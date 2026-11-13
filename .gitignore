@@ -1,0 +1,22 @@
+# build output and generated card files
+build/
+out/
+*.o
+*.mo
+*.DAT
+*.dat
+*.FRT
+*.CUB
+*.cub
+*.cube
+*.sym
+*.bin
+*.ppm
+# never in this repo: Canon ROMs / firmware, the author's module or data, the owner's own cubes
+*.ROM
+*.rom
+ROM0*
+ROM1*
+FILMCAN*
+filmroll*.mo
+__pycache__/

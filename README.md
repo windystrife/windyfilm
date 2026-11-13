@@ -1,0 +1,95 @@
+# WindyFilm
+
+Module Magic Lantern cho **Canon EOS M (firmware 2.0.2)** và **Canon 5D Mark II (2.1.2)**. Module tạo màu phim cho
+ảnh JPEG ngay lúc chụp. Tác giả: **WindyStrife**. Giấy phép GPL-2.0, xem `LICENSE`; dữ liệu bên thứ ba ghi ở
+`ATTRIBUTIONS.md`.
+
+WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Bản cũ là code của WindyStrife chạy bên trong module
+`filmroll.mo` của tác giả khác. WindyFilm không dùng, không nạp và không chứa bất cứ thứ gì của module đó.
+**Đừng bật hai module cùng lúc.**
+
+> Trạng thái (14/11/2026): đang viết (Phase 2). Chưa có thẻ cài đặt. Tình trạng mới nhất ở `docs/HANDOFF-QWEN.md`.
+
+## Tính năng
+
+- **Màu phim lúc chụp.** Mỗi ảnh JPEG đi qua bảng màu 17³ YCbCr của phim đang chọn (nhân 2.5D, xử lý theo từng khúc).
+  - EOS M: hook ở bước Canon chuyển YUV (NN 5184x3456 hoặc Diana hai nửa).
+  - 5D2: hook đường A, hai nửa 5616x1872.
+- **Danh mục phim**, chia nhóm Colour / Cine / B&W / Film LUT. Mỗi phim có mô tả ngắn.
+- **Hàng Light:**
+  - Auto: giữ nguyên WB máy;
+  - Day: WB theo phim;
+  - Cloudy: WB phim x1,25;
+  - Tungsten: 3200 K.
+  WB của bạn được lưu lại và trả về khi chọn Auto hoặc tắt module.
+- **Hàng Print:** Scan (scan trung tính), Cine print (in lên phim chiếu kiểu 2383), Paper (in giấy màu). Chỉ có với
+  những phim có mô hình.
+- **Hiệu ứng:**
+  - Grain (kiểu Yedlin);
+  - Halation và bloom;
+  - Mist (chỉ EOS M);
+  - Strength 30 / 100 / 125 %.
+- **Đầu ra log:** S-Log3, V-Log, LogC3, Canon Log 2, Canon Log 3, dạng phẳng hoặc **+ LUT** (cube trên thẻ). Có LUT EI.
+- **Film LUT can:** chọn một lon là đặt luôn V-Log + LUT với cube của lon đó.
+- **Xem trước trên LiveView** bằng cùng nhân màu, kèm xem trước độ phơi sáng.
+- **EXIF:** UserComment ghi phim, kiểu in, Light, hiệu ứng và EV của từng ảnh.
+- **Nhật ký:** `ML/LOGS/WINDYFLM.LOG`.
+
+## Giao diện chọn phim
+
+Mở từ menu **WindyFilm > Browser**, hoặc bằng phím tắt: EOS M giữ lâu nút DOWN, 5D2 bấm TRASH.
+
+- Bên trái là lon phim lớn, có quầng sáng theo màu của phim.
+- Bên phải là tên phim, các chip (loại, ISO, khổ), mô tả ngắn và 7 hàng: Light, Print, Grain, Halation, Mist,
+  Strength, Film LUT.
+- Phía dưới là dải phim 35 mm cuộn ngang, có tab nhóm và thanh cuộn.
+
+| Phím | Việc |
+|---|---|
+| L / R | đổi phim trên dải |
+| UP / DN | chọn hàng |
+| bánh xe (hoặc L / R trên hàng đang chọn) | đổi giá trị của hàng |
+| SET | nạp phim |
+| Q | đổi nhóm |
+| INFO | xem chi tiết |
+| MENU | thoát |
+
+(Bảng phím sẽ được chốt sau khi chạy thử trên máy.)
+
+## Cài lên thẻ
+
+Thẻ WindyFilm nằm ở thư mục riêng (`EOSM_WindyFilm`, `5D2_WindyFilm`), không đụng vào các thẻ Film Roll đang dùng.
+
+```
+ML/modules/windyflm.mo
+ML/DATA/WFFILMS.DAT    bảng màu của các phim (Scan / Cine / Paper)
+ML/DATA/WFCANS.DAT     hình lon phim
+ML/DATA/WFFONTS.DAT    font chữ nhỏ của giao diện
+ML/LUTS/               cube Film LUT
+README_WINDYFILM.txt, README_FILMLUT.txt, SPEKTRAFILM_LICENSE.txt, ATTRIBUTIONS.txt
+```
+
+- `autoexec.bin` và file `.sym` của máy (`EOSM_202.sym` / `5D2_212.sym`) phải luôn đi đúng cặp. Giữ nguyên cặp thẻ
+  đang có.
+- `filmroll.mo` không được có trên thẻ WindyFilm.
+
+## Build và test (WSL Ubuntu-24.04)
+
+```bash
+bash build.sh CAM=EOSM
+bash build.sh CAM=5D2
+bash test.sh
+```
+
+Chạy từ một file script trong WSL; lệnh đầy đủ ở `docs/PLAYBOOK-QWEN.md`. `build.sh` kiểm tra các việc sau:
+- mọi symbol module dùng đều có trong file `.sym` của thẻ;
+- kích thước image khi TCC liên kết;
+- cổng nguồn gốc (`tools/provenance_gate.py`): không có chuỗi hay đoạn byte nào trùng với module cũ.
+
+Không chạy bộ test EOS M và 5D2 cùng lúc.
+
+## Tài liệu
+
+- `docs/DESIGN.md`: kiến trúc, định dạng các file trên thẻ, giao diện giữa các phần.
+- `docs/PLAYBOOK-QWEN.md`, `docs/HANDOFF-QWEN.md`: hướng dẫn cho Qwen Code và tình trạng hiện tại.
+- `ATTRIBUTIONS.md`: ghi công dữ liệu và thông số bên thứ ba.
