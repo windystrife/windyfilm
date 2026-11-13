@@ -94,6 +94,38 @@ shot: Canon YUV conversion site ─ hook (patch_hook_function) ─ gate ─ sema
 - **Coexistence:** do not load together with `filmroll.mo`. Symbols: everything except ML's `__module_*_windyflm` is
   made local (`objcopy --keep-global-symbols`), so the TCC loader never sees a clash.
 
+### 3.1 Input stage: open for a RAW path (owner request 2026-11-14)
+
+Today every look grades Canon's developed 8-bit UYVY 4:2:2 frame. A RAW input path (our own develop from the 14-bit
+Bayer buffer, or a hybrid) is being researched in another session; it will report its conclusion here. The pipeline
+must take a new input without a rewrite:
+
+```
+camera input layer  ->  [develop stage]  ->  look stage  ->  output
+(wf_cam_*: hook,        (future: black,      (film table /     (today: in place in Canon's UYVY buffer;
+ buffers, halves)        WB, demosaic,        log / Log+LUT /   future: write UYVY for Canon's encoder,
+                         matrix, log16)       effects)          or our own JPEG)
+```
+
+- **`src/wf_frame.h`** (core, internal): `struct wf_frame` = format tag + geometry + buffers. Fields: `fmt`,
+  `part` (0 full / 1 top / 2 bottom), `w`, `h`, `pitch`, `data`, `dst` (the output buffer when a develop stage writes
+  somewhere other than its input), and for RAW `black`, `white`, `cfa`, `bpp`.
+- **Formats:**
+  - `WF_FMT_UYVY8`: Canon's developed 4:2:2, processed in place. The only format implemented now.
+  - `WF_FMT_RAW14` (reserved): ML's raw buffer (`raw_info`), packed Bayer.
+  - `WF_FMT_LOG16` (reserved): a 16-bit working buffer, log-encoded 4:2:2 or 4:4:4. A develop stage writes it and a
+    16-bit look path reads it.
+- **The camera input layer is the only code that knows hook registers, Canon buffer addresses and frame sizes.** It
+  fills a `wf_frame` and hands it to the worker. Kernels and effects never read registers or fixed addresses; they take
+  a `wf_frame` (or the chunk callback the worker gives them).
+- **The look is resolved once per shot into `struct wf_look`**, independent of the input format. It holds the output
+  (film / log / Log + LUT / off), the table and variant, the curve, the cube, the effects, Strength and Light. The
+  worker dispatches on (`frame.fmt`, `look.output`). A missing combination is logged and the frame is left untouched.
+- **Look stages declare the formats they accept.** Today: the UYVY8 kernels. A RAW path later adds a develop stage
+  plus a LOG16 variant of the Log + LUT / film path, without touching the UYVY8 kernels, the menu rows or the UI.
+- **Config:** key `input` is reserved (value `jpeg`, the only one now). The menu shows no input choice until a RAW
+  path exists.
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`
