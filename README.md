@@ -8,7 +8,13 @@ WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Bản c�
 `filmroll.mo` của tác giả khác. WindyFilm không dùng, không nạp và không chứa bất cứ thứ gì của module đó.
 **Đừng bật hai module cùng lúc.**
 
-> Trạng thái (14/11/2026): đang viết (Phase 2). Chưa có thẻ cài đặt. Tình trạng mới nhất ở `docs/HANDOFF-QWEN.md`.
+> **Trạng thái 14/11/2026: module đã build được cho cả EOS M và 5D2, nhưng chưa chạy trên máy thật và chưa có thẻ
+> cài đặt.**
+>
+> - Test host: EOS M 386 phép kiểm tra, 5D2 373 phép, đều 0 lỗi.
+> - Cổng kiểm tra nguồn gốc: PASS.
+>
+> Tình trạng mới nhất ở `docs/HANDOFF-QWEN.md`.
 
 ## Tính năng
 
@@ -44,17 +50,20 @@ Mở từ menu **WindyFilm > Browser**, hoặc bằng phím tắt: EOS M giữ l
   Strength, Film LUT.
 - Phía dưới là dải phim 35 mm cuộn ngang, có tab nhóm và thanh cuộn.
 
-| Phím | Việc |
-|---|---|
-| L / R | đổi phim trên dải |
-| UP / DN | chọn hàng |
-| bánh xe (hoặc L / R trên hàng đang chọn) | đổi giá trị của hàng |
-| SET | nạp phim |
-| Q | đổi nhóm |
-| INFO | xem chi tiết |
-| MENU | thoát |
+| Việc | EOS M | 5D2 |
+|---|---|---|
+| Đổi phim (sang được nhóm khác) | trái / phải | joystick trái / phải |
+| Chọn hàng | lên / xuống | joystick lên / xuống |
+| Đổi giá trị hàng đang chọn | vòng xoay sau | bánh xe trên hoặc bánh xe sau |
+| Nạp phim | SET | SET hoặc nhấn joystick |
+| Nhóm kế tiếp | chạm 1 ngón | Picture Style |
+| Trang chi tiết | INFO | INFO |
+| Đóng | MENU hoặc chạm 2 ngón | MENU hoặc TRASH |
 
-(Bảng phím sẽ được chốt sau khi chạy thử trên máy.)
+- Bấm nửa hoặc hết nút chụp thì giao diện đóng và máy chụp như thường.
+- EOS M cần đang ở LiveView chụp ảnh. Phím mở giao diện cần thẻ có core ML với patch 0002 / 0003 (thẻ EOS M hiện tại
+  đã có).
+- Bảng phím được chốt sau lần chạy thử đầu tiên trên máy.
 
 ## Cài lên thẻ
 
