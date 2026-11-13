@@ -6,7 +6,7 @@ Nothing here is committed by the data agent.
 ## Step 1: can pack  DONE (2026-11-14)
 - `cans/gen_cans.py`: our drawing code (from the old gen_cans_real.py), palette part and pack code removed (no
   FILMCAN.DAT read anywhere). API: `films(argv)`, `render(f, w, h, bg)` -> (rgb8, opaque mask).
-- `tools/mk_wfcans.py OUT.DAT [--colours N] [--sheet DIR]`: own median cut (112 colours default), OKLab nearest with
+- `tools/mk_wfcans.py OUT.DAT [--colours N] [--sheet DIR]`: own median cut (103 colours default, the UI palette budget), OKLab nearest with
   ordered dither on flat areas, RLE per DESIGN 4.4 (runs never cross a row end), glow = mean of saturated pixels x 1.25.
   Edge pixels are pre-blended with the colour each size sits on: big (24,27,33), strip (21,23,28), selected (84,58,22).
 - Run: `cd /root/ml/wf_data && python3 -I -B /mnt/f/MagicLatern/_windyfilm/tools/mk_wfcans.py out/WFCANS.DAT --sheet out/cans_sheet`

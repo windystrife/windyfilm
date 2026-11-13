@@ -13,7 +13,7 @@ any other module is read. Layout (docs/DESIGN.md 4.4):
                0x00..0x7F one pixel of that palette index; 0xFF one transparent pixel;
                0x80..0xFE a run of (c - 0x7E) = 2..128 pixels of the next byte (an index, or 0xFF = transparent)
 
---colours N (default 112): the palette size. The edge pixels of each size are pre-blended with the colour it sits on
+--colours N (default 103 = the UI palette range 0x50..0xFE minus its fixed, background, glow and shadow entries): the palette size. The edge pixels of each size are pre-blended with the colour it sits on
 (big: the page background, strip: the film frame, selected: the amber frame). glow = the mean of the can's saturated
 pixels x 1.25 (weight = max - min + 8, as the mockup's can_mean). Self-test: every image is decoded again and compared
 with the quantised source (exact) and with the RGB source (mean / max colour error); --sheet DIR writes the decoded
@@ -240,7 +240,7 @@ def main():
     if not a or a[0].startswith("--"):
         print(__doc__); sys.exit(2)
     out = a[0]
-    ncol = int(a[a.index("--colours") + 1]) if "--colours" in a else 112
+    ncol = int(a[a.index("--colours") + 1]) if "--colours" in a else 103
     sheet = a[a.index("--sheet") + 1] if "--sheet" in a else None
     fl = G.films(a)
     fl = sorted(fl, key=lambda f: f["id"])

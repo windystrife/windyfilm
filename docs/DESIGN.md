@@ -171,7 +171,7 @@ data         RLE per image, row-major: 0x00..0x7F one pixel of that palette inde
              0x80..0xFE a run of (c - 0x7E) = 2..128 pixels of the next byte (an index, or 0xFF = transparent)
 ```
 
-- `npal` defaults to 112. The UI maps palette index i to hardware entry `base + i` (base chosen by the UI, section 5).
+- `npal` defaults to 103: the UI palette range 0x50..0xFE (175 entries) holds 21 fixed, 6 background, 33 glow, 12 shadow and 103 can colours. The UI maps palette index i to its can block.
   If the UI needs fewer colours, the data side regenerates with `--colours N`.
 - `glow` = the film's glow colour (the mean of its saturated pixels x 1.25, as in the mockup).
 - Drawing code: our `gen_cans_real.py` (compose / lin). Palette: median cut over our cans only.
