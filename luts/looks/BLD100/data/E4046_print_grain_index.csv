@@ -1,0 +1,18 @@
+# publication: KODAK PROFESSIONAL EKTAR 100 Film technical data, Kodak Publication No. E-4046 (Kodak Alaris), January 2025 ('Revised 1/25')
+# page: 3, section 'IMAGE STRUCTURE - Print Grain Index' (tables). PGI: diffuse printing, 14 in viewing distance,
+#   25 = approximate visual threshold of graininess, 4 units = one just-noticeable difference for 90 % of observers.
+#   '<25' = 'less than 25' as printed.
+# comparison rows (other public Kodak sheets, as digitised in this catalogue): E-4050 Portra 400 Jan 2025 p.3
+#   (catalogue/looks/PRT400/data/e4050_print_grain_index.csv); E-7022 Gold 200 rev. 06-23 p.3
+#   (catalogue/looks/SUN200/data/E7022_print_grain_index.csv)
+negative,print_size_in,magnification,PGI,source
+24x36mm (135),4x6,4.4,<25,E-4046 p.3
+24x36mm (135),8x10,8.8,38,E-4046 p.3
+24x36mm (135),16x20,17.8,66,E-4046 p.3
+6x6cm (120),4x6,2.6,<25,E-4046 p.3
+6x6cm (120),8x10,4.4,<25,E-4046 p.3
+6x6cm (120),16x20,8.8,38,E-4046 p.3
+4x5in,4x6 / 8x10 / 16x20,1.2 / 4 / 8,<25,E-4046 p.3
+8x10in,4x6 / 8x10 / 16x20,0.6 / 1 / 2,<25,E-4046 p.3
+24x36mm (135) ISO 400 portrait,4x6 / 8x10 / 16x20,4.4 / 8.8 / 17.8,37 / 59 / 89,E-4050 p.3 (comparison)
+24x36mm (135) ISO 200 consumer,4x6 / 8x10,4.4 / 4.4 (as printed),44 / 64,E-7022 p.3 (comparison)

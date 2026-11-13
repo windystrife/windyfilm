@@ -1,0 +1,10 @@
+# publication: retail product listings of the modelled stock (no maker data sheet): glazerscamera.com, lookingglassphoto.com,
+#   pictureline.com product pages; metergeist film page.  Read through WebSearch result summaries on 2026-11-11.
+# revision/date: listings current on 2026-11-11 (undated pages); page: product description; figure: none
+# note: the latitude wording matches the maker's ISO 200 sibling data sheet (E-7022 Revised 06-23, p.1), so it is probably
+#   copied from it; it is treated as a retail claim, not a measurement.
+fact,value,source
+ISO speed,200,all listings
+process,C-41,all listings
+exposure latitude,-2 / +3 stops,glazerscamera.com; lookingglassphoto.com; pictureline.com; metergeist
+measured exposure series (third party),fine to -2 EV; shadows lost at -3..-4 EV; highlights usable to about +9 EV,dehancer.com article (D4 in SNP200_descriptions.csv)

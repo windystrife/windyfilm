@@ -1,0 +1,72 @@
+# publication: Kodak Alaris, "KODAK PROFESSIONAL T-MAX 100 Film", Technical Data / Black-and-White Film, F-4016
+# revision/date: June 2018 ("Revised 6-18"; PDF creation 2018-06-05)
+# page: 8 ; figure: "Spectral Sensitivity Curves*" : Effective Exposure: 1.4 seconds ; Process: KODAK Developer D-76, 68 F (20 C) ;
+#   Densitometry: Diffuse visual ; upper curve "0.3 greater than D-min", lower curve "1.0 greater than D-min" ;
+#   *Sensitivity = reciprocal of exposure (ergs/cm2) required to produce specified density ; x 250..750 nm, y log S -2.0..+2.0
+# digitised: vector paths from a pdftocairo SVG of the page (tools/svgpaths.py, tools/digitise_f4016.py): frame x 74.60 pt =
+#   250 nm, ticks every 20.0967 pt = 50 nm; y 498.49 pt = +2.0, gridlines every 37.87 pt per log unit (649.96 pt = -2.0).
+#   Drawn ranges: D=0.3 curve 400.0..700.0 nm, D=1.0 curve 400.0..670.0 nm (both start at 400 nm: the figure has no data below 400).
+#   Sampled every 5 nm by linear interpolation along the path. Reading error: line width 0.72 pt = 1.8 nm / 0.019 log S.
+#   Beyond the last drawn point of the D=1.0 curve the generator sets the sensitivity to zero (an extrapolation, not data).
+wavelength_nm,logS_D1.0,logS_D0.3
+400,0.500,1.500
+405,0.497,1.474
+410,0.487,1.446
+415,0.467,1.414
+420,0.444,1.382
+425,0.422,1.351
+430,0.400,1.322
+435,0.379,1.295
+440,0.360,1.269
+445,0.339,1.244
+450,0.314,1.215
+455,0.284,1.184
+460,0.250,1.155
+465,0.214,1.125
+470,0.178,1.094
+475,0.140,1.060
+480,0.102,1.027
+485,0.066,1.001
+490,0.037,0.987
+495,0.017,0.981
+500,0.009,0.983
+505,0.011,0.991
+510,0.021,1.005
+515,0.036,1.026
+520,0.054,1.050
+525,0.074,1.074
+530,0.091,1.091
+535,0.099,1.099
+540,0.104,1.100
+545,0.109,1.100
+550,0.106,1.100
+555,0.089,1.101
+560,0.065,1.109
+565,0.046,1.125
+570,0.031,1.143
+575,0.021,1.153
+580,0.020,1.152
+585,0.031,1.138
+590,0.042,1.116
+595,0.046,1.090
+600,0.023,1.060
+605,-0.030,1.030
+610,-0.103,1.002
+615,-0.184,0.978
+620,-0.255,0.967
+625,-0.308,0.976
+630,-0.345,0.992
+635,-0.376,0.987
+640,-0.409,0.903
+645,-0.468,0.714
+650,-0.600,0.432
+655,-0.832,0.123
+660,-1.096,-0.156
+665,-1.374,-0.390
+670,,-0.603
+675,,-0.807
+680,,-1.009
+685,,-1.215
+690,,-1.419
+695,,-1.593
+700,,

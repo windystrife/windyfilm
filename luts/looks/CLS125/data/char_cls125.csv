@@ -1,0 +1,32 @@
+# publication: HARMAN technology Limited, "FP4 PLUS" technical information, Nov 2018 (PDF), page 5 "CHARACTERISTIC CURVE"
+# figure: FP4 Plus roll film developed in ILFORD ILFOTEC HC (1+31) for 8 minutes at 20 C with intermittent agitation (also representative of 35 mm and sheet).
+# axes: "Relative log exposure" (grid unit = 1.0, assumed log10; check: ISO 6 average gradient from the speed point over 1.30 log E is 0.66 vs the 0.615 criterion) and Density 0..2.0
+# digitised from a 500 dpi render of the raster figure (src/trace_fp4_char.py): x = 1 + (px-311.5)/258.3, D = (797.5-py)/253.5, stroke centres by run-length (+-0.02 x, +-0.02 D).
+# base+fog 0.095 read from the flat left part.
+logH_rel,D
+0.00,0.095
+0.99,0.112
+1.10,0.140
+1.23,0.189
+1.37,0.249
+1.51,0.325
+1.62,0.391
+1.74,0.458
+1.85,0.529
+1.97,0.606
+2.09,0.694
+2.20,0.783
+2.32,0.874
+2.43,0.966
+2.55,1.053
+2.67,1.150
+2.78,1.249
+2.90,1.347
+3.02,1.444
+3.13,1.523
+3.25,1.609
+3.36,1.680
+3.48,1.744
+3.78,1.846
+4.11,1.870
+4.60,1.870

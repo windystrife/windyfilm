@@ -1,0 +1,48 @@
+# publication: KODAK PROFESSIONAL EKTAR 100 Film technical data, Kodak Publication No. E-4046 (Kodak Alaris)
+# revision/date: January 2025 ('Revised 1/25')
+# page: 4, figure: 'Characteristic Curves' (figure code E4046A); Exposure: Daylight; Densitometry: Status M; Log H Ref: -0.84
+# digitised: 200 dpi render of the page as read through WebFetch (pdftoppm; render deleted after reading), column trace of
+#   the drawn lines (tools/trace_char.py); frame x 225..737.5 px = log H -3.0..+2.0, y 812..299 px = density 0..4
+#   (128.25 px per density unit); line centre averaged over +-0.025 log H; +-0.01 D, +-0.01 log H.  The curves are drawn
+#   from log H about -2.85 to +1.23; samples outside that are not given.
+log_H_lux_s,D_red,D_green,D_blue,note
+-2.8,0.211,0.636,0.851,traced
+-2.7,0.215,0.639,0.865,traced
+-2.6,0.218,0.639,0.873,traced
+-2.5,0.219,0.639,0.873,traced
+-2.4,0.226,0.647,0.878,traced
+-2.3,0.234,0.655,0.894,traced
+-2.2,0.247,0.668,0.922,traced
+-2.1,0.268,0.690,0.965,traced
+-2.0,0.296,0.722,1.018,traced
+-1.9,0.336,0.764,1.082,traced
+-1.8,0.382,0.812,1.142,traced
+-1.7,0.430,0.867,1.196,traced
+-1.6,0.482,0.928,1.263,traced
+-1.5,0.536,0.989,1.345,traced
+-1.4,0.589,1.046,1.413,traced
+-1.3,0.644,1.104,1.477,traced
+-1.2,0.704,1.164,1.542,traced
+-1.1,0.768,1.223,1.609,traced
+-1.0,0.828,1.279,1.671,traced
+-0.9,0.892,1.336,1.734,traced
+-0.8,0.954,1.398,1.802,traced
+-0.7,1.013,1.457,1.870,traced
+-0.6,1.067,1.516,1.935,traced
+-0.5,1.120,1.572,2.001,traced
+-0.4,1.176,1.632,2.072,traced
+-0.3,1.230,1.690,2.141,traced
+-0.2,1.285,1.743,2.207,traced
+-0.1,1.341,1.795,2.272,traced
+0.0,1.397,1.849,2.336,traced
+0.1,1.449,1.903,2.401,traced
+0.2,1.499,1.952,2.459,traced
+0.3,1.550,2.002,2.516,traced
+0.4,1.602,2.053,2.576,traced
+0.5,1.655,2.102,2.635,traced
+0.6,1.701,2.150,2.693,traced
+0.7,1.746,2.196,2.752,traced
+0.8,1.789,2.245,2.814,traced
+0.9,1.831,2.292,2.880,traced
+1.0,1.871,2.339,2.947,traced
+1.1,1.909,2.384,3.018,traced

@@ -1,0 +1,12 @@
+# publication: Kodak E-4040, KODAK PROFESSIONAL PORTRA 800 Film, technical data / colour negative film
+# revision/date: January 2025 (Revised 1-25)
+# page: 3
+# figure: table "Print Grain Index" (IMAGE STRUCTURE); diffuse printing, 14 inch viewing distance; 4 units = 1 just-noticeable difference, 25 = visual threshold
+# columns: negative size, print size (inches), magnification, print grain index (read from the text layer of the publication)
+negative,print,magnification,pgi
+135,4x6,4.4,48
+135,8x10,8.8,70
+135,16x20,17.8,99
+120,4x6,2.6,36
+120,8x10,4.4,48
+120,16x20,8.8,70

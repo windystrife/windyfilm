@@ -1,0 +1,50 @@
+# publication: KODAK GOLD 200 Film technical data, Kodak Publication No. E-7022 (Kodak Alaris)
+# revision/date: Revised 06-23 (June 2023)
+# page: 4, figure: 'Spectral-Sensitivity Curves' (figure code E7022C); Exposure: Daylight; Effective Exposure: 1/50 sec;
+#   Densitometry: Status M; Density: 0.2 > D-min; sensitivity = reciprocal of exposure (erg/cm2) for that density
+# digitised by eye from a 200 dpi render (x 250..750 nm = 209..765 px, y 0..4 = 510..93 px); +-3 nm, +-0.08 log S.
+#   layer: Y = yellow-forming (blue record), M = magenta-forming (green record), C = cyan-forming (red record).
+#   The secondary short-wave bumps of the M and C layers (around 400 nm) are listed as drawn.
+layer,wavelength_nm,log_sensitivity
+Y,370,0.84
+Y,386,1.44
+Y,402,2.03
+Y,413,2.11
+Y,431,2.08
+Y,440,2.15
+Y,450,2.11
+Y,461,2.18
+Y,469,2.36
+Y,478,2.16
+Y,485,1.25
+Y,509,0.00
+M,382,0.53
+M,402,1.25
+M,420,1.00
+M,440,0.93
+M,455,0.93
+M,470,1.30
+M,490,1.60
+M,503,1.68
+M,521,1.87
+M,548,2.24
+M,570,1.92
+M,584,1.25
+M,599,0.00
+C,390,0.33
+C,401,0.62
+C,425,0.25
+C,458,0.00
+C,480,0.00
+C,490,0.15
+C,520,0.40
+C,548,0.62
+C,561,0.82
+C,579,1.39
+C,601,1.58
+C,629,1.92
+C,642,2.16
+C,651,2.22
+C,660,2.11
+C,673,1.44
+C,689,0.79

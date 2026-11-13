@@ -1,0 +1,39 @@
+# publication: KODAK ULTRA MAX 400 Film technical data, Kodak Publication No. E-7023 (Kodak Alaris)
+# revision/date: February 2016 (page 4 footer 'Revised 2/16')
+# page: 4, figure: 'Spectral-Dye-Density Curves' (figure code E7023C): "Typical densities for a midscale neutral subject and
+#   D-min."; Process: C-41; y = diffuse spectral density
+# digitised from a 200 dpi render of the page as read through WebFetch (render deleted after reading): frame x 992..1503.5 px =
+#   400..700 nm, y 825.5..313.5 px = density 0..2.5 (204.8 px per unit); column scan (tools/scan_cols.py) every 10 nm;
+#   the midscale curve is dashed: values at 640..660 nm fall in dash gaps and are read by eye ('eye'); +-3 nm, +-0.03 D.
+wavelength_nm,D_midscale_neutral,D_min,note
+400,1.31,0.81,eye
+410,1.41,0.82,
+420,1.57,0.90,
+430,1.72,0.96,
+440,1.78,0.98,
+450,1.78,0.96,
+460,1.73,0.91,
+470,1.63,0.84,
+480,1.50,0.77,
+490,1.41,0.70,
+500,1.38,0.66,
+510,1.42,0.65,
+520,1.47,0.62,
+530,1.50,0.60,
+540,1.53,0.60,
+550,1.48,0.59,
+560,1.34,0.57,
+570,1.13,0.52,
+580,0.93,0.44,
+590,0.76,0.32,
+600,0.69,0.24,
+610,0.69,0.21,
+620,0.73,0.20,
+630,0.81,0.20,
+640,0.89,0.22,eye
+650,0.97,0.23,eye
+660,1.04,0.24,eye
+670,1.11,0.26,
+680,1.17,0.27,
+690,1.19,0.28,eye
+700,1.19,0.28,eye

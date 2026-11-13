@@ -1,0 +1,19 @@
+# SNP200 use: display-medium Dmax cap for the grain row's rho_max (PLAN 3.2.4 b) only; file copied unchanged from looks/SUN200/data
+# publication: KODAK PROFESSIONAL PORTRA ENDURA Paper and KODAK PROFESSIONAL SUPRA ENDURA Paper, technical data,
+#   Kodak Publication No. E-4021 (Eastman Kodak), October 2003
+# page: 9, section 'CURVES', figure 'Characteristic Curves: KODAK PROFESSIONAL SUPRA ENDURA Paper' (code F002_1197AC);
+#   Process RA-4 95 F (35 C) 45 s; Densitometry Status A; x = LOG EXPOSURE (lux-seconds) -3.0..0.0, y = DENSITY 0..3.0
+# digitised: 200 dpi render of the page as read through WebFetch (rendered with pdftoppm, render deleted after reading);
+#   frame y 1181..1693.5 px = density 3.0..0.0 (170.8 px per unit), x 1006..1518 px = log E -3.0..0.0; dark-pixel runs
+#   per column, line centre, +-0.02 D, +-0.03 log E.  Record labels (G, R, B) as the figure's leader lines show them:
+#   top curve G, middle R, lowest B at the right end.  The curves end at log E about -0.05 (plot edge), still rising
+#   very slightly, so the last points are the published maximum density of this paper as plotted.
+# use: display-medium Dmax for the grain row's rho_max (PLAN 3.2.4 b): neutral net Dmax = lowest record at the plot
+#   end minus D-min = 2.58 - 0.10 = 2.48.  (Supra = the 'slightly higher contrast and colour saturation' paper of the
+#   pair, p.1; the closest published colour-paper curve read for a saturated consumer print.)
+log_E_lux_s,D_top_G,D_mid_R,D_low_B,note
+-1.92,0.10,0.10,0.10,foot (three records overlap; D-min)
+-1.69,0.13,0.13,0.13,foot
+-0.25,2.68,2.61,2.56,shoulder
+-0.14,2.70,2.63,2.57,shoulder
+-0.07,2.71,2.66,2.58,plot end (Dmax as published)

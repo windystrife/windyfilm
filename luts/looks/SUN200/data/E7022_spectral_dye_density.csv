@@ -1,0 +1,26 @@
+# publication: KODAK GOLD 200 Film technical data, Kodak Publication No. E-7022 (Kodak Alaris)
+# revision/date: Revised 06-23 (June 2023)
+# page: 4, figure: 'Spectral-Dye-Density Curves' ("Typical densities for a midscale neutral subject and D-min.")
+# digitised by eye from a 200 dpi render (x 400..700 nm = 202..713 px, y 0..2.5 = 665..154 px); +-3 nm, +-0.03 D
+wavelength_nm,D_midscale_neutral,D_min
+400,1.28,0.77
+416,1.59,0.88
+428,1.79,0.95
+446,1.84,0.99
+460,1.79,0.93
+475,1.59,0.81
+490,1.42,0.70
+500,1.38,0.67
+513,1.42,0.65
+528,1.49,0.64
+540,1.52,0.64
+551,1.42,0.63
+569,1.20,0.56
+587,0.86,0.40
+604,0.72,0.28
+610,0.72,0.27
+634,0.83,0.23
+657,1.00,0.24
+681,1.15,0.28
+692,1.17,0.29
+700,1.17,0.30

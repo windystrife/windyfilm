@@ -1,0 +1,17 @@
+# publication: KODAK PROFESSIONAL EKTAR 100 Film technical data, Kodak Publication No. E-4046 (Kodak Alaris), January 2025 ('Revised 1/25')
+# text facts used by gen_bld100.py and the README (page, section).  Short quotes only.
+fact,value,page,section
+ISO speed daylight,100,1,Film Speed table
+described properties,"'world's finest grain color negative film'; 'high saturation and ultra-vivid color'",1,introduction
+technology / benefit,"Optimized Emulsion Spectral Sensitivity and Image Modifier Chemistry -> Ultra-vivid color; Proprietary DIR Couplers -> Distinct edges, fine detail; Micro-Structure Optimized T-GRAIN Emulsions -> Ideal for scanning",1,Technology / Benefit table
+recommended uses,"nature, travel and outdoor photography; fashion and product photography",1,introduction
+film base (135 and 120),0.10 mm ESTAR Thick Base,1,Sizes Available
+reciprocity,no correction from 1/10000 s to 1 s,2,Adjustments for Long and Short Exposures
+red-filter density of a grey card (normally exposed),0.77 to 0.87,3,Judging Negative Exposures
+forehead red density (light / dark complexion),1.08-1.18 / 0.93-1.03,3,Judging Negative Exposures
+printing paper the film is optimised for,KODAK PROFESSIONAL ENDURA Premier Paper (and Canvas / Metallic / display materials),3,Printing Negatives
+log H reference (normal exposure),-0.84 log lux-s,4,Characteristic Curves (E4046A)
+mid-scale slopes log H -2.0..0.0 (our trace),R 0.55 / G 0.56 / B 0.66,4,Characteristic Curves (E4046A) via data/E4046_characteristic_curves.csv
+D-min (our trace at log H -2.8),R 0.21 / G 0.64 / B 0.85,4,Characteristic Curves (E4046A)
+plotted range,log H -2.85..+1.23 (straight to about +0.6; R slope falls to about 0.38 at +1.1),4,Characteristic Curves (E4046A)
+MTF,response above 100 % around 5-20 cycles/mm (adjacency / DIR edge effect); not representable in a 3D LUT,4,Modulation Transfer Function (E4046D)

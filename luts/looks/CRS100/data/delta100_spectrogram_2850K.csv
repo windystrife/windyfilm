@@ -1,0 +1,77 @@
+# publication: ILFORD (HARMAN technology), "100 DELTA PROFESSIONAL" technical information sheet (film data sheet)
+# revision/date: September 2002 edition (PDF created 2002-09-11); the same figure is printed unchanged in the
+#   current edition "DELTA 100 PROFESSIONAL Technical Information", HARMAN technology, Nov 2018, page 1 (checked by eye
+#   against that edition's raster copy of the figure: same shape, same tick values)
+# page: 1 ; figure: "SPECTRAL SENSITIVITY - Wedge spectrogram to tungsten light (2850K)";
+#   x = "Wavelength nm" (labels 400..650), y = "Sensitivity" (right-axis ticks 0.5 and 1.0, no unit stated)
+# digitised: tools/trace_spec.py on a 1200 dpi render of the vector figure (pdftoppm -r 1200 -f 1 -l 1
+#   -x 5280 -y 4200 -W 3180 -H 1560). x calibration from the 6 tick-label centres (residuals <= 0.1 nm),
+#   y calibration from the two right-axis ticks (1.0 and 0.5); the frame's bottom edge reads 0.044 on that scale.
+#   Columns traced every 5 nm (centre of the stroke, 25 px wide); the steep blue (356-405 nm) and red (630-650 nm)
+#   edges traced by rows ("row"). Estimated reading error +-0.005 y, +-0.5 nm.
+# reading of the axis (NOT stated on the sheet): a wedge spectrogram's height at each wavelength is proportional to
+#   the LOG of (source energy x film sensitivity) above the wedge's threshold; the sheet's y scale is a relative
+#   height. The generator's use of this column (log interpretation, scale, 2850 K division) is stated there as GUESS.
+# the curve meets the frame bottom at about 356 nm and 655 nm: values there (<= 0.06) are the frame, not data.
+nm,y,method
+355,0.0559,col
+360,0.1067,row
+365,0.1826,row
+370,0.2627,row
+375,0.3415,row
+380,0.4173,row
+385,0.4841,row
+390,0.5431,row
+395,0.5921,row
+400,0.6325,row
+405,0.6655,row
+410,0.6925,col
+415,0.7131,col
+420,0.7294,col
+425,0.7416,col
+430,0.7500,col
+435,0.7558,col
+440,0.7611,col
+445,0.7653,col
+450,0.7690,col
+455,0.7722,col
+460,0.7743,col
+465,0.7753,col
+470,0.7753,col
+475,0.7732,col
+480,0.7690,col
+485,0.7621,col
+490,0.7526,col
+495,0.7426,col
+500,0.7373,col
+505,0.7368,col
+510,0.7426,col
+515,0.7537,col
+520,0.7706,col
+525,0.7917,col
+530,0.8138,col
+535,0.8339,col
+540,0.8534,col
+545,0.8697,col
+550,0.8845,col
+555,0.8961,col
+560,0.9051,col
+565,0.9114,col
+570,0.9135,col
+575,0.9119,col
+580,0.9061,col
+585,0.8950,col
+590,0.8776,col
+595,0.8597,col
+600,0.8476,col
+605,0.8428,col
+610,0.8449,col
+615,0.8565,col
+620,0.8708,col
+625,0.8697,col
+630,0.8245,row
+635,0.6545,row
+640,0.4774,row
+645,0.3088,row
+650,0.1550,row
+655,0.0580,col

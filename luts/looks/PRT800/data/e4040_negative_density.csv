@@ -1,0 +1,10 @@
+# publication: Kodak E-4040, KODAK PROFESSIONAL PORTRA 800 Film, technical data / colour negative film
+# revision/date: January 2025 (Revised 1-25)
+# page: 3
+# figure: table "Judging Negative Exposures" (Status M red density of a normally exposed and processed negative)
+# columns: area measured, red density range at EI 800, EI 1600 (push 1), EI 3200 (push 2) (read from the text layer)
+area,EI800_lo,EI800_hi,EI1600_lo,EI1600_hi,EI3200_lo,EI3200_hi
+grey card (grey side),0.75,0.95,0.85,1.05,0.95,1.15
+lightest step of a paper grey scale,1.00,1.20,1.20,1.40,1.40,1.60
+forehead light complexion,0.95,1.25,1.10,1.40,1.25,1.55
+forehead dark complexion,0.75,1.10,0.90,1.25,1.00,1.35

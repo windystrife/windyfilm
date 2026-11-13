@@ -1,0 +1,85 @@
+# publication: Kodak Professional, "KODAK PROFESSIONAL TRI-X 320 and 400 Films", Technical Data / Black-and-White Film, F-4017
+# revision/date: December 2016 (PDF creation 2016-12-14)
+# page: 7 ; figure: "Spectral Sensitivity Curves" (the TRI-X 400 / 400TX page of curves)
+# figure notes: Effective Exposure 0.5 sec ; Densitometry Diffuse Visual ; solid = D=1.0>Gross Fog, dashed = D=0.3>Gross Fog ;
+#   *Sensitivity = reciprocal of exposure (erg/cm2) required to produce specified density ; axes 250..750 nm, log S 0..4
+# digitised: pixel trace of a 600 dpi render of the page (tools/trace_spec.py); frame calibration from the gridlines
+#   (x: 250..750 nm every 50 nm, y: log S 0,1,2,3,4); columns traced every 5 nm, the steep red tail traced by rows.
+#   Estimated reading error: +-0.01 log S, +-0.5 nm. Blank = curve not drawn / not separable.
+# the figure starts at 300 nm. Beyond the last drawn point (D=1.0: 667 nm at log S 0.0) the sensitivity is below 1/500 of
+#   the peak and is set to zero in the generator (stated there as an extrapolation, not data).
+wavelength_nm,logS_D1.0,logS_D0.3
+300,2.490,1.210
+305,2.506,1.216
+310,2.525,
+315,2.546,1.251
+320,2.567,
+325,2.590,1.317
+330,2.614,
+335,2.638,1.416
+340,2.657,
+345,2.673,1.484
+350,2.686,
+355,2.692,1.514
+360,2.698,1.519
+365,2.702,1.543
+370,2.708,1.562
+375,2.711,
+380,2.711,1.584
+385,2.711,
+390,2.708,1.581
+395,2.705,1.571
+400,2.698,1.567
+405,2.692,1.562
+410,2.686,
+415,2.679,1.552
+420,2.671,
+425,2.660,1.535
+430,2.648,1.524
+435,2.632,1.502
+440,2.614,1.498
+445,2.597,
+450,2.576,1.478
+455,2.551,1.475
+460,2.522,1.443
+465,2.486,1.411
+470,2.448,1.365
+475,2.405,1.330
+480,2.362,1.276
+485,2.319,
+490,2.281,1.206
+495,2.251,1.194
+500,2.232,1.183
+505,2.225,1.187
+510,2.232,
+515,2.248,1.237
+520,2.270,
+525,2.294,1.292
+530,2.319,
+535,2.341,1.335
+540,2.363,
+545,2.384,1.371
+550,2.402,
+555,2.417,
+560,2.432,1.406
+565,2.444,
+570,2.451,1.413
+575,2.454,1.413
+580,2.444,1.403
+585,2.429,1.394
+590,2.405,
+595,2.381,1.375
+600,2.373,
+605,2.375,1.384
+610,2.392,1.400
+615,2.410,1.406
+620,2.413,1.394
+625,2.394,
+630,2.330,1.300
+635,2.180,1.194
+640,1.930,1.060
+645,1.510,0.780
+650,1.010,0.470
+655,0.653,0.080
+660,0.357,
+665,0.118,

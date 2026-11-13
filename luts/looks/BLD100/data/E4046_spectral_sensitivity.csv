@@ -1,0 +1,58 @@
+# publication: KODAK PROFESSIONAL EKTAR 100 Film technical data, Kodak Publication No. E-4046 (Kodak Alaris)
+# revision/date: January 2025 ('Revised 1/25')
+# page: 4, figure: 'Spectral-Sensitivity Curves' (figure code E4046B); Exposure: Daylight; Effective Exposure: 1/25 Second;
+#   Densitometry: Status M; Density: 0.2 > D-min; sensitivity = reciprocal of exposure (erg/cm2) required for that density
+# digitised by eye from 3x crops of a 200 dpi render of the page as read through WebFetch (render deleted after reading);
+#   frame x 205.5..762.5 px = 250..750 nm (1.114 px/nm), y 1411..990 px = log S 0.0..3.0 (140.3 px per unit); +-2 nm, +-0.05 log S.
+#   layer: Y = yellow-forming (blue record), M = magenta-forming (green record), C = cyan-forming (red record).
+#   The M layer's secondary short-wave branch (395..483 nm, lower curve) is listed as M_sw.
+layer,wavelength_nm,log_sensitivity
+Y,380,1.10
+Y,389,1.65
+Y,400,2.00
+Y,405,2.06
+Y,418,2.02
+Y,441,2.09
+Y,450,2.02
+Y,470,2.14
+Y,477,1.86
+Y,483,1.22
+Y,489,0.79
+Y,495,0.35
+M_sw,395,0.85
+M_sw,405,0.97
+M_sw,416,0.90
+M_sw,432,0.72
+M_sw,443,0.54
+M_sw,450,0.52
+M_sw,470,0.53
+M_sw,477,0.72
+M,483,1.08
+M,489,1.33
+M,496,1.43
+M,514,1.61
+M,532,1.79
+M,546,1.85
+M,558,1.78
+M,571,1.66
+M,577,1.57
+M,580,1.38
+M,583,1.15
+M,586,0.79
+M,591,0.38
+C,555,0.19
+C,562,0.34
+C,570,0.36
+C,576,0.74
+C,580,1.15
+C,586,1.43
+C,601,1.72
+C,613,1.77
+C,628,1.81
+C,640,1.93
+C,652,2.05
+C,661,1.93
+C,670,1.55
+C,679,1.12
+C,688,0.84
+C,695,0.29

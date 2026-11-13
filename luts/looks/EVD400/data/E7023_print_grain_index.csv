@@ -1,0 +1,9 @@
+# publication: KODAK ULTRA MAX 400 Film technical data, Kodak Publication No. E-7023 (Kodak Alaris), February 2016
+# page: 3, section 'IMAGE STRUCTURE - Print Grain Index Magnification Table'. PGI: diffuse printing illumination, 14 in viewing
+#   distance; 25 = approximate visual threshold of graininess; a change of 4 units = one just-noticeable difference for 90 % of
+#   observers; "replaces rms granularity and has a different scale which cannot be compared to rms granularity".
+# comparison rows: our own digitisations of the sibling films' maker sheets (catalogue looks SUN200/data, PRT400/data)
+negative,print_size_in,magnification,PGI,source
+24x36mm (135),4x6,4.4,46,E-7023 p.3 (this film; the only size listed)
+24x36mm (135) ISO 200 consumer (SUN200 class),4x6,4.4,44,E-7022 Revised 06-23 p.3 (SUN200/data/E7022_print_grain_index.csv)
+24x36mm (135) ISO 400 portrait (PRT400 class; the Neg 400 row's reference),4x6,4.4,37,E-4050 Revised 1-25 p.3 (PRT400/data/e4050_print_grain_index.csv)

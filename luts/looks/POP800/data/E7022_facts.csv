@@ -1,0 +1,10 @@
+# publication: KODAK GOLD 200 Film technical data, Kodak Publication No. E-7022 (Kodak Alaris), Revised 06-23
+# text facts used by gen_sun200.py (page, section)
+fact,value,page,section
+ISO speed daylight,200,1,Film Speed table
+exposure latitude,-2 / +3 stops,1,introduction ("wide exposure latitude")
+described properties,"saturated colours; fine grain; high sharpness",1,introduction + Features/Benefits table
+red-filter density of a grey card (normally exposed),0.85 to 1.05,2,Judging Negative Exposures
+film base (135 and 120),0.10 mm ESTAR (polyester),1,Sizes Available
+log H reference (normal exposure),-1.14 log lux-s,4,Characteristic Curves
+characteristic-curve max density (B/G/R),2.8 / 2.2 / 1.9 (secondary: cacreeks.com table; our trace at log H +0.8: 2.72 / 2.28 / 1.81),4,Characteristic Curves

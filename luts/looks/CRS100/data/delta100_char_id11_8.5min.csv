@@ -1,0 +1,86 @@
+# publication: ILFORD (HARMAN technology), "100 DELTA PROFESSIONAL" technical information sheet (film data sheet)
+# revision/date: September 2002 edition (PDF created 2002-09-11); the same curve is printed unchanged in the current
+#   edition "DELTA 100 PROFESSIONAL Technical Information", HARMAN technology, Nov 2018, page 4 (cross-check: a trace of
+#   that edition's 169 ppi raster of the figure differs from these rows by mean -0.007, rms 0.008, max 0.021 D, n 66)
+# page: 4 ; figure: "CHARACTERISTIC CURVE": "100 DELTA Professional rollfilm developed in ILFORD ID-11 stock for 8 1/2
+#   minutes at 20C/68F with intermittent agitation. This curve is also representative of the 35mm and sheet film
+#   formats." x = "Relative log exposure" (labels 1..4, grid every 0.5), y = "Density" (labels 1.0, 2.0, grid every 0.5)
+# related facts, same publication (Nov 2018): p.3 development table, ID-11 stock, EI 100/21: 8 1/2 min (EI 50: 7,
+#   EI 200: 10 1/2), "These times will produce negatives of average contrast suitable for printing in all enlargers";
+#   p.1 "speed rating of ISO 100/21 to daylight ... the exposure index (EI) range ... is based on a practical evaluation
+#   of film speed and is not based on foot speed, as is the ISO standard."
+# digitised: tools/trace_hd.py on the figure's native embedded raster (1192 x 792 px, 400 ppi; pdfimages -png -f 4 -l 4).
+#   Grid lines found as long dark runs: 9 vertical lines = rel. log E 0.5..4.5 (residuals <= 0.002), 7 horizontal lines
+#   = D 3.0..0 (residuals <= 0.005). Curve = centre of the stroke per pixel column; columns where the stroke meets a
+#   grid line are dropped; median of the columns within +-0.015 log E of each listed value (n_columns).
+#   Estimated reading error +-0.01 D. The drawn curve ends at rel. log E 4.0 (D about 1.82).
+# densities are as plotted (the flat part at D 0.086 is the curve's base + fog level on this plot).
+logE_rel,D,n_columns
+0.05,0.0858,5
+0.10,0.0858,7
+0.15,0.0858,7
+0.20,0.0858,7
+0.25,0.0858,7
+0.30,0.0858,7
+0.35,0.0858,7
+0.40,0.0858,6
+0.45,0.0858,7
+0.55,0.0858,7
+0.60,0.0858,7
+0.65,0.0858,7
+0.70,0.0858,7
+0.75,0.0858,7
+0.80,0.0858,7
+0.85,0.0858,7
+0.90,0.0858,7
+0.95,0.0858,7
+1.05,0.0880,6
+1.10,0.0880,7
+1.15,0.0903,7
+1.20,0.0903,7
+1.25,0.0903,7
+1.30,0.0969,7
+1.35,0.0992,7
+1.40,0.1080,7
+1.45,0.1169,7
+1.55,0.1414,7
+1.60,0.1569,7
+1.65,0.1747,7
+1.70,0.1936,6
+1.75,0.2169,7
+1.80,0.2370,7
+1.85,0.2614,7
+1.90,0.2836,7
+1.95,0.3103,7
+2.05,0.3636,7
+2.10,0.3903,7
+2.15,0.4214,7
+2.20,0.4481,7
+2.35,0.5503,2
+2.40,0.5770,7
+2.45,0.6059,7
+2.55,0.6748,7
+2.60,0.7126,7
+2.65,0.7459,7
+2.70,0.7859,7
+2.75,0.8215,7
+2.80,0.8659,7
+2.85,0.9015,7
+2.90,0.9426,6
+3.05,1.0593,5
+3.10,1.1037,4
+3.15,1.1415,7
+3.20,1.1815,7
+3.25,1.2260,5
+3.30,1.2660,4
+3.35,1.3082,4
+3.40,1.3471,4
+3.45,1.3905,5
+3.50,1.4271,2
+3.65,1.5505,5
+3.70,1.5905,7
+3.75,1.6283,6
+3.80,1.6727,6
+3.85,1.7083,7
+3.90,1.7483,7
+3.95,1.7861,7

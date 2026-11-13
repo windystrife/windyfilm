@@ -1,0 +1,9 @@
+# publication: Fujifilm AF3-176E, FUJICOLOR PRO 400H PROFESSIONAL, Fujifilm Product Information Bulletin (colour negative film data sheet)
+# revision/date: Ref. No. AF3-176E (EIGI-05.1-FG(HB) 4-1); PDF created 2005-01-19; copy at asset.fujifilm.com/www/uk/files/2019-09/.../films_pro-400h_datasheet_01.pdf, md5 61b77af8bd4c093b430b5b8cd0e4ef4a
+# page: 7
+# figure: 16. DIFFUSE RMS GRANULARITY VALUE (micro-densitometer aperture 48 um diameter, sample density +1.0 above minimum density; 'Based on Fujifilm measurements'); 17. RESOLVING POWER (tables, no figure)
+# columns: quantity, value, unit
+quantity,value,unit
+diffuse_rms_granularity,4,RMS x1000 (Fujifilm measurement; not comparable with reversal films per the sheet)
+resolving_power_contrast_1.6to1,50,lines/mm
+resolving_power_contrast_1000to1,125,lines/mm

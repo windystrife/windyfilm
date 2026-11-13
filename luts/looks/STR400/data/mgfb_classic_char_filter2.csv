@@ -1,0 +1,42 @@
+# publication: HARMAN technology Limited, "ILFORD MULTIGRADE FB CLASSIC" technical information sheet
+#   (PDF title MGFB_CLASSIC_1013), revision/date: Oct 2013
+# page: 2 ; figure: "Characteristic curves" (top plot: glossy paper exposed through MULTIGRADE filters 00, 0, 1, 2, 3;
+#   Developer MULTIGRADE diluted 1+9, 2 minutes at 20 C) ; this file: the filter 2 curve (cyan), the grade-2 paper
+# same publication, page 1, "ISO range" table (ISO 6846-1992): filter 00 R170, 0 R140, 1 R110, 2 R95, 3 R80, 4 R60, 5 R50
+# digitised: colour trace of a 600 dpi render of the page (tools/trace_paper.py); frame calibration from the gridlines
+#   (D 0 at y 1768 px, D 2.5 at y 1003 px; logE 0 at x 2880 px, 2.5 at x 4389 px); sampled every 0.05 logE.
+#   Below logE 0.30 the filter 2 curve is hidden under the other curves (all filters coincide in the toe); those rows are
+#   the mean of the filter 1 and filter 3 traces at the same logE (flagged "toe_from_f1_f3"). 1.45..1.80: hidden under the
+#   plateau of the other curves; the plateau value 2.064 is read at 1.85..2.35. Estimated reading error +-0.01 D.
+# the plotted curves start at D ~0.02 at logE 0: treated as Dmin = 0.020 (net density = D - 0.020) in the generator.
+logE,D,note
+0.00,0.020,toe_from_f1_f3
+0.10,0.025,toe_from_f1_f3
+0.20,0.040,toe_from_f1_f3
+0.25,0.047,toe_from_f1_f3
+0.30,0.074,
+0.35,0.105,
+0.40,0.149,
+0.45,0.203,
+0.55,0.310,
+0.60,0.394,
+0.65,0.459,
+0.70,0.547,
+0.75,0.629,
+0.80,0.734,
+0.85,0.846,
+0.90,0.964,
+0.95,1.098,
+1.00,1.278,
+1.05,1.435,
+1.10,1.590,
+1.15,1.739,
+1.20,1.853,
+1.25,1.930,
+1.30,1.985,
+1.35,2.007,
+1.40,2.026,
+1.85,2.062,
+2.00,2.064,
+2.35,2.064,
+2.50,2.075,

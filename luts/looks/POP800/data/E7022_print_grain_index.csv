@@ -1,0 +1,14 @@
+# publication: KODAK GOLD 200 Film technical data, Kodak Publication No. E-7022 (Kodak Alaris), Revised 06-23
+# page: 3, section 'IMAGE STRUCTURE - Print Grain Index' (table). PGI: diffuse printing, 14 in viewing distance,
+#   25 = visual threshold of graininess, 4 units = one just-noticeable difference for 90 % of observers.
+# extra rows (comparison only, secondary source): cacreeks.com/films.htm, 'Kodak PGI table (print films)', read 2026-11-10
+negative,print_size_in,magnification,PGI,source
+24x36mm (135),4x6,4.4,44,E-7022 p.3
+24x36mm (135),8x10,4.4,64,E-7022 p.3
+6x6cm (120),4x6,2.6,33,E-7022 p.3
+6x6cm (120),8x10,4.4,44,E-7022 p.3
+6x6cm (120),16x20,8.8,64,E-7022 p.3
+135 ISO 200 consumer (this film class; 'new Kodak Gold 200' GB-7),4x6,4.4,44,cacreeks.com Kodak PGI table
+135 ISO 160 portrait (160NC-2),4x6,4.4,32,cacreeks.com Kodak PGI table
+135 ISO 400 portrait (400NC-3),4x6,4.4,<40,cacreeks.com Kodak PGI table
+135 ISO 400 consumer (GC-9),4x6,4.4,46,cacreeks.com Kodak PGI table

@@ -1,0 +1,17 @@
+# publication: KODAK ULTRA MAX 400 Film technical data, Kodak Publication No. E-7023 (Kodak Alaris), February 2016 (Revised 2/16)
+# text facts used by gen_evd400.py and the README (page, section). Short excerpts in single quotes; values contain no commas.
+fact,value,page,section
+ISO speed daylight,ISO/DIN 400/27 deg,1,EXPOSURE - Film Speed
+described colour,'consistently bright and vibrant colors' with 'accurate skin-tone reproduction' (Optimized color precision technology),1,introduction
+described sharpness and grain,'excellent sharpness and fine grain' even when enlarged,1,introduction
+underexposure,'fewer underexposures'; Features table: 'Better underexposure protection',1,introduction + Features/Advantages table
+emulsion,T-GRAIN emulsion; antenna dye sensitization; development accelerators,1,Features table
+printing,'printing compatible with KODAK GOLD Films',1,introduction
+mixed light,'tolerant of mixed-lighting situations',2,Fluorescent and High-Intensity Discharge Lights
+red-filter density of a grey card (normally exposed),0.80 to 1.00 (Status M red),3,Judging Negative Exposures
+print papers named,EDGE / ROYAL Digital / Photo Book / PROFESSIONAL ENDURA Premier,3,Printing Negatives
+print grain index (135 at 4x6 in; 4.4x),46,3,Image Structure
+log H reference (normal exposure),-1.44 log lux-s,4,Characteristic Curves (E7023A)
+characteristic-curve extent (our trace),log H about -3.45 to +0.6; D-min R 0.285 G 0.69 B 0.98; at +0.5 R 1.91 G 2.42 B 2.94,4,Characteristic Curves (E7023A)
+mid-scale slopes (our trace; log H -2.0 to 0.0),R 0.512 G 0.530 B 0.600,4,Characteristic Curves (E7023A)
+net density at Log H Ref (our trace),R 0.67 G 0.76 B 0.79 (total red 0.957 agrees with the p.3 grey-card 0.80 to 1.00),4,Characteristic Curves (E7023A)

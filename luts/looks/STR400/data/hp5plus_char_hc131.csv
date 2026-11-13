@@ -1,0 +1,58 @@
+# publication: HARMAN technology Limited, "ILFORD PHOTO TECHNICAL INFORMATION: HP5 PLUS, ISO 400/27, black and white
+#   professional film" (6 pages)
+# revision/date: Nov 2018 (page header/footer "Nov 2018")
+# page: 5 ; figure: "CHARACTERISTIC CURVE" - "HP5 Plus film developed in ILFORD ILFOTEC HC (1+31) stock for 6 1/2 minutes at
+#   20C/68F with intermittent agitation. This curve is also representative of roll film and sheet film formats."
+# figure notes: x = "Relative log exposure" (grid every 0.5, labels 1..4; no absolute exposure is given), y = "Density"
+#   (grid every 0.5, labels 1.0 and 2.0; frame 0..3.0); the curve is drawn from relative log E 0 to 4.11 (D 2.15) and has
+#   no shoulder; base + fog plateau D 0.178 up to relative log E 0.55
+# related facts in the same publication: p.3 table: ILFOTEC HC 1+31, EI 400/27: 6 1/2 min (the plotted process is the
+#   EI 400 recommendation); "These times will produce negatives of average contrast suitable for printing in all enlargers"
+#   (p.3). The July 2004 edition (FACT SHEET, 95042.GB.www, p.1) adds: "HP5 Plus has a speed rating of ISO 400/27 ... to
+#   daylight. The ISO speed rating was measured using ILFORD ID-11 developer" and shows the same curve and spectrogram.
+# digitised: the PDF's own embedded raster (page 5 image 0, 488 x 344 px, about 170 ppi), traced at native resolution by
+#   tools/trace_hp5.py (grid from long dark lines: 7 rows D 0..3, 10 columns log E 0..4.5); columns within 2 px of a
+#   vertical grid line and samples where the stroke crosses a horizontal grid line skipped; resampled to 0.1 log E (mean
+#   within +-0.06). Estimated reading error +-0.01 D, +-0.01 log E.
+rel_logE,D
+0.10,0.1778
+0.20,0.1778
+0.30,0.1778
+0.40,0.1778
+0.50,0.1783
+0.60,0.1851
+0.70,0.1945
+0.80,0.2094
+0.90,0.2288
+1.00,0.2531
+1.10,0.2819
+1.20,0.3169
+1.30,0.3621
+1.40,0.4092
+1.50,0.4367
+1.60,0.5492
+1.70,0.5866
+1.80,0.6530
+1.90,0.7221
+2.00,0.7883
+2.10,0.8540
+2.20,0.9180
+2.30,0.9517
+2.40,1.0622
+2.50,1.1111
+2.60,1.1769
+2.70,1.2428
+2.80,1.3069
+2.90,1.3717
+3.00,1.4266
+3.10,1.5002
+3.20,1.5692
+3.30,1.6290
+3.40,1.6931
+3.50,1.7573
+3.60,1.8211
+3.70,1.8857
+3.80,1.9408
+3.90,2.0481
+4.00,2.0833
+4.10,2.1303

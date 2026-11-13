@@ -1,0 +1,49 @@
+# publication: FUJIFILM PRODUCT INFORMATION BULLETIN, FUJICOLOR SUPERIA X-TRA 400 [CH] (colour negative film), Ref. No. AF3-0217E
+# revision/date: print code KAMIQ-06.10-FP (October 2006), 6 pages; read through WebFetch from asset.fujifilm.com
+#   (www/uk/files/2019-09/af234c58ab3d3b67b41cde22b1155309/films_superia-xtra400_datasheet_01.pdf, md5 b7b35f85b1c2bfa610f604526a73c283; not kept)
+# page: 6, figure: 17. CHARACTERISTIC CURVES; Exposure: Daylight, 1/125 sec; Process: CN-16; Densitometry: Status M
+#   (no Log H reference is printed on this sheet; see the generator for the grey-card anchor, p.4 section 12)
+# digitised: 400 dpi render of page 6, column trace of the drawn lines (tools/trace_char.py): frame x 472.5..1437.5 px =
+#   log H -4.0..0.0, y 1541.5..579.5 px = density 0..4 (240.5 px per unit); line centre, about +-0.01 D, +-0.01 log H;
+#   'bridged' = a grid line or a curve label hides the column, value from a local linear fit (+-0.15 log H; +-0.45 inside
+#   the label gap log H -1.88..-1.25, a straight part of all three curves)
+#   curves are drawn from log H -3.64 to about +0.2; rows -3.6..+0.1 are given
+log_H_lux_s,D_red,D_green,D_blue,note
+-3.6,0.137,0.454,0.728,traced
+-3.5,0.143,0.457,0.730,bridged
+-3.4,0.150,0.460,0.733,traced
+-3.3,0.161,0.465,0.737,traced
+-3.2,0.177,0.477,0.743,traced
+-3.1,0.195,0.485,0.751,traced
+-3.0,0.219,0.503,0.764,bridged
+-2.9,0.243,0.522,0.777,traced
+-2.8,0.273,0.552,0.800,traced
+-2.7,0.306,0.589,0.833,traced
+-2.6,0.341,0.635,0.877,traced
+-2.5,0.380,0.691,0.936,bridged
+-2.4,0.421,0.749,0.995,traced
+-2.3,0.474,0.812,1.062,traced
+-2.2,0.528,0.876,1.131,traced
+-2.1,0.585,0.940,1.201,traced
+-2.0,0.645,1.007,1.273,bridged
+-1.9,0.705,1.073,1.346,traced
+-1.8,0.765,1.138,1.416,bridged
+-1.7,0.822,1.202,1.487,bridged
+-1.6,0.888,1.270,1.558,bridged
+-1.5,0.948,1.336,1.629,bridged
+-1.4,1.009,1.400,1.705,bridged
+-1.3,1.070,1.467,1.773,bridged
+-1.2,1.132,1.534,1.843,traced
+-1.1,1.194,1.602,1.912,traced
+-1.0,1.254,1.667,1.980,bridged
+-0.9,1.315,1.735,2.049,traced
+-0.8,1.376,1.802,2.117,traced
+-0.7,1.437,1.868,2.185,traced
+-0.6,1.498,1.936,2.254,traced
+-0.5,1.560,2.004,2.323,bridged
+-0.4,1.621,2.071,2.391,traced
+-0.3,1.684,2.141,2.462,traced
+-0.2,1.746,2.209,2.530,traced
+-0.1,1.808,2.277,2.599,traced
+0.0,1.870,2.346,2.669,bridged
+0.1,1.932,2.414,2.739,traced

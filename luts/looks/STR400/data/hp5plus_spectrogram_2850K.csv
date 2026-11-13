@@ -1,0 +1,73 @@
+# publication: HARMAN technology Limited, "ILFORD PHOTO TECHNICAL INFORMATION: HP5 PLUS, ISO 400/27, black and white
+#   professional film" (6 pages)
+# revision/date: Nov 2018 (page header/footer "Nov 2018"); listed on 125px.com/techdocs/ilford as 11/2018
+# page: 1 ; figure: "SPECTRAL SENSITIVITY - Wedge spectrogram to tungsten light (2850K)"
+# figure notes: x = Wavelength nm (ticks 400..650 every 50); y = "Sensitivity", linear ticks 0.5 and 1.0, zero at the frame
+#   bottom (checked: the 0.5 -> 1.0 tick spacing extrapolates to the bottom frame line within 0.0 px); the curve is the
+#   film's response to a 2850 K tungsten source (the source is NOT divided out in the figure)
+# digitised: the PDF's own embedded raster of the figure (page 1 image 2, 515 x 264 px, about 150 ppi), traced at native
+#   resolution by tools/trace_hp5.py (frame from long dark lines, x calibration from the 6 tick marks below the frame,
+#   y from the 1.0 / 0.5 ticks); one column per ~1.05 nm, resampled here to 5 nm (mean within +-2.6 nm).
+#   Estimated reading error +-0.01 (y), +-1 nm (x); steeper on the red flank (632-657 nm): +-0.03.
+# the drawn curve meets zero at 351.1 nm (blue end) and 659.1 nm (red end); the generator sets the response to 0 outside.
+wavelength_nm,rel_response_2850K
+360,0.1197
+365,0.1913
+370,0.2762
+375,0.3578
+380,0.4383
+385,0.5028
+390,0.5746
+395,0.6359
+400,0.6762
+405,0.7061
+410,0.7311
+415,0.7503
+420,0.7637
+425,0.7775
+430,0.7897
+435,0.7993
+440,0.8090
+445,0.8157
+450,0.8207
+455,0.8246
+460,0.8246
+465,0.8246
+470,0.8234
+475,0.8186
+480,0.8154
+485,0.8078
+490,0.7972
+495,0.7859
+500,0.7807
+505,0.7811
+510,0.7895
+515,0.8051
+520,0.8199
+525,0.8395
+530,0.8596
+535,0.8767
+540,0.8969
+545,0.9167
+550,0.9343
+555,0.9517
+560,0.9661
+565,0.9743
+570,0.9792
+575,0.9820
+580,0.9757
+585,0.9674
+590,0.9464
+595,0.9243
+600,0.9129
+605,0.9088
+610,0.9082
+615,0.9151
+620,0.9277
+625,0.9315
+630,0.9131
+635,0.7792
+640,0.5575
+645,0.3505
+650,0.1956
+655,0.0526

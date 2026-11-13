@@ -1,0 +1,90 @@
+# publication: Kodak Alaris, "KODAK PROFESSIONAL T-MAX P3200 Black & White Negative Film", Technical Data / Black-and-White
+#   Film, publication F-4001 ; revision/date: March 2018 ("Revised 03-18", PDF modified 2018-02-05)
+# page: 8 ; figure: "Characteristic Curves", top right plot: Exposure: Daylight ; Process: KODAK PROFESSIONAL T-MAX Developer,
+#   Small Tank, 20 C (68 F) ; Densitometry: Diffuse Visual ; curves 12 min (solid), 10 min (long dash), 7 min (short dash),
+#   6 min (dash-dot) ; x = LOG EXPOSURE (lux-seconds) -4.0..+1.0, y = DENSITY 0..3.0
+# related facts in the same publication: p.3 table "Small-Tank Processing", T-MAX Developer, 68 F (20 C): EI 400 8 1/2 min,
+#   EI 800 9 1/2, EI 1600 10 1/2, EI 3200 12, EI 6400 13 1/2 min (so the 12 min curve is the EI 3200 starting-point push);
+#   p.2 EXPOSURE: "The nominal speed is EI 1000 when the film is processed in KODAK PROFESSIONAL T-MAX Developer ...
+#   determined in a manner published in ISO standards"; at EI 3200 or 6400 "a slight increase in contrast and graininess
+#   with additional loss of shadow detail".
+# digitised: pixel trace of a 600 dpi render of the page (tools/trace_hd.py); frame calibration from the plot frame
+#   (x(-4.0) = 2964.5 px, x(+1.0) = 4501.5 px, y(D 0) = 1953.5 px, y(D 3.0) = 416.5 px; the D 1.0 tick at 1441 px checks).
+#   Median of the columns within +-0.015 log H of each row. 12 min: the topmost curve, continuous from log H -3.15 to
+#   +0.38 where it leaves the frame at D 3.0. 10/7/6 min: assigned by order where all four curves are separate (log H > -2.25)
+#   and in the toe (12 = 10 min upper, 7 = 6 min lower); blank = dash gap or not separable (interpolate).
+#   Estimated reading error +-0.01 D, +-0.01 log H.
+# NOTE (see README / generator): the plotted absolute log H axis implies an ISO speed of about 190 for this curve family,
+#   against the stated nominal EI 1000 (p.2) and against the October 2007 edition (F-4016 p.26), whose T-MAX Developer curves
+#   sit about 1.0 log H lower; the generator therefore uses these curves' SHAPES and anchors their position by the stated speed.
+logH_luxs,D_12min,D_10min,D_7min,D_6min
+-3.10,0.298,0.298,0.243,0.243
+-3.05,0.300,0.300,0.244,0.244
+-3.00,0.303,0.303,0.246,0.246
+-2.95,0.304,0.304,0.248,0.248
+-2.90,0.306,0.307,0.250,0.250
+-2.85,0.309,0.309,0.250,0.250
+-2.80,0.314,0.312,0.252,0.252
+-2.75,0.319,0.319,0.255,0.255
+-2.70,0.320,0.320,0.257,0.257
+-2.65,0.326,0.326,0.261,0.261
+-2.60,0.340,0.340,0.265,0.265
+-2.55,0.348,0.348,0.271,0.271
+-2.50,0.359,0.359,0.280,0.280
+-2.45,0.368,0.368,0.289,0.289
+-2.40,0.384,0.384,0.301,0.301
+-2.35,0.399,0.399,0.313,0.313
+-2.30,0.418,0.416,0.326,0.326
+-2.25,0.449,,,
+-2.20,0.476,,,
+-2.15,0.507,0.470,0.389,0.375
+-2.10,0.540,,,
+-2.05,0.577,0.530,0.438,0.410
+-2.00,0.615,,,
+-1.95,0.656,0.599,0.492,0.448
+-1.90,0.696,0.619,0.506,0.454
+-1.85,0.739,0.657,0.547,0.496
+-1.80,0.782,,,
+-1.75,0.825,0.741,0.604,0.547
+-1.70,0.871,0.777,0.631,0.574
+-1.65,0.916,0.831,0.669,0.606
+-1.60,0.959,,,
+-1.55,1.006,0.889,0.719,0.651
+-1.50,1.049,,,
+-1.45,1.091,0.966,0.777,0.706
+-1.40,1.134,0.997,0.796,0.726
+-1.35,1.174,1.027,0.829,0.751
+-1.30,1.214,,,
+-1.25,1.253,1.104,0.884,0.796
+-1.20,1.290,1.147,0.931,0.837
+-1.15,1.328,1.195,0.954,0.863
+-1.10,1.366,1.219,0.985,0.886
+-1.05,1.402,1.239,0.996,0.899
+-1.00,1.441,,,
+-0.95,1.478,,,
+-0.90,1.516,,,
+-0.85,1.555,,,
+-0.80,1.593,1.435,1.153,1.048
+-0.75,1.633,,,
+-0.70,1.674,1.498,1.208,1.096
+-0.65,1.715,,,
+-0.60,1.762,1.580,1.276,1.154
+-0.55,1.806,1.622,1.309,1.182
+-0.50,1.855,,,
+-0.45,1.905,1.722,1.387,1.252
+-0.40,1.957,,,
+-0.35,2.013,1.826,1.460,1.311
+-0.30,2.070,1.870,1.506,1.343
+-0.25,2.129,1.905,1.525,1.368
+-0.20,2.194,1.979,1.577,1.420
+-0.15,2.256,2.007,1.597,1.424
+-0.10,2.322,2.100,1.654,1.481
+-0.05,2.392,2.144,1.695,1.514
+-0.00,2.459,2.183,1.722,1.540
+0.05,2.530,2.263,1.774,1.592
+0.10,2.601,,,
+0.15,2.670,2.384,1.853,1.657
+0.20,2.741,2.426,1.888,1.688
+0.25,2.811,2.466,1.919,1.717
+0.30,2.877,2.546,1.975,1.767
+0.35,2.948,,,

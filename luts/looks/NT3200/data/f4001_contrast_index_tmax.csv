@@ -1,0 +1,20 @@
+# publication: Kodak Alaris, "KODAK PROFESSIONAL T-MAX P3200 Black & White Negative Film", publication F-4001 ;
+#   revision/date: March 2018 ("Revised 03-18")
+# page: 8 ; figure: "Contrast Index Curves", Process: Small Tank, 68 F (20 C) ; Densitometry: Diffuse Visual ;
+#   x = DEVELOPMENT TIME (MINUTES) 4..18, y = CONTRAST INDEX 0.3..0.9 ; this file: the T-MAX (Developer) line (thin solid)
+# digitised: row trace of a 600 dpi render of the page (tools/trace_ci.py; frame x(4 min) = 2945 px, x(18 min) = 4481.5 px,
+#   y(CI 0.9) = 2544.5 px, y(CI 0.3) = 4081.5 px). The T-MAX line is the left one of the two parallel thin lines (solid, then
+#   the short-dash T-MAX RS line 0.09 min to its right) that end at about 14.5 / 14.6 min, CI 0.82; it is unambiguous for
+#   CI 0.73..0.81 (below 0.73 it crosses the D-76 (1:1) / XTOL 1:1 / HC-110 lines). Estimated reading error +-0.05 min.
+# derived (generator, linear fit of these rows): CI 0.71 at 12 min (the p.3 EI 3200 small-tank time); extrapolated
+#   CI 0.56 at 8 1/2 min (the p.3 EI 400 time), the usual normal-contrast aim.
+dev_time_min,contrast_index
+12.44,0.73
+12.69,0.74
+12.93,0.75
+13.17,0.76
+13.39,0.77
+13.62,0.78
+13.84,0.79
+14.05,0.80
+14.28,0.81

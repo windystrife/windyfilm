@@ -1,0 +1,85 @@
+# publication: KODAK ULTRA MAX 400 Film technical data, Kodak Publication No. E-7023 (Kodak Alaris)
+# revision/date: February 2016 (page 4 footer 'Revised 2/16')
+# page: 4, figure: 'Spectral-Sensitivity Curves' (figure code E7023B); Exposure: Daylight; Effective Exposure: 1/100 sec;
+#   Densitometry: Status M; Density: 0.2 > D-min; sensitivity = reciprocal of exposure (erg/cm2) for that density
+# digitised from a 200 dpi render of the page as read through WebFetch (render deleted after reading): frame x 212..770.5 px =
+#   250..750 nm (grid every 50 nm), y 1451..1030 px = log S 0..4 (105.3 px per unit); column scan of the drawn lines
+#   (tools/scan_cols.py) plus reading by eye where lines cross or run near-vertical (marked 'steep', +-0.2 log S);
+#   elsewhere +-3 nm, +-0.05 log S.
+#   layer: Y = yellow-forming (blue record), M = magenta-forming (green record), C = cyan-forming (red record).
+#   The M layer's secondary short-wave response (390..480 nm) is listed as drawn.
+layer,wavelength_nm,log_sensitivity,note
+Y,365,1.25,
+Y,370,1.35,
+Y,375,1.61,
+Y,380,1.73,
+Y,385,1.89,
+Y,395,2.30,steep
+Y,400,2.57,
+Y,405,2.64,
+Y,410,2.67,
+Y,420,2.64,
+Y,430,2.64,
+Y,440,2.66,
+Y,450,2.58,
+Y,460,2.58,
+Y,470,2.69,peak
+Y,475,2.66,
+Y,480,2.35,steep
+Y,490,1.89,steep
+Y,500,1.55,steep
+Y,510,0.90,steep
+Y,520,0.35,
+Y,525,0.06,line end
+M,390,0.82,line start
+M,400,1.12,
+M,405,1.15,secondary peak
+M,410,1.12,
+M,420,1.05,
+M,430,0.98,
+M,440,0.89,
+M,450,0.87,
+M,460,0.94,
+M,470,0.98,
+M,475,1.03,
+M,480,1.25,steep
+M,490,1.75,steep
+M,500,2.07,
+M,510,2.19,
+M,520,2.33,
+M,530,2.47,
+M,540,2.60,
+M,550,2.69,peak
+M,560,2.62,
+M,570,2.46,
+M,575,2.40,
+M,582,2.00,steep
+M,591,1.00,steep
+M,600,0.29,line end
+C,485,0.19,line start
+C,490,0.28,
+C,500,0.41,
+C,510,0.57,
+C,520,0.75,
+C,530,0.81,
+C,540,0.83,
+C,550,0.91,
+C,555,1.05,
+C,560,1.14,
+C,565,1.24,
+C,570,1.27,
+C,580,1.70,steep
+C,590,2.01,
+C,600,2.13,
+C,610,2.23,
+C,620,2.34,
+C,630,2.43,
+C,640,2.60,
+C,650,2.70,peak
+C,655,2.70,peak
+C,660,2.63,
+C,670,2.20,steep
+C,680,1.80,steep
+C,685,1.57,
+C,690,1.10,steep
+C,700,0.49,line end

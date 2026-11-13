@@ -1,0 +1,21 @@
+# publication: KODAK PROFESSIONAL ENDURA Premier Paper technical data, Kodak Publication No. E-4070 (Kodak Alaris)
+# revision/date: December 2017
+# page: 4, figure: 'Characteristic Curves'; Exposure: 0.5 second; Process: RA-4 95 F (35 C), 45 sec; Densitometry: Status A;
+#   x = LOG EXPOSURE (lux-seconds) -3.0..0.0, y = DENSITY 0..3.0
+# digitised: 200 dpi render of the page as read through WebFetch (render deleted after reading); frame x 1012.5..1525 px =
+#   log E -3.0..0.0, y 714..201 px = density 0..3.0 (171 px per unit); dark-pixel runs per column (tools/trace_paper.py),
+#   line centre, +-0.02 D.  At the foot the three records are drawn as two overlapping lines (0.079 and 0.105).
+#   The curves end at log E about -0.12 on a flat shoulder (published maximum density as plotted).
+# why this paper: E-4046 p.3 'This film is optimized for printing to KODAK PROFESSIONAL ENDURA Premier Paper'.
+# use: display-medium Dmax for the grain row's rho_max (PLAN 3.2.4 b): neutral net Dmax = lowest record on the shoulder
+#   (B 2.444) minus D-min (0.09, mean of the two foot lines) = 2.35.
+log_E_lux_s,D_R,D_G,D_B,note
+-2.80,0.105,0.079,0.079,foot (lines overlap; upper line 0.105 / lower 0.079; record order not resolvable)
+-2.40,0.105,0.079,0.079,foot
+-2.00,0.111,0.053,0.053,foot (start of the toe)
+-0.80,2.646,2.439,2.392,shoulder
+-0.60,2.725,2.497,2.427,shoulder
+-0.40,2.754,2.523,2.442,shoulder
+-0.30,2.754,2.526,2.444,shoulder (maximum)
+-0.20,2.743,2.520,2.439,shoulder
+-0.15,2.737,2.515,2.439,plot end

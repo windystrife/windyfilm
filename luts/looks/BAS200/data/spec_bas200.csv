@@ -1,0 +1,34 @@
+# NOT a published curve: Kentmere Pan 200 prints no spectral sensitivity (Harman sheet Mar 2025, 4 pages: speed, development, filter factors, reciprocity only).
+# LOOK CALL: 50 % of the FP4 Plus tungsten-corrected spectral sensitivity (ILFORD fact sheet 04/2004, see CLS125/data/spec_cls125.csv) + 50 % of a flat equal-energy panchromatic response (flat to 650 nm, zero at 680 nm),
+# i.e. a plain panchromatic response with a blue-green lean halfway to the FP4 curve.  Relative; unit area applied in the generator.
+wavelength_nm,logS_D1.0,logS_D0.3
+370,2.6725,2.6725
+380,2.8301,2.8301
+390,2.8778,2.8778
+400,3.0000,3.0000
+410,2.9713,2.9713
+420,2.9346,2.9346
+430,2.9164,2.9164
+440,2.9080,2.9080
+450,2.8930,2.8930
+460,2.8675,2.8675
+470,2.8390,2.8390
+480,2.8099,2.8099
+490,2.7813,2.7813
+500,2.7533,2.7533
+510,2.7329,2.7329
+520,2.7290,2.7290
+530,2.7224,2.7224
+540,2.7080,2.7080
+550,2.6954,2.6954
+560,2.6925,2.6925
+570,2.6908,2.6908
+580,2.6905,2.6905
+590,2.6875,2.6875
+600,2.6814,2.6814
+610,2.6715,2.6715
+620,2.6584,2.6584
+630,2.6509,2.6509
+640,2.6144,2.6144
+650,2.5637,2.5637
+660,2.3406,2.3406

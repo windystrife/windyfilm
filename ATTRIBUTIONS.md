@@ -38,7 +38,10 @@ ideas, published formulas or published numbers, implemented independently here.
 
 - **Film grain**: the approach follows Steve Yedlin's public talks and writing on emulating film grain (no code).
 - **Halation and bloom**: the model follows ideas published with spektrafilm and our own measurements (no code).
-- **Stock facts** (box ISO, white balance, published grain figures) come from the manufacturers' public datasheets.
+- **Stock facts** come from the manufacturers' public technical data sheets, digitised by WindyStrife: box ISO,
+  white balance, characteristic curves, spectral sensitivity, dye density and published granularity. Examples:
+  Kodak E-4050 (Portra 400), Kodak H-1 (Vision3). Each file under `luts/looks/*/data/` names its publication, page
+  and figure.
 
 ## Trademarks
 

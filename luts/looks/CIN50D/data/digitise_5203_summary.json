@@ -1,0 +1,105 @@
+{
+ "sensitometric_paths": {
+  "R": {
+   "path": 106,
+   "dashed": true,
+   "n": 129
+  },
+  "G": {
+   "path": 107,
+   "dashed": false,
+   "n": 129
+  },
+  "B": {
+   "path": 108,
+   "dashed": false,
+   "n": 129
+  }
+ },
+ "spectral_paths": {
+  "yellow_forming": {
+   "path": 126,
+   "nm_range": [
+    360.0,
+    498.7
+   ],
+   "peak_nm": 468.7,
+   "peak_logS": 1.827
+  },
+  "magenta_forming": {
+   "path": 124,
+   "nm_range": [
+    477.1,
+    593.3
+   ],
+   "peak_nm": 548.7,
+   "peak_logS": 1.607
+  },
+  "cyan_forming": {
+   "path": 125,
+   "nm_range": [
+    573.4,
+    678.7
+   ],
+   "peak_nm": 648.8,
+   "peak_logS": 1.557
+  }
+ },
+ "granularity_median_sigmaD_logE_2_4": {
+  "R": 0.00456,
+  "G": 0.00474,
+  "B": 0.00804
+ },
+ "dye_paths": {
+  "cyan_dye": {
+   "path": 42,
+   "peak_nm": 685.1,
+   "peak_D": 1.003
+  },
+  "magenta_dye": {
+   "path": 43,
+   "peak_nm": 538.8,
+   "peak_D": 1.001
+  },
+  "yellow_dye": {
+   "path": 44,
+   "peak_nm": 447.6,
+   "peak_D": 1.003
+  },
+  "minimum_density": {
+   "path": 45,
+   "peak_nm": 442.6,
+   "peak_D": 0.858
+  },
+  "midscale_neutral": {
+   "path": 46,
+   "peak_nm": 443.8,
+   "peak_D": 1.557
+  }
+ },
+ "slope_D_per_stop_-2_+3": {
+  "R": 0.1473,
+  "G": 0.1757,
+  "B": 0.1696
+ },
+ "gamma_D_per_logH_-2_+3": {
+  "R": 0.468,
+  "G": 0.558,
+  "B": 0.539
+ },
+ "Dmin_at_-8": {
+  "R": 0.172,
+  "G": 0.58,
+  "B": 0.855
+ },
+ "D_at_0": {
+  "R": 0.941,
+  "G": 1.454,
+  "B": 1.696
+ },
+ "D_at_+8": {
+  "R": 1.897,
+  "G": 2.628,
+  "B": 2.829
+ }
+}

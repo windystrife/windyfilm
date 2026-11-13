@@ -1,0 +1,34 @@
+# publication: KODAK PROFESSIONAL EKTAR 100 Film technical data, Kodak Publication No. E-4046 (Kodak Alaris)
+# revision/date: January 2025 ('Revised 1/25')
+# page: 4, figure: 'Spectral-Dye-Density Curves' (figure code E4046C): 'Typical densities for a midscale neutral subject and D-min.'
+# digitised: 200 dpi render of the page as read through WebFetch (render deleted after reading), column trace
+#   (tools/trace_dye.py); frame x 992.5..1504.5 px = 400..700 nm, y 806..294 px = diffuse spectral density 0..2.5;
+#   +-0.02 D, +-1 nm; values are total densities (dyes + mask + base), as drawn.  The curves end at about 685 nm.
+wavelength_nm,D_midscale_neutral,D_min
+410,1.561,0.724
+420,1.780,0.796
+430,1.976,0.850
+440,2.074,0.864
+450,2.091,0.850
+460,2.039,0.819
+470,1.921,0.782
+480,1.765,0.742
+490,1.624,0.705
+500,1.572,0.692
+510,1.592,0.708
+520,1.602,0.675
+530,1.606,0.631
+550,1.577,0.598
+560,1.467,0.593
+570,1.315,0.583
+580,1.126,0.523
+590,0.930,0.393
+600,0.817,0.281
+610,0.792,0.225
+620,0.828,0.205
+630,0.896,0.200
+640,0.979,0.206
+650,1.068,0.216
+660,1.155,0.229
+670,1.230,0.239
+680,1.288,0.249

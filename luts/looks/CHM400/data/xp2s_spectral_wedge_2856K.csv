@@ -1,0 +1,73 @@
+# publication A: HARMAN technology Limited, "TECHNICAL INFORMATION - XP2 SUPER" (ILFORD), revision/date: June 2010 (footer "June 2010"; PDF title XP2_Super_web, 4 pages)
+# publication B: HARMAN technology Limited, "XP2 SUPER Information" technical information, revision/date: Nov 2018 (footer "Nov 2018"; PDF "XP2S 281118", 5 pages)
+# page: A p.2, B p.2 ; figure: "SPECTRAL SENSITIVITY - Wedge spectrogram to tungsten light" (A: 2850K, B: 2856K)
+# figure notes: x = Wavelength (nm), labels 400..650 every 50, frame 348.7..701 nm; y = Sensitivity, B labels 0.5 and 1.0 (linear, 0 at the frame bottom), A unlabelled.
+#   The curve is the film response to a 2850/2856 K tungsten source (source NOT divided out here; gen_chm400.py divides it out).
+# digitised: A = the vector path of the figure (155 vertices, exact page coordinates, tools/paths.py), x calibrated on its 6 tick marks,
+#   y scaled to B's axis (B's 1.0 tick at 0.6514 of the frame height; both frames span the same wavelengths, so it is one figure).
+#   B = column trace of the embedded 515 x 264 px raster (tools/digitise_xp2.py), x from the label centres, y from the 0.5 / 1.0 ticks.
+#   A - B over 400..640 nm: mean +0.010, max abs 0.054 (B's raster line is 4 px thick: reading error about +-0.02).
+#   The curve starts at 354.0 nm and ends at 659.7 nm at height 0 (blank = outside the drawn curve).
+wavelength_nm,S_A_vector,S_B_raster
+355,0.0264,0.0393
+360,0.1093,0.1062
+365,0.1930,0.1907
+370,0.2741,0.2718
+375,0.3542,0.3465
+380,0.4316,0.4298
+385,0.5056,0.5022
+390,0.5761,0.5724
+395,0.6366,0.6317
+400,0.6829,0.6777
+405,0.7159,0.7061
+410,0.7419,0.7292
+415,0.7623,0.7501
+420,0.7764,0.7632
+425,0.7886,0.7786
+430,0.7975,0.7895
+435,0.8054,0.7984
+440,0.8098,0.8070
+445,0.8129,0.8158
+450,0.8156,0.8202
+455,0.8169,0.8246
+460,0.8167,0.8246
+465,0.8147,0.8246
+470,0.8120,0.8246
+475,0.8098,0.8199
+480,0.8058,0.8158
+485,0.8008,0.8070
+490,0.7957,0.7982
+495,0.7912,0.7892
+500,0.7878,0.7807
+505,0.7899,0.7807
+510,0.7949,0.7895
+515,0.8066,0.8030
+520,0.8227,0.8194
+525,0.8413,0.8403
+530,0.8613,0.8596
+535,0.8816,0.8776
+540,0.9032,0.8984
+545,0.9243,0.9193
+550,0.9461,0.9357
+555,0.9683,0.9561
+560,0.9898,0.9649
+565,1.0063,0.9737
+570,1.0141,0.9796
+575,1.0109,0.9825
+580,1.0000,0.9737
+585,0.9800,0.9649
+590,0.9554,0.9414
+595,0.9378,0.9211
+600,0.9262,0.9123
+605,0.9197,0.9079
+610,0.9215,0.9079
+615,0.9426,0.9129
+620,0.9730,0.9298
+625,0.9851,0.9314
+630,0.9592,0.9088
+635,0.7397,0.7574
+640,0.5463,0.5430
+645,0.3917,0.3440
+650,0.2532,0.1674
+655,0.1262,0.0425
+660,,

@@ -1,0 +1,21 @@
+# publication: Fujifilm AF3-176E, FUJICOLOR PRO 400H PROFESSIONAL, Fujifilm Product Information Bulletin (colour negative film data sheet)
+# revision/date: Ref. No. AF3-176E (EIGI-05.1-FG(HB) 4-1); PDF created 2005-01-19; copy at asset.fujifilm.com/www/uk/files/2019-09/.../films_pro-400h_datasheet_01.pdf, md5 61b77af8bd4c093b430b5b8cd0e4ef4a
+# page: 8
+# figure: 20. MTF CURVE; Exposure: Daylight; Process: C-41 (layer not stated)
+# columns: spatial frequency cycles/mm, response %; plotted range 2.5..103.9 cycles/mm (not used by the LUT; for the record)
+cycles_per_mm,response_pct
+3.000,111
+4.000,110.7
+5.000,110.2
+7.000,108.5
+10.000,104.8
+15.000,96.404
+20.000,88.191
+30.000,74.493
+40.000,63.027
+50.000,53.018
+60.000,44.706
+70.000,37.861
+80.000,32.143
+90.000,27.406
+100,23.235

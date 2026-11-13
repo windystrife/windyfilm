@@ -1,0 +1,86 @@
+# publication: Kodak, "KODAK PROFESSIONAL T-MAX Films" (T-MAX 100, 400 and P3200), Technical Data / Black-and-White Film,
+#   publication F-4016 ; revision/date: October 2007 (PDF created 2008-06-24)
+# page: 26 ; figure: "Characteristic Curves", top left (T-MAX P3200 section): Exposure: Daylight ; Process: KODAK PROFESSIONAL
+#   T-MAX Developer, Small Tank, 20 C (68 F) ; Densitometry: Diffuse Visual ; curves 13 (solid), 11, 9, 8 min ;
+#   x = LOG EXPOSURE (lux-seconds) -4.0..+1.0, y = DENSITY 0..4.0
+# related: same publication p.20, T-MAX P3200 small tank, T-MAX Developer 68 F, EI 3200: 12 min (as in F-4001, 2018).
+# digitised: pixel trace of a 600 dpi render (tools/trace_hd2007.py; frame x(-4.0) = 673 px, x(+1.0) = 2210 px, y(D 0) = 2117 px,
+#   y(D 4.0) = 579.5 px); the topmost curve (13 min) per column, median within +-0.015 log H. Reading error +-0.01 D.
+# USE: cross-check only (not in the film model): its speed point (base+fog + 0.10) lies about 1.0 log H below that of the 2018
+#   sheet's 12 min curve, which supports anchoring the 2018 curves by the stated speed instead of by their plotted axis.
+logH_luxs,D_13min
+-3.70,0.381
+-3.65,0.389
+-3.60,0.397
+-3.55,0.403
+-3.50,0.412
+-3.45,0.424
+-3.40,0.438
+-3.35,0.454
+-3.30,0.473
+-3.25,0.496
+-3.20,0.522
+-3.15,0.550
+-3.10,0.585
+-3.05,0.622
+-3.00,0.662
+-2.95,0.704
+-2.90,0.747
+-2.85,0.790
+-2.80,0.835
+-2.75,0.877
+-2.70,0.921
+-2.65,0.963
+-2.60,1.004
+-2.55,1.046
+-2.50,1.085
+-2.45,1.123
+-2.40,1.163
+-2.35,1.199
+-2.30,1.236
+-2.25,1.273
+-2.20,1.309
+-2.15,1.346
+-2.10,1.381
+-2.05,1.418
+-2.00,1.454
+-1.95,1.489
+-1.90,1.525
+-1.85,1.561
+-1.80,1.596
+-1.75,1.634
+-1.70,1.670
+-1.65,1.707
+-1.60,1.742
+-1.55,1.777
+-1.50,1.813
+-1.45,1.848
+-1.40,1.881
+-1.35,1.915
+-1.30,1.947
+-1.25,1.979
+-1.20,2.010
+-1.15,2.040
+-1.10,2.069
+-1.05,2.097
+-1.00,2.124
+-0.95,2.150
+-0.90,2.175
+-0.85,2.198
+-0.80,2.224
+-0.75,2.249
+-0.70,2.274
+-0.65,2.300
+-0.60,2.323
+-0.55,2.349
+-0.50,2.375
+-0.45,2.401
+-0.40,2.427
+-0.35,2.453
+-0.30,2.481
+-0.25,2.509
+-0.20,2.537
+-0.15,2.566
+-0.10,2.595
+-0.05,2.624
+-0.00,2.652

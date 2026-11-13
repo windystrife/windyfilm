@@ -1,0 +1,21 @@
+# publication: published written accounts (DESCRIBED) of the budget ISO 200 consumer C-41 negative modelled by SNP200
+# (no maker data sheet exists for this stock: searched 2026-11-11 on the maker sites and 125px techdocs; retail listings only).
+# Read through WebFetch on 2026-11-11; statements are short paraphrases, not quotes. No figures are digitised from these sources.
+# columns: id, publication (site, author, title), revision/date, page/section, figure, attribute, statement (paraphrase)
+id,publication,revision_date,page_section,figure,attribute,statement
+D1,"analog.cafe, Dmitri, 'Kodak ColorPlus 200 Film Review'",2023-06-13 (upd. 2025-10-08),colour / dynamic range / grain sections,none,warmth,evident warmth tied to stronger red response
+D1,"analog.cafe, Dmitri, 'Kodak ColorPlus 200 Film Review'",2023-06-13 (upd. 2025-10-08),colour section,none,hues,reds emphasised; greens vivid; blues slightly subdued
+D1,"analog.cafe, Dmitri, 'Kodak ColorPlus 200 Film Review'",2023-06-13 (upd. 2025-10-08),contrast section,none,scene advice,looks muddy in grey / low-contrast / badly lit scenes; best in bright low-shadow light
+D1,"analog.cafe, Dmitri, 'Kodak ColorPlus 200 Film Review'",2023-06-13 (upd. 2025-10-08),grain section,none,grain,fine; same as the maker's other ISO 200 consumer film (estimated PGI about 44)
+D2,"lenslurker.com, (no author), 'Kodak ColorPlus 200 - Cheap 35mm Film for Color Shooters'",2023-08-29 (last update),summary / look sections,none,warmth,classic warm 'vintage' / 'sun-kissed' palette; warm but more balanced (cooler) than the golden ISO 200 sibling
+D2,"lenslurker.com, (no author), 'Kodak ColorPlus 200 - Cheap 35mm Film for Color Shooters'",2023-08-29 (last update),summary,none,saturation,moderate; subtler than the maker's other consumer films; less than the golden ISO 200 sibling
+D2,"lenslurker.com, (no author), 'Kodak ColorPlus 200 - Cheap 35mm Film for Color Shooters'",2023-08-29 (last update),summary,none,contrast,moderate; lower than the golden ISO 200 sibling; cloudy shots can look flat
+D2,"lenslurker.com, (no author), 'Kodak ColorPlus 200 - Cheap 35mm Film for Color Shooters'",2023-08-29 (last update),latitude section,none,latitude,moderate; more forgiving of overexposure
+D3,"bayphoto.com blog, TeamBay, 'Film Comparison: Kodak Gold v.s. Kodak Color plus'",2023-11-14,side-by-side text,none,reds,reds rendered cooler / more magenta than the golden sibling's warm orange-red
+D3,"bayphoto.com blog, TeamBay, 'Film Comparison: Kodak Gold v.s. Kodak Color plus'",2023-11-14,side-by-side text,none,yellows greens blues,almost identical to the golden sibling
+D4,"dehancer.com, (no author), 'Films at different exposures: Kodak Color Plus 200 vs Fujicolor C200'",undated (site 2014-2026),normal exposure,none,cast,tends toward red at normal exposure including skin tones (the Fuji ISO 200 tends yellow-green)
+D4,"dehancer.com, (no author), 'Films at different exposures: Kodak Color Plus 200 vs Fujicolor C200'",undated (site 2014-2026),under / over exposure,none,latitude,fine to -2 EV; -3..-4 EV loses shadow detail with rising contrast and a blue-violet cast; highlights hold far over (usable to about +9 EV)
+D5,"analog.cafe, Dmitri (images Daren), 'Kodak Gold vs. ColorPlus: Side-by-Side Comparison'",2023-11-23 (upd. 2025-07-15),summary / grain,none,similarity,only slight colour differences side by side; grain identical at 10K dpi; maker marketing says this stock has a 'more vintage feel'
+D6,"uniquephoto.com Photo Insider, 'Kodak ColorPlus 200 Profile: The Budget Color Film Worth Knowing'",2026-09-26,look,none,warmth,warm and vintage; golden cast in sun; inviting skin; not a low-light film
+D7,"filmsupply.club Film Photography Journal, 'Kodak Gold vs Kodak ColorPlus'",2026-05-03,comparison,none,warmth / grain,cooler and more neutral than the golden sibling; coarser grain
+D8,"35mmc.com, Tony Warren, 'Kodak Colorplus 200 Colour Negative Film Mini-Review'",2023-07-26,text,none,saturation / grain,nicely but not overly saturated; moderate grain; best exposed generously

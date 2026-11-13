@@ -1,0 +1,35 @@
+# publication: HARMAN/ILFORD fact sheet "FP4 PLUS" ISO 125/22, April 2004 (PDF 2004-04-02, copy on 125px.com), page 1 "SPECTRAL SENSITIVITY: Wedge spectrogram to tungsten light (2850K)"
+# the current Nov 2018 sheet no longer prints this figure; the curve is the same emulsion family.  Axis: wavelength 400..650 nm (label centres), sensitivity 0.5 / 1.0 (relative, linear reading).
+# digitised from the sheet's vector curve (src/trace_fp4_spec.py): nm = 400 + (x_pt - 355.0)*1.93, s = (483.5 - y_pt)/57.0, +-0.02 s, +-3 nm.
+# logS columns = log10 of the sensitivity with the 2850 K Planck source divided out (relative; unit area is applied in the generator); blank beyond 666 nm (curve ends).
+wavelength_nm,logS_D1.0,logS_D0.3,s_tungsten_relative
+370,2.7345,2.7345,0.1169
+380,2.9220,2.9220,0.2257
+390,2.9766,2.9766,0.3159
+400,3.0000,3.0000,0.4060
+410,2.9585,2.9585,0.4437
+420,2.9036,2.9036,0.4648
+430,2.8754,2.8754,0.5121
+440,2.8622,2.8622,0.5782
+450,2.8383,2.8383,0.6312
+460,2.7963,2.7963,0.6551
+470,2.7473,2.7473,0.6639
+480,2.6949,2.6949,0.6624
+490,2.6402,2.6402,0.6530
+500,2.5831,2.5831,0.6359
+510,2.5390,2.5390,0.6342
+520,2.5302,2.5302,0.6824
+530,2.5152,2.5152,0.7197
+540,2.4814,2.4814,0.7234
+550,2.4506,2.4506,0.7288
+560,2.4433,2.4433,0.7716
+570,2.4390,2.4390,0.8191
+580,2.4383,2.4383,0.8734
+590,2.4307,2.4307,0.9132
+600,2.4146,2.4146,0.9331
+610,2.3883,2.3883,0.9282
+620,2.3514,2.3514,0.8982
+630,2.3295,2.3295,0.8972
+640,2.2098,2.2098,0.7135
+650,1.9894,1.9894,0.4488
+660,1.4677,1.4677,0.1407

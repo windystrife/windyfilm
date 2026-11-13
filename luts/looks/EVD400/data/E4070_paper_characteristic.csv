@@ -1,0 +1,21 @@
+# publication: KODAK PROFESSIONAL ENDURA Premier Paper, technical data / colour paper, Kodak Publication No. E-4070 (Kodak Alaris)
+# revision/date: December 2017
+# page: 4, section 'CURVES', figure 'Characteristic Curves'; Exposure 0.5 second; Process RA-4 95 F (35 C), 45 sec; Densitometry Status A;
+#   x = LOG EXPOSURE (lux-seconds) -3.0..0.0, y = DENSITY 0..3.0
+# why this paper: E-7023 p.3 names ENDURA Premier among the papers the film is optimised for (the only one of the four with a
+#   maker curve found); used only for the display-medium Dmax cap of the grain row's rho_max (PLAN 3.2.4 b).
+# digitised: 200 dpi render of the page as read through WebFetch (pdftoppm; render deleted after reading); frame x 1012.5..1525 px =
+#   log E -3.0..0.0 (170.8 px per unit), y 714..201 px = density 0..3.0 (171 px per unit); column scan (tools/scan_cols.py);
+#   +-0.02 D.  Record order at the right end as labelled in the figure: R top, then G, B lowest; G and B overlap within the line
+#   width on the plateau (one merged run), so both are given the merged value.
+log_E_lux_s,D_R,D_G,D_B,note
+-2.30,0.11,0.09,0.09,foot (D-min; records overlap, two strokes 0.08..0.11)
+-1.90,0.13,0.10,0.10,foot
+-1.80,0.16,0.13,0.13,toe
+-0.80,2.46,2.41,2.41,shoulder
+-0.70,2.49,2.42,2.42,shoulder
+-0.60,2.50,2.43,2.43,plateau
+-0.50,2.51,2.43,2.43,plateau
+-0.30,2.51,2.44,2.44,plateau
+-0.20,2.51,2.44,2.44,plateau (Dmax as published; B lowest record)
+# derived: neutral net Dmax = lowest record on the plateau minus D-min = 2.43 - 0.10 = 2.33 (+-0.03)

@@ -1,0 +1,15 @@
+# publication: Kodak E-4051, KODAK PROFESSIONAL PORTRA 160 Film, technical data / colour negative film
+# revision/date: February 2016 (Revised 2-16)
+# page: 3
+# figure: table "Print Grain Index" (IMAGE STRUCTURE); used for claim C1 only
+# columns: negative size, print size (inches), magnification, print grain index ("<25" = less than 25)
+negative,print,magnification,pgi
+135,4x6,4.4,28
+135,8x10,8.8,50
+135,16x20,17.8,79
+120,4x6,2.6,<25
+120,8x10,4.4,28
+120,16x20,8.8,50
+4x5,4x6,1.2,<25
+4x5,8x10,2,<25
+4x5,16x20,4,26
