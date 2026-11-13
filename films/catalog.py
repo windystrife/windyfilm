@@ -220,7 +220,7 @@ FILMS = [
       "Fine-grain 100-speed B&W with crisp,", "clean tones.", ready=True, fx="README: B&W 100T x1.05 = 0.47 x 1.05 of B&W 400: x0.49; BW x1.0",
       prov="luts_ws/CRS100/gen_crs100.py (md5 ba716ed2), README luts_ws/CRS100/README.md, judged PASS (judge v2.1.1, luts_ws/CRS100/judge2_CRS100.json)"),
     F(54, "SHP50", "Ilford Pan F 50", "bw", 50, 72, 5200, 0, "B&W", 70, ("B&W 400", 72), ("BW", 256),
-      "Slow 50-speed B&W: high contrast and", "very fine grain.", ready=True, fx="README: new row B&W 50 = 0.6 x B&W 100T: 0.6 x 0.47 = x0.28 of B&W 400; BW x1.0",
+      "Slow 50-speed B&W: punchy contrast,", "grain so fine it almost vanishes.", ready=True, fx="README: new row B&W 50 = 0.6 x B&W 100T: 0.6 x 0.47 = x0.28 of B&W 400; BW x1.0",
       prov="luts_ws/SHP50/gen_shp50.py (md5 0e87cd09), README luts_ws/SHP50/README.md, judged PASS (judge v2.1.1, luts_ws/SHP50/judge2_SHP50.json)"),
     F(55, "SLK100", "Fuji Acros 100 II", "bw", 100, 72, 5200, 0, "B&W", 73, ("B&W 400", 108), ("BW", 256),
       "100-speed B&W with dark reds and", "smooth, crisp tones.", ready=True, fx="README: B&W 100T x0.9 = 0.9 x 0.47 = x0.42 of B&W 400; BW x1.0",
@@ -387,7 +387,7 @@ def header(out, synth=0, gaps=False):
         "TEST_SYNTH=%d" % synth if synth else "TEST_GAPS" if gaps else "release catalogue"))
     L.append("#ifndef FR_CATALOG_H\n#define FR_CATALOG_H\n#include <stdint.h>")
     L.append("#define FR_CAT_ID0      %d" % ID0)
-    L.append("#define FR_CAT_IDMAX    %d                 /* max compiled id = the sub_100 clamp (patch_mo.py) */" % idmax)
+    L.append("#define FR_CAT_IDMAX    %d                 /* max compiled id */" % idmax)
     L.append("#define FR_CAT_N        %d                 /* rows: ids %d..%d, placeholders included */" % (n, ID0, idmax))
     L.append("#define FR_CAT_NPRESENT %d" % len(pres))
     L.append("#define FR_CAT_NGSET    %d" % len(gs))

@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""mk_catalog_c.py - films/catalog.py -> build/<cam>/wf_catalog.c (WindyFilm core, docs/DESIGN.md 4.2).
+
+usage: python3 -I -B tools/mk_catalog_c.py OUT.c [--catalog films/catalog.py] [--tables films/tables]
+
+Writes what src/wf_api.h and src/wf_core.h declare:
+  wf_films[] / wf_nfilms          the shown rows (ready films and Film LUT cans), ascending id
+  wf_cat_gset[] / wf_cat_hset[]   per row: grain / halation effect set (set 0 = the Log + LUT output's)
+  wf_cat_gsets[] / wf_cat_hsets[] the distinct sets (yg_stocks row, amount Q8, rho Q8 / yh profiles and strengths)
+  wf_cat_ftflags[]                per row: WF_FT_V21 | WF_FT_MONO (wf_film_build flags)
+  wf_cat_lut[] / wf_cat_lutrow[]  per row: a can's Film LUT 1..22 (0 a film) / per Film LUT: the can's row, -1
+  wf_cat_ev8[]                    per row: descriptor EV x 8
+
+Fields a row may lack (an older catalogue) get defaults: short = name cut to 11, line1 / line2 = "", kind from type /
+family / lut, fmt "35mm" ("V-Log" for a can), group from type / family / lut, prints ("scan",) for a film, () for a can.
+WF_F_READY = a ready Film LUT can, or a ready film whose scan table films/tables/<table>.T17 exists (the build prints the
+ready films without one: they are shown but cannot be loaded). `can` = the row's entry in WFCANS.DAT (its rank among
+the shown rows by id, the order tools/mk_wfcans.py writes), 255 past 254 rows.
+The catalogue is imported by path and only read; nothing is written next to it.
+"""
+import importlib.util, os, sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+GROUPS = ("colour", "cine", "bw", "lut")
+PRINTS = ("scan", "cine", "paper")
+FLUT_N = 23                       # src/wf_loglut.h WF_FLUT_N (asserted against the catalogue's FLUT_N when it has one)
+MAXROWS = 128                     # src/wf_shot.c WF_WS_MAXROW
+LIM = {"name": 24, "short": 11, "line1": 44, "line2": 44, "kind": 15, "fmt": 7, "code": 8}
+
+
+def load_catalog(path):
+    spec = importlib.util.spec_from_file_location("wf_catalog_src", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def cstr(s):
+    out = []
+    for ch in s:
+        o = ord(ch)
+        if ch in '"\\':
+            out.append("\\" + ch)
+        elif 32 <= o < 127:
+            out.append(ch)
+        else:
+            sys.exit("mk_catalog_c: non-ASCII character %r in %r" % (ch, s))
+    return '"' + "".join(out) + '"'
+
+
+def defaults(f):
+    lut = int(f.get("lut") or 0)
+    typ = f.get("type", "neg")
+    fam = f.get("family", "")
+    g = f.get("group") or ("lut" if lut else "bw" if typ == "bw" else "cine" if fam == "cine" else "colour")
+    kind = f.get("kind") or ("FILM LUT" if lut else "SLIDE" if typ == "slide" else "B&W NEG" if typ == "bw"
+                             else "CINE NEG" if g == "cine" else "COLOUR NEG")
+    prints = f.get("prints")
+    if prints is None:
+        prints = () if lut else ("scan",)
+    return dict(lut=lut, type=typ, group=g, kind=kind, fmt=f.get("fmt") or ("V-Log" if lut else "35mm"),
+                short=f.get("short") or f["name"][:11], line1=f.get("line1") or "", line2=f.get("line2") or "",
+                prints=tuple(prints), table=f.get("table") or f["code"])
+
+
+def main(argv):
+    if len(argv) < 2:
+        sys.exit(__doc__)
+    out = argv[1]
+    cat = os.path.join(ROOT, "films", "catalog.py")
+    tables = None
+    i = 2
+    while i < len(argv):
+        if argv[i] == "--catalog":
+            cat = argv[i + 1]; i += 2
+        elif argv[i] == "--tables":
+            tables = argv[i + 1]; i += 2
+        else:
+            sys.exit("mk_catalog_c: unknown argument " + argv[i])
+    C = load_catalog(cat)
+    if tables is None:
+        tables = os.path.join(os.path.dirname(os.path.abspath(cat)), "tables")
+    if getattr(C, "FLUT_N", FLUT_N) != FLUT_N:
+        sys.exit("mk_catalog_c: catalogue FLUT_N %d, the module has %d Film LUTs" % (C.FLUT_N, FLUT_N))
+
+    rows = sorted((dict(f) for f in C.FILMS if f.get("ready")), key=lambda f: f["id"])
+    if len(rows) > MAXROWS:
+        sys.exit("mk_catalog_c: %d rows, at most %d" % (len(rows), MAXROWS))
+    ids = [f["id"] for f in rows]
+    if len(set(ids)) != len(ids) or min(ids) < 1 or max(ids) > 254:
+        sys.exit("mk_catalog_c: ids must be unique, 1..254")
+    for f in rows:
+        f.update(defaults(f))
+        if hasattr(C, "rho_for"):
+            C.rho_for(f)                          # sets rho_q8 (0 = the yg_stocks row's value)
+        f.setdefault("rho_q8", 0)
+    # effect sets: the catalogue's own folding when it has one, else the same rule here
+    if hasattr(C, "sets"):
+        gs, hs, gi, hi = C.sets(rows)
+    else:
+        sys.exit("mk_catalog_c: the catalogue has no sets()")
+    if len(gs) > 62 or len(hs) > 62:
+        sys.exit("mk_catalog_c: %d grain / %d halation sets, at most 62 fit the effect keys" % (len(gs), len(hs)))
+
+    missing = []
+    L = []
+    L.append("/* wf_catalog.c - generated by tools/mk_catalog_c.py from films/catalog.py: do not edit */")
+    L.append("#include <stddef.h>")
+    L.append('#include "wf_core.h"')
+    L.append("")
+    L.append("const struct wf_film wf_films[] = {")
+    lutrow = [-1] * FLUT_N
+    for k, f in enumerate(rows):
+        lut = f["lut"]
+        flags = 0
+        if lut:
+            if not 1 <= lut < FLUT_N:
+                sys.exit("mk_catalog_c: id %d: lut %d out of range" % (f["id"], lut))
+            if lutrow[lut] >= 0:
+                sys.exit("mk_catalog_c: Film LUT %d has two cans" % lut)
+            lutrow[lut] = k
+            flags |= 0x01 | 0x02                   # WF_F_READY | WF_F_LUTCAN
+        else:
+            t17 = os.path.join(tables, f["table"] + ".T17")
+            if os.path.isfile(t17) and os.path.getsize(t17) == 19652:
+                flags |= 0x01
+            else:
+                missing.append("%d %s" % (f["id"], f["table"]))
+        if f["type"] == "bw":
+            flags |= 0x04
+        if f["type"] == "slide":
+            flags |= 0x08
+        pb = 0
+        for p in f["prints"]:
+            if p not in PRINTS:
+                sys.exit("mk_catalog_c: id %d: print %r" % (f["id"], p))
+            pb |= 1 << PRINTS.index(p)
+        if not lut:
+            pb |= 1                                # bit 0 for every film
+        if f["group"] not in GROUPS:
+            sys.exit("mk_catalog_c: id %d: group %r" % (f["id"], f["group"]))
+        txt = dict(code=f["table"], name=f["name"], short=f["short"], line1=f["line1"], line2=f["line2"],
+                   kind=f["kind"], fmt=f["fmt"])
+        for key, lim in LIM.items():
+            if len(txt[key]) > lim:
+                sys.exit("mk_catalog_c: id %d: %s %r longer than %d" % (f["id"], key, txt[key], lim))
+        can = k if k < 255 else 255
+        L.append("    { %d, %d, 0x%02x, %d, %d, %d, %d, 0x%02x, 0, %s, %s, %s, %s, %s, %s, %s }," % (
+            f["id"], GROUPS.index(f["group"]), flags, can, int(f.get("iso") or 0), int(f.get("kelvin") or 0),
+            int(f.get("order") or 0), pb, cstr(txt["code"]), cstr(txt["name"]), cstr(txt["short"]), cstr(txt["line1"]),
+            cstr(txt["line2"]), cstr(txt["kind"]), cstr(txt["fmt"])))
+    L.append("};")
+    n = len(rows)
+    L.append("const int wf_nfilms = %d;" % n)
+    L.append("")
+
+    def arr(ctype, name, vals, size=None):
+        L.append("const %s %s[%s] = { %s };" % (ctype, name, size if size is not None else n, ", ".join(map(str, vals))))
+
+    arr("int8_t", "wf_cat_gset", gi)
+    arr("int8_t", "wf_cat_hset", hi)
+    arr("uint8_t", "wf_cat_ftflags", [(1 if f.get("v21") else 0) | (2 if f["type"] == "bw" else 0) for f in rows])
+    arr("uint8_t", "wf_cat_lut", [f["lut"] for f in rows])
+    ev = []
+    for f in rows:
+        e = int(f.get("ev8") or 0)
+        if not -128 <= e <= 127:
+            sys.exit("mk_catalog_c: id %d: ev8 %d" % (f["id"], e))
+        ev.append(e)
+    arr("int8_t", "wf_cat_ev8", ev)
+    arr("int16_t", "wf_cat_lutrow", lutrow, "WF_FLUT_CAT_N")
+    L.insert(4, "#define WF_FLUT_CAT_N %d                         /* = wf_loglut.h WF_FLUT_N (checked below) */" % FLUT_N)
+    L.append("typedef char wf_cat_flut_check[WF_FLUT_CAT_N == 23 ? 1 : -1];")
+    L.append("")
+    L.append("/* grain sets: yg_stocks row, amount scale Q8 (256 = x1), rho_max Q8 (0 = the row's value); set 0 = Log + LUT */")
+    L.append("const struct wf_gset wf_cat_gsets[] = { %s };" % ", ".join("{ %d, %d, %d }" % tuple(g) for g in gs))
+    L.append("/* halation sets: yh profile, spektrafilm profile, strength Q8, spektrafilm strength Q8; set 0 = Log + LUT */")
+    L.append("const struct wf_hset wf_cat_hsets[] = { %s };" % ", ".join(
+        "{ %d, %d, %d, %d }" % (h[0], h[2], h[1], h[3]) for h in hs))
+    L.append("const int wf_cat_ngset = %d, wf_cat_nhset = %d;" % (len(gs), len(hs)))
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    with open(out, "w") as fo:
+        fo.write("\n".join(L) + "\n")
+    cnt = {g: sum(1 for f in rows if f["group"] == g) for g in GROUPS}
+    print("mk_catalog_c: %d rows (%s), %d grain / %d halation sets -> %s" % (
+        n, ", ".join("%s %d" % (g, cnt[g]) for g in GROUPS), len(gs), len(hs), out))
+    if missing:
+        print("mk_catalog_c: ready films without a scan table (shown, not loadable): " + ", ".join(missing))
+
+
+if __name__ == "__main__":
+    main(sys.argv)

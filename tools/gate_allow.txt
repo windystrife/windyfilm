@@ -1,0 +1,77 @@
+# gate_allow.txt - allowlist of tools/provenance_gate.py (docs/DESIGN.md 6).
+# "str <text>": a generic string that may appear in both modules (the whole string, exact). ML core symbol names need
+#               no line here: the gate takes them from the camera's card .sym.
+# "deny-ok <text>": a phrase removed (exact case) before the deny-word and string checks; only what the design
+#               prescribes or a card path needs.
+#
+# ---- deny-ok
+# the coexistence status DESIGN 3 prescribes (wf_status(), also tests/ui/ui_test.c)
+deny-ok Disable filmroll.mo
+# card folder names in the paths of the cameras' card .sym files (build.sh, tests)
+deny-ok EOSM_FilmRoll
+deny-ok 5D2_FilmRoll_A13
+#
+# ---- ELF / toolchain section names (every GCC object has them)
+str .ARM.attributes
+str .comment
+str .rel.data
+str .rel.module_strings
+str .rel.rodata
+str .rel.text
+str .rodata.str1.1
+str .rodata.str1.4
+str .shstrtab
+str .strtab
+str .symtab
+#
+# ---- ML module API: module_strings keys of ML's own modules, the stringified MODULE_CBR name
+str Author
+str Summary
+str Description
+str Build date
+str CBR_KEYPRESS
+#
+# ---- file formats and printf idioms: .cube keywords (Adobe / IRIDAS cube spec), DCIM file names, plain formats
+str LUT_1D_SIZE
+str LUT_3D_SIZE
+str %04d.JPG
+str %s%04d.JPG
+str %s%s%s
+str ISO %d
+#
+# ---- plain English and Canon camera terms (menu words, white balance and Picture Style names, log words)
+str Cloudy
+str Tungsten
+str White balance
+str Neutral
+str Standard
+str Portrait
+str Picture Style
+str Normal
+str Strong
+str failed
+str loaded
+str orange
+str colour negative
+str Film look
+#
+# ---- public film stock and maker names (manufacturers' product names that films/catalog.py also uses; not the
+#      third-party author's text). Listed one by one so every name stays visible; the lead / owner decide on names.
+str Acros 100
+str CineStill
+str Color 800
+str Delta 100
+str Ektar 100
+str Fomapan 100
+str Gold 200
+str HP5 Plus
+str Ilford
+str Portra 160
+str Portra 400
+str Portra 800
+str Pro 400H
+str Superia 400
+str T-Max 100
+str T-Max P3200
+str Tri-X 400
+str XP2 Super
