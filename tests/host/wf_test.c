@@ -2956,6 +2956,8 @@ static int menu_set(const char *nm)                 /* SET on the entry: its sel
     sel(*(void **)(e + wf_t_me_priv), 1);
     return 0;
 }
+#define H_KEY_HALFSHUTTER 1                       /* ML module.h MODULE_KEY_PRESS_HALFSHUTTER / _SET (as WF_KEY_PLAY) */
+#define H_KEY_SET 9
 static void t_roll(void)
 {
     std_pack();
@@ -2995,6 +2997,7 @@ static void t_roll(void)
     chk(wf_roll_req_rewind() == 0 && WAIT(wf_roll_now()->state == WF_RS_REWOUND, 5000) && wf_roll_now()->nshot == 1
         && !wf_roll_shooting() && wf_rawb == 1, "End roll now: rewound with its frame, RAW develop stays on (state %d)",
         wf_roll_now()->state);
+    chk(LOGW("roll: end notice rewound", 3000), "End roll now: the end notice shows (rewound)");
     chk(cbr_key(WF_KEY_PLAY) == 0, "rewound roll: PLAY still blocked until it is developed or closed");
     chk(wf_roll_req_load(film, 24) == -1, "a roll with frames in the camera: a new load is refused");
     chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000) && wf_rawb == 1
@@ -3004,6 +3007,43 @@ static void t_roll(void)
     chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && wf_rawb == 0,
         "RAW develop off: a roll loads, RAW develop stays off (%d, %d)", rc, wf_rawb);
     chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "the empty roll closes");
+    /* the end-of-roll notice (owner 11-15): the 12th frame shows it, SET opens the Darkroom while it is up (no UI in
+     * this build: the stub logs it), a key drops it, LiveView back shows it again */
+    rc = wf_roll_req_load(film, 12);
+    chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000), "a roll of 12 loads (%d)", rc);
+    usleep(600000);
+    log_mark();
+    int ok = 1;
+    for (int i = 0; i < 12 && ok; i++) {
+        char p[64];
+        snprintf(p, sizeof p, "DCIM/100CANON/IMG_%04d.CR2", 209 + i);
+        put_file(p, "II*", 3);
+        h_set_file_number(209 + i);
+        ok = WAIT(wf_roll_now()->nshot == i + 1, 5000);
+    }
+    chk(ok && wf_roll_now()->state == WF_RS_FULL && LOGW("roll: end notice full", 3000) && log_has(", end of roll"),
+        "12 frames: FULL, the end notice shows (%d/12, state %d)", wf_roll_now()->nshot, wf_roll_now()->state);
+    usleep(300000);
+    chk(cbr_key(H_KEY_SET) == 0 && LOGW("browser: not in this build", 2000),
+        "SET while the notice is up: taken, the Darkroom is asked for");
+    usleep(600000);
+    chk(cbr_key(H_KEY_SET) == 1, "SET after the notice went: passes to Canon");
+    log_mark();
+    lv = 0;
+    usleep(600000);
+    chk(!log_has("roll: end notice"), "no LiveView: no notice");
+    lv = 1;
+    chk(LOGW("roll: end notice full", 3000), "LiveView back on a full roll: the notice again");
+    chk(cbr_key(H_KEY_HALFSHUTTER) == 1, "half-shutter while the notice is up: drops it, Canon gets the key");
+    log_mark();
+    h_movie = 1;
+    lv = 0;
+    usleep(600000);
+    lv = 1;
+    usleep(900000);
+    chk(!log_has("roll: end notice"), "movie mode: no notice");
+    h_movie = 0;
+    chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "the full roll closes");
     long n = 0;
     char *b = 0;
     for (int i = 0; i < 50; i++) {                  /* wf_task writes the file after the state changed in memory */

@@ -453,7 +453,26 @@ Stocks keep their Windy names, and there are no brand logos.
   - The HUD shares the UI's font pack `WFFONTS.DAT` (`wff_open` counts its users; `wff_reload` reads it again for a
     user that has it). A pack Canon's card kept from the HUD (card busy, as at boot) is read again every 2 s, at most 5
     times, while the UI is closed (the UI retries its own, main c114bfe).
+- **End-of-roll notice** (owner 11-15: the small red counter is easy to miss). A box in the middle of LiveView (x 96..624,
+  y 118..336, clear of the chip, the counter and the ladder; `wfdr_notice`, ML colour indices, a red frame):
+  - full: "END OF ROLL", "12/12 . <film> . ROLL 021"; rewound ("End roll now", or a stopped darkroom run with frames
+    left): "ROLL REWOUND", "7 frames . <film> . ROLL 021" (the frames still to develop);
+  - "Develop it: ML menu > Shoot > WindyFilm > Darkroom", "[SET] open the Darkroom now", and the small line "Shots from
+    now on are not counted, WindyFilm keeps working".
+  - When: 5 s when the roll ends on this boot (its last frame counts, or End roll now); 2.5 s again on the HUD info rule
+    (LiveView back, the ML menu / UI / PLAY gone, a shot done) while the roll stays full / rewound with frames to
+    develop. A transition with no LiveView waits for it. Then the HUD's 0.4 s dithered fade, then the box goes back to
+    0 and `redraw()` gives Canon's own LiveView marks back.
+  - A key press (CBR_KEYPRESS: shutter, arrows, wheel, MENU, INFO, PLAY, ...) drops it at once and goes on to Canon / ML
+    as before; SET / Q / joystick centre (EOS M LiveView sends SET as Q) is taken and opens the Darkroom screen
+    (`wf_ui_open_scr`, the same open as TRASH). Only while the box is up.
+  - Never under the ML menu, the UI, PLAY, in movie mode or during a darkroom run (a run's own rewind gives none).
+    The log says `roll: end notice full|rewound` each time it shows.
 - **End / close.** "End roll now" (menu) ends the roll early (the roll is rewound: no more frames); starting the darkroom rewinds a loaded roll first.
+- **A full or rewound roll keeps** (until the Darkroom develops it or Close roll): the film loaded and locked (another
+  film is refused; the same film plays the load animation); the film look on every later JPEG (and B with RAW develop
+  On, if the quality Canon gets back is RAW+L: B develops only RAW+L shots); RAW+L and image review back to Canon's
+  own values (forced only while the roll can still take frames); PLAY still blocked while Blind roll is On.
   "Close roll" gives up on the frames not yet developed: they become K and their CR2s stay untouched.
 
 **Darkroom (developing).**

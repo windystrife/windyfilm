@@ -78,6 +78,8 @@ static int pq_old = -1, rv_old = -1, prop_t;
 static int hud_on, hud_fonts_on, hud_t, hud_mode = -1, info_t = -100000, hud_sig, hud_job;
 static int hud_font_again, hud_font_t, hud_font_n;  /* the font pack read again while Canon held the card */
 static volatile int dk_running;                   /* the darkroom task owns the roll */
+static int nt_state = -1, nt_req, nt_t, nt_len, nt_mode = -1, nt_pt;   /* the end-of-roll notice (roll_notice) */
+static volatile int nt_up, nt_drop;
 
 const struct wf_roll *wf_roll_now(void) { return &roll; }
 uint32_t wf_roll_gen(void) { return roll_gen_n; }
@@ -85,6 +87,18 @@ static void roll_changed(void) { roll_gen_n++; wf_gen_bump(); }
 int wf_roll_shooting(void) { return roll.state == WF_RS_LOADED; }
 int wf_roll_blocks_play(void) { return wf_blind && wf_roll_open(&roll) && !dk_running; }
 int wf_dark_busy(void) { return dk_running; }
+
+/* GUI task (wf_main.c wf_keypress): a key while the end-of-roll notice is up drops it (wf_task clears it on its next
+ * poll); SET / Q opens the Darkroom on top. Never in the ML menu (the notice is not drawn there either). */
+int wf_roll_notice_key(int set)
+{
+    if (!nt_up || gui_menu_shown())
+        return 0;
+    nt_drop = 1;
+    if (set)
+        wf_ui_open_scr(WF_UI_SCR_DARK);
+    return 1;
+}
 
 int wf_roll_req_load(int film, int exp)
 {
@@ -222,6 +236,61 @@ static void roll_props(int idle)
     }
 }
 
+/* the end-of-roll notice (owner 11-15, wfdr_notice): NT_FIRST_MS when the roll ends on this boot (its last frame counts,
+ * End roll now), NT_AGAIN_MS each time LiveView comes back (or the menu / UI / PLAY goes) and after each shot while it
+ * stays FULL / REWOUND, then the HUD's fade. A key drops it at once (wf_roll_notice_key); the darkroom run, the ML menu,
+ * the UI, PLAY and movie mode never get it. Called by roll_hud with the HUD's own want, before the HUD's pixels. */
+#define NT_FIRST_MS 5000
+#define NT_AGAIN_MS 2500
+#define NT_FADE_MS  400                          /* = HUD_FADE_MS (below) */
+static void roll_notice(int want, int now)
+{
+    int endk = roll.state == WF_RS_FULL ? 1 : roll.state == WF_RS_REWOUND && wf_roll_left(&roll) > 0 ? 2 : 0;
+    if (nt_state == WF_RS_LOADED && endk)
+        nt_req = NT_FIRST_MS;                    /* the roll ended now (waits for LiveView if it is not there) */
+    nt_state = roll.state;
+    want = want && endk && !is_movie_mode();
+    if (!endk)
+        nt_req = 0;
+    else if (info_t == now)                      /* roll_hud: LiveView back, a shot done, a new state (the HUD info rule) */
+        nt_req = nt_req > NT_AGAIN_MS ? nt_req : NT_AGAIN_MS;
+    if (!want) {                                 /* gone with LiveView / under the menu or UI: roll_hud's redraw covers it */
+        nt_len = nt_drop = nt_up = 0;
+        return;
+    }
+    if (nt_req && !nt_drop) {                    /* a new notice, or more time for the one on screen */
+        int rest = nt_len ? nt_len - (now - nt_t) : 0;
+        if (!nt_len) {
+            wf_log("roll: end notice %s", endk == 1 ? "full" : "rewound");
+            nt_mode = -1;
+        }
+        if (nt_req > rest) {
+            nt_len = nt_req;
+            nt_t = now;
+        }
+        nt_req = 0;
+    }
+    if (!nt_len)
+        return;
+    int t = now - nt_t;
+    int mode = nt_drop ? WF_HUD_CLEAR : t < nt_len ? WF_HUD_FULL : t < nt_len + NT_FADE_MS ? WF_HUD_FADE : WF_HUD_CLEAR;
+    if (gui_menu_shown() || wf_ui_is_open())     /* (again right before the pixels) */
+        return;
+    if (mode == WF_HUD_CLEAR) {
+        wfdr_notice(bmp_vram(), WF_BMPPITCH, WF_HUD_CLEAR);
+        redraw();                                /* Canon's own LiveView marks under the box come back */
+        hud_mode = -1;                           /* (the HUD paints again after it) */
+        nt_len = nt_drop = nt_up = 0;
+        return;
+    }
+    if (mode != nt_mode || now - nt_pt >= 500) {
+        wfdr_notice(bmp_vram(), WF_BMPPITCH, mode);
+        nt_mode = mode;
+        nt_pt = now;
+    }
+    nt_up = 1;
+}
+
 /* the HUD over LiveView (DESIGN 3.6, owner 11-14): the roll + film chip, the big counter and the ladder show for
  * HUD_INFO_MS, fade for HUD_FADE_MS, then only a small dim counter stays. They show again when LiveView comes back
  * (or the menu / UI / PLAY goes), after a shot, after a frame counts, and when the roll, its film or its state changes. */
@@ -260,6 +329,7 @@ static void roll_hud(void)
     }
     if (want && !hud_on)
         info_t = now;                            /* LiveView is back */
+    roll_notice(want, now);
     if (want) {
         int blink = now - wind_t < 1000, t = now - info_t;
         int mode = t < HUD_INFO_MS ? WF_HUD_FULL : t < HUD_INFO_MS + HUD_FADE_MS ? WF_HUD_FADE : WF_HUD_SMALL;
@@ -322,6 +392,8 @@ void wf_roll_poll(void)
     }
     if (dk_running) {
         hud_on = 0;
+        nt_state = -1;                           /* a run rewinds the roll: no end notice for that */
+        nt_req = nt_len = nt_up = 0;
         return;
     }
     int idle = wf_job_state() == 0 && !wf_shot_pending();

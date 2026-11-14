@@ -107,6 +107,30 @@ static void hud_dump(const char *name, int blink, int mode, int keep)   /* keep:
     printf("hud %s\n", p);
 }
 
+/* the end-of-roll notice over LiveView: hud < 0 = the notice alone, else the HUD in that mode first (as wf_dark.c) */
+#define NT_BOX(x, y) ((x) >= 96 && (x) <= 624 && (y) >= 118 && (y) <= 336)
+static void nt_dump(const char *name, int mode, int hud, int keep)
+{
+    uint8_t *v = hv;
+    if (!keep) memset(v, 0, sizeof hv);
+    wfdr_hud_fonts(1);
+    if (hud >= 0) wfdr_hud(v, 720, 0, hud);
+    wfdr_notice(v, 720, mode);
+    char p[700];
+    snprintf(p, sizeof p, "%s/hud_%s.idx", outdir, name);
+    FILE *f = fopen(p, "wb");
+    if (f) { fwrite(v, 1, sizeof hv, f); fclose(f); }
+    printf("hud %s\n", p);
+}
+static int nt_count(int in, int c)                          /* pixels of colour c (-1 any) inside / outside the box */
+{
+    int n = 0;
+    for (int y = 0; y < 480; y++)
+        for (int x = 0; x < 720; x++)
+            if (!NT_BOX(x, y) == !in && (c < 0 ? hv[y * 720 + x] != 0 : hv[y * 720 + x] == c)) n++;
+    return n;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 5) { fprintf(stderr, "usage: dr_ui_test OUTDIR CARD RBFDIR THUMBDIR\n"); return 2; }
@@ -308,6 +332,39 @@ int main(int argc, char **argv)
     CHECK(px > 100, "HUD text after a refused open: %d white pixels", px);
     wfdr_hud_fonts(0);
     CHECK(host_live_allocs() == 0, "the HUD's close (12): %ld allocations left", host_live_allocs());
+
+    /* 13. the end-of-roll notice (owner 11-15): a box in the middle, clear of the HUD's chip, counter and ladder */
+    roll_of(bw, 12, 12, WF_RS_FULL);
+    nt_dump("end_notice_alone", WF_HUD_FULL, -1, 0);
+    int nr = nt_count(1, COLOR_RED), nw = nt_count(1, MLC_W), out = nt_count(0, -1), nall = nt_count(1, -1);
+    CHECK(nr > 400 && nw > 400 && out == 0, "notice FULL: %d red, %d white in the box, %d pixels outside it", nr, nw, out);
+    static uint8_t hud_only[480 * 720];
+    hud_dump("end_hud_only", 0, WF_HUD_FULL, 0);
+    memcpy(hud_only, hv, sizeof hv);
+    nt_dump("end_notice_full", WF_HUD_FULL, WF_HUD_FULL, 0);
+    int both = 0;
+    for (int y = 0; y < 480; y++)
+        for (int x = 0; x < 720; x++)
+            if (hud_only[y * 720 + x] && NT_BOX(x, y)) both++;
+    CHECK(both == 0, "notice and HUD overlap on %d pixels", both);
+    nt_dump("end_notice_full_fade", WF_HUD_FADE, WF_HUD_FADE, 0);
+    int nf = nt_count(1, -1);
+    CHECK(nf > nall / 3 && nf < nall * 6 / 10 && nt_count(1, COLOR_RED) == 0, "notice FADE: dimmed, dithered (%d of %d, red %d)",
+          nf, nall, nt_count(1, COLOR_RED));
+    nt_dump("end_notice_full", WF_HUD_FULL, WF_HUD_FULL, 0);
+    nt_dump("end_notice_clear", WF_HUD_CLEAR, WF_HUD_CLEAR, 1);   /* its time is over: the box back to 0, HUD small */
+    CHECK(nt_count(1, -1) == 0 && nt_count(0, -1) > 200, "notice CLEAR: %d pixels left in the box (%d outside: the HUD)",
+          nt_count(1, -1), nt_count(0, -1));
+    roll_of(colour, 36, 7, WF_RS_REWOUND);
+    nt_dump("end_notice_rewound", WF_HUD_FULL, WF_HUD_FULL, 0);
+    CHECK(nt_count(1, COLOR_RED) > 400, "notice REWOUND: %d red pixels", nt_count(1, COLOR_RED));
+    roll_of(colour, 36, 36, WF_RS_FULL);
+    nt_dump("end_notice_full36", WF_HUD_FULL, WF_HUD_FULL, 0);
+    roll_of(bw, 12, 5, WF_RS_LOADED);                          /* a roll still shooting: nothing (only a CLEAR) */
+    nt_dump("end_notice_loaded", WF_HUD_FULL, -1, 0);
+    CHECK(nt_count(1, -1) == 0 && nt_count(0, -1) == 0, "notice on a loaded roll: %d pixels", nt_count(1, -1));
+    wfdr_hud_fonts(0);
+    CHECK(host_live_allocs() == 0, "the HUD's close (13): %ld allocations left", host_live_allocs());
 
     printf("peak UI heap %ld bytes\n", host_peak_bytes());
     printf("%s: %d failure(s)\n", fails ? "FAIL" : "PASS", fails);

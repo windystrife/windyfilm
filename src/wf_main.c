@@ -331,6 +331,19 @@ static unsigned int wf_keypress(unsigned int key)
         return 1;
     if (wf_ui_is_open())
         return wf_ui_key(key);
+    switch (key) {                               /* the end-of-roll notice (wf_dark.c): a key press drops it */
+    case MODULE_KEY_PRESS_SET: case MODULE_KEY_JOY_CENTER: case MODULE_KEY_Q:   /* (EOS M LiveView: SET comes as Q) */
+        if (wf_roll_notice_key(1))
+            return 0;                            /* SET: the Darkroom opens instead */
+        break;
+    case MODULE_KEY_PRESS_HALFSHUTTER: case MODULE_KEY_PRESS_FULLSHUTTER: case MODULE_KEY_REC:
+    case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:
+    case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_UP: case MODULE_KEY_WHEEL_DOWN:
+    case MODULE_KEY_INFO: case MODULE_KEY_MENU: case MODULE_KEY_TRASH: case MODULE_KEY_PLAY: case MODULE_KEY_LV:
+    case MODULE_KEY_PICSTYLE: case MODULE_KEY_TOUCH_1_FINGER:
+        wf_roll_notice_key(0);                   /* and the key goes on as before */
+        break;
+    }
     if (key == WF_KEY_PLAY && !gui_menu_shown() && wf_roll_blocks_play()) {   /* blind roll (docs/DESIGN.md 3.6) */
         NotifyBox(2000, "Roll in camera: develop it in the Darkroom");
         return 0;

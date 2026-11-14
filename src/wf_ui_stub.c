@@ -15,3 +15,4 @@ int  wf_ui_menu_guard(void) { return 0; }
 void wf_ui_open_scr(int scr) { (void)scr; wf_log("browser: not in this build"); }
 int  wfdr_hud_fonts(int on) { (void)on; return -1; }
 void wfdr_hud(uint8_t *vram, int pitch, int blink, int mode) { (void)vram; (void)pitch; (void)blink; (void)mode; }
+void wfdr_notice(uint8_t *vram, int pitch, int mode) { (void)vram; (void)pitch; (void)mode; }

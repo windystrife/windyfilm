@@ -75,6 +75,9 @@ void wf_ui_open_scr(int scr);                    /* open the UI on a screen (WF_
 enum { WF_HUD_FULL = 0, WF_HUD_FADE, WF_HUD_SMALL, WF_HUD_CLEAR };
 int  wfdr_hud_fonts(int on);
 void wfdr_hud(uint8_t *vram, int pitch, int blink, int mode);
+/* the end-of-roll notice (owner 11-15): a box in the middle while a roll is FULL or REWOUND; mode FULL / FADE (dimmed,
+   dithered) / CLEAR (its box back to 0). wf_dark.c times it: 5 s when the roll ends, 2.5 s when LiveView comes back */
+void wfdr_notice(uint8_t *vram, int pitch, int mode);
 int  wf_clock_hm(void);                          /* the camera clock as h * 100 + m, -1 = unknown (wf_dark.c) */
 
 #endif

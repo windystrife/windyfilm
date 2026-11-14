@@ -812,6 +812,86 @@ void wfdr_hud(uint8_t *vram, int pitch, int blink, int mode)
     wfg_pitch = cp;
 }
 
+/* owner 11-15: the end-of-roll notice, a box in the middle of LiveView (clear of the HUD's chip, counter and ladder).
+ * wf_dark.c says when (5 s when the roll ends, 2.5 s each time LiveView comes back, a key drops it). Text pieces are
+ * joined by small square dots (the font is ASCII only). */
+#define NT_X0 96
+#define NT_X1 624
+#define NT_Y0 118
+#define NT_Y1 336
+static int dots_w(int font, const char *const *s, int n, int gap)
+{
+    int w = 0;
+    for (int i = 0; i < n; i++) w += ui_textw(font, s[i]) + (i ? gap : 0);
+    return w;
+}
+static void dots_c(int font, int cx, int y, const char *const *s, int n, int gap, int c, int dc)
+{
+    int x = cx - dots_w(font, s, n, gap) / 2;
+    for (int i = 0; i < n; i++)
+    {
+        if (i) { wfg_rect(x + gap / 2 - 2, y + 8, x + gap / 2 + 1, y + 11, dc); x += gap; }
+        x += ui_text(font, x, y, s[i], c);
+    }
+}
+
+void wfdr_notice(uint8_t *vram, int pitch, int mode)
+{
+    const struct wf_roll *r = wf_roll_now();
+    if (!vram) return;
+    uint8_t *cv = wfg_cv;
+    int cp = wfg_pitch;
+    wfg_cv = vram;
+    wfg_pitch = pitch;
+    if (mode == WF_HUD_CLEAR || (r->state != WF_RS_FULL && r->state != WF_RS_REWOUND))
+    {
+        hud_punch(NT_X0, NT_Y0, NT_X1, NT_Y1, 1);
+        wfg_cv = cv;
+        wfg_pitch = cp;
+        return;
+    }
+    int fade = mode == WF_HUD_FADE, cx = (NT_X0 + NT_X1) / 2;
+    int K = MLC(COLOR_BLACK), R = fade ? MLC(COLOR_GRAY(55)) : MLC(COLOR_RED);
+    int W = fade ? MLC(COLOR_GRAY(55)) : MLC(COLOR_WHITE), Y = fade ? MLC(COLOR_GRAY(55)) : MLC(COLOR_YELLOW);
+    int G = MLC(COLOR_GRAY(60)), D = MLC(COLOR_GRAY(30));
+    const struct wf_film *f = wf_film_by_id(r->film);
+    char a[16], c[16];
+    const char *s[3];
+    /* (an ML index is a negative colour here, which wfg_rrect reads as "no outline": the frames are two fills) */
+    wfg_rrect(NT_X0, NT_Y0, NT_X1, NT_Y1, 12, R, -1, 0);
+    wfg_rrect(NT_X0 + 3, NT_Y0 + 3, NT_X1 - 3, NT_Y1 - 3, 9, K, -1, 0);
+    spaced_c(F_ML28, cx, NT_Y0 + 16, r->state == WF_RS_FULL ? "END OF ROLL" : "ROLL REWOUND", R, 4);
+    wfg_rect(NT_X0 + 40, NT_Y0 + 58, NT_X1 - 40, NT_Y0 + 58, D);
+    /* 12/12 . Portra 400 . ROLL 021 (rewound: 7 frames . ..., the frames still to develop after a stopped run) */
+    int left = wf_roll_left(r);
+    if (r->state == WF_RS_FULL) snprintf(a, sizeof a, "%d/%d", r->nshot, r->exp);
+    else snprintf(a, sizeof a, "%d frame%s", left, left == 1 ? "" : "s");
+    snprintf(c, sizeof c, "ROLL %03d", r->num);
+    s[0] = a;
+    s[1] = f ? f->name : "?";
+    s[2] = c;
+    if (f && f->shortname && dots_w(F_15, s, 3, 22) > NT_X1 - NT_X0 - 40) s[1] = f->shortname;
+    dots_c(F_15, cx, NT_Y0 + 72, s, 3, 22, W, R);
+    /* where to develop it (EOS M: the ML menu comes with a two-finger tap, not Canon's MENU) */
+    const char *dv = "Develop it:", *path = "ML menu > Shoot > WindyFilm > Darkroom";
+    int dw = ui_textw(F_15, dv) + 10, pw = ui_textw(F_15, path), x = cx - (dw + pw) / 2;
+    ui_text(F_15, x, NT_Y0 + 106, dv, G);
+    ui_text(F_15, x + dw, NT_Y0 + 106, path, Y);
+    /* [SET] opens it now (wf_main.c: while the notice is up) */
+    const char *key = "SET", *kt = "open the Darkroom now";
+    int kw = ui_textw(F_13, key) + 12, tw = ui_textw(F_13, kt);
+    x = cx - (kw + 8 + tw) / 2;
+    wfg_rrect(x, NT_Y0 + 141, x + kw, NT_Y0 + 159, 4, W, -1, 0);
+    wfg_rrect(x + 1, NT_Y0 + 142, x + kw - 1, NT_Y0 + 158, 3, K, -1, 0);
+    ui_text(F_13, x + 6, NT_Y0 + 143, key, W);
+    ui_text(F_13, x + kw + 8, NT_Y0 + 143, kt, W);
+    wfg_rect(NT_X0 + 40, NT_Y0 + 174, NT_X1 - 40, NT_Y0 + 174, D);
+    text_c(F_13, cx, NT_Y0 + 186, "Shots from now on are not counted, WindyFilm keeps working", G);
+    if (fade) hud_punch(NT_X0, NT_Y0, NT_X1, NT_Y1, 0);
+    wfg_cv = cv;
+    wfg_pitch = cp;
+}
+
 /* =================================================================== dispatch (wf_ui.c) */
 void wfdr_enter(int scr)
 {

@@ -101,6 +101,8 @@ void wf_dark_end(void);                           /* wf_task at unload: stop a r
 int  wf_roll_shooting(void);                      /* a roll is loaded (takes frames; RAW develop B may run on them too) */
 int  wf_dark_busy(void);                          /* a darkroom run lives (RAW develop B gives its shoot memory back) */
 int  wf_roll_blocks_play(void);                   /* blind roll: PLAY is eaten */
+int  wf_roll_notice_key(int set);                 /* GUI task, a key: drops the end-of-roll notice if it is up (wf_task
+                                                     clears it); set (SET / Q) also opens the Darkroom. 1 = it was up */
 #define WF_KEY_PLAY 24                            /* ML module.h MODULE_KEY_PLAY */                           /* wf_menu.c: ML lens_info.job_state (Canon busy with a shot when != 0) */
 int wf_iso_now(void);                             /* wf_menu.c: the ISO now (lens_info.iso, or iso_auto under Auto ISO) */
 void wf_ui_request(void);                         /* menu: open the browser from wf_task after the ML menu closed */
