@@ -75,6 +75,11 @@ extern int wf_ll_auto;
  * exposure. wf_task sets it before a load; the .FRT key holds the slot in bits 17-18 (0: the key as before). */
 #define WF_LL_NINC    3                  /* sRGB + 2 Canon curve slots (tools/mk_loglut_tab.py CANON_SLOTS + 1) */
 extern int wf_ll_incurve;
+/* A display look (owner 2026-11-14 "grade tren srgb luon ko ra vlog dau", WF_FLUT_DISP): 1 = the cube's input is the JPEG's
+ * own sRGB code (R'G'B' / 255 -> grid), no decode, no log gamut or curve; its output is the display picture as for every
+ * cube. The input curve is ignored (sRGB), auto exposure is off; a LUT EI scales the sRGB-decoded light and encodes it
+ * back with the sRGB curve (inverse of wf_ll_dec). wf_task sets it before a load; the .FRT key holds it in bit 19. */
+extern int wf_ll_disp;
 int wf_ll_curve_have(int k);                     /* slot k built in (0, sRGB: always; out of range: 0) */
 const char *wf_ll_curve_src(int k);              /* slot k's CSV first comment line, "" without */
 const uint32_t *wf_ll_dec_of(int k);             /* slot k's decode (code i/4 -> linear Q24, 1022 entries), 0 = sRGB */
@@ -147,13 +152,13 @@ const char *wf_loglut_cache_path(int mode);
 #define WF_FLUT_VL_END 11                     /* first cube after the owner's six (11 EKTA P has every log) */
 #define WF_FLUT_EKTAP 11
 #define WF_FLUT_TUNG0 12                      /* V14T: the eleven Windy cubes 12..22 (named Tung until 11-14), V-Log only */
-#define WF_FLUT_LEICAV 23                     /* 11-14: Leica Vivid, the owner's display-referred V-Log 65^3 cube, V-Log only */
+#define WF_FLUT_LEICAV 23                     /* 11-14: Leica Vivid, the owner's display cube (sRGB in, sRGB out): LEICAVSR.CUB */
 #define WF_FLUT_N     24
-/* a look made on the camera's rendered picture (Leica Vivid: sRGB -> V-Log -> cube = the look on a Standard JPEG): the JPEG is
- * always read as sRGB (never through a Canon input curve), no auto exposure (LUT EI by hand still works), and loading it sets
- * Picture Style Standard */
+/* a look made on the camera's rendered picture (Leica Vivid: the display cube applied to the Standard JPEG's sRGB codes, no
+ * log on the way, wf_ll_disp): the JPEG is always read as sRGB (never through a Canon input curve), no auto exposure (LUT EI
+ * by hand still works), loading it sets Picture Style Standard, and its file is <code>SR.CUB whatever the Log curve */
 #define WF_FLUT_DISP(l) ((l) == WF_FLUT_LEICAV)
-#define WF_FLUT_VLONLY(l) (((l) >= WF_FLUT_VL0 && (l) < WF_FLUT_VL_END) || ((l) >= WF_FLUT_TUNG0 && (l) < WF_FLUT_N))
+#define WF_FLUT_VLONLY(l) (((l) >= WF_FLUT_VL0 && (l) < WF_FLUT_VL_END) || ((l) >= WF_FLUT_TUNG0 && (l) < WF_FLUT_LEICAV))
 extern const char *wf_flut_name[WF_FLUT_N];           /* "Technical", "Vision3 250D", .. (menu choices, EXIF text) */
 extern const char *const wf_flut_code[WF_FLUT_N];   /* "", "V250D", .. (the short form in the "shot #" log line) */
 /* the cube (frt 0) or its .FRT table cache (frt 1) of output `mode` for Film LUT `lut`: "ML/DATA/<wf_flut_code padded with _ to 6

@@ -507,6 +507,7 @@ struct wf_ll_b {
     int32_t eik, eib, eid;                       /* LUT EI: gain Q16 (0 = none), the curve's log offset b (Q24) and step
                                                     per stop (log code Q20), see wf_ll_coords */
     int32_t off[3], K[3];                        /* domain: g = (code_Q20 - off) * K >> 32 */
+    int disp;                                    /* wf_ll_disp: the grid reads the sRGB code itself */
     int ir, ig, ib;
     uint16_t *wp;
 };
@@ -515,6 +516,7 @@ struct wf_ll_b {
 
 int wf_ll_ei;                                    /* LUT EI in 1/3 EV (wf_loglut.h); wf_task sets it before a load */
 int wf_ll_incurve;                               /* input curve slot (wf_loglut.h); wf_task sets it before a load */
+int wf_ll_disp;                                  /* display look (wf_loglut.h); wf_task sets it before a load */
 
 /* the input curve slots of wf_loglut_tab.h (build.sh: one CSV per slot); a slot without a CSV decodes as sRGB */
 #if !WF_LL_HAVE_C1
@@ -535,12 +537,44 @@ static int wf_ll_inc(void) { int k = wf_ll_incurve; return k > 0 && wf_ll_curve_
 const uint32_t *wf_ll_dec_of(int k) { return k > 0 && wf_ll_curve_have(k) ? wf_ll_dec_in[k] : 0; }
 #define WF_LL_GREY18 3019899                     /* 0.18 in Q24 */
 
+static uint32_t wf_ll_div40(uint64_t n, uint32_t d);
+
+/* a display look with a LUT EI: the sRGB code v (Q20) -> light (wf_ll_dec) x gain (Q16) -> back to an sRGB code (Q20) by
+   the inverse of the same table (binary search, then linear between its entries); light above white = code 255 */
+static int32_t wf_ll_reenc(int32_t v, int32_t gain)
+{
+    const uint32_t *d = wf_ll_dec;
+    int idx = v >> 18;
+    uint32_t fr = (v >> 4) & 0x3fff, d0 = d[idx];
+    uint32_t lin = d0 + (((d[idx + 1] - d0) * fr) >> 14);
+    uint64_t x = ((uint64_t)lin * (uint32_t)gain + 32768) >> 16;
+    if (x >= d[1020])
+        return 255 << 20;
+    int lo = 0, hi = 1020;                       /* d[lo] <= x < d[hi] */
+    while (hi - lo > 1) {
+        int m = (lo + hi) >> 1;
+        if (d[m] <= x) lo = m; else hi = m;
+    }
+    uint32_t span = d[hi] - d[lo];
+    return (lo << 18) + (int32_t)(span ? wf_ll_div40((x - d[lo]) << 18, span) : 0);
+}
+
 /* node -> grid coordinates (Q16, 0 .. (n-1) << 16) */
 static void wf_ll_coords(const struct wf_ll_b *B, int y, int cb, int cr, int32_t *g)
 {
     int32_t base = y << 20;
     int32_t q[3] = { base + K_RV * cr, base - K_GU * cb - K_GV * cr, base + K_BU * cb };
     int32_t lin[3];
+    if (B->disp) {                               /* display look: R'G'B' code Q20 is the grid input (domain applied) */
+        for (int c = 0; c < 3; c++) {
+            int32_t v = q[c] < 0 ? 0 : q[c] > (255 << 20) ? (255 << 20) : q[c];
+            if (B->eik)
+                v = wf_ll_reenc(v, B->eik);
+            int32_t gg = (int32_t)(((int64_t)(v - B->off[c]) * B->K[c]) >> 32);
+            g[c] = gg < 0 ? 0 : gg > B->gmax ? B->gmax : gg;
+        }
+        return;
+    }
     for (int c = 0; c < 3; c++) {
         int32_t v = q[c] < 0 ? 0 : q[c] > (255 << 20) ? (255 << 20) : q[c];
         int idx = v >> 18;
@@ -726,12 +760,13 @@ static int wf_ll_build(const char *path, int mode, struct wf_lltabs *out, struct
     char *z = (char *)&B;
     for (unsigned i = 0; i < sizeof B; i++) z[i] = 0;
     B.out = out;
-    B.dec = wf_ll_dec_in[wf_ll_inc()];
+    B.disp = wf_ll_disp != 0;
+    B.dec = B.disp ? wf_ll_dec : wf_ll_dec_in[wf_ll_inc()];
     B.mat = wf_ll_mat[mode - 1];
     B.enc = wf_ll_enc[mode - 1];
     if (gain != 65536)
         B.eik = gain;
-    if (gain != 65536 || B.dec != wf_ll_dec) {
+    if (!B.disp && (gain != 65536 || B.dec != wf_ll_dec)) {
         B.eib = wf_ll_eib[mode - 1];
         B.eid = wf_ll_eid[mode - 1];
     }
@@ -800,8 +835,9 @@ int wf_loglut_load(const char *path, int mode, struct wf_lltabs *out, struct wf_
     }
     int ei = wf_ll_ei >= WF_LL_EI_MIN && wf_ll_ei <= WF_LL_EI_MAX ? wf_ll_ei : 0;
     int32_t gain = wf_ll_eik[ei - WF_LL_EI_MIN], ga = 65536;
-    int rc = wf_ll_build(path, mode, out, info, wf_ll_auto ? 65536 : gain);
-    if (!rc && wf_ll_auto) {
+    int au = wf_ll_auto && !wf_ll_disp;          /* a display look is never auto exposed */
+    int rc = wf_ll_build(path, mode, out, info, au ? 65536 : gain);
+    if (!rc && au) {
         int lo = wf_ll_cross(out->N, 235), hi = wf_ll_cross(out->N, 237);
         if (lo < 0 || hi < 0)
             ga = 16384;                          /* grey comes out above 118 even from black: the darkest */
@@ -822,8 +858,8 @@ int wf_loglut_load(const char *path, int mode, struct wf_lltabs *out, struct wf_
             out->L[l] = 8 * out->N[l * 8 > 255 ? 255 : l * 8] - 4 - 8 * WF_LL_KOFF;
         for (int j = 0; j < (int)sizeof out->K; j++)
             out->K[j] = (uint8_t)(j < 512 ? 0 : j > 512 + 255 ? 255 : j - 512);
-        out->pad[0] = (uint8_t)(int8_t)(wf_ll_auto ? wf_ll_ev10((uint32_t)ga) : 0);
-        out->pad[1] = wf_ll_auto ? 0xa5 : 0;
+        out->pad[0] = (uint8_t)(int8_t)(au ? wf_ll_ev10((uint32_t)ga) : 0);
+        out->pad[1] = au ? 0xa5 : 0;
         out->pad[2] = 0;
     }
     return rc;
@@ -1042,7 +1078,8 @@ int wf_loglut_load_cached(const char *cube, const char *cache, int mode, struct 
                 k.ver = WF_LLC_VER;
                 k.mode = (uint32_t)mode | (uint32_t)(wf_ll_ei & 0xff) << 8    /* LUT EI 0, no auto, sRGB: */
                          | (uint32_t)(wf_ll_auto != 0) << 16                  /* the key as before */
-                         | (uint32_t)wf_ll_inc() << 17;                     /* Film 1 = bit 17 as before */
+                         | (uint32_t)(wf_ll_disp ? 0 : wf_ll_inc()) << 17    /* Film 1 = bit 17 as before */
+                         | (uint32_t)(wf_ll_disp != 0) << 19;               /* display look (sRGB grid) */
                 k.tabsize = sizeof *out;
                 key = 1;
                 z = (char *)info;
@@ -1085,6 +1122,7 @@ static const char *const wf_ll_tech[2][WF_LL_NCURVE] = {
 const char *wf_loglut_name(char *b, int mode, int lut, int frt)
 {
     static const char suf[WF_LL_NCURVE][2] = { { 'S', '3' }, { 'V', 'L' }, { 'L', 'C' }, { 'C', '2' }, { 'C', '3' } };
+    int dsp = WF_FLUT_DISP(lut);                 /* a display look: one file, "SR" (sRGB in), for every Log curve */
     if (mode < WF_LL_SLOG3 || mode > WF_LL_NCURVE)
         return 0;
     if (lut <= 0 || lut >= WF_FLUT_N)
@@ -1094,8 +1132,8 @@ const char *wf_loglut_name(char *b, int mode, int lut, int frt)
     memcpy(b, "ML/DATA/", 8);
     for (int i = 0; i < 6; i++)
         *p++ = *c ? *c++ : '_';                 /* "V250D" -> "V250D_" */
-    *p++ = suf[mode - 1][0];
-    *p++ = suf[mode - 1][1];
+    *p++ = dsp ? 'S' : suf[mode - 1][0];
+    *p++ = dsp ? 'R' : suf[mode - 1][1];
     memcpy(p, frt ? ".FRT" : ".CUB", 5);
     return b;
 }

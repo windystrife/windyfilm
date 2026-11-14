@@ -14,7 +14,8 @@
  *   CFG                WINDYFLM.CFG load (every key), save, garbage, oversize, userwb restore at unload
  *   PACK CASE          ok | missing | magic | index | top | fnv | code | dup | flags | real FILE
  *   LIGHT              Day / Cloudy / Tungsten / Auto, film kelvin, user WB back
- *   LEICA              Leica Vivid can (no auto exposure, always sRGB in, its load asks for Picture Style Standard),
+ *   LEICA              Leica Vivid can (its cube on the JPEG's sRGB codes, no V-Log; no auto exposure, its load asks
+ *                      for Picture Style Standard),
  *                      hidden without its cube, Film LUT row, flut=leicav; the Windy names (no Tung left)
  *   PRINT              Scan / Cine / Paper rows and shots, missing variants
  *   5D2                (5D2 build) TOP / BOT pairing: BOT alone, owed BOT, pairing timeout, r1 / RAW gates, Log halves
@@ -2947,21 +2948,25 @@ static void t_leica(void)
         && !strcmp(wf_flut_name[22], "Windy EXRa M") && !strcmp(wf_flut_name[WF_FLUT_LEICAV], "Leica Vivid"),
         "no Tung name left (%d), Windy names, Leica Vivid last", nt);
     char nb[WF_LL_NAME];
-    chk(!strcmp(wf_loglut_name(nb, WF_CURVE_VLOG, WF_FLUT_LEICAV, 0), "ML/DATA/LEICAVVL.CUB")
+    chk(!strcmp(wf_loglut_name(nb, WF_CURVE_VLOG, WF_FLUT_LEICAV, 0), "ML/DATA/LEICAVSR.CUB")
+        && !strcmp(wf_loglut_name(nb, 1, WF_FLUT_LEICAV, 0), "ML/DATA/LEICAVSR.CUB")
+        && !strcmp(wf_loglut_name(nb, WF_CURVE_VLOG, WF_FLUT_LEICAV, 1), "ML/DATA/LEICAVSR.FRT")
         && !strcmp(wf_loglut_name(nb, WF_CURVE_VLOG, 9, 0), "ML/DATA/TUNGNTVL.CUB"),
-        "cube names: LEICAVVL.CUB, the Windy cubes keep their file names");
-    chk(WF_FLUT_DISP(WF_FLUT_LEICAV) && !WF_FLUT_DISP(9) && !WF_FLUT_DISP(0) && WF_FLUT_VLONLY(WF_FLUT_LEICAV),
-        "Leica Vivid: a display look, V-Log only");
+        "cube names: LEICAVSR.CUB / .FRT for every Log curve, the Windy cubes keep their file names");
+    chk(WF_FLUT_DISP(WF_FLUT_LEICAV) && !WF_FLUT_DISP(9) && !WF_FLUT_DISP(0) && !WF_FLUT_VLONLY(WF_FLUT_LEICAV)
+        && WF_FLUT_VLONLY(9),
+        "Leica Vivid: a display look on sRGB codes, not a V-Log cube");
 
     /* hidden without its cube (the module scans the cubes at start and when the browser opens) */
     std_pack();
     put_cfg("output=off\nincurve=film1\n");
     cube_write("ML/DATA/TUNGNTVL.CUB", 9);
+    cube_write("ML/DATA/LEICAVVL.CUB", 9);      /* the old V-Log file name: not Leica Vivid's cube any more */
     h_li_set("picstyle", 0x84);                  /* Neutral */
     mod_init(1);
     chk(WAIT(wf_avail(71), 5000) && !wf_avail(84) && wf_load(84) == WF_LOAD_NOCUBE,
-        "only TUNGNTVL.CUB on the card: Windy Neutral shown, Leica Vivid hidden and does not load");
-    cube_write("ML/DATA/LEICAVVL.CUB", 9);
+        "TUNGNTVL.CUB and the old LEICAVVL.CUB on the card: Windy Neutral shown, Leica Vivid hidden and does not load");
+    cube_write("ML/DATA/LEICAVSR.CUB", 9);
 
     /* load: Picture Style Standard asked for, sRGB in whatever the Input curve, no auto exposure */
     int inc = wf_ll_curve_have(WF_INC_FILM1) ? WF_INC_FILM1 : WF_INC_SRGB;
@@ -2976,18 +2981,45 @@ static void t_leica(void)
         "loading it asks for Picture Style Standard (0x81): %d request(s), log '%s'", ps_changes(n0, -1),
         log_line("style:"));
     chk(wf_incurve == inc && wf_incurve_t() == WF_INC_SRGB, "Input curve %d chosen, Leica Vivid reads sRGB", inc);
-    chk(LOGW("lut LEICAVVL.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && wf_ll_auto == 0
-        && wf_ll_incurve == WF_INC_SRGB && !strstr(log_line("lut LEICAVVL.CUB"), " in-"),
-        "loaded without auto exposure, sRGB tables: '%s'", log_line("lut LEICAVVL.CUB"));
-    static struct wf_lltabs la, lb;
+    chk(LOGW("lut LEICAVSR.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && wf_ll_auto == 0
+        && wf_ll_disp == 1 && wf_ll_incurve == WF_INC_SRGB && !strstr(log_line("lut LEICAVSR.CUB"), " in-"),
+        "loaded on the sRGB codes, no auto exposure: '%s'", log_line("lut LEICAVSR.CUB"));
+
+    /* the colour path: the identity cube on the sRGB codes gives the JPEG back (no log on the way) */
+    static struct wf_lltabs la, lb, lc, ld, le;
     struct wf_ll_info inf;
-    wf_ll_auto = 0; wf_ll_incurve = WF_INC_SRGB; wf_ll_ei = 0;
-    int rc = wf_loglut_load("ML/DATA/LEICAVVL.CUB", WF_CURVE_VLOG, &la, &inf);
-    wf_ll_auto = 1;
-    int rc2 = wf_loglut_load("ML/DATA/LEICAVVL.CUB", WF_CURVE_VLOG, &lb, &inf);
+    wf_ll_incurve = WF_INC_SRGB; wf_ll_ei = 0; wf_ll_auto = 0; wf_ll_disp = 1;
+    int rc = wf_loglut_load("ML/DATA/LEICAVSR.CUB", WF_CURVE_VLOG, &la, &inf);
+    wf_ll_auto = 1;                              /* ignored for a display look */
+    int rc3 = wf_loglut_load("ML/DATA/LEICAVSR.CUB", 1, &lc, &inf);
     wf_ll_auto = 0;
-    chk(rc == WF_LL_OK && rc2 == WF_LL_OK && ll_same(&la, wf_ll_tables()) && !ll_same(&lb, wf_ll_tables()),
-        "published tables = the cube read as sRGB with no auto exposure (auto exposure would differ)");
+    wf_ll_ei = 3;                                /* +1 EV by hand */
+    int rc4 = wf_loglut_load("ML/DATA/LEICAVSR.CUB", WF_CURVE_VLOG, &ld, &inf);
+    wf_ll_ei = 0; wf_ll_disp = 0;
+    int rc2 = wf_loglut_load("ML/DATA/LEICAVSR.CUB", WF_CURVE_VLOG, &lb, &inf);   /* the old path: sRGB -> V-Log -> cube */
+    int dn = 0, dv = 0;
+    for (int y = 0; y < 256; y++) {
+        int d = abs(la.N[y] - y), e = abs(lb.N[y] - y);
+        dn = d > dn ? d : dn;
+        dv = e > dv ? e : dv;
+    }
+    chk(rc == WF_LL_OK && rc2 == WF_LL_OK && rc3 == WF_LL_OK && rc4 == WF_LL_OK && ll_same(&la, wf_ll_tables())
+        && ll_same(&la, &lc) && !ll_same(&lb, wf_ll_tables()),
+        "published tables = the cube on the sRGB codes (S-Log3 + auto the same), not the V-Log path");
+    chk(dn <= 1 && dv > 20, "identity cube: neutral Y' out = in (max %d codes off); through V-Log it moved %d", dn, dv);
+    chk(ld.N[100] >= 135 && ld.N[100] <= 141 && ld.N[0] <= 1 && ld.N[255] == 255 && ld.N[200] == 255,
+        "LUT EI +1 EV: light x2 then sRGB again: 100 -> %d (138), 0 -> %d, 200 -> %d", ld.N[100], ld.N[0], ld.N[200]);
+    wf_ll_disp = 1;
+    log_mark();
+    chk(wf_loglut_load_cached("ML/DATA/LEICAVSR.CUB", "ML/DATA/LEICAVSR.FRT", WF_CURVE_VLOG, &le, &inf) == WF_LL_OK
+        && inf.cached && ll_same(&la, &le), "the .FRT the module wrote is read back for the display look");
+    wf_ll_disp = 0;
+    chk(wf_loglut_load_cached("ML/DATA/LEICAVSR.CUB", "ML/DATA/LEICAVSR.FRT", WF_CURVE_VLOG, &le, &inf) == WF_LL_OK
+        && !inf.cached && ll_same(&lb, &le), "the same .FRT is not taken for the V-Log path (key bit 19)");
+    wf_ll_disp = 1;
+    chk(wf_loglut_load_cached("ML/DATA/LEICAVSR.CUB", "ML/DATA/LEICAVSR.FRT", WF_CURVE_VLOG, &le, &inf) == WF_LL_OK
+        && !inf.cached && ll_same(&la, &le), "and back: rebuilt for the display look");
+    wf_ll_disp = 0;
     struct wf_look lk;
     wf_look_now(&lk);
     chk(lk.output == WF_OUT_LLUT && lk.flut == WF_FLUT_LEICAV && lk.incurve == WF_INC_SRGB, "the look: Leica Vivid, sRGB");
@@ -3004,8 +3036,8 @@ static void t_leica(void)
     log_mark();
     chk(wf_load(71) == WF_LOAD_OK && wf_flut == 9 && wf_incurve_t() == inc && ps_changes(n0, -1) == 0,
         "Windy Neutral: Input curve %d again, no style request", inc);
-    chk(LOGW("lut TUNGNTVL.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && wf_ll_auto == 1,
-        "Windy Neutral loaded with auto exposure: '%s'", log_line("lut TUNGNTVL.CUB"));
+    chk(LOGW("lut TUNGNTVL.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && wf_ll_auto == 1
+        && wf_ll_disp == 0, "Windy Neutral loaded with auto exposure, through V-Log: '%s'", log_line("lut TUNGNTVL.CUB"));
     chk(!strcmp(wf_row_text(WF_ROW_FLUT), "Windy Neutral"), "Film LUT row: '%s'", wf_row_text(WF_ROW_FLUT));
 
     /* the Film LUT row reaches it (last cube before Off) and asks for the style too */

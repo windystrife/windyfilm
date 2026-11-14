@@ -306,19 +306,30 @@ too), never flat Log. The math is WindyStrife's own (the V14U spec); WindyFilm h
 
 ### 3.4 Leica Vivid and the Windy names (owner 2026-11-14, as Film Roll V14U)
 
-- **Leica Vivid** = Film LUT 23 (`WF_FLUT_LEICAV`, `WF_FLUT_N` 24), can id 84 `LLEICV`, cube `ML/DATA/LEICAVVL.CUB` (the
-  owner's Lumix "L Leica 2" look, made on Picture Style Standard, turned into a display-referred V-Log 65^3 cube: sRGB ->
-  V-Log -> cube gives the look on the camera's Standard JPEG). `WF_FLUT_DISP(l)` marks it:
+- **Leica Vivid** = Film LUT 23 (`WF_FLUT_LEICAV`, `WF_FLUT_N` 24), can id 84 `LLEICV`, cube `ML/DATA/LEICAVSR.CUB`: the
+  owner's Lumix "L Leica 2" display cube (33^3, sRGB in, sRGB out), made on Picture Style Standard as the S9's Real Time
+  LUT uses it (Standard + the LUT). Owner 11-14: "grade tren srgb luon ko ra vlog dau". So the cube is applied straight
+  to the JPEG's sRGB codes (`wf_ll_disp`): per node R'G'B' code / 255 -> the cube's domain -> grid, no decode, no log
+  gamut matrix, no log curve, no resample through V-Log; the output is the display picture as for every cube. The file
+  is `<code>SR.CUB` (and `SR.FRT`) whatever the Log curve, so it needs no V-Log and the menu never asks for it.
+  `WF_FLUT_DISP(l)` marks it:
   - the JPEG is always read as sRGB: `wf_incurve_t()` returns sRGB while Log + LUT is on it (the menu says so), so the
     look, the poll and the load all see sRGB;
-  - no auto exposure (`wf_ll_auto` 0, as Technical); LUT EI by hand still works;
+  - no auto exposure (`wf_ll_auto` 0, as Technical); LUT EI by hand still works: the sRGB code is decoded
+    (`wf_ll_dec`), the light scaled by 2^(EI/3), then encoded back with the inverse of the same table
+    (`wf_ll_reenc`; light over white = 255) before the grid;
+  - the `.FRT` key holds `wf_ll_disp` in bit 19 (the input curve bits are 0 for it), so a cache made the other way is
+    rebuilt;
   - choosing it (can load, Film LUT row, ML menu) asks for Picture Style Standard 0x81 (`prop_request_change` of
     PROP_PICTURE_STYLE 0x80000028) unless the camera is on it already; log `style: Standard for Leica Vivid`;
-  - the can shows only with its cube on the card (as every Film LUT can); the first 65^3 load takes about 30 s, then the
-    `.FRT` cache (written through wf_fio.h);
+  - the can shows only with its cube on the card (as every Film LUT can; the old V-Log file `LEICAVVL.CUB` does not
+    count); the first 33^3 load takes a few seconds, then the `.FRT` cache (written through wf_fio.h);
   - Highlights / Shadows bend it like any Log + LUT output (3.3).
   - Can art: our house layout, graphite body, champagne accent, the name in our font. No logo, red dot, script lettering
     or other mark of the camera maker.
+  - Labels say it is a look on the Standard picture, not a log look (owner 11-14 14:00): can foot "STD + LUT", lip text
+    "digital look" without "35mm" (gen_cans `side` / `side35`), chip "Standard" (catalog `fmt`, FMTS), info page "Look on
+    the Standard picture", ML menu Output "Look on Standard" and title "Leica Vivid (look on Standard)".
 - **Windy names:** the 12 cans of the owner's film pack and his neutral cube (Film LUT 9, 11..22; can ids 66, 71,
   73..83) are named "Windy ..." instead of "Tung ..." (catalogue, `wf_flut_name`, cans with "Windy" on the body). Cube
   file names and config codes stay the same (`TUNGNTVL.CUB`, `flut=TUNGNT`, ...); `flut=leicav` selects Leica Vivid.

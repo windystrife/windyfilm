@@ -57,7 +57,7 @@ FLUT_NAME = ("Technical", "Vision3 250D", "Vision3 500T", "Portra 400", "Pro 400
 FLUT_VL = (None, "V250D_VL.CUB", "V500T_VL.CUB", "PRT400VL.CUB", "FP400HVL.CUB",             # fr_loglut.c fr_loglut_name(b, 2, l, 0)
            "FJ3513VL.CUB", "KD83V3VL.CUB", "KD83V5VL.CUB", "EKTAR5VL.CUB", "TUNGNTVL.CUB", "LBONO_VL.CUB", "EKTAP_VL.CUB",
            "T250DPVL.CUB", "T250DMVL.CUB", "T500TPVL.CUB", "T500TMVL.CUB", "TEKTAMVL.CUB", "TEKAAPVL.CUB", "TEKAAMVL.CUB",
-           "TEXRP_VL.CUB", "TEXRM_VL.CUB", "TEXRAPVL.CUB", "TEXRAMVL.CUB", "LEICAVVL.CUB")
+           "TEXRP_VL.CUB", "TEXRM_VL.CUB", "TEXRAPVL.CUB", "TEXRAMVL.CUB", "LEICAVSR.CUB")   # Leica Vivid: sRGB in, any Log curve
 TYPES = {"neg": 0, "slide": 1, "bw": 2}
 # yg_stocks.c rows and yh_halo.h profiles that exist in this build (a row of a film that is not ready may name a
 # row that a later batch adds; check() asserts the rows of ready films exist)
@@ -299,12 +299,12 @@ FILMS = [
            "owner's film pack V-Log cube TEXRAPVL.CUB (Resolve 33^3), not in the repo"),
     LUTCAN(83, "LTEXAM", "Windy EXRa M", 500, 91, 3200, 22, 22, "Alternate 500T negative look with a plain", "intermediate curve, as a V-Log LUT.",
            "owner's film pack V-Log cube TEXRAMVL.CUB (Resolve 33^3), not in the repo"),
-    # ---- 11-14 (as Film Roll V14U): "Leica Vivid", the owner's Lumix "L Leica 2" look (made on Picture Style Standard) as a
-    # display-referred V-Log 65^3 cube: sRGB -> V-Log -> cube gives that look on the camera's Standard JPEG. So the can
-    # reads the JPEG as sRGB whatever the Input curve, has no auto exposure, and its load sets Picture Style Standard
-    # (wf_loglut.h WF_FLUT_DISP). Name only: no logo, mark or house colour of the camera maker on the can.
+    # ---- 11-14: "Leica Vivid", the owner's Lumix "L Leica 2" look, a display cube made on Picture Style Standard (sRGB in,
+    # sRGB out; the S9's Real Time LUT puts it on Standard). Owner 11-14: "grade tren srgb luon ko ra vlog dau": the cube
+    # reads the Standard JPEG's sRGB codes directly, no V-Log on the way (wf_loglut.h WF_FLUT_DISP, wf_ll_disp), no auto
+    # exposure, and its load sets Picture Style Standard. Name only: no logo, mark or house colour of the camera maker.
     dict(LUTCAN(84, "LLEICV", "Leica Vivid", 100, 72, 5200, 23, 23, "A look on the camera's Standard picture,", "not a log or film look.",
-           "owner's Lumix L Leica 2 cube as a V-Log 65^3 display LUT LEICAVVL.CUB (Film Roll V14U), not in the repo"), fmt="Standard"),
+           "owner's Lumix L Leica 2 display cube (sRGB in, sRGB out, 33^3) as LEICAVSR.CUB, not in the repo"), fmt="Standard"),
 ]
 # the author's codes (no own code may equal one; generic notations only, PLAN 5.1)
 AUTHOR_CODE_RULE = "no code equal to one of the author's (P160 .. XP2): checked against tools/brandscan.py's list"
