@@ -238,3 +238,226 @@ Open items:
 4. RAW develop stage: not implemented (section 7); `input=jpeg` only.
 5. Preview exposure "Smooth" is EOS M only (5D2 build: no-ops, menu shows Camera).
 6. Real timings (shot ms per film / effect) exist only from the camera; host times under qemu say nothing.
+
+## 10. RAW develop "B" (branch `raw-develop`, not wired)
+
+The full in-camera develop of DESIGN 3.2 "B": an optional slow mode. It develops Canon's 14-bit raw of the shot and
+writes the graded UYVY 4:2:2 frame into Canon's YUV buffer, so Canon's JPEG encoder runs as usual. EOS M first; the
+code takes the 5D2 matrix too. The code is host-tested and memsim-timed. **No hook calls it yet.** The integration points
+are listed below; whoever merges does that after P0 has run on the camera.
+
+### 10.1 Files (all new; no existing file changed)
+
+| File | What |
+|---|---|
+| `src/wf_dev.h` | API, tables, job / stat structs; the design summary in the header comment |
+| `src/wf_dev.c` | load-time builder, per-shot prepare (pass A, WB fit, highlight map, matrix), rows driver, highlight path, C reference of the span kernel |
+| `src/wf_dev_arm.S` | `wf_dv_span_s`: fused MHC demosaic + matrix + CLZ encode + tetrahedral + UYVY pack for runs without clipping (ARMv5TE: SMULxy / SMLAxy) |
+| `tests/host/wf_dev_test.c` | host test, modes `px frame full bad span cr2` |
+| `tests/host/wf_dev_scene.c/.h` | synthetic shot: one linear scene rendered as a packed 14-bit raw and as Canon's UYVY frame; cube writer |
+| `tests/host/wf_dev_shim.c` | the few ML / FIO / memory calls the test and the bench need |
+| `tools/dev_check.sh` | objects for both cameras + build.sh's object checks + the host test |
+| `tools/dev_bench.c`, `tools/dev_bench.sh` | memsim timing on the EOS M frame |
+| `tools/mk_devmat.py` | the camera matrices in `wf_dev.c` (dcraw's method from the public ColorMatrix numbers), `--check` |
+| `tools/cr2_dec.c` | own minimal CR2 reader: raw.r14 (ML layout) + meta.txt (ISO, measured black, as-shot WB, clip pile-up) |
+| `tools/jpg_uyvy.py` | Canon's JPEG -> UYVY at the raw window, alignment check by phase correlation; UYVY -> PNG |
+| `tools/dev_a1ref.c` | the JPEG path's reference with A1's Canon curve (`ref_a1.uyvy`) + the curve table for the fit (`dec.bin`) |
+| `tools/dev_cr2.sh` | the real-shot test on RAW+L pairs |
+
+### 10.2 Pipeline and fixed point
+
+Per shot `wf_dev_prepare` (worker, before the first row):
+1. **Pass A** over the raw at quad (2 x 2) resolution: the clipped quads and the highlight ratio samples (below), plus
+   the WB fit samples.
+2. **WB + exposure fit** against Canon's own UYVY frame of the shot (read before any row overwrites it). It takes
+   near-neutral, unclipped mid-tones on a 16 px grid, decodes them with `job.dec` (the JPEG's input curve: A1's Canon
+   curve slot, or sRGB), goes to camera space and sums the ratios. So the develop follows Canon's AWB, WB shift, ISO and
+   exposure without reading a property. A caller may pass its own scales (`job.wb_q8`).
+3. **Highlight map:** per 32 x 32 px block, R/G and B/G come only from quads whose brightest photosite is 55-92 % of clip
+   and that have no clipped photosite within 2 quads (>= 3 px). Holes are filled from neighbour blocks (8 rounds), then
+   neutral.
+4. **One matrix** M = scene gain x (Rec.709 -> log gamut) x (camera -> Rec.709) x per-shot scales. The coefficients
+   are int16 at shift sh, the largest with sum |M| x 57344 < 2^31 - 2^sh, and the result is floored. sh >= 7 is `fast`:
+   x < 2^24, no upper clamp.
+
+Rows `wf_dev_rows(ya, yb)` take any band, so the NN full frame and the Diana halves run the same code. Per output pixel:
+1. Unpack the 14-bit rows to int16 with black subtracted, into a 5-row ring in cached scratch.
+2. MHC 5 x 5 demosaic. The values fit int16: max 28670 at black 0.
+3. M by SMULxy / SMLAxy.
+4. CLZ index `((a << c) >> 23) - (c << 8) + (23 - sh) * 256`, with c = clz(a | 256 << sh). The table entry is
+   `(cell x word stride) << 9 | frac7` and folds in the log curve, the cube DOMAIN and the clamp.
+5. Tetrahedral interpolation over a 33^3 node table. The lanes are Y9 + 1 | (Cb9 + 1) << 16 and Cr9 + 1: the + 1 is the
+   rounding, and the weights sum to 128. Y per pixel, Cb / Cr as the pair mean.
+6. Pack the UYVY word into a cached row, then `wf_copyw` it into Canon's buffer.
+
+Node sources (`wf_dev_build`, wf_task): `WF_DEV_CUBE` (the Log + LUT / Film LUT cube resampled at the nodes, with the same
+log curves, gamut, LUT EI and Film LUT auto exposure as `wf_loglut.c`), `WF_DEV_LOG` (plain log) and `WF_DEV_SRGB` (a
+Canon-like 8-bit base frame for the film tables: `wf_film_words` then runs unchanged on the developed frame).
+
+**Kernel split.** Runs of blocks without clipping go to `wf_dv_span_s` (asm, about 110 instructions per pixel, one
+stack slot per pair). Inside a block with clipping, a per-pair dirty mask still sends the clean pairs to the span
+kernel. Only the dirty pairs take the C highlight path:
+- one or two clipped channels are rebuilt from the unclipped ones with the block's ratios;
+- all three clipped: neutral at the brightest white-balanced channel. That is the lowest level consistent with every
+  channel being clipped, so a fully clipped sky sits above Canon's JPEG clip (10.4).
+
+The output of the asm path is bit-exact with the C reference (`wf_dev_kernel(1)`; mode `span`, the frame tests,
+cropped windows).
+
+Memory: tables 356,400 B (`struct wf_dev_tabs`), scratch `wf_dev_scratch_bytes(5184, 3456)` = 392,472 B; both cached,
+shoot memory. Code: `wf_dev.o` 32,521 B text, 56 B bss. Imports: `__aeabi_idiv`, `__aeabi_idivmod`,
+`__aeabi_uidiv`, `__mem_malloc`, `__mem_free`, `memcpy`, `wf_copyw`, `wf_lenc`, `wf_ll_parse` (no 64-bit division,
+no LDRD / STRD; the C part is v5T, the object v5TE like `wf_logout.o`).
+
+### 10.3 Timing (memsim, ARM946E-S model 200 MHz, EOS M 5184 x 3456, NCNB raw and frame)
+
+Synthetic scene, 11 % highlight pixels (`FULL=1 bash tools/dev_check.sh; bash tools/dev_bench.sh`):
+
+| Version | rows | shot (prepare + rows) |
+|---|---|---|
+| C only (`WF_DEV_NO_ASM`) | 30.57 s (4110 M instructions) | 34.00 s |
+| two-pass asm (MHC, then LUT) | 26.03 s (2913 M) | 29.47 s |
+| **fused span kernel + dirty-pair masks (this branch)** | **25.59 s** (2893 M; core 20.7 s, stall 4.87 s, 16.6 M linefills) | **29.03 s** |
+
+`wf_dev_build` 290 ms (load time), prepare 3.44 s (396 M instructions), checksum bbbeb78c (= `wf_dev_test full`).
+That is under the 43 s baseline and inside the report's 25-30 s guess, but above the 25 s floor. Where the rest goes:
+- the span kernel: about 2.0 G instructions;
+- the highlight path: about 0.7 G;
+- pass A: 88 instructions per quad.
+
+The two-pass version lost its gain to D-cache misses: the ARM946E-S does not allocate on a store miss, so the temporary
+buffer was refetched. Hence the fused kernel with a stack slot.
+
+**Real raws are slower than the scene.** The fixed-WB job, the shipped object (10.4):
+
+| shot | prepare | rows | shot |
+|---|---|---|---|
+| IMG_0208 (no clipping) | 3.36 s | 25.91 s (core 15.8 s, stall 10.1 s) | 29.3 s |
+| IMG_0210 (no clipping) | 3.17 s | 27.17 s (stall 11.4 s) | 30.3 s |
+| IMG_0233 (1.5 M highlight px) | 3.20 s | 32.38 s (stall 11.9 s) | 35.6 s |
+
+Real colour spreads the tetrahedral lookups over more of the 356 KB node table; the D-cache is 8 KB. So 29-36 s per
+shot. A sky as large as IMG_0206's (4.8 M highlight pixels) would add more.
+
+The next step for speed is to cut the node-table misses. Candidates:
+- a smaller node table: 17^3 nodes, or 16-bit lanes;
+- going through the rows in tiles.
+
+### 10.4 Quality
+
+Synthetic (`dev_check.sh`, 478 checks with `FULL=1`, 0 fail):
+- pixel look vs the JPEG path on the same light: Y mean 0.32-0.43, max 2 codes, over 5 curves, cubes 2 / 17 / 33 / 65,
+  LUT EI and auto exposure;
+- frame patches: Y mean 0.45 (max 1.34), C 0.23;
+- WB fit within 0.04 %; exposure +0.3 %;
+- highlights: one or two clipped channels keep R/G, B/G within 1 %.
+
+Real EOS M RAW+L pairs (`tools/dev_cr2.sh`, WSL; the photos stay outside the repo):
+- The JPEG L sits at raw (84, 64), exactly (phase-correlation offset 0, 0 on every pair). The CR2's image data runs
+  72..5280 x 52..3528. Black measures 2047-2048.
+- **The white level depends on the ISO and must come from the camera.** Clip pile-ups measured in the 35 CR2s:
+
+  | ISO | clip |
+  |---|---|
+  | 100 | 13582-13583 |
+  | 160, 320 | 12635-12636 |
+  | 200 | 15303 |
+
+  The fixed 15200 of the brief left the 12636 pile unflagged at ISO 320: green clipped, the white-balanced R and B rose
+  above it, and the sky came out magenta. `cr2_dec` now writes the pile-up when a real one exists (>= 1000 photosites
+  at one value and 8 x the density just below it). The test uses that value; without one it falls back to the table
+  above, the same values as `raw-path/proto/curve/match.py`.
+- Day09 is shot in Picture Style Film 1, so the JPEG path's reference must use A1's Film 1 curve. With the sRGB decode
+  the comparison is off by about 20 codes; that is the JPEG path's error, not the develop's.
+
+All 35 pairs (`tools/dev_cr2.sh`: 34 Day09 Film 1 pairs, A1 slot 1; IMG_6821 Neutral, slot 2) pass, 12 / 0 each:
+- the WB fit is within 1.35 % (R/G) and 1.43 % (B/G) of Canon's as-shot WB on average, worst -2.2 / -5.2 %;
+- on flat 16 x 16 blocks without clipped raw, the develop against Log + LUT of Canon's JPEG with A1's curve:
+  |dY| 1.68 on average (worst pair 5.24), p90 3.2, |dC| 1.00.
+
+| pairs | ISO | white | mean abs dY (unclipped) | mean abs dC | blocks with clipped raw | dY on those blocks |
+|---|---|---|---|---|---|---|
+| 0206-0226 (21) | 320 | 12636 (the 3 shots without clipping ran with the old 15200 fallback) | 1.63 (0.41-5.24) | 0.91 | 0-44 % | +2.4..+19.4 |
+| 0227-0230 (4) | 100 | 13582 | 1.17 | 0.63 | 14-29 % | +8.1..+31.2 |
+| 0231-0233 (3) | 160 | 12636 | 1.06 | 0.52 | 19-22 % | +17.2..+21.5 |
+| 0234-0239 (6) | 200 | 15303 | 2.67 | 1.93 | 0-26 % | +7.0..+22.7 |
+| 6821 Neutral | 200 | 15303 | **0.67** (p90 1.3) | 0.32 | 0.2 % | - |
+
+On blocks with clipped raw the develop is brighter than the JPEG path by design. Canon's JPEG (so A1 too) stops at its
+clip; the develop rebuilds the highlights, and a fully clipped area sits at the brightest white-balanced channel, the
+lowest level consistent with the raw. Eye check (IMG_0206 sky, IMG_6821 street): the sky is neutral, tone and colour
+match ref_a1, and the develop is a bit crisper. If the owner prefers Canon's clipped look there, it is a one-line change
+in the all-clipped branch of `wf_dv_hl`: cap at the green clip.
+
+B renders for the A1-vs-B sheet: IMG_0208 / 0210 / 0233 were run with Canon's as-shot WB and match.py's fixed scene
+scale (grey = 11352 / 2^3.3 DN), V-Log, `T250DMVL.CUB`. Notes and files are in the shared notes folder, `a1-vs-b/`.
+- **memsim on the real raws:** 29.3 / 30.3 / 35.6 s per shot. Memory stalls in the rows are 10-12 s, against 4.9 s
+  for the synthetic scene: real colour spreads the tetrahedral lookups over more of the node table.
+- **Against main's A1 Log + LUT, same cube:** median dY -0.4 / -0.8 / -0.2, except the rebuilt highlights.
+
+### 10.5 Integration points (for the merge, after P0)
+
+1. **Camera layer** (`wf_cam_eosm.c`, at the hook where the raw is valid) fills a `struct wf_dev_job`:
+   - `raw`, `pitch` 9240;
+   - active area `ax0 72, ay0 52, ax1 5280, ay1 3528` (the CR2's numbers; check against ML's `raw_info` on the camera);
+   - `x0 84, y0 64` = Canon's JPEG L crop (any even x0, y0 work);
+   - `w 5184, h 3456` for L 3:2 (other aspects / sizes: from the YUV geometry P0 logs);
+   - `black` and **`white` from the camera per shot**: ML's `raw_info` / autodetect, or a per-ISO table (10.4). Never
+     the fixed 15200;
+   - `cfa` 0 (RGGB at 84, 64);
+   - `canon` = Canon's UYVY buffer, read for the fit before any row is written; `canon_y0` / `canon_h` for Diana halves.
+2. **WB source:** the fit is the default. If P0 finds Canon's colour block (the as-shot WB levels), the caller may pass
+   `wb_q8` instead; the fit stays within -4.7..+3.1 % of Canon's as-shot WB on the real pairs.
+3. **`job.dec`** = the active A1 slot's table (`wf_ll_dec_c<k>`, through `wf_ll_inc()`), 0 for sRGB. The develop then
+   matches what Log + LUT does with the same JPEG.
+4. **`wf_dispatch()`** (wf_shot.c) gets the `WF_FMT_RAW14` case: `wf_dev_prepare`, then `wf_dev_rows` over the frame
+   (or each Diana half), then the unchanged effects on the developed UYVY8 frame (grain, halation, mist).
+   - Log + LUT / Film LUT cans: `WF_DEV_CUBE` with the active cube, curve, EI and auto flag;
+   - plain Log: `WF_DEV_LOG`;
+   - film stocks: `WF_DEV_SRGB`, then `wf_film_words` on the developed frame.
+5. **wf_task** builds the tables with `wf_dev_build` on a look change (file I/O there, like `wf_loglut_load`). The look
+   tables, 356 KB, and the per-shot scratch, 392 KB, come from shoot memory under the wf_fx.c rules (no SRM fallback),
+   given back in playback. The worker only calls `wf_dev_prepare` / `wf_dev_rows`: no allocation, log, file or wait.
+6. **Builder vs main's A1.** Main's `wf_ll_coords` puts light above 1.0 on the log segment whenever `eib` is set (a
+   LUT gain or a curve slot). `wf_dv_logcode` always does: the matrix carries the gain, and the log segment applies above
+   1.0. With the sRGB decode at gain 1, main's light never exceeds 1.0, so the two agree in every case.
+   `wf_dv_eik / eib / eid` are copies of `wf_ll_eik / eib / eid`; keep them in step. The merge trial below ran `px`
+   against main's `wf_loglut.c`.
+7. **Time:** the hook holds Canon's task for 29-36 s per shot (memsim on real raws, 10.3; more with a large clipped
+   sky). It is a slow mode: config `input=raw` + a menu choice. DESIGN 3.2 says the owner decides whether the wait is
+   acceptable.
+8. **build.sh / test.sh:**
+   - add `wf_dev.o` = `ld -r` of `wf_dev_c.o` (module flags `-O2`) and `wf_dev_arm.o` (`-mcpu=arm946e-s -marm`);
+   - extend the v5TE exception in the object check to `wf_dev.o` (as `wf_logout.o`);
+   - the trial build below did exactly this;
+   - `tools/dev_check.sh` can become a test.sh mode later.
+9. **Memory check on the camera:** the raw is read through the uncached alias (memsim: NCNB). The tables and scratch
+   must be cacheable.
+
+Checks run on 2026-11-14 (branch = 50a727d + these files; WSL; EOS M first, then 5D2):
+
+| | EOS M 2.0.2 | 5D2 2.1.2 |
+|---|---|---|
+| `build.sh` (branch as is, PACKS=0) | image 329,216 B, gate PASS | image 324,960 B, gate PASS |
+| `test.sh` | 386 / 0 | 373 / 0 |
+| trial build with `wf_dev.o` linked in (point 8) | image 361,760 B (+32,544), 103 imports (unchanged), TCC link OK, gate PASS | image 357,504 B (+32,544), 98 imports, TCC link OK, gate PASS |
+
+Merge trial: main's tree (d7728d8: A1 slots, P0) plus these files in scratch. Results:
+- no file clashes;
+- `dev_check.sh`: objects OK for both cameras, host test 469 / 0 (px 68, frame 56, bad 13, span 332). `px` runs
+  against main's `wf_loglut.c`;
+- `dev_cr2.sh` built `dev_a1ref` from that tree with both curve slots:
+  - IMG_0206 (slot 1): 12 / 0;
+  - IMG_6821 (slot 2): 12 / 0;
+  - the numbers equal the branch's runs.
+
+### 10.6 Running it
+
+```
+bash tools/dev_check.sh                      # objects (EOSM, 5D2) + host test px frame bad span
+FULL=1 bash tools/dev_check.sh               # + the EOS M frame (input for the bench)
+bash tools/dev_bench.sh                      # memsim phases (QEMU / MEMSIM env)
+bash tools/dev_cr2.sh <dir with IMG_xxxx.CR2 + .JPG> [N]    # real pairs; A1SLOT=2 for Neutral, KEEP=1 keeps files
+```
+`dev_cr2.sh` builds `dev_a1ref` when the tree has A1 (main's `wf_ll_incurve` and `luts/canon_curve/*.csv`). Without
+A1 the develop is compared with the sRGB-decoded JPEG path only.
