@@ -103,13 +103,27 @@ static uint32_t wf_dt(uint32_t a, uint32_t b) { return b - a; }
 
 /* ------------------------------------------------------------------ the look of a shot */
 int wf_cat_index(int id);
+/* the variant a shot really uses: the wanted one if the film HAS it, else the film's first variant; and if the pack
+ * does not CARRY that variant at all, the first variant it does carry (the chain films have no Scan - their variants
+ * are the sixteen print stocks - so the first-variant fallback is what makes them usable). A variant the pack carries
+ * but whose table fails its checksum is kept, not swapped: the shot then ends with ": notab" as it always did. */
 static int wf_variant_eff(int k, int v)
 {
     const struct wf_film *f = &wf_films[k];
-    if (v < 0 || v >= WF_NPRINTS || !(f->prints & (1u << v)))
-        v = WF_PRINT_SCAN;
-    if (v != WF_PRINT_SCAN && wf_ws_state() == 1 && !wf_ws_has(k, v) && wf_ws_has(k, WF_PRINT_SCAN))
-        v = WF_PRINT_SCAN;                       /* the pack lacks that print: the scan */
+    int w;
+    if (v < 0 || v >= WF_NPRINTS || !(f->prints & (1u << v))) {
+        for (v = 0; v < WF_NPRINTS && !(f->prints & (1u << v)); v++)
+            ;
+        if (v >= WF_NPRINTS)
+            v = WF_PRINT_SCAN;
+    }
+    if (wf_ws_state() == 1 && !wf_ws_listed(k, v)) {
+        for (w = 0; w < WF_NPRINTS; w++)
+            if ((f->prints & (1u << w)) && wf_ws_listed(k, w)) {
+                v = w;
+                break;
+            }
+    }
     return v;
 }
 
@@ -354,6 +368,14 @@ int wf_ws_has(int row, int v)
 {
     return row >= 0 && row < wf_nfilms && row < WF_WS_MAXROW && v >= 0 && v < WF_NPRINTS && wf_ws_st == 1
         && wf_ws_ok[WF_WS_KEY(row, v)];
+}
+/* the pack's index LISTS this film and variant, whatever became of its table afterwards: a table that fails its
+ * checksum is listed but not good, and that difference is what keeps a corrupt table from being swapped for another
+ * look (the shot must end with ": notab") while a variant the pack simply does not carry falls back to one it does. */
+int wf_ws_listed(int row, int v)
+{
+    return row >= 0 && row < wf_nfilms && row < WF_WS_MAXROW && v >= 0 && v < WF_NPRINTS && wf_ws_st == 1
+        && wf_ws_off[WF_WS_KEY(row, v)] != 0;
 }
 
 static uint32_t wf_fnv1(uint32_t h, const uint8_t *p, uint32_t n)

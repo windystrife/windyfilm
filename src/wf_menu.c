@@ -265,6 +265,19 @@ static void wf_flut_style(int l)
 }
 
 /* ------------------------------------------------------------------ load / loaded / avail (wf_api.h) */
+static int wf_print_first(int k);                 /* defined below: the first variant the film really has */
+
+/* a film is usable when the pack holds a good table for ANY of its variants. Not "for Scan": the chain films have no
+ * Scan/Cine/Paper at all (their variants are the sixteen print stocks), so asking for Scan hid all 44 of them from the
+ * strip even though their tables were on the card. */
+static int wf_any_table(int k)
+{
+    for (int v = 0; v < WF_NPRINTS; v++)
+        if ((wf_films[k].prints & (1u << v)) && wf_ws_has(k, v))
+            return 1;
+    return 0;
+}
+
 int wf_avail(int id)
 {
     int k = wf_cat_index(id);
@@ -272,7 +285,7 @@ int wf_avail(int id)
         return 0;
     if (wf_films[k].flags & WF_F_LUTCAN)
         return (wf_cube_have >> wf_cat_lut[k]) & 1;
-    return wf_ws_has(k, WF_PRINT_SCAN);
+    return wf_any_table(k);
 }
 
 int wf_load(int id)
@@ -295,7 +308,7 @@ int wf_load(int id)
         wf_flut = l;
         wf_flut_style(l);
     } else {
-        if (!(f->flags & WF_F_READY) || !wf_ws_has(k, WF_PRINT_SCAN))
+        if (!(f->flags & WF_F_READY) || !wf_any_table(k))
             return WF_LOAD_NOTABLE;
         wf_film_id = id;
         wf_out = WF_OUT_FILM;
