@@ -630,9 +630,11 @@ static void mode_cr2(const char *dir, int x0, int y0)
     j.raw = raw; j.pitch = pitch;
     j.ax0 = 72; j.ay0 = 52; j.ax1 = W; j.ay1 = H;   /* EOS M CR2: image data from 72, 52 to the right / bottom edge */
     j.x0 = x0; j.y0 = y0; j.w = jw; j.h = jh;
-    /* white: the shot's measured clip pile-up when it has one (the 1/3-stop ISOs clip lower: ISO 320 at ~12636, not the
-       15200 of the full stops), else the full-stop table. On the camera this comes from the raw backend (integration). */
-    j.black = (int)(blk + 0.5); j.white = wmeas > j.black + 4096 ? wmeas : iso == 100 ? 13400 : 15200; j.cfa = 0;
+    /* white: the shot's measured clip pile-up when it has one, else the pile-ups measured in the Day09 / 1114 CR2s per
+       ISO (the 1/3-stop ISOs clip lower: 160 / 320 at 12636), else 15200. On the camera this comes from the raw backend
+       (CORE-NOTES 10.5). */
+    int wtab = iso == 100 ? 13582 : iso == 160 || iso == 320 ? 12636 : iso == 200 ? 15303 : 15200;
+    j.black = (int)(blk + 0.5); j.white = wmeas > j.black + 4096 ? wmeas : wtab; j.cfa = 0;
     j.canon = jpg; j.canon_y0 = 0; j.canon_h = jh;
     /* main's A1 (Canon input curve) when dev_cr2.sh made it: the curve table for the fit and the JPEG path's frame */
     static uint32_t dec[1022];
