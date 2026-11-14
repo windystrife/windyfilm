@@ -14,6 +14,8 @@
  *   CFG                WINDYFLM.CFG load (every key), save, garbage, oversize, userwb restore at unload
  *   PACK CASE          ok | missing | magic | index | top | fnv | code | dup | flags | real FILE
  *   LIGHT              Day / Cloudy / Tungsten / Auto, film kelvin, user WB back
+ *   LEICA              Leica Vivid can (no auto exposure, always sRGB in, its load asks for Picture Style Standard),
+ *                      hidden without its cube, Film LUT row, flut=leicav; the Windy names (no Tung left)
  *   PRINT              Scan / Cine / Paper rows and shots, missing variants
  *   5D2                (5D2 build) TOP / BOT pairing: BOT alone, owed BOT, pairing timeout, r1 / RAW gates, Log halves
  *   PROBE [boot]       RAW probe P0. EOS M: off at boot, record + log + WFPROBE.BIN, uncached alias, out-of-pool,
@@ -2853,6 +2855,108 @@ static void t_hs(void)
     mod_deinit();
 }
 
+/* ------------------------------------------------------------------ LEICA: the display-look can and the Windy names */
+static int ps_changes(int from, int val)
+{
+    int n = 0;
+    for (int i = from; i < h_nchanges && i < 256; i++)
+        n += h_change_prop[i] == 0x80000028u && (val < 0 || h_change_val[i] == val);
+    return n;
+}
+static void t_leica(void)
+{
+    int kL = wf_cat_index(84), kW = wf_cat_index(71);
+    chk(kL >= 0 && kW >= 0 && !strcmp(wf_films[kL].name, "Leica Vivid") && (wf_films[kL].flags & WF_F_LUTCAN)
+        && wf_cat_lut[kL] == WF_FLUT_LEICAV && !strcmp(wf_films[kW].name, "Windy Neutral"),
+        "catalogue: Leica Vivid can (Film LUT %d), Windy Neutral", kL >= 0 ? wf_cat_lut[kL] : -1);
+    int nt = 0;
+    for (int k = 0; k < wf_nfilms; k++)
+        nt += !strncmp(wf_films[k].name, "Tung", 4);
+    for (int l = 0; l < WF_FLUT_N; l++)
+        nt += !strncmp(wf_flut_name[l], "Tung", 4);
+    chk(nt == 0 && !strcmp(wf_flut_name[9], "Windy Neutral") && !strcmp(wf_flut_name[12], "Windy 250D P")
+        && !strcmp(wf_flut_name[22], "Windy EXRa M") && !strcmp(wf_flut_name[WF_FLUT_LEICAV], "Leica Vivid"),
+        "no Tung name left (%d), Windy names, Leica Vivid last", nt);
+    char nb[WF_LL_NAME];
+    chk(!strcmp(wf_loglut_name(nb, WF_CURVE_VLOG, WF_FLUT_LEICAV, 0), "ML/DATA/LEICAVVL.CUB")
+        && !strcmp(wf_loglut_name(nb, WF_CURVE_VLOG, 9, 0), "ML/DATA/TUNGNTVL.CUB"),
+        "cube names: LEICAVVL.CUB, the Windy cubes keep their file names");
+    chk(WF_FLUT_DISP(WF_FLUT_LEICAV) && !WF_FLUT_DISP(9) && !WF_FLUT_DISP(0) && WF_FLUT_VLONLY(WF_FLUT_LEICAV),
+        "Leica Vivid: a display look, V-Log only");
+
+    /* hidden without its cube (the module scans the cubes at start and when the browser opens) */
+    std_pack();
+    put_cfg("output=off\nincurve=film1\n");
+    cube_write("ML/DATA/TUNGNTVL.CUB", 9);
+    h_li_set("picstyle", 0x84);                  /* Neutral */
+    mod_init(1);
+    chk(WAIT(wf_avail(71), 5000) && !wf_avail(84) && wf_load(84) == WF_LOAD_NOCUBE,
+        "only TUNGNTVL.CUB on the card: Windy Neutral shown, Leica Vivid hidden and does not load");
+    cube_write("ML/DATA/LEICAVVL.CUB", 9);
+
+    /* load: Picture Style Standard asked for, sRGB in whatever the Input curve, no auto exposure */
+    int inc = wf_ll_curve_have(WF_INC_FILM1) ? WF_INC_FILM1 : WF_INC_SRGB;
+    wf_incurve = inc;
+    h_li_set("picstyle", 0);                     /* not reported: Film 1 counts as usable */
+    chk(wf_incurve_t() == inc, "before: the Input curve in use is %d", inc);
+    int n0 = h_nchanges;
+    log_mark();
+    chk(wf_load(84) == WF_LOAD_OK && wf_out == WF_OUT_LLUT && wf_flut == WF_FLUT_LEICAV && wf_curve == WF_CURVE_VLOG,
+        "load Leica Vivid: Log + LUT, V-Log, its cube");
+    chk(ps_changes(n0, 0x81) == 1 && LOGW("style: Standard for Leica Vivid", 3000),
+        "loading it asks for Picture Style Standard (0x81): %d request(s), log '%s'", ps_changes(n0, -1),
+        log_line("style:"));
+    chk(wf_incurve == inc && wf_incurve_t() == WF_INC_SRGB, "Input curve %d chosen, Leica Vivid reads sRGB", inc);
+    chk(LOGW("lut LEICAVVL.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && wf_ll_auto == 0
+        && wf_ll_incurve == WF_INC_SRGB && !strstr(log_line("lut LEICAVVL.CUB"), " in-"),
+        "loaded without auto exposure, sRGB tables: '%s'", log_line("lut LEICAVVL.CUB"));
+    static struct wf_lltabs la, lb;
+    struct wf_ll_info inf;
+    wf_ll_auto = 0; wf_ll_incurve = WF_INC_SRGB; wf_ll_ei = 0;
+    int rc = wf_loglut_load("ML/DATA/LEICAVVL.CUB", WF_CURVE_VLOG, &la, &inf);
+    wf_ll_auto = 1;
+    int rc2 = wf_loglut_load("ML/DATA/LEICAVVL.CUB", WF_CURVE_VLOG, &lb, &inf);
+    wf_ll_auto = 0;
+    chk(rc == WF_LL_OK && rc2 == WF_LL_OK && ll_same(&la, wf_ll_tables()) && !ll_same(&lb, wf_ll_tables()),
+        "published tables = the cube read as sRGB with no auto exposure (auto exposure would differ)");
+    struct wf_look lk;
+    wf_look_now(&lk);
+    chk(lk.output == WF_OUT_LLUT && lk.flut == WF_FLUT_LEICAV && lk.incurve == WF_INC_SRGB, "the look: Leica Vivid, sRGB");
+    chk(!strcmp(wf_row_text(WF_ROW_FLUT), "Leica Vivid"), "Film LUT row: '%s'", wf_row_text(WF_ROW_FLUT));
+
+    /* Picture Style already Standard: nothing asked */
+    h_li_set("picstyle", 0x81);
+    n0 = h_nchanges;
+    chk(wf_load(84) == WF_LOAD_OK && ps_changes(n0, -1) == 0, "style already Standard: no request");
+
+    /* another can: the Input curve and auto exposure are back, no style request */
+    h_li_set("picstyle", 0);
+    n0 = h_nchanges;
+    log_mark();
+    chk(wf_load(71) == WF_LOAD_OK && wf_flut == 9 && wf_incurve_t() == inc && ps_changes(n0, -1) == 0,
+        "Windy Neutral: Input curve %d again, no style request", inc);
+    chk(LOGW("lut TUNGNTVL.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && wf_ll_auto == 1,
+        "Windy Neutral loaded with auto exposure: '%s'", log_line("lut TUNGNTVL.CUB"));
+    chk(!strcmp(wf_row_text(WF_ROW_FLUT), "Windy Neutral"), "Film LUT row: '%s'", wf_row_text(WF_ROW_FLUT));
+
+    /* the Film LUT row reaches it (last cube before Off) and asks for the style too */
+    n0 = h_nchanges;
+    int steps = 0;
+    while (wf_flut != WF_FLUT_LEICAV && steps++ < WF_FLUT_N + 2)
+        wf_row_step(WF_ROW_FLUT, 1);
+    chk(wf_flut == WF_FLUT_LEICAV && ps_changes(n0, 0x81) == 1, "Film LUT row: Leica Vivid after %d steps, style asked", steps);
+    wf_row_step(WF_ROW_FLUT, 1);
+    chk(wf_out != WF_OUT_LLUT, "one more step: Off");
+
+    /* config: flut=leicav */
+    put_cfg("output=lut\ncurve=vlog\nflut=leicav\n");
+    wf_cfg_load();
+    chk(wf_flut == WF_FLUT_LEICAV && wf_out == WF_OUT_LLUT, "flut=leicav read (Film LUT %d)", wf_flut);
+    wf_incurve = WF_INC_SRGB;
+    wf_out = WF_OUT_OFF;
+    mod_deinit();
+}
+
 /* ------------------------------------------------------------------ main */
 int main(int argc, char **argv)
 {
@@ -2892,6 +2996,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LOG")) t_log(cs);
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();
+    else if (!strcmp(mode, "LEICA")) t_leica();
 #ifdef WF_BUILD_5D2
     else if (!strcmp(mode, "5D2")) t_5d2();
     else if (!strcmp(mode, "PROBE")) t_probe_5d2();

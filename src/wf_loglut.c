@@ -1067,13 +1067,14 @@ int wf_loglut_load_cached(const char *cube, const char *cache, int mode, struct 
 }
 
 const char *wf_flut_name[WF_FLUT_N] = { "Technical", "Vision3 250D", "Vision3 500T", "Portra 400", "Pro 400H",
-                                       "Fuji 3513", "Kodak 2383 v3", "Kodak 2383 v5", "Kodak Ektar", "Tung Neutral", "Luca Bono",
-                                       "Tung EKTA P", "Tung 250D P", "Tung 250D M", "Tung 500T P", "Tung 500T M", "Tung EKTA M",
-                                       "Tung EKTAa P", "Tung EKTAa M", "Tung EXR P", "Tung EXR M", "Tung EXRa P", "Tung EXRa M" };
+                                       "Fuji 3513", "Kodak 2383 v3", "Kodak 2383 v5", "Kodak Ektar", "Windy Neutral", "Luca Bono",
+                                       "Windy EKTA P", "Windy 250D P", "Windy 250D M", "Windy 500T P", "Windy 500T M", "Windy EKTA M",
+                                       "Windy EKTAa P", "Windy EKTAa M", "Windy EXR P", "Windy EXR M", "Windy EXRa P", "Windy EXRa M",
+                                       "Leica Vivid" };
 const char *const wf_flut_code[WF_FLUT_N] = { "", "V250D", "V500T", "PRT400", "FP400H",
                                              "FJ3513", "KD83V3", "KD83V5", "EKTAR5", "TUNGNT", "LBONO", "EKTAP",
                                              "T250DP", "T250DM", "T500TP", "T500TM", "TEKTAM", "TEKAAP", "TEKAAM", "TEXRP", "TEXRM",
-                                             "TEXRAP", "TEXRAM" };
+                                             "TEXRAP", "TEXRAM", "LEICAV" };
 
 /* V14T (owner 2026-11-13 "slim it"): the file names are built from wf_flut_code (padded with '_' to six characters) instead of
  * two 23 x 5 tables of strings; the Technical names stay fixed strings so wf_loglut_path(mode) pointers never change. */

@@ -146,8 +146,13 @@ const char *wf_loglut_cache_path(int mode);
                                                * Film LUT can (WF_FLUT_CAT_N == WF_FLUT_N) */
 #define WF_FLUT_VL_END 11                     /* first cube after the owner's six (11 EKTA P has every log) */
 #define WF_FLUT_EKTAP 11
-#define WF_FLUT_TUNG0 12                      /* V14T: the eleven Tung cubes 12..22, V-Log only */
-#define WF_FLUT_N     23
+#define WF_FLUT_TUNG0 12                      /* V14T: the eleven Windy cubes 12..22 (named Tung until 11-14), V-Log only */
+#define WF_FLUT_LEICAV 23                     /* 11-14: Leica Vivid, the owner's display-referred V-Log 65^3 cube, V-Log only */
+#define WF_FLUT_N     24
+/* a look made on the camera's rendered picture (Leica Vivid: sRGB -> V-Log -> cube = the look on a Standard JPEG): the JPEG is
+ * always read as sRGB (never through a Canon input curve), no auto exposure (LUT EI by hand still works), and loading it sets
+ * Picture Style Standard */
+#define WF_FLUT_DISP(l) ((l) == WF_FLUT_LEICAV)
 #define WF_FLUT_VLONLY(l) (((l) >= WF_FLUT_VL0 && (l) < WF_FLUT_VL_END) || ((l) >= WF_FLUT_TUNG0 && (l) < WF_FLUT_N))
 extern const char *wf_flut_name[WF_FLUT_N];           /* "Technical", "Vision3 250D", .. (menu choices, EXIF text) */
 extern const char *const wf_flut_code[WF_FLUT_N];   /* "", "V250D", .. (the short form in the "shot #" log line) */

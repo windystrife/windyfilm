@@ -49,6 +49,17 @@ Grain và Halation mặc định tắt trên 5D2 (mỗi nửa ảnh tốn vài g
   danh sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.
+- Lon Leica Vivid (nhóm Film LUT, cần ML/data/LEICAVVL.CUB): look "L Leica 2"
+  của Lumix đặt lên ảnh Picture Style Standard. Đây KHÔNG phải look cho log:
+  ảnh ra là Standard + look, không phẳng như log. Module chỉ chuyển nội bộ qua
+  V-Log để đưa ảnh vào cube. Menu ghi "Leica Vivid (look on Standard)". Nạp lon
+  thì module chuyển Picture Style sang Standard (Neutral cũng chạy, màu nhạt
+  hơn). Lon này luôn đọc JPEG như sRGB, bất kể Input curve, và không tự bù sáng
+  (LUT EI vẫn chỉnh tay được). Lần đầu nạp cube 65^3 mất khoảng 30 giây, sau
+  đó dùng cache .FRT.
+- 13 lon "Tung" cũ giờ tên "Windy ...": Windy Neutral, Windy EKTA P,
+  Windy 250D P / M, Windy 500T P / M, Windy EKTA M, Windy EKTAa P / M,
+  Windy EXR P / M, Windy EXRa P / M. Tên file cube trên thẻ giữ nguyên.
 - Input curve (cho Log + LUT và lon Film LUT): sRGB, Canon Film 1 hoặc Canon
   Neutral. Hai đường cong đo trên EOS M (Film 1: file trong User Def. 1,
   Contrast -2; Neutral: Contrast 0); trên 5D2 chưa kiểm, cứ để sRGB nếu không

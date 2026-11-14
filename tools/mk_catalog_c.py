@@ -23,9 +23,9 @@ import importlib.util, os, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GROUPS = ("colour", "cine", "bw", "lut")
 PRINTS = ("scan", "cine", "paper")
-FLUT_N = 23                       # src/wf_loglut.h WF_FLUT_N (asserted against the catalogue's FLUT_N when it has one)
+FLUT_N = 24                       # src/wf_loglut.h WF_FLUT_N (asserted against the catalogue's FLUT_N when it has one)
 MAXROWS = 128                     # src/wf_shot.c WF_WS_MAXROW
-LIM = {"name": 24, "short": 11, "line1": 44, "line2": 44, "kind": 15, "fmt": 7, "code": 8}
+LIM = {"name": 24, "short": 11, "line1": 44, "line2": 44, "kind": 15, "fmt": 8, "code": 8}
 
 
 def load_catalog(path):
@@ -170,7 +170,7 @@ def main(argv):
     arr("int8_t", "wf_cat_ev8", ev)
     arr("int16_t", "wf_cat_lutrow", lutrow, "WF_FLUT_CAT_N")
     L.insert(4, "#define WF_FLUT_CAT_N %d                         /* = wf_loglut.h WF_FLUT_N (checked below) */" % FLUT_N)
-    L.append("typedef char wf_cat_flut_check[WF_FLUT_CAT_N == 23 ? 1 : -1];")
+    L.append("typedef char wf_cat_flut_check[WF_FLUT_CAT_N == %d ? 1 : -1];" % FLUT_N)
     L.append("")
     L.append("/* grain sets: yg_stocks row, amount scale Q8 (256 = x1), rho_max Q8 (0 = the row's value); set 0 = Log + LUT */")
     L.append("const struct wf_gset wf_cat_gsets[] = { %s };" % ", ".join("{ %d, %d, %d }" % tuple(g) for g in gs))
