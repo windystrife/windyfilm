@@ -589,6 +589,32 @@ static void t_shot(const char *cs)
         chk(h_kelvin_n == 0 && h_nchanges == 0 && h_gm_last == 0 && h_ba_last == 0, "white balance never touched");
         return;
     }
+    if (!strcmp(cs, "late") || !strcmp(cs, "noworker")) {   /* DryOS's task table full at boot (owner RAWB8 "worker 5") */
+        int late = !strcmp(cs, "late");
+        h_task_fail = late ? 3 : 1000;
+        std_pack();
+        int s0 = h_nsem;
+        mod_init(0);
+        chk(LOGW("worker 5 prio 1c", 3000) && LOGW("try 1, tasks 70 of 72", 3000) && !wf_cam_shot_ok(),
+            "a refused worker: logged with the task count, no hooks yet");
+        chk(wf_films_state() == 0 && !*wf_status() && !wf_avail(wf_films[fA].id),
+            "while it tries again: tables 'starting' (%d), no status yet ('%s')", wf_films_state(), wf_status());
+        if (late) {
+            chk(WAIT(wf_cam_shot_ok(), 5000) && LOGW("hooks: installed (0), try 4", 3000), "the 4th try starts it: %s",
+                log_line("hooks:"));
+            chk(WAIT(wf_ws_state() == 1, 5000) && LOGW("pack ok", 3000) && wf_films_state() == 1 && wf_avail(wf_films[fA].id)
+                && !*wf_status(), "the pack is read after the late start (state %d)", wf_films_state());
+        } else {
+            chk(WAIT(log_has("hooks: not installed (-100), try 30"), 25000) && !strcmp(wf_status(), "Worker failed")
+                && wf_films_state() == -1 && !wf_cam_shot_ok(), "30 tries then 'Worker failed' (%d, '%s')",
+                wf_films_state(), wf_status());
+            usleep(1200000);
+            chk(!log_has("try 31"), "no 31st try");
+        }
+        chk(h_nsem - s0 == 3, "the worker's 3 semaphores made once over all the tries: %d", h_nsem - s0);
+        mod_deinit();
+        return;
+    }
     if (!strcmp(cs, "busy")) {                   /* the old module holds the hook site */
         h_patch_err = 2;
         std_pack();

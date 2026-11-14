@@ -131,10 +131,19 @@ static void *h_task_main(void *p)
     t.entry(t.arg);
     return 0;
 }
+/* DryOS's task table: get_task_info_by_id answers 0 for h_tasks_live ids of task_max; h_task_fail = how many
+ * task_create("film_yuv") calls are refused with 5 (a full table, owner RAWB8 boots) */
+unsigned int task_max = 72;
+volatile int h_task_fail, h_tasks_live = 70, h_nsem;
+int get_task_info_by_id(int a, int id, void *p) { (void)a; (void)p; return id >= 1 && id <= h_tasks_live ? 0 : 1; }
 int task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg)
 {
     static int n;
-    (void)name; (void)prio; (void)stack;
+    (void)prio; (void)stack;
+    if (h_task_fail > 0 && name && !strcmp(name, "film_yuv")) {
+        h_task_fail--;
+        return 5;
+    }
     struct h_task *t = malloc(sizeof *t);
     t->entry = (void (*)(void *))entry;
     t->arg = arg;
@@ -152,6 +161,8 @@ struct h_sem { sem_t s; } __attribute__((aligned(8)));
 void *create_named_semaphore(const char *name, int initial)
 {
     (void)name;
+    if (name && (!strcmp(name, "wf_lock") || !strcmp(name, "wf_go") || !strcmp(name, "wf_done")))
+        h_nsem++;                                /* the worker's three */
     struct h_sem *s = malloc(sizeof *s);
     sem_init(&s->s, 0, initial);
     return s;

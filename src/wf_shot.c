@@ -31,6 +31,8 @@
 
 extern int  task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg);
 extern void *create_named_semaphore(const char *name, int initial);
+extern unsigned int task_max;                    /* DryOS: the size of its task table (ML .sym) */
+extern int  get_task_info_by_id(int, int, void *);
 extern int  take_semaphore(void *sem, int timeout_ms);
 extern int  give_semaphore(void *sem);
 extern uint64_t get_us_clock(void);
@@ -929,20 +931,37 @@ static void wf_worker(void *arg)
     }
 }
 
+/* tasks alive in DryOS's table (as ML's task list counts them): its slots are few, and a full table refuses a
+ * task_create (owner RAWB6 / RAWB8 boots: "worker 5", 1 of 4 and 3 of 3) */
+static int wf_tasks_live(void)
+{
+    uint32_t a[16];                              /* the task info (0x24 bytes on the EOS M / 5D2) */
+    int n = 0;
+    for (int id = 1; id <= (int)task_max && id < 1024; id++)
+        if (get_task_info_by_id(1, id, a) == 0)
+            n++;
+    return n;
+}
+
+/* wf_task, again every 500 ms while it fails (wf_main.c): the semaphores are made once, only a missing one again */
 int wf_worker_start(void)
 {
+    static int tries;
     if (wf_worker_ok)
         return 0;
-    wf_lock = create_named_semaphore("wf_lock", 1);
-    wf_go = create_named_semaphore("wf_go", 0);
-    wf_done = create_named_semaphore("wf_done", 0);
+    if (!DRY_SEM(wf_lock))
+        wf_lock = create_named_semaphore("wf_lock", 1);
+    if (!DRY_SEM(wf_go))
+        wf_go = create_named_semaphore("wf_go", 0);
+    if (!DRY_SEM(wf_done))
+        wf_done = create_named_semaphore("wf_done", 0);
     uint32_t tid = 1;
     if (DRY_SEM(wf_lock) && DRY_SEM(wf_go) && DRY_SEM(wf_done)) {
         tid = task_create("film_yuv", WF_WORKER_PRIO, 0x2000, (void *)wf_worker, 0);
         wf_worker_ok = DRY_OK(tid);
     }
-    wf_log("worker %x prio %x sem %x %x %x", (unsigned)tid, WF_WORKER_PRIO, (unsigned)wf_lock, (unsigned)wf_go,
-           (unsigned)wf_done);
+    wf_log("worker %x prio %x sem %x %x %x, try %d, tasks %d of %d", (unsigned)tid, WF_WORKER_PRIO, (unsigned)wf_lock,
+           (unsigned)wf_go, (unsigned)wf_done, ++tries, wf_tasks_live(), (int)task_max);
     return wf_worker_ok ? 0 : -1;
 }
 

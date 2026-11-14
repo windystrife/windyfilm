@@ -61,6 +61,37 @@ int wf_cam(void)
 }
 const char *wf_status(void) { return wf_status_s; }
 void wf_status_set(const char *s) { wf_status_s = s ? s : ""; wf_gen_bump(); }
+
+/* the worker + hooks start (wf_task): a refused worker task (DryOS's task table full at boot) is tried again every
+ * WF_START_MS, WF_START_TRIES times (~15 s); "Worker failed" only after the last */
+#define WF_START_MS    500
+#define WF_START_TRIES 30
+static volatile int wf_cam_rc = WF_CAM_NOWORKER, wf_cam_tries;
+static int wf_cam_t;
+static void wf_cam_try(void)
+{
+    wf_cam_t = get_ms_clock();
+    int rc = wf_cam_start();
+    wf_cam_tries++;
+    if (rc == WF_CAM_NOWORKER && wf_cam_tries < WF_START_TRIES)
+        return;                                  /* (wf_worker_start logged the try) */
+    if (rc == WF_CAM_NOWORKER)
+        wf_status_set("Worker failed");
+    wf_cam_rc = rc;
+    wf_log("hooks: %s (%d), try %d", rc ? "not installed" : "installed", rc, wf_cam_tries);
+    wf_gen_bump();
+}
+int wf_films_state(void)
+{
+    int ws = wf_ws_state();
+    if (!wf_cam_ok)
+        return -1;
+    if (ws == 1 || ws < 0)
+        return ws == 1 ? 1 : -2;
+    if (wf_cam_rc == WF_CAM_NOWORKER)
+        return wf_cam_tries < WF_START_TRIES ? 0 : -1;
+    return wf_cam_rc ? -1 : 0;
+}
 uint32_t wf_gen(void) { return wf_gen_n; }
 void wf_gen_bump(void) { wf_gen_n++; }
 
@@ -367,10 +398,12 @@ static void wf_task(void *arg)
         wf_film_shot_set_mem(m);                 /* the shot set of the film kernel (wf_film.c), kept */
         if (!m)
             wf_log("film: no memory for the shot set, film looks stay off");
-        int rc = wf_cam_start();
-        wf_log("hooks: %s (%d)", rc ? "not installed" : "installed", rc);
+        wf_cam_try();
     }
     while (!wf_unloading) {
+        if (wf_cam_ok && wf_cam_rc == WF_CAM_NOWORKER && wf_cam_tries < WF_START_TRIES
+            && get_ms_clock() - wf_cam_t >= WF_START_MS)
+            wf_cam_try();
         if (wf_cam_ok) {
             wf_cam_poll();
             wf_shot_poll();                      /* shot log, EXIF entries, pack reader, Log + LUT, effects */

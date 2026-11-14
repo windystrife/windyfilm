@@ -110,6 +110,7 @@ void wf_ui_request(void);                         /* menu: open the browser from
 /* ------------------------------------------------------------------ camera layer (wf_cam_eosm.c / wf_cam_5d2.c) */
 int  wf_cam_init(void);                           /* module init: ROM word checks only (no hook); 1 = this body is supported */
 int  wf_cam_start(void);                          /* wf_task: worker + hooks; 0 = installed */
+#define WF_CAM_NOWORKER (-100)                    /* wf_cam_start: no worker task (yet): wf_task tries again */
 void wf_cam_poll(void);                           /* wf_task: the camera layer's own log lines (rejects) */
 int  wf_cam_shot_ok(void);                        /* the in-camera path is up (worker + main hook) */
 int  wf_cam_gate_pv(void);                        /* preview: a shot now would get a look at all (JPEG L, no multishot) */

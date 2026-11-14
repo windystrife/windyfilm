@@ -9,6 +9,7 @@ extern char __camera_model_short[16], firmware_version[16];
 extern int pic_quality, shooting_mode, lv;
 extern uint8_t lens_info[];                      /* ML struct lens_info bytes (layout from wf_expoff.c) */
 extern volatile int h_play, h_movie, h_menu_shown, h_gdraw, h_expsim, h_expsim_stuck;
+extern volatile int h_task_fail, h_tasks_live, h_nsem;   /* task_create("film_yuv") refusals; live tasks; semaphores */
 
 /* ROM words (wf_cam_*: wf_host_rom_read); h_rom_bad = address whose word reads wrong (0 none) */
 extern volatile uint32_t h_rom_bad;

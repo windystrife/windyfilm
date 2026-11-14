@@ -363,10 +363,8 @@ static void wf_hook_5d2(uint32_t *regs, uint32_t *stack, uint32_t pc)
 
 int wf_cam_start(void)
 {
-    if (wf_worker_start() != 0) {
-        wf_status_set("Worker failed");
-        return -1;
-    }
+    if (wf_worker_start() != 0)
+        return WF_CAM_NOWORKER;                  /* wf_task tries again (wf_main.c), "Worker failed" only at the end */
     static const char *const names[K_N] = { "windyflm top", "windyflm bottom" };
     static const uint32_t site[K_N] = { SITE_TOP, SITE_BOT }, instr[K_N] = { INSTR_TOP, INSTR_BOT };
     int err = -1;

@@ -251,8 +251,10 @@ static void load_sel(void)
         anim_start(f, 0);
         return;
     }
-    say(r == WF_LOAD_NOTABLE ? "Film table not on the card" : r == WF_LOAD_NOCUBE ? "LUT cube not on the card"
-        : r == WF_LOAD_BUSY ? "Busy, press SET again" : "Unknown film");
+    int fs = wf_films_state();                              /* a table not read is not "not on the card" (RAWB8) */
+    say(r == WF_LOAD_NOTABLE ? (fs == 0 ? "Starting: film tables not read yet, SET again soon"
+                                : fs == -1 ? "Worker not running: film tables cannot load" : "Film table not on the card")
+        : r == WF_LOAD_NOCUBE ? "LUT cube not on the card" : r == WF_LOAD_BUSY ? "Busy, press SET again" : "Unknown film");
     wf_log("ui: load %d -> %d", f->id, r);
 }
 
@@ -377,7 +379,8 @@ static int draw_load_button(const struct wf_film *f, int g)
     }
     if (!wf_avail(f->id))
     {
-        const char *s = "Not on card";
+        int fs = (f->flags & WF_F_LUTCAN) ? 1 : wf_films_state();   /* the tables need the worker + pack first */
+        const char *s = fs == 0 ? "Starting..." : fs == -1 ? "Worker not running" : "Not on card";
         int bw = ui_textw(F_15, s) + 20;
         wfg_rrect(706 - bw, 70, 706, 90, 10, -1, C_TXT3, 1);
         ui_text(F_15, 706 - bw + 10, 72, s, C_TXT3);
@@ -588,7 +591,9 @@ static void draw_info(const struct wf_film *f, int g)
         "Daylight", kel,
         "Prints", lut ? "-" : pr,
         "Output", lut ? outp : "Film look",
-        "On the card", av ? (lut ? "LUT cube found" : "Film table found") : (lut ? "LUT cube missing" : "Film table missing"),
+        "On the card", av ? (lut ? "LUT cube found" : "Film table found") : lut ? "LUT cube missing"
+                       : wf_films_state() == 0 ? "Starting (tables not read yet)"
+                       : wf_films_state() == -1 ? "Worker not running" : "Film table missing",
         "State", wf_loaded() == f->id ? "Loaded" : "Not loaded",
         0 };
     for (int i = 0; kv[i]; i += 2, y += 19)

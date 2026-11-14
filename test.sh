@@ -28,6 +28,7 @@ case $CAM in
         ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA CLOG2 CUBE65 RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
   *) echo "CAM must be EOSM or 5D2"; exit 2 ;;
 esac
+ALL="$ALL SHOT:late SHOT:noworker"                 # the worker's late start (DryOS refused its task at boot)
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
 B=${OUT:-$R/build/$cam}
