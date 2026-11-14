@@ -77,6 +77,8 @@ static int dlg_give(void);
 #define ANIM_WIND_MS    800
 #define ANIM_MS         1150
 static int anim_on, anim_t0, anim_drawn;
+static const struct wf_film *anim_film;  /* the film being loaded (the browser's, or a roll's from wf_dark_ui.c) */
+static int anim_exp;                    /* a roll: its exposures (0 = a film load) */
 static int lv_after;                    /* a film was loaded: LiveView after the close */
 static int edit;                        /* 5D2: joystick press, LEFT / RIGHT change the focused row */
 
@@ -193,6 +195,19 @@ static void say(const char *s)
     dirty = 1;
 }
 
+static void anim_start(const struct wf_film *f, int nexp)
+{
+    anim_film = f;
+    anim_exp = nexp;
+    anim_on = 1;                                            /* the animation, then close and LiveView */
+    anim_t0 = get_ms_clock();
+    anim_drawn = 0;
+    lv_after = 1;
+    edit = info = 0;
+    msg = 0;
+    dirty = 1;
+}
+
 static void load_sel(void)
 {
     const struct wf_film *f = film_at(sel);
@@ -203,13 +218,7 @@ static void load_sel(void)
     int r = wf_load(f->id);
     if (r == WF_LOAD_OK)
     {
-        anim_on = 1;                                        /* the animation, then close and LiveView */
-        anim_t0 = get_ms_clock();
-        anim_drawn = 0;
-        lv_after = 1;
-        edit = info = 0;
-        msg = 0;
-        dirty = 1;
+        anim_start(f, 0);
         return;
     }
     say(r == WF_LOAD_NOTABLE ? "Film table not on the card" : r == WF_LOAD_NOCUBE ? "LUT cube not on the card"
@@ -232,7 +241,10 @@ static void act(int k)
     }
     if (scr != WFUI_SCR_BROWSER)
     {
-        if (wfdr_key(scr, k)) close_req = 1;
+        int r = wfdr_key(scr, k), nexp = 0;
+        const struct wf_film *rf = r == WFDR_LOADED ? wfdr_loaded(&nexp) : 0;
+        if (rf) anim_start(rf, nexp);                       /* a roll: the same load animation, then LiveView */
+        else if (r) close_req = 1;
         dirty = 1;
         return;
     }
@@ -609,9 +621,9 @@ void wfui_render(void)
 #define AY1 368
 void wfui_render_anim(int t, int first)
 {
-    const struct wf_film *f = film_at(sel);
+    const struct wf_film *f = anim_film ? anim_film : film_at(sel);
     if (!f) return;
-    int g = group_of_sel(), A = acc(g), AD = accd(g);
+    int g = f->group % WF_NGROUPS, A = acc(g), AD = accd(g);
     if (first) wfg_scrim(AX0, AY0, AX1, AY1);
     int done = t >= ANIM_WIND_MS;
     int p = t >= ANIM_WIND_MS ? 1024 : t < 0 ? 0 : t * 1024 / ANIM_WIND_MS;
@@ -619,11 +631,17 @@ void wfui_render_anim(int t, int first)
     char b[24];
 
     wfg_rrect(AX0, AY0, AX1, AY1, 10, C_SEP, C_LINE, 1);
-    ui_text(F_15, AX0 + 20, AY0 + 12, done ? "Loaded" : "Loading", done ? C_GRN : C_TXT3);
+    ui_text(F_15, AX0 + 20, AY0 + 12, anim_exp ? (done ? "Roll loaded" : "Loading the roll") : done ? "Loaded" : "Loading",
+            done ? C_GRN : C_TXT3);
     ui_text_clip(F_ML23, AX0 + 20, AY0 + 30, f->name, C_TXT, AX1 - 20);
     int cx = chip_s(AX0 + 22, AY0 + 62, f->kind, A, AX1 - 20);
     snprintf(b, sizeof(b), "ISO %d", f->iso);
-    chip_s(cx, AY0 + 62, b, C_TXT2, AX1 - 20);
+    cx = chip_s(cx, AY0 + 62, b, C_TXT2, AX1 - 20);
+    if (anim_exp)
+    {
+        snprintf(b, sizeof(b), "%d EXP", anim_exp);
+        chip_s(cx, AY0 + 62, b, C_TXT2, AX1 - 20);
+    }
 
     /* can, leader, gate */
     int canx = AX0 + 24, cany = AY0 + 96;

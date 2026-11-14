@@ -155,6 +155,10 @@ static void roll_next_tab(int d)
     }
 }
 
+static const struct wf_film *rl_film;            /* the roll just loaded: wf_ui.c plays the load animation for it */
+static int rl_exp;
+const struct wf_film *wfdr_loaded(int *nexp) { if (nexp) *nexp = rl_exp; return rl_film; }
+
 static int roll_key(int key, int now)
 {
     const struct wf_film *f = rfilm(rtab, rsel[rtab]);
@@ -182,10 +186,15 @@ static int roll_key(int key, int now)
         if (wf_roll_open(r) && r->nshot > 0) { say("This roll has frames: develop it first (Darkroom)", now); break; }
         if (!wf_avail(f->id)) { say(f->flags & WF_F_LUTCAN ? "LUT cube not on the card" : "Film table not on the card", now); break; }
         int rc = wf_roll_req_load(f->id, exps[rexp]);
-        say(rc == 0 ? "Roll loaded: shoot away" : rc == 1 ? "Roll loaded: RAW develop is off now"
-            : rc == -3 ? "Busy, press SET again"
+        if (rc >= 0)                                /* as a film load: the animation, then close and LiveView */
+        {
+            rl_film = f;
+            rl_exp = exps[rexp];
+            wf_log("ui: roll load %d x%d", f->id, rl_exp);
+            return WFDR_LOADED;
+        }
+        say(rc == -3 ? "Busy, press SET again"
             : rc == -4 ? "Rolls come to this camera later (EOS M first)" : "Cannot load this roll", now);
-        if (rc >= 0) return 0;
         break;
     }
     case MODULE_KEY_MENU: case MODULE_KEY_TRASH: case MODULE_KEY_PLAY: case MODULE_KEY_LV:
@@ -709,7 +718,19 @@ int wfdr_hud_fonts(int on)
     return 0;
 }
 
-void wfdr_hud(uint8_t *vram, int pitch, int blink)
+/* the HUD's rectangles go back to 0 (LiveView shows through): every pixel (CLEAR), or every other one (FADE: a dither,
+ * the palette has no alpha) */
+static void hud_punch(int x0, int y0, int x1, int y1, int all)
+{
+    if (x0 < 0) x0 = 0;
+    if (x1 > WFUI_W - 1) x1 = WFUI_W - 1;
+    for (int y = y0 < 0 ? 0 : y0; y <= y1 && y < WFUI_H; y++)
+        for (int x = all ? x0 : x0 + ((x0 + y) & 1); x <= x1; x += all ? 1 : 2)
+            wfg_cv[y * wfg_pitch + x] = 0;
+}
+
+/* owner 11-14: the film info shows for 2.5 s and fades (wf_dark.c times it), a small dim counter stays */
+void wfdr_hud(uint8_t *vram, int pitch, int blink, int mode)
 {
     const struct wf_roll *r = wf_roll_now();
     if (!wf_roll_open(r) || !vram) return;
@@ -719,11 +740,41 @@ void wfdr_hud(uint8_t *vram, int pitch, int blink)
     wfg_pitch = pitch;
     const struct wf_film *f = wf_film_by_id(r->film);
     char b[48];
-    int K = MLC(COLOR_BLACK), W = MLC(COLOR_WHITE), Y = MLC(COLOR_YELLOW), G = MLC(COLOR_GRAY(60)), R = MLC(COLOR_RED);
-    /* top-left chip: roll number and film */
+    int fade = mode == WF_HUD_FADE, small = mode == WF_HUD_SMALL || mode == WF_HUD_CLEAR;
+    int K = MLC(COLOR_BLACK), G = MLC(COLOR_GRAY(60)), R = MLC(COLOR_RED);
+    int W = fade ? MLC(COLOR_GRAY(55)) : MLC(COLOR_WHITE), Y = fade ? MLC(COLOR_GRAY(55)) : MLC(COLOR_YELLOW);
+    int left = r->exp - r->nshot;
+    int full = r->state != WF_RS_LOADED || left <= 0;
+    /* the geometry of the full HUD (CLEAR needs it too) */
     snprintf(b, sizeof b, "ROLL %03d  %s", r->num, f ? (f->shortname ? f->shortname : f->name) : "?");
-    int w = ui_textw(F_15, b);
-    wfg_rrect(12, 39, 14 + w + 36, 63, 6, K, -1, 0);
+    int w = ui_textw(F_15, b), chx1 = 14 + w + 36;
+    char n1[8], n2[8];
+    snprintf(n1, sizeof n1, "%d", r->nshot);
+    snprintf(n2, sizeof n2, "/%d", r->exp);
+    int cw = ui_textw(F_ML28, n1), sw = ui_textw(F_15, n2);
+    int x1 = 690, x0 = x1 - cw - sw - 20, y0 = 384, y1 = 420;
+    const char *lab = full ? (r->state == WF_RS_REWOUND ? "REWOUND" : "END OF ROLL") : blink ? "WIND ON" : 0;
+    int lx0 = x1 - 6 - ui_textw(F_13, "END OF ROLL") - 2;
+    int top = 90, bottom = 370;
+    if (mode == WF_HUD_CLEAR)
+    {
+        hud_punch(12, 39, chx1, 63, 1);
+        hud_punch(x0 < lx0 ? x0 : lx0, y0, x1, y1 + 20, 1);
+        hud_punch(694, top, 704, bottom + 2, 1);
+    }
+    if (small)
+    {
+        /* frames shot / roll length, inside the big counter's box (FULL covers it again) */
+        snprintf(b, sizeof b, "%d/%d", r->nshot, r->exp);
+        int tw = ui_textw(F_13, b);
+        wfg_rrect(x1 - tw - 12, 398, x1, 416, 5, K, -1, 0);
+        ui_text(F_13, x1 - tw - 6, 400, b, full ? R : G);
+        wfg_cv = cv;
+        wfg_pitch = cp;
+        return;
+    }
+    /* top-left chip: roll number and film */
+    wfg_rrect(12, 39, chx1, 63, 6, K, -1, 0);
     wfg_rrect(18, 45, 30, 57, 3, Y, -1, 0);
     wfg_rect(21, 47, 23, 48, K);
     wfg_rect(25, 47, 27, 48, K);
@@ -731,25 +782,23 @@ void wfdr_hud(uint8_t *vram, int pitch, int blink)
     wfg_rect(25, 54, 27, 55, K);
     ui_text(F_15, 38, 42, b, W);
     /* bottom-right counter: frames left like a film counter window, plus the exposure ladder up the right edge */
-    int left = r->exp - r->nshot;
-    int full = r->state != WF_RS_LOADED || left <= 0;
-    snprintf(b, sizeof b, "%d", r->nshot);
-    int cw = ui_textw(F_ML28, b);
-    snprintf(b + 16, sizeof b - 16, "/%d", r->exp);
-    int sw = ui_textw(F_15, b + 16);
-    int x1 = 690, x0 = x1 - cw - sw - 20, y0 = 384, y1 = 420;
-    wfg_rrect(x0, y0, x1, y1 + (full || blink ? 18 : 0), 6, K, -1, 0);
-    ui_text(F_ML28, x0 + 8, y0 + 2, b, full ? R : W);
-    ui_text(F_15, x0 + 10 + cw, y0 + 14, b + 16, G);
-    if (full) text_r(F_13, x1 - 6, y1, r->state == WF_RS_REWOUND ? "REWOUND" : "END OF ROLL", R);
-    else if (blink) text_r(F_13, x1 - 6, y1, "WIND ON", Y);
-    int n = r->exp, top = 90, bottom = 370;
+    wfg_rrect(x0, y0, x1, y1 + (lab ? 18 : 0), 6, K, -1, 0);
+    ui_text(F_ML28, x0 + 8, y0 + 2, n1, full ? R : W);
+    ui_text(F_15, x0 + 10 + cw, y0 + 14, n2, G);
+    if (lab) text_r(F_13, x1 - 6, y1, lab, full ? R : Y);
+    int n = r->exp;
     for (int i = 0; i < n; i++)
     {
         int y = bottom - (bottom - top) * i / (n - 1 > 0 ? n - 1 : 1);
         int c = i < r->nshot ? G : i == r->nshot ? Y : W;
         int len = i % 6 == 5 ? 10 : 6;
         wfg_rect(704 - len, y, 704, y + (i == r->nshot ? 2 : 1), c);
+    }
+    if (fade)
+    {
+        hud_punch(12, 39, chx1, 63, 0);
+        hud_punch(x0 < lx0 ? x0 : lx0, y0, x1, y1 + 20, 0);
+        hud_punch(694, top, 704, bottom + 2, 0);
     }
     wfg_cv = cv;
     wfg_pitch = cp;

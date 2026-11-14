@@ -399,7 +399,8 @@ void wf_rawb_poll(void)
     struct wf_look lk;
     wf_look_now(&lk);
     int play = is_play_mode();
-    int want = wf_rawb && wf_yuv_active() && !play && !wf_unloading ? rb_key(&lk) : 0;
+    /* a darkroom run (wf_dark.c) takes the shoot memory: the block goes while it lives, then is built again */
+    int want = wf_rawb && wf_yuv_active() && !play && !wf_unloading && !wf_dark_busy() ? rb_key(&lk) : 0;
     if (rb_have && rb_have != want) {
         rb_have = 0;                             /* new shots stop using the tables */
         WF_BARRIER();
@@ -498,6 +499,8 @@ int wf_rawb_state(void)
     return WF_RB_LOADING;
 }
 int wf_rawb_err(void) { return rb_rc; }
+int wf_rawb_busy(void) { return rb_live; }
+int wf_rawb_holds(void) { return rb_live || rb_mem; }
 
 void wf_rawb_end(void)
 {
@@ -515,4 +518,6 @@ void wf_rawb_poll(void) {}
 void wf_rawb_end(void) {}
 int  wf_rawb_state(void) { return wf_rawb ? WF_RB_NOCAM : WF_RB_OFF; }
 int  wf_rawb_err(void) { return 0; }
+int  wf_rawb_busy(void) { return 0; }
+int  wf_rawb_holds(void) { return 0; }
 #endif

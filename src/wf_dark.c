@@ -9,7 +9,7 @@
 #include "wf_core.h"
 #include "wf_dark.h"
 #include "wf_loglut.h"
-#include "wf_rawb.h"                             /* wf_rawb: a roll and RAW develop B are one mode at a time */
+#include "wf_rawb.h"                             /* B gives its shoot memory back before a darkroom run */
 #ifdef WF_BUILD_5D2
 #define WF_DARK_CAN 0                            /* the 5D2 follows once the EOS M works (raw 5792 x 3804, GBRG) */
 #else
@@ -75,7 +75,7 @@ volatile int wf_blind = 1;
 static volatile int req_kind, req_film, req_exp;  /* 1 load, 2 rewind, 3 close */
 static int poll_F = -1, poll_D = -1, poll_stable, wind_t = -100000;
 static int pq_old = -1, rv_old = -1, prop_t;
-static int hud_on, hud_fonts_on, hud_t;
+static int hud_on, hud_fonts_on, hud_t, hud_mode = -1, info_t = -100000, hud_sig, hud_job;
 static volatile int dk_running;                   /* the darkroom task owns the roll */
 
 const struct wf_roll *wf_roll_now(void) { return &roll; }
@@ -83,6 +83,7 @@ uint32_t wf_roll_gen(void) { return roll_gen_n; }
 static void roll_changed(void) { roll_gen_n++; wf_gen_bump(); }
 int wf_roll_shooting(void) { return roll.state == WF_RS_LOADED; }
 int wf_roll_blocks_play(void) { return wf_blind && wf_roll_open(&roll) && !dk_running; }
+int wf_dark_busy(void) { return dk_running; }
 
 int wf_roll_req_load(int film, int exp)
 {
@@ -98,7 +99,7 @@ int wf_roll_req_load(int film, int exp)
     req_exp = exp;
     WF_BARRIER();
     req_kind = 1;
-    return WF_RAWB_CAN && wf_rawb ? 1 : 0;      /* 1: the load turns RAW develop off (one mode at a time) */
+    return 0;
 }
 int wf_roll_req_rewind(void)
 {
@@ -220,6 +221,11 @@ static void roll_props(int idle)
     }
 }
 
+/* the HUD over LiveView (DESIGN 3.5, owner 11-14): the roll + film chip, the big counter and the ladder show for
+ * HUD_INFO_MS, fade for HUD_FADE_MS, then only a small dim counter stays. They show again when LiveView comes back
+ * (or the menu / UI / PLAY goes), after a shot, after a frame counts, and when the roll, its film or its state changes. */
+#define HUD_INFO_MS 2500
+#define HUD_FADE_MS 400
 static void roll_hud(void)
 {
     int want = wf_roll_open(&roll) && !dk_running && lv && !gui_menu_shown() && !wf_ui_is_open() && !is_play_mode();
@@ -231,14 +237,32 @@ static void roll_hud(void)
         hud_fonts_on = 0;
     }
     int now = get_ms_clock();
+    int sig = (int)(roll.num * 4099u + roll.film * 37u + roll.exp * 5u + roll.state) ^ (wf_loaded() << 20);
+    if (sig != hud_sig) {                        /* a new roll, film or state */
+        hud_sig = sig;
+        info_t = now;
+    }
+    if (wf_job_state())
+        hud_job = 1;                             /* a shot: the info again once Canon is idle */
+    else if (hud_job) {
+        hud_job = 0;
+        info_t = now;
+    }
+    if (want && !hud_on)
+        info_t = now;                            /* LiveView is back */
     if (want) {
-        int blink = now - wind_t < 1000;
-        if (!hud_on || blink || now - hud_t >= 500) {
-            wfdr_hud(bmp_vram(), WF_BMPPITCH, blink);
+        int blink = now - wind_t < 1000, t = now - info_t;
+        int mode = t < HUD_INFO_MS ? WF_HUD_FULL : t < HUD_INFO_MS + HUD_FADE_MS ? WF_HUD_FADE : WF_HUD_SMALL;
+        if (!hud_on || mode != hud_mode || blink || now - hud_t >= 500) {
+            /* the first small pass clears what the full HUD drew (only our own rectangles) */
+            wfdr_hud(bmp_vram(), WF_BMPPITCH, blink, mode == WF_HUD_SMALL && hud_mode != WF_HUD_SMALL ? WF_HUD_CLEAR : mode);
             hud_t = now;
+            hud_mode = mode;
         }
-    } else if (hud_on && !wf_ui_is_open()) {
-        redraw();
+    } else {
+        if (hud_on && !wf_ui_is_open())
+            redraw();
+        hud_mode = -1;
     }
     hud_on = want;
 }
@@ -255,10 +279,8 @@ static void roll_req(void)
         } else if (wf_roll_load(&roll, req_film, req_exp, D, F) == 0) {
             int rc = wf_loaded() == req_film ? WF_LOAD_OK : wf_load(req_film);
             wf_log("roll: %03d loaded, %s x%d at %d/%04d (film load %d)", roll.num, f ? f->name : "?", roll.exp, D, F, rc);
-            if (WF_RAWB_CAN && wf_rawb) {        /* one mode at a time (DESIGN 3.5): a roll or RAW develop B */
-                wf_rawb = 0;
-                wf_log("roll: RAW develop off (one mode at a time)");
-            }
+            if (WF_RAWB_CAN && wf_rawb)          /* both modes at once (DESIGN 3.5): B at shot time, the print later */
+                wf_log("roll: RAW develop stays on (frames get B now, a print later)");
             poll_F = F;
             poll_D = D;
             roll_dirty = 1;
@@ -305,7 +327,7 @@ void wf_roll_poll(void)
                 int n0 = roll.nshot, n = wf_roll_seen(&roll, D, F, roll_has_cr2, 0);
                 roll_dirty = 1;
                 if (n > 0) {
-                    wind_t = get_ms_clock();
+                    wind_t = info_t = get_ms_clock();
                     wf_log("roll: %03d frame %d/%d IMG_%04d%s", roll.num, roll.nshot, roll.exp, roll.file[roll.nshot - 1],
                            roll.state == WF_RS_FULL ? ", end of roll" : "");
                     roll_changed();
@@ -745,6 +767,15 @@ static void dk_task(void *arg)
         wf_roll_rewind(&roll);
         roll_save();
     }
+    /* RAW develop B gives its tables + scratch (shoot memory) back while the run lives (wf_rawb_poll sees
+     * wf_dark_busy) and builds them again after it: wait for that here, so the frame's contiguous block has room */
+    int t_b = get_ms_clock();
+    while (wf_rawb_holds() && get_ms_clock() - t_b < 10000 && !dk_stop)   /* a cube build may take seconds */
+        msleep(20);
+    if (wf_rawb_holds())
+        wf_log("dark: RAW develop still holds its memory after %d ms", get_ms_clock() - t_b);
+    else if (WF_RAWB_CAN && wf_rawb)
+        wf_log("dark: RAW develop tables given back (%d ms), built again after the run", get_ms_clock() - t_b);
     struct wf_look lk;
     wf_look_now(&lk);
     dv.total = roll.nshot;
@@ -855,8 +886,8 @@ int wf_dark_start(void)
 {
     if (dk_running)
         return -2;
-    if (!wf_cam_ok || wf_unloading || wf_job_state() || is_movie_mode() || req_kind)
-        return -3;
+    if (!wf_cam_ok || wf_unloading || wf_job_state() || is_movie_mode() || req_kind || wf_rawb_busy())
+        return -3;                               /* (a shot's B develop still runs: 30 s) */
     if (wf_cam() != WF_CAM_EOSM) {
         dv.msg = "The Darkroom runs on the EOS M first";
         dv_bump();

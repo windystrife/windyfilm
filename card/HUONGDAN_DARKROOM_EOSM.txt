@@ -1,7 +1,8 @@
-HƯỚNG DẪN THỬ ROLL + DARKROOM TRÊN EOS M (thẻ EOSM_WindyFilm_DARKROOM)
-=======================================================================
-Bản thử đầu tiên, 14/11/2026. CHƯA chạy trên máy thật lần nào: lần chụp này để
-đo bộ nhớ, thời gian và xem mọi bước có chạy không.
+HƯỚNG DẪN THỬ ROLL + DARKROOM TRÊN EOS M (chung thẻ với RAW develop)
+===================================================================
+Bản thử thứ hai, 14/11/2026 tối: Darkroom gộp chung thẻ với RAW develop B, hai chế
+độ chạy cùng lúc. CHƯA chạy trên máy thật lần nào: lần chụp này để đo bộ nhớ, thời
+gian và xem mọi bước có chạy không.
 
 Ý tưởng: chụp một cuộn phim (12 / 24 / 36 kiểu RAW + L, không xem lại ảnh), rồi
 "tráng" cả cuộn trong máy: Darkroom đọc từng file CR2 trên thẻ, develop bằng RAW
@@ -11,8 +12,8 @@ bộ code Darkroom là code mới của WindyFilm (không dùng code Film Roll).
 
 0. LƯU Ý TRƯỚC
 --------------
-- Đây là thẻ thử riêng. Đừng chép đè lên thẻ EOSM_WindyFilm / EOSM_WindyFilm_RAWB
-  đang dùng để chụp.
+- Thẻ này có cả RAW develop lẫn Roll + Darkroom (thử bằng một thẻ). Đừng chép đè lên
+  thẻ EOSM_WindyFilm đang dùng để chụp.
 - Pin: Darkroom chỉ bắt đầu khi pin còn ít nhất nửa (máy EOS M chỉ báo theo vạch),
   và tự dừng khi pin xuống vạch thấp. Nên sạc đầy trước.
 - Thẻ nên còn trống ít nhất 1 GB (mỗi kiểu: CR2 ~22 MB + JPEG Canon + bản in 7-10 MB).
@@ -35,16 +36,19 @@ Menu ML: Shoot > WindyFilm > "Film roll" -> màn hình chọn cuộn:
 - Q (hoặc chạm 1 ngón): đổi kệ Colour / Slide / B&W / Cine / LUT.
 - Trái / phải hoặc xoay bánh xe: chọn hộp phim.
 - Lên / xuống (hoặc INFO): 12 / 24 / 36 kiểu (mặc định 24).
-- SET: nạp cuộn ("Roll loaded: shoot away"). MENU: thoát.
+- SET: nạp cuộn: chạy hoạt ảnh nạp phim giống lúc nạp phim trong browser ("Loading the
+  roll" -> "Roll loaded"), rồi tự đóng và về LiveView. MENU: thoát.
 
 Mục "Blind roll" (mặc định On): khi có cuộn trong máy thì tắt xem lại ảnh sau khi
 chụp và khoá nút PLAY. Muốn xem ảnh như thường thì đặt Off.
 
-MỖI LẦN MỘT CHẾ ĐỘ: "RAW develop" (develop RAW ngay lúc chụp) và "Film roll" cùng
-nằm trong module nhưng chỉ một cái bật:
-- Nạp cuộn -> RAW develop tự tắt (màn hình báo "RAW develop is off now").
-- Bật RAW develop khi đang có cuộn -> cuộn kết thúc: có kiểu thì tua lại (Darkroom
-  vẫn tráng được), cuộn rỗng thì đóng luôn.
+HAI CHẾ ĐỘ CHẠY CÙNG LÚC: "RAW develop" (develop RAW ngay lúc chụp) và "Film roll"
+bật được cùng nhau, cái này không tắt cái kia:
+- Có cuộn + RAW develop On: mỗi tấm RAW+L được develop B ngay (khoảng 30 s, như
+  thường), VÀ vẫn là một kiểu của cuộn: Darkroom in lại từ CR2 sau, bằng phim của cuộn.
+- Kiểu được đếm sau khi B develop xong (bộ đếm nhảy và "WIND ON" hiện sau khoảng 30 s).
+- Lúc Darkroom chạy, RAW develop tạm trả bộ nhớ, tráng xong tự dựng lại bảng.
+  Darkroom không bắt đầu khi B còn đang develop một tấm: chờ xong rồi bấm SET.
 
 Module tự đặt chất lượng ảnh RAW + L (Fine) khi cuộn đang chụp, và trả lại như cũ
 khi cuộn hết / tua lại / đóng. Đừng tự đổi chất lượng trong lúc chụp cuộn: tấm nào
@@ -55,12 +59,15 @@ không có CR2 thì không được đếm.
 -------
 - Chụp đơn như thường. Trên LiveView: góc trên trái "ROLL 001 <tên phim>", góc
   dưới phải bộ đếm "5/24"; sau mỗi tấm hiện "WIND ON" khoảng 1 giây.
+- Thông tin phim hiện khoảng 2,5 giây rồi mờ dần; chỉ còn bộ đếm nhỏ màu xám "5/24"
+  ở góc dưới phải (đỏ khi hết cuộn). Thông tin hiện lại 2,5 giây khi LiveView quay
+  lại (thoát menu, thoát xem ảnh), sau mỗi tấm chụp, khi đếm thêm kiểu, và khi đổi cuộn.
 - Đủ số kiểu: bộ đếm đỏ "END OF ROLL", các tấm sau không tính vào cuộn.
 - Muốn kết thúc sớm: menu "End roll now" (cuộn tua lại, hiện "REWOUND"; Darkroom
   tráng các kiểu đã chụp).
 - "Close roll": bỏ các kiểu chưa tráng (file RAW / JPG vẫn còn nguyên trên thẻ).
-- Mỗi tấm vẫn có JPEG màu phim ngay lúc chụp (như module thường). RAW develop B lúc
-  chụp tự tắt khi có cuộn: Darkroom làm việc đó sau.
+- Mỗi tấm vẫn có JPEG màu phim ngay lúc chụp (như module thường; nếu RAW develop On
+  thì là bản develop B). Darkroom in thêm bản in riêng từ CR2 sau.
 
 
 4. TRÁNG (DARKROOM)
@@ -91,10 +98,12 @@ d. Vào Darkroom, SET, chờ xong cả cuộn. Ghi lại thời gian thực tế
 e. Cuộn thứ hai: 12 kiểu, phim khác (kệ B&W hoặc LUT), chụp 5 tấm, "End roll now",
    vào Darkroom, giữa chừng bấm MENU hai lần để dừng, rồi SET chạy tiếp cho xong.
 f. Mở vài bản in trên máy tính, so với JPG của Canon cùng số IMG.
-g. Chuyển chế độ: bật RAW develop, rồi nạp cuộn -> RAW develop phải về Off. Chụp 2
-   tấm, bật RAW develop -> cuộn báo "REWOUND"; đặt lại chất lượng RAW + L nếu máy đã
-   trả về cái cũ, chụp 1 tấm: tấm đó phải được develop B (khoảng 30 s) và không bị
-   tính vào cuộn.
+g. Hai chế độ cùng lúc: bật RAW develop, nạp cuộn 12 kiểu -> RAW develop vẫn On.
+   Chụp 3 tấm: mỗi tấm hiện "RAW develop n%" (khoảng 30 s), xong thì bộ đếm lên 1/12,
+   2/12, 3/12. "End roll now", vào Darkroom, tráng 3 kiểu. Sau khi tráng xong chụp
+   thêm 1 tấm (không có cuộn): vẫn phải được develop B.
+h. HUD: sau khi nạp cuộn, thông tin phim hiện khoảng 2,5 s rồi mờ đi, còn bộ đếm nhỏ.
+   Vào menu ML rồi thoát ra: thông tin hiện lại. Chụp 1 tấm: hiện lại.
 
 
 6. GỬI LẠI

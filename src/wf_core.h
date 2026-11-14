@@ -98,7 +98,8 @@ int wf_job_state(void);
 void wf_dark_init(void);                          /* module init: the view, no allocation */
 void wf_roll_poll(void);                          /* wf_task: roll file, requests, frames, RAW+L / review, HUD */
 void wf_dark_end(void);                           /* wf_task at unload: stop a run, Canon's values back */
-int  wf_roll_shooting(void);                      /* a roll is loaded (takes frames): RAW develop B stays off at the shot */
+int  wf_roll_shooting(void);                      /* a roll is loaded (takes frames; RAW develop B may run on them too) */
+int  wf_dark_busy(void);                          /* a darkroom run lives (RAW develop B gives its shoot memory back) */
 int  wf_roll_blocks_play(void);                   /* blind roll: PLAY is eaten */
 #define WF_KEY_PLAY 24                            /* ML module.h MODULE_KEY_PLAY */                           /* wf_menu.c: ML lens_info.job_state (Canon busy with a shot when != 0) */
 int wf_iso_now(void);                             /* wf_menu.c: the ISO now (lens_info.iso, or iso_auto under Auto ISO) */

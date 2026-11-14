@@ -17,7 +17,7 @@ extern volatile int wf_blind;                    /* menu "Blind roll": 1 (defaul
 const struct wf_roll *wf_roll_now(void);         /* the current roll (never 0) */
 uint32_t wf_roll_gen(void);                      /* bumped when the roll changes */
 /* UI / menu requests (wf_task carries them out while Canon is idle; the result shows in wf_roll_now):
-   0 = queued, 1 = queued and the load turns RAW develop off (one mode at a time), -1 = a roll with frames is open, -2 = bad film / count, -3 = busy (a request is pending),
+   0 = queued, -1 = a roll with frames is open, -2 = bad film / count, -3 = busy (a request is pending),
    -4 = no darkroom on this camera yet (5D2: load refused) */
 int  wf_roll_req_load(int film, int exp);
 int  wf_roll_req_rewind(void);
@@ -66,10 +66,13 @@ int  wf_dark_eta_s(const struct wf_dark_view *v);   /* seconds left for the roll
 #define WF_UI_SCR_ROLL 1                         /* = WFUI_SCR_ROLL / WFUI_SCR_DARK of src/ui/wf_ui_int.h */
 #define WF_UI_SCR_DARK 2
 void wf_ui_open_scr(int scr);                    /* open the UI on a screen (WF_UI_SCR_*), wf_ui.c */
-/* the HUD over LiveView (src/ui/wf_dark_ui.c; wf_task draws it while a roll shoots): wfdr_hud_fonts(1) loads the font
-   pack once (0 frees it), wfdr_hud draws into ML's bitmap with ML's own colour indices; blink = the "wind on" cue */
+/* the HUD over LiveView (src/ui/wf_dark_ui.c; wf_task draws it while a roll is in the camera): wfdr_hud_fonts(1) loads
+   the font pack once (0 frees it), wfdr_hud draws into ML's bitmap with ML's own colour indices; blink = the "wind on"
+   cue. mode: FULL = roll + film chip, big counter, ladder (2.5 s); FADE = the same, dimmed and dithered (0.4 s);
+   SMALL = only a small dim counter; CLEAR = SMALL after clearing the rectangles FULL drew (to 0, LiveView shows) */
+enum { WF_HUD_FULL = 0, WF_HUD_FADE, WF_HUD_SMALL, WF_HUD_CLEAR };
 int  wfdr_hud_fonts(int on);
-void wfdr_hud(uint8_t *vram, int pitch, int blink);
+void wfdr_hud(uint8_t *vram, int pitch, int blink, int mode);
 int  wf_clock_hm(void);                          /* the camera clock as h * 100 + m, -1 = unknown (wf_dark.c) */
 
 #endif

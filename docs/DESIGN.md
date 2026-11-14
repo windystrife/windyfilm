@@ -355,7 +355,9 @@ Stocks keep their Windy names, and there are no brand logos.
 
 **Roll (shooting).**
 - **One roll at a time.** The roll picker (UI screen ROLL) has shelf tabs Colour / Slide / B&W / Cine / LUT, a can
-  carousel, and 12 / 24 / 36 exposures (default 24). SET loads the roll.
+  carousel, and 12 / 24 / 36 exposures (default 24). SET loads the roll and plays the same load animation as a film
+  load in the browser ("Loading the roll", the can, the film's chips and "12 EXP"), then the UI closes and LiveView
+  shows. A key skips the rest of the animation.
   - While the roll has frames, loading is refused ("develop it first"). A roll with no frames yet is simply reloaded
     with the new film or count.
   - The film is locked while a roll is open: the browser refuses a film change.
@@ -370,29 +372,40 @@ Stocks keep their Windy names, and there are no brand logos.
   - frames past the count are not added, and at the count the roll is FULL.
 - **RAW+L forced.** While a roll can shoot, wf_task sets `PROP_PIC_QUALITY` to RAW + L fine when it differs. The old
   value comes back once the roll is full, rewound or closed, and at unload. A frame without a CR2 does not count.
-- **The shot's JPEG** gets the module's normal 8-bit look of the roll's film, as before, so the card holds a picture
-  at once. RAW develop B at shot time is off in roll mode: the darkroom does it later, and 30 s per frame would hold
-  up the next shot.
-- **One mode at a time** (owner 11-14): both modes are in the one module, but only one is on.
-  - Loading a roll turns the menu "RAW develop" Off (logged; the picker says "RAW develop is off now").
-  - Turning "RAW develop" On while a roll is loaded ends the roll: rewound when it has frames (the Darkroom still
-    develops them), closed when it is empty. A full or rewound roll waiting for the Darkroom does not block B.
+- **The shot's JPEG** gets the module's look of the roll's film at once, so the card holds a picture: the normal
+  8-bit look, or B's develop when the menu "RAW develop" is On.
+- **Both modes at once** (owner 11-14 evening, replacing that afternoon's "one mode at a time"): with a roll loaded
+  and RAW develop On, each RAW+L shot is developed by B right away (about 30 s, as without a roll) and also counts as a
+  roll frame whose CR2 the Darkroom prints later with the roll's film. Loading a roll leaves RAW develop alone, and
+  RAW develop leaves the roll alone. The frame counts once Canon is idle and B has finished (no shot pending), so
+  "WIND ON" comes after B's develop.
+  - Memory: B holds one shoot-memory block (tables + scratch, about 790 KB) while it is On. The darkroom wants a
+    35.8 MB contiguous frame from the same shoot memory, so B gives its block back while a run lives
+    (`wf_rawb_poll` sees `wf_dark_busy()`). The run waits up to 10 s for that (a cube build may be under way) before it allocates (logged), and B
+    builds its tables again after the run. The darkroom does not start while a shot's B develop runs
+    (`wf_rawb_busy()`, "Not now: the camera is busy").
 - **Blind roll** (menu, default On):
   - image review off (`PROP_REVIEW_TIME` 0, the old value back afterwards);
   - PLAY blocked: CBR_KEYPRESS eats it (outside the ML menu) while a roll is in the camera (loaded or rewound, not yet developed or closed) and the darkroom is not running, and shows a short note.
   - Off leaves Canon's review and PLAY alone.
-- **HUD** over LiveView (wf_task draws it, ML colour indices, solid black chips):
+- **HUD** over LiveView (wf_task draws it, ML colour indices, solid black chips). The film info shows for 2.5 s,
+  then fades (owner 11-14: "giu phim info 2-3 s"):
   - "ROLL 021 <short name>" top left;
-  - the counter "5/12" bottom right, red when full, with "WIND ON" for 1 s after a frame, or "END OF ROLL" /
+  - the big counter "5/12" bottom right, red when full, with "WIND ON" for 1 s after a frame, or "END OF ROLL" /
     "REWOUND";
   - an exposure ladder on the right edge.
+  - The fade: 0.4 s in grey with every other pixel cleared (a dither: ML's bitmap palette has no alpha). Then wf_task
+    clears our own rectangles to 0 once, and only a small dim counter "5/12" stays (grey on a black chip, red when
+    full), so the frames left are always in view.
+  - The info shows again for 2.5 s when LiveView comes back (or the ML menu, the UI or PLAY goes away), after each
+    shot (Canon's job ends), when a frame counts, and when the roll, its film or its state changes.
 - **End / close.** "End roll now" (menu) ends the roll early (the roll is rewound: no more frames); starting the darkroom rewinds a loaded roll first.
   "Close roll" gives up on the frames not yet developed: they become K and their CR2s stay untouched.
 
 **Darkroom (developing).**
 - **Entry.** ML menu "Darkroom" opens the darkroom screen. SET starts. MENU stops, after a second MENU to confirm,
   and closes the screen when nothing runs.
-  - Starting needs: not movie mode, a card, and battery >= 30 %.
+  - Starting needs: not movie mode, a card, battery >= 30 %, and no B develop of a shot still running.
 - **Task "wf_dark"**, prio 0x1F (below wf_task 0x1E and the worker 0x1C), lives for one run.
   - At start: PauseLiveView, powersave_prohibit, then the memory:
     - raw: 32,598,720 B from the SRM suite (a contiguous run of its buffers);

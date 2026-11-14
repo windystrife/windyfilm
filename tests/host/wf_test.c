@@ -2417,6 +2417,38 @@ static void t_rawb(void)
     log_mark();
     h_clock_add_ms += 11000;
     chk(LOGW("rawb: tables srgb", 10000), "no memory: the retry builds the tables");
+
+    /* both modes at once (owner 11-14 evening, DESIGN 3.5): a roll is loaded and RAW develop is on: the shot is
+     * developed by B AND counts as a roll frame; a darkroom run takes B's shoot memory, B builds its tables after it */
+    chk(WAIT(wf_rawb_state() == WF_RB_READY, 3000) && h_arena_live == live0 + 1, "roll + B: tables ready");
+    h_set_folder_number(100);
+    h_set_file_number(300);
+    log_mark();
+    chk(wf_roll_req_load(wf_films[fA].id, 12) == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && wf_rawb == 1
+        && LOGW("roll: RAW develop stays on", 3000), "roll + B: the roll loads, RAW develop stays on");
+    pic_quality = 0x3070000;
+    drive_mode = 0;
+    rb_point(RB_A, 0);
+    rb_ref(rb_dev, in, WF_DEV_SRGB, 1);
+    memcpy(ref, rb_dev, NW * 4);
+    ref_film(ref, NW, tabs[fA][0], flags_of(fA, 1));
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    chk(sb == 0 && LOGW("rawb: done rows 3456,", 5000) && ndiff(out, ref, NW) == 0,
+        "roll + B: the shot is developed by B, bit-exact (%d words differ)", ndiff(out, ref, NW));
+    put_file("DCIM/100CANON/IMG_0301.CR2", "II*", 3);
+    h_set_file_number(301);
+    chk(WAIT(wf_roll_now()->nshot == 1, 5000) && LOGW(" frame 1/12 IMG_0301", 3000),
+        "roll + B: the same shot counts as frame 1 (%d/12, '%s')", wf_roll_now()->nshot, log_line(" frame 1/12"));
+    log_mark();
+    int ds = wf_dark_start();
+    chk(ds == 0, "roll + B: the darkroom starts (%d)", ds);
+    chk(LOGW("dark: RAW develop tables given back", 5000) && WAIT(!wf_dark_busy(), 15000),
+        "roll + B: the run waits for B's shoot memory ('%s')", log_line("dark: RAW"));
+    chk(LOGW("dark: roll", 3000), "roll + B: the run ends on the host (no SRM): '%s'", log_line("dark: roll"));
+    chk(LOGW("rawb: tables srgb", 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 3000) && WAIT(h_arena_live == live0 + 1, 3000),
+        "roll + B: after the run B builds its tables again (blocks %d)", h_arena_live);
+    chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "roll + B: Close roll");
     wf_rawb = 0;
     chk(WAIT(h_arena_live == live0, 3000), "off again: memory given back");
     mod_deinit();
@@ -2711,9 +2743,10 @@ static int hs_pv_diff(int k, int flags)
 }
 
 /* ------------------------------------------------------------------ ROLL: Roll + Darkroom in the module (DESIGN 3.5)
- * One mode at a time: loading a roll turns RAW develop off; RAW develop on ends a loaded roll (closed when empty,
- * rewound with its frames). Frames count from the card's file number + CR2; PLAY is blocked while a roll is in the
- * camera (Blind roll). The darkroom run itself is tools/dr_dark_check.sh (the chain) and a camera run (memory). */
+ * Both modes at once (owner 11-14 evening): a roll load leaves RAW develop alone and RAW develop leaves the roll
+ * alone (RAWB checks a B shot that also counts, and a darkroom run taking B's memory). Frames count from the card's
+ * file number + CR2; PLAY is blocked while a roll is in the camera (Blind roll). The darkroom run itself is
+ * tools/dr_dark_check.sh (the chain) and a camera run (memory). */
 extern const int wf_t_me_size, wf_t_me_name, wf_t_me_priv, wf_t_me_select, wf_t_me_children;
 static uint8_t *menu_named(const char *nm)
 {
@@ -2752,29 +2785,37 @@ static void t_roll(void)
     log_mark();
     wf_rawb = 1;
     int rc = wf_roll_req_load(film, 12);
-    chk(rc == 1, "RAW develop on: the load is queued and says RAW develop goes off (%d)", rc);
-    chk(WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && WAIT(wf_rawb == 0, 1000) && LOGW("roll: RAW develop off", 3000),
-        "roll loaded, RAW develop off (state %d, rawb %d)", wf_roll_now()->state, wf_rawb);
+    chk(rc == 0, "RAW develop on: the roll load is queued (%d)", rc);
+    chk(WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && LOGW("roll: RAW develop stays on", 3000) && wf_rawb == 1,
+        "roll loaded, RAW develop stays on (state %d, rawb %d)", wf_roll_now()->state, wf_rawb);
     chk(wf_roll_shooting() && wf_blind && cbr_key(WF_KEY_PLAY) == 0, "roll loaded: it shoots, PLAY blocked (Blind roll)");
-    chk(menu_set("RAW develop") == 0 && wf_rawb == 1, "menu RAW develop: On");
-    chk(WAIT(wf_roll_now()->state == WF_RS_DONE, 5000) && !wf_roll_shooting() && cbr_key(WF_KEY_PLAY) == 1,
-        "the empty roll is closed, PLAY passes (state %d)", wf_roll_now()->state);
-    rc = wf_roll_req_load(film, 12);
-    chk(rc == 1 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && WAIT(wf_rawb == 0, 1000),
-        "second roll loaded (%d), RAW develop off again (%d)", rc, wf_rawb);
+    chk(menu_named("RAW develop") && menu_set("RAW develop") == -1, "menu RAW develop: a plain toggle again (no select)");
+    wf_rawb = 0;
+    usleep(600000);
+    chk(wf_roll_now()->state == WF_RS_LOADED && wf_rawb == 0, "RAW develop off: the roll stays loaded (%d)",
+        wf_roll_now()->state);
+    wf_rawb = 1;
+    usleep(600000);
+    chk(wf_roll_now()->state == WF_RS_LOADED && wf_roll_shooting() && !log_has("roll: RAW develop off"),
+        "RAW develop on again: the roll stays loaded, no switch-off either way (%d)", wf_roll_now()->state);
     put_file("DCIM/100CANON/IMG_0207.CR2", "II*", 3);
     h_set_file_number(207);
-    chk(WAIT(wf_roll_now()->nshot == 1, 5000), "a RAW+L frame counts (%d/12)", wf_roll_now()->nshot);
+    chk(WAIT(wf_roll_now()->nshot == 1, 5000), "a RAW+L frame counts with RAW develop on (%d/12)", wf_roll_now()->nshot);
     h_set_file_number(208);                         /* a JPEG-only shot: no CR2, not a frame */
     usleep(600000);
     chk(wf_roll_now()->nshot == 1, "a shot without a CR2 does not count (%d/12)", wf_roll_now()->nshot);
-    chk(menu_set("RAW develop") == 0 && wf_rawb == 1, "menu RAW develop: On again");
-    chk(WAIT(wf_roll_now()->state == WF_RS_REWOUND, 5000) && wf_roll_now()->nshot == 1 && !wf_roll_shooting(),
-        "the roll with a frame is rewound, not closed (state %d, %d frame)", wf_roll_now()->state, wf_roll_now()->nshot);
+    chk(wf_roll_req_rewind() == 0 && WAIT(wf_roll_now()->state == WF_RS_REWOUND, 5000) && wf_roll_now()->nshot == 1
+        && !wf_roll_shooting() && wf_rawb == 1, "End roll now: rewound with its frame, RAW develop stays on (state %d)",
+        wf_roll_now()->state);
     chk(cbr_key(WF_KEY_PLAY) == 0, "rewound roll: PLAY still blocked until it is developed or closed");
     chk(wf_roll_req_load(film, 24) == -1, "a roll with frames in the camera: a new load is refused");
-    chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000) && wf_rawb == 1,
-        "Close roll: done, RAW develop stays on");
+    chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000) && wf_rawb == 1
+        && cbr_key(WF_KEY_PLAY) == 1, "Close roll: done, RAW develop stays on, PLAY passes");
+    wf_rawb = 0;
+    rc = wf_roll_req_load(film, 12);
+    chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && wf_rawb == 0,
+        "RAW develop off: a roll loads, RAW develop stays off (%d, %d)", rc, wf_rawb);
+    chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "the empty roll closes");
     long n;
     char *b = get_file("ML/SETTINGS/WFROLL.TXT", &n);
     chk(b && n == 1536 && strstr(b, "state=done"), "roll file: 1536 bytes, state=done (%ld)", n);

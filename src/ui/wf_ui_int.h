@@ -105,7 +105,9 @@ void wfui_render_anim(int t, int first);/* the load animation at t ms over it (f
 enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_ROLL, WFUI_SCR_DARK, WFUI_SCR_N };
 void wfdr_enter(int scr);               /* the screen becomes active: palette theme, its state */
 void wfdr_render(int scr, int now);     /* draw it into the idle buffer */
-int  wfdr_key(int scr, int key);        /* 1 = close the UI */
+enum { WFDR_STAY = 0, WFDR_CLOSE = 1, WFDR_LOADED = 2 };
+int  wfdr_key(int scr, int key);        /* WFDR_*: LOADED = a roll was loaded (wf_ui.c: the load animation, then close) */
+const struct wf_film *wfdr_loaded(int *nexp);   /* that roll's film and exposures */
 int  wfdr_tick(int scr, int now);       /* 1 = something moved (redraw now) */
 void wfdr_leave(int scr);
 

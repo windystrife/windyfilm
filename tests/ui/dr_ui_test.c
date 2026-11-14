@@ -13,6 +13,7 @@
 int wfdr_host_tab(void);
 int wfdr_host_exp(void);
 int wfdr_host_sel_id(void);
+int wfui_host_anim(void);
 
 static const char *outdir;
 static int fails, closed;
@@ -91,16 +92,17 @@ static void roll_of(int film, int exp, int n, int state)
     r->state = state;
 }
 
-static void hud_dump(const char *name, int blink)
+static uint8_t hv[480 * 720];
+static void hud_dump(const char *name, int blink, int mode, int keep)   /* keep: draw over the last dump (CLEAR) */
 {
-    static uint8_t v[480 * 720];
-    memset(v, 0, sizeof v);
+    uint8_t *v = hv;
+    if (!keep) memset(v, 0, sizeof hv);
     wfdr_hud_fonts(1);
-    wfdr_hud(v, 720, blink);
+    wfdr_hud(v, 720, blink, mode);
     char p[700];
     snprintf(p, sizeof p, "%s/hud_%s.idx", outdir, name);
     FILE *f = fopen(p, "wb");
-    if (f) { fwrite(v, 1, sizeof v, f); fclose(f); }
+    if (f) { fwrite(v, 1, sizeof hv, f); fclose(f); }
     printf("hud %s\n", p);
 }
 
@@ -140,7 +142,17 @@ int main(int argc, char **argv)
     key(MODULE_KEY_PRESS_SET);
     CHECK(fake_req_film() == want && fake_req_exp() == we, "SET did not load the roll (%d %d)", fake_req_film(), fake_req_exp());
     CHECK(wf_roll_now()->state == WF_RS_LOADED, "roll not loaded");
-    close_ui();
+    /* as a film load (owner 11-14): the load animation, then the UI closes (LiveView) */
+    CHECK(wfui_host_anim() && !closed, "SET on a roll: no load animation");
+    tick(10);
+    shot("roll_anim_wind");
+    tick(30);
+    shot("roll_anim_loaded");
+    tick(40);
+    CHECK(closed, "the roll's load animation did not close the UI");
+    wfui_task_end();
+    CHECK(!wf_ui_is_open() && host_palette_is_canon() && host_live_allocs() == 0, "after the roll's animation: open %d, "
+          "palette %d, %ld allocations", wf_ui_is_open(), host_palette_is_canon(), host_live_allocs());
 
     /* 2. picker with a roll on the camera, 5 of 12 shot: SET says develop first */
     roll_of(bw, 12, 5, WF_RS_LOADED);
@@ -226,10 +238,20 @@ int main(int argc, char **argv)
 
     /* 10. HUD over LiveView */
     roll_of(bw, 12, 5, WF_RS_LOADED);
-    hud_dump("5of12", 0);
-    hud_dump("5of12_wind", 1);
+    hud_dump("5of12_wind", 1, WF_HUD_FULL, 0);
+    hud_dump("5of12_fade", 0, WF_HUD_FADE, 0);
+    hud_dump("5of12", 0, WF_HUD_FULL, 0);
+    hud_dump("5of12_small", 0, WF_HUD_CLEAR, 1);   /* the info's 2.5 s are over: only the small counter is left */
+    int left = 0, inside = 0;
+    for (int y = 0; y < 480; y++)
+        for (int x = 0; x < 720; x++)
+            if (hv[y * 720 + x]) { if (y >= 398 && y <= 416 && x >= 620 && x <= 690) inside++; else left++; }
+    CHECK(left == 0 && inside > 200, "CLEAR after FULL: %d pixels left outside the small counter (%d in it)", left, inside);
     roll_of(colour, 36, 36, WF_RS_FULL);
-    hud_dump("full", 0);
+    hud_dump("full", 0, WF_HUD_FULL, 0);
+    hud_dump("full_small", 0, WF_HUD_CLEAR, 1);
+    roll_of(colour, 36, 7, WF_RS_REWOUND);
+    hud_dump("rewound", 0, WF_HUD_FULL, 0);
     wfdr_hud_fonts(0);
 
     printf("peak UI heap %ld bytes\n", host_peak_bytes());

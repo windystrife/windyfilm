@@ -1285,11 +1285,13 @@ static MENU_UPDATE_FUNC(wf_rawb_update)
 {
     int st = wf_rawb_state(), dm = drive_mode;
     if (!wf_rawb && wf_roll_shooting())
-        MENU_SET_WARNING(MENU_WARN_INFO, "A roll is loaded: turning this on ends the roll (Darkroom develops it).");
+        MENU_SET_WARNING(MENU_WARN_INFO, "On: each roll frame is also developed now (30 s), and printed later.");
     else if (!wf_rawb)
         MENU_SET_WARNING(MENU_WARN_INFO, "Develops the RAW of a RAW+L shot: about 30 s each. Off at boot.");
     else if (!wf_yuv_active())
         WF_NOT_ACTIVE();
+    else if (wf_dark_busy())
+        MENU_SET_WARNING(MENU_WARN_INFO, "The Darkroom runs: its tables are given back, built again after it.");
     else if (pic_quality != PICQ_RAW_JPG_LARGE_FINE)
         MENU_SET_WARNING(MENU_WARN_ADVICE, "Set image quality to RAW+L: other shots get the normal look.");
     else if (dm != DRIVE_SINGLE && dm != 0x10 && dm != 0x11)
@@ -1305,30 +1307,11 @@ static MENU_UPDATE_FUNC(wf_rawb_update)
     else
         MENU_SET_WARNING(MENU_WARN_INFO, "About 30 s per shot. Hold half-shutter to stop.");
 }
-/* one mode at a time (docs/DESIGN.md 3.5): RAW develop on ends a loaded roll (rewound when it has frames, so the
- * Darkroom still develops them; closed when empty), and loading a roll turns RAW develop off (wf_dark.c) */
-static MENU_SELECT_FUNC(wf_rawb_select)
-{
-    (void)priv; (void)delta;
-    if (wf_rawb) {
-        wf_rawb = 0;
-        return;
-    }
-    const struct wf_roll *r = wf_roll_now();
-    if (r->state == WF_RS_LOADED) {
-        int had = r->nshot;
-        if ((had > 0 ? wf_roll_req_rewind() : wf_roll_req_close()) != 0) {
-            NotifyBox(2000, "Busy: try again");
-            return;
-        }
-        NotifyBox(3000, had > 0 ? "Roll ended: develop it in the Darkroom" : "Empty roll closed");
-        wf_log("menu: RAW develop on, roll %03d ended (%d frame(s))", r->num, had);
-    }
-    wf_rawb = 1;
-}
+/* both modes at once (owner 11-14 evening, docs/DESIGN.md 3.5): with a roll loaded each frame gets B at shot time and
+ * still counts for the Darkroom, so this is a plain toggle again */
 #define WF_RAWB_ENTRY { .name = "RAW develop", .priv = (void *)&wf_rawb, .max = 1, .choices = wf_rawb_name, \
-                        .select = wf_rawb_select, .update = wf_rawb_update, \
-                        .help = "Slow: the look from Canon's RAW (RAW+L single shots). Off while a roll shoots." },
+                        .update = wf_rawb_update, \
+                        .help = "Slow: the look from Canon's RAW (RAW+L single shots). Works with a roll too." },
 #else
 #define WF_RAWB_ENTRY
 #endif
@@ -1360,7 +1343,7 @@ static MENU_UPDATE_FUNC(wf_roll_update)
         MENU_SET_WARNING(MENU_WARN_INFO, "%s, %s. RAW+L is set while the roll shoots.", f->name, wf_rs_text[r->state]);
 #if WF_RAWB_CAN
     else if (wf_rawb)
-        MENU_SET_WARNING(MENU_WARN_INFO, "Loading a roll turns RAW develop off (one mode at a time).");
+        MENU_SET_WARNING(MENU_WARN_INFO, "RAW develop stays on: frames get B now and a print later.");
 #endif
 }
 static MENU_SELECT_FUNC(wf_blind_select) { (void)priv; (void)delta; wf_blind = !wf_blind; wf_dirty(); }

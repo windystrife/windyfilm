@@ -37,5 +37,7 @@ enum { WF_RBW_OK = 0, WF_RBW_NOTAB, WF_RBW_BUF, WF_RBW_PREP, WF_RBW_LOOK, WF_RBW
 void wf_rawb_note(const struct wf_frame *f, int why);
 void wf_rawb_poll(void);                         /* wf_task: tables, memory, the progress box, the shot's log line */
 void wf_rawb_end(void);                          /* wf_task at unload: waits up to 2 s for a develop to stop, frees */
+int  wf_rawb_busy(void);                         /* a shot's develop runs (the darkroom does not start then) */
+int  wf_rawb_holds(void);                        /* the tables + scratch block is held, or a develop runs */
 
 #endif
