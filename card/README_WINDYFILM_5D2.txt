@@ -69,7 +69,25 @@ Grain và Halation mặc định tắt trên 5D2 (mỗi nửa ảnh tốn vài g
   Lần đầu nạp cube mất vài giây, sau đó dùng cache .FRT.
 - 13 lon "Tung" cũ giờ tên "Windy ...": Windy Neutral, Windy EKTA P,
   Windy 250D P / M, Windy 500T P / M, Windy EKTA M, Windy EKTAa P / M,
-  Windy EXR P / M, Windy EXRa P / M. Tên file cube trên thẻ giữ nguyên.
+  Windy EXR P / M, Windy EXRa P / M.
+- 12 lon Windy của CinePrint (tất cả trừ Windy Neutral) giờ dùng cube
+  Canon Log 2 thay cho V-Log, cho đúng log của Canon. Nạp lon thì Log curve
+  thành Canon Log 2 và cube là ML/data/<mã>C2.CUB: EKTAP_C2, T250DPC2,
+  T250DMC2, T500TPC2, T500TMC2, TEKTAMC2, TEKAAPC2, TEKAAMC2, TEXRP_C2,
+  TEXRM_C2, TEXRAPC2, TEXRAMC2. Đây là cube 65^3 xuất từ PowerGrade C-Log2
+  của CinePrint (file "C-Log2 <look> 65.cube"), màu dày hơn bản OSM.
+  Thiếu cube nào thì lon đó báo "LUT cube not on the card".
+  Windy EKTA P giờ là PowerGrade "C-Log2 EKTA P" của CinePrint: lon KHÔNG
+  còn nạp EKTAP_VL.CUB (bản "Tung EKTA P V-Log" bạn xuất). File đó cứ để
+  trên thẻ: hàng Film LUT với Log curve V-Log chọn tay vẫn dùng nó.
+  Các cube V-Log cũ (T250DPVL.CUB ...) cũng vậy: chọn tay Log curve V-Log
+  ở hàng Film LUT thì module dùng cube V-Log nếu có trên thẻ.
+  Windy Neutral vẫn là V-Log (TUNGNTVL.CUB).
+  Lần đầu nạp một cube 65^3 mất khoảng 20 giây trên EOS M (cube 33^3 khoảng
+  5 giây): đợi menu Film LUT hết báo "Loading" rồi hãy chụp. Sau đó module
+  nạp từ cache .FRT, nhanh như cũ (cache V-Log cũ không dùng lại). Đổi LUT
+  EI hoặc Input curve thì cube được nạp lại từ đầu. Chép cube khác đè đúng
+  tên (ví dụ bản OSM 33^3) cũng chạy, không cần module mới.
 - Input curve (cho Log + LUT và lon Film LUT): sRGB, Canon Film 1 hoặc Canon
   Neutral. Hai đường cong đo trên EOS M (Film 1: file trong User Def. 1,
   Contrast -2; Neutral: Contrast 0); trên 5D2 chưa kiểm, cứ để sRGB nếu không

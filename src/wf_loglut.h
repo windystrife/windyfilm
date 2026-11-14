@@ -150,7 +150,9 @@ const char *wf_loglut_cache_path(int mode);
                                                * Film LUT can (WF_FLUT_CAT_N == WF_FLUT_N) */
 #define WF_FLUT_VL_END 11                     /* first cube after the owner's six (11 EKTA P has every log) */
 #define WF_FLUT_EKTAP 11
-#define WF_FLUT_TUNG0 12                      /* V14T: the eleven Windy cubes 12..22 (named Tung until 11-14), V-Log only */
+#define WF_FLUT_TUNG0 12                      /* V14T: the eleven Windy cubes 12..22 (named Tung until 11-14); on Canon Log 2
+                                               * since 11-14 (wf_flut_curve), WF_FLUT_VLONLY keeps meaning "no S-Log3 /
+                                               * LogC3 / C-Log3 file": their C2 cube, and the old VL one if still there */
 #define WF_FLUT_LEICAV 23                     /* 11-14: Leica Vivid, the owner's display cube (sRGB in, sRGB out): LEICAVSR.CUB */
 #define WF_FLUT_N     24
 /* a look made on the camera's rendered picture (Leica Vivid: the display cube applied to the Standard JPEG's sRGB codes, no
@@ -158,6 +160,12 @@ const char *wf_loglut_cache_path(int mode);
  * by hand still works), loading it sets Picture Style Standard, and its file is <code>SR.CUB whatever the Log curve */
 #define WF_FLUT_DISP(l) ((l) == WF_FLUT_LEICAV)
 #define WF_FLUT_VLONLY(l) (((l) >= WF_FLUT_VL0 && (l) < WF_FLUT_VL_END) || ((l) >= WF_FLUT_TUNG0 && (l) < WF_FLUT_LEICAV))
+/* the Log curve a cube was made for (WF_LL_*; 0 = Technical, any curve): a Film LUT can's Load sets this curve. 1..10 and
+ * Leica Vivid V-Log; 11 EKTA P and 12..22 Canon Log 2 since 11-14 (owner: "thay het qua clog2 thoi ban may cai cineprint
+ * ay": the twelve CinePrint looks as their "OSM - Canon Log2" cubes, <code>C2.CUB, Cinema Gamut; films/catalog.py
+ * FLUT_CURVE). Their V-Log cubes may stay on the card: only the Film LUT row with Log curve V-Log set by hand uses them. */
+extern const uint8_t wf_flut_curve[WF_FLUT_N];
+#define WF_FLUT_CURVE(l) ((l) > 0 && (l) < WF_FLUT_N && wf_flut_curve[l] ? wf_flut_curve[l] : WF_LL_VLOG)
 extern const char *wf_flut_name[WF_FLUT_N];           /* "Technical", "Vision3 250D", .. (menu choices, EXIF text) */
 extern const char *const wf_flut_code[WF_FLUT_N];   /* "", "V250D", .. (the short form in the "shot #" log line) */
 /* the cube (frt 0) or its .FRT table cache (frt 1) of output `mode` for Film LUT `lut`: "ML/DATA/<wf_flut_code padded with _ to 6

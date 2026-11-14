@@ -44,6 +44,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 #define WF_ML_HEADERS
 #include "wf_core.h"
@@ -2499,6 +2500,185 @@ static void t_leica(void)
     mod_deinit();
 }
 
+/* the CinePrint looks on Canon Log 2 (owner 11-14 "thay het qua clog2 thoi ban may cai cineprint ay"): Windy EKTA P (11)
+ * and 12..22 load Canon Log 2 and their <code>C2.CUB; their V-Log cubes of before do not make a can show; the Film LUT row
+ * brings each cube on its own curve, and a Log curve set by hand that is not the cube's own stays and finds that curve's
+ * cube (mk_card.sh CINEPRINT_C2 writes the C2 names) */
+static void t_clog2(void)
+{
+    char nb[WF_LL_NAME];
+    int ok = 1;
+    for (int l = -1; l <= WF_FLUT_N; l++)
+        ok &= WF_FLUT_CURVE(l) == (l >= WF_FLUT_EKTAP && l < WF_FLUT_LEICAV ? WF_LL_CLOG2 : WF_CURVE_VLOG);
+    chk(ok, "cube curves: Canon Log 2 for Film LUT 11..22, V-Log for the others and out of range");
+    chk(!strcmp(wf_loglut_name(nb, WF_LL_CLOG2, 12, 0), "ML/DATA/T250DPC2.CUB")
+        && !strcmp(wf_loglut_name(nb, WF_LL_CLOG2, 12, 1), "ML/DATA/T250DPC2.FRT")
+        && !strcmp(wf_loglut_name(nb, WF_LL_CLOG2, WF_FLUT_EKTAP, 0), "ML/DATA/EKTAP_C2.CUB")
+        && !strcmp(wf_loglut_name(nb, WF_LL_CLOG2, 19, 0), "ML/DATA/TEXRP_C2.CUB")
+        && !strcmp(wf_loglut_name(nb, WF_LL_CLOG2, 22, 0), "ML/DATA/TEXRAMC2.CUB")
+        && !strcmp(wf_loglut_name(nb, WF_CURVE_VLOG, 12, 0), "ML/DATA/T250DPVL.CUB"),
+        "C2 cube names T250DPC2 / EKTAP_C2 / TEXRP_C2 / TEXRAMC2, the V-Log names kept");
+    int k11 = -1, k12 = -1, k13 = -1, k9 = -1;
+    for (int k = 0; k < wf_nfilms; k++)
+        if (wf_films[k].flags & WF_F_LUTCAN) {
+            if (wf_cat_lut[k] == WF_FLUT_EKTAP) k11 = k;
+            if (wf_cat_lut[k] == 12) k12 = k;
+            if (wf_cat_lut[k] == 13) k13 = k;
+            if (wf_cat_lut[k] == 9) k9 = k;
+        }
+    if (k11 < 0 || k12 < 0 || k13 < 0 || k9 < 0) {
+        chk(0, "catalogue: cans of Film LUT 9 / 11 / 12 / 13 (%d %d %d %d)", k9, k11, k12, k13);
+        return;
+    }
+    const char *f11 = wf_films[k11].format, *f12 = wf_films[k12].format, *f9 = wf_films[k9].format;
+    chk(f11 && f12 && f9 && !strcmp(f11, "C-Log2") && !strcmp(f12, "C-Log2") && !strcmp(f9, "V-Log"),
+        "catalogue chip: Windy EKTA P / 250D P 'C-Log2', Windy Neutral 'V-Log' (%s %s %s)", f11 ? f11 : "-",
+        f12 ? f12 : "-", f9 ? f9 : "-");
+    int id11 = wf_films[k11].id, id12 = wf_films[k12].id, id9 = wf_films[k9].id;
+
+    /* only the V-Log cubes of before on the card: the CinePrint cans are hidden and do not load */
+    std_pack();
+    put_cfg("output=off\n");
+    cube_write("ML/DATA/TUNGNTVL.CUB", 9);
+    cube_write("ML/DATA/T250DPVL.CUB", 9);
+    cube_write("ML/DATA/T250DMVL.CUB", 9);
+    cube_write("ML/DATA/EKTAP_VL.CUB", 9);
+    mod_init(1);
+    chk(WAIT(wf_avail(id9), 5000) && !wf_avail(id12) && !wf_avail(id11) && wf_load(id12) == WF_LOAD_NOCUBE
+        && wf_load(id11) == WF_LOAD_NOCUBE && wf_out != WF_OUT_LLUT,
+        "V-Log cubes only (T250DPVL, EKTAP_VL): Windy 250D P and EKTA P hidden, no load; Windy Neutral shown");
+
+    /* its C2 cube: Load sets Canon Log 2 + LUT */
+    cube_write("ML/DATA/T250DPC2.CUB", 9);
+    cube_write("ML/DATA/TEKTAMC2.CUB", 9);       /* Windy EKTA M (16): the next C2 cube on the row */
+    log_mark();
+    chk(wf_load(id12) == WF_LOAD_OK && wf_loaded() == id12 && wf_out == WF_OUT_LLUT && wf_flut == 12
+        && wf_curve == WF_LL_CLOG2, "load Windy 250D P: Canon Log 2 + LUT, Film LUT 12");
+    chk(LOGW("lut T250DPC2.CUB", 60000) && WAIT(wf_ll_state(WF_LL_CLOG2) == WF_LL_OK, 5000)
+        && wf_ll_have_curve() == WF_LL_CLOG2 && wf_ll_auto == 1 && wf_ll_disp == 0,
+        "its C2 cube loaded, auto exposure on: '%s'", log_line("lut T250DPC2.CUB"));
+    chk(!strcmp(wf_row_text(WF_ROW_FLUT), "Windy 250D P"), "Film LUT row: '%s'", wf_row_text(WF_ROW_FLUT));
+
+    /* the Film LUT row: each cube on its own curve */
+    wf_row_step(WF_ROW_FLUT, 1);
+    chk(wf_flut == 16 && wf_curve == WF_LL_CLOG2 && wf_out == WF_OUT_LLUT,
+        "row +1: 250D M (only its V-Log cube) skipped, Windy EKTA M on Canon Log 2 (Film LUT %d, curve %d)", wf_flut, wf_curve);
+    wf_row_step(WF_ROW_FLUT, -1);
+    wf_row_step(WF_ROW_FLUT, -1);
+    chk(wf_flut == 9 && wf_curve == WF_CURVE_VLOG && wf_out == WF_OUT_LLUT,
+        "row -1 twice: back over 250D P to Windy Neutral, on its V-Log (Film LUT %d, curve %d)", wf_flut, wf_curve);
+    wf_row_step(WF_ROW_FLUT, 1);
+    chk(wf_flut == 12 && wf_curve == WF_LL_CLOG2 && wf_loaded() == id12,
+        "row +1: Windy 250D P on Canon Log 2 again, the can counts as loaded");
+
+    /* V-Log set by hand on a CinePrint look: kept, its V-Log cube used, the row offers the cubes V-Log has */
+    log_mark();
+    wf_curve = WF_CURVE_VLOG;
+    chk(wf_loaded() != id12 && LOGW("lut T250DPVL.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000),
+        "V-Log by hand: T250DPVL.CUB, the can no longer the loaded look: '%s'", log_line("lut T250DPVL.CUB"));
+    wf_row_step(WF_ROW_FLUT, 1);
+    chk(wf_flut == 13 && wf_curve == WF_CURVE_VLOG, "row +1 on V-Log by hand: Windy 250D M through T250DMVL.CUB (%d, %d)",
+        wf_flut, wf_curve);
+    wf_row_step(WF_ROW_FLUT, 1);
+    chk(wf_flut == WF_FLUT_EKTAP && wf_curve == WF_CURVE_VLOG, "row +1: Windy EKTA P through EKTAP_VL.CUB (%d, %d)",
+        wf_flut, wf_curve);
+
+    /* the can's Load: Canon Log 2 and EKTAP_C2.CUB whatever the curve before, EKTAP_VL.CUB not used */
+    chk(wf_load(id11) == WF_LOAD_NOCUBE, "Windy EKTA P without EKTAP_C2.CUB: no load (EKTAP_VL.CUB does not count)");
+    cube_write("ML/DATA/EKTAP_C2.CUB", 9);
+    log_mark();
+    chk(wf_load(id11) == WF_LOAD_OK && wf_flut == WF_FLUT_EKTAP && wf_curve == WF_LL_CLOG2 && wf_loaded() == id11,
+        "load Windy EKTA P: Canon Log 2 + EKTAP_C2.CUB");
+    chk(LOGW("lut EKTAP_C2.CUB", 60000) && WAIT(wf_ll_state(WF_LL_CLOG2) == WF_LL_OK, 5000),
+        "EKTAP_C2.CUB loaded: '%s'", log_line("lut EKTAP_C2.CUB"));
+    wf_out = WF_OUT_OFF;
+    mod_deinit();
+}
+
+/* a 65^3 cube dropped in under a can's name (owner 11-14: the final CinePrint cubes are 65^3 exports of the C-Log2
+ * PowerGrades, the 33^3 OSM cubes until then): no code change. It parses over a 33^3 file of the same name (not the old
+ * cache), its .FRT is as big as a 33^3 one's and is used on the next load, and an identity cube gives the same tables at
+ * both sizes (+-1). WF_CUBE_REAL=<file>[:<file>..] also loads real cubes under that name and prints the first-load and
+ * cache times (qemu wall time: only their ratio means something for the camera) */
+static long fsize(const char *p) { struct stat st; return stat(p, &st) ? -1 : (long)st.st_size; }
+static long ms_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000L + t.tv_nsec / 1000000; }
+static int ll_maxd(const struct wf_lltabs *a, const struct wf_lltabs *b)
+{
+    int m = 0;
+    for (int i = 0; i < 256; i++) { int d = abs(a->N[i] - b->N[i]); if (d > m) m = d; }
+    for (int i = 0; i < WF_LL_NODES; i++) {
+        int d = abs(a->Y[i] - b->Y[i]);
+        int e = abs((int)(a->C[i] & 0xffff) - (int)(b->C[i] & 0xffff)) / 2, f = abs((int)(a->C[i] >> 16) - (int)(b->C[i] >> 16)) / 2;
+        if (d > m) m = d;
+        if (e > m) m = e;
+        if (f > m) m = f;
+    }
+    return m;
+}
+static int fcopy(const char *from, const char *to)
+{
+    FILE *a = fopen(from, "rb"), *b = a ? fopen(to, "wb") : 0;
+    char buf[65536];
+    size_t n;
+    int ok = a && b;
+    while (ok && (n = fread(buf, 1, sizeof buf, a)) > 0)
+        ok = fwrite(buf, 1, n, b) == n;
+    if (a) fclose(a);
+    if (b) fclose(b);
+    return ok;
+}
+static void t_cube65(void)
+{
+    static struct wf_lltabs l33, l65, lc;
+    struct wf_ll_info inf;
+    const char *cub = "ML/DATA/T250DPC2.CUB", *frt = "ML/DATA/T250DPC2.FRT";
+    char nb[WF_LL_NAME];
+    chk(!strcmp(wf_loglut_name(nb, WF_LL_CLOG2, 12, 1), frt), "the cache of Windy 250D P's cube: %s", nb);
+    wf_ll_ei = 0;
+    wf_ll_auto = 1;
+    wf_ll_disp = 0;
+    cube_write(cub, 33);
+    unlink(frt);
+    long t0 = ms_now();
+    int rc = wf_loglut_load_cached(cub, frt, WF_LL_CLOG2, &l33, &inf);
+    long t33 = ms_now() - t0, s33 = fsize(frt);
+    chk(rc == WF_LL_OK && !inf.cached && inf.n == 33 && s33 > (long)sizeof l33,
+        "33^3 identity: parsed in %ld ms, .FRT %ld B", t33, s33);
+    cube_write(cub, 65);                         /* the 65^3 file over it, same name */
+    long c65 = fsize(cub);
+    t0 = ms_now();
+    rc = wf_loglut_load_cached(cub, frt, WF_LL_CLOG2, &l65, &inf);
+    long t65 = ms_now() - t0;
+    chk(rc == WF_LL_OK && !inf.cached && inf.n == 65 && inf.samples == 65 * 65 * 65 && inf.clamped == 0,
+        "65^3 over the 33^3 file (%ld B): parsed, not the old cache, %ld ms (%ld.%ld x the 33^3 time), peak %u B",
+        c65, t65, t33 ? t65 / t33 : 0, t33 ? t65 * 10 / t33 % 10 : 0, (unsigned)inf.peak);
+    chk(fsize(frt) == s33, ".FRT %ld B, as for 33^3 (%ld)", fsize(frt), s33);
+    t0 = ms_now();
+    rc = wf_loglut_load_cached(cub, frt, WF_LL_CLOG2, &lc, &inf);
+    chk(rc == WF_LL_OK && inf.cached && ll_same(&l65, &lc), "next load from the cache, same tables, %ld ms", ms_now() - t0);
+    int md = ll_maxd(&l33, &l65);
+    chk(md <= 1, "identity at 33^3 and 65^3: the same tables (max %d code)", md);
+
+    /* real cubes (manual: WF_CUBE_REAL=a.cube:b.cube ./test.sh CUBE65) */
+    const char *rl = getenv("WF_CUBE_REAL");
+    static char list[2048];
+    snprintf(list, sizeof list, "%s", rl ? rl : "");
+    for (char *f = strtok(list, ":"); f; f = strtok(0, ":")) {
+        unlink(frt);
+        if (!fcopy(f, cub)) { printf("real cube %s: not copied\n", f); continue; }
+        t0 = ms_now();
+        rc = wf_loglut_load_cached(cub, frt, WF_LL_CLOG2, &l65, &inf);
+        long a = ms_now() - t0;
+        t0 = ms_now();
+        int rc2 = wf_loglut_load_cached(cub, frt, WF_LL_CLOG2, &lc, &inf);
+        long b = ms_now() - t0;
+        printf("real cube %s: %ld B, %d^3, rc %d, first load %ld ms, then cache rc %d cached %d %ld ms, .FRT %ld B, '%s'\n",
+               f, fsize(cub), inf.n, rc, a, rc2, inf.cached, b, fsize(frt), inf.title);
+    }
+    unlink(cub);
+    unlink(frt);
+}
+
 /* ------------------------------------------------------------------ main */
 int main(int argc, char **argv)
 {
@@ -2531,6 +2711,8 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LOG")) t_log(cs);
     else if (!strcmp(mode, "HS")) t_hs();
     else if (!strcmp(mode, "LEICA")) t_leica();
+    else if (!strcmp(mode, "CLOG2")) t_clog2();
+    else if (!strcmp(mode, "CUBE65")) t_cube65();
 #ifdef WF_BUILD_5D2
     else if (!strcmp(mode, "5D2")) t_5d2();
     else if (!strcmp(mode, "PROBE")) t_probe_5d2();
