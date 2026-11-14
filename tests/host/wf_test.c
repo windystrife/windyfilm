@@ -16,6 +16,8 @@
  *   LIGHT              Day / Cloudy / Tungsten / Auto, film kelvin, user WB back
  *   PRINT              Scan / Cine / Paper rows and shots, missing variants
  *   5D2                (5D2 build) TOP / BOT pairing: BOT alone, owed BOT, pairing timeout, r1 / RAW gates, Log halves
+ *   PROBE              (EOS M build) RAW probe P0: off at boot, record + log + WFPROBE.BIN, uncached alias, out-of-pool,
+ *                      CHANGED after the worker, ROM-call mode, gate reject probed, r2 != 0 not, frame never touched
  * Output: PASS / FAIL lines, then "RESULT MODE CASE: P pass, F fail"; exit status 1 on any failure. */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -1385,6 +1387,117 @@ static void t_5d2(void)
 }
 #endif
 
+#ifndef WF_BUILD_5D2
+/* ------------------------------------------------------------------ PROBE (RAW probe P0, EOS M) */
+#define PRB_REC 4696                             /* sizeof(struct wf_prb) in wf_cam_eosm.c */
+static uint32_t fnv4k(const uint8_t *p)
+{
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < 4096; i++) { h ^= p[i]; h *= 16777619u; }
+    return h;
+}
+static void probe_nn(uint32_t r2)
+{
+    memcpy(fa, in, NW * 4);
+    memset(regs, 0, sizeof regs); regs[0] = 0x00ABC000u; regs[1] = FRAME_A; regs[2] = r2; call_hook(S_NN);
+    memcpy(out, fa, NW * 4);
+}
+static void t_probe(void)
+{
+    const uint32_t raw_u = FRAME_B + 0x100002u, a0_u = FRAME_B + 0x10000u, a1_u = FRAME_A;
+    uint8_t *b = (uint8_t *)fb;
+    for (uint32_t i = 0; i < B_USED; i++) b[i] = (uint8_t)((i * 0x9E3779B1u) >> 24);
+    memset(h_pb, 0, sizeof h_pb);
+    h_pb[0x00 / 4] = 2;
+    h_pb[0x50 / 4] = raw_u - 0x40000000u;        /* cached twins: the probe reads the uncached alias */
+    h_pb[0x60 / 4] = 1;
+    h_pb[0x64 / 4] = a0_u - 0x40000000u;
+    h_pb[0x68 / 4] = a1_u - 0x40000000u;         /* "A1" = the frame itself: graded in place -> CHANGED */
+    h_pb[0x94 / 4] = 5184; h_pb[0x98 / 4] = 5184; h_pb[0x9c / 4] = 3456;
+    h_edmac[0] = 0x30000000u;                    /* outside the shoot pool: never read */
+    h_edmac[1] = 0x4D000000u; h_edmac[2] = 0x4D100000u; h_edmac[3] = 0x4D200000u; h_edmac[4] = 0x4D300000u;
+    for (int i = 0; i < 5; i++) h_nav_a[i] = 0x0C010000u + 0x100000u * i;
+
+    std_pack();
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\n", wf_films[fA].id);
+    mod_init(1);
+    h_prop_send(PROP_ASPECT, 0);
+    gen_frame(in, FW, FH, 0);
+    chk(WAIT(look_table_ready(), 10000), "film table published");
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fA][0], flags_of(fA, 1));
+
+    /* off (the boot state): no record, no file, no ROM call */
+    chk(wf_probe_mode == WF_PRB_OFF, "probe off at boot");
+    log_mark();
+    probe_nn(0);
+    chk(ndiff(out, ref, NW) == 0, "off: the film shot as always");
+    chk(LOGW(": film ", 3000), "off: shot logged");
+    usleep(300000);
+    long n = -1;
+    char *f = get_file("ML/LOGS/WFPROBE.BIN", &n);
+    chk(!log_has("probe #") && !f && h_nav_calls == 0, "off: no probe line, no WFPROBE.BIN, no ROM call");
+    free(f);
+
+    /* on */
+    wf_probe_mode = WF_PRB_ON;
+    log_mark();
+    probe_nn(0);
+    chk(ndiff(out, ref, NW) == 0, "on: the frame is graded exactly as without the probe");
+    chk(LOGW("probe #1 r0 00abc000 r1 48000000 r2 0 mode 1", 5000), "on: header '%s'", log_line("probe #1"));
+    chk(LOGW("probe pb+60 00000001 ", 3000), "on: parameter block dumped ('%s')", log_line("probe pb+60"));
+    chk(log_has("probe edmac wr0 30000000 308 4d000000"), "on: EDMAC words ('%s')", log_line("probe edmac"));
+    char e[200];
+    snprintf(e, sizeof e, "probe raw %08x: %08x %08x %08x -> %08x %08x %08x same", raw_u, fnv4k(b + 0x100002),
+             fnv4k(b + 0x900002), fnv4k(b + 0x1100002), fnv4k(b + 0x100002), fnv4k(b + 0x900002), fnv4k(b + 0x1100002));
+    chk(LOGW(e, 3000), "on: raw windows (uncached alias, 3 FNV, unchanged): '%s'", log_line("probe raw"));
+    snprintf(e, sizeof e, "probe A0 %08x: %08x", a0_u, fnv4k(b + 0x10000));
+    chk(log_has(e) && strstr(log_line("probe A0"), " same"), "on: SSRAW A[0] from the block: '%s'", log_line("probe A0"));
+    snprintf(e, sizeof e, "probe A1 %08x: %08x", a1_u, fnv4k((const uint8_t *)in));
+    chk(log_has(e) && strstr(log_line("probe A1"), " CHANGED"), "on: a window the worker writes reads CHANGED: '%s'",
+        log_line("probe A1"));
+    chk(log_has("probe wr0 30000000: outside the shoot pool, not read"), "on: out-of-pool address not read");
+    chk(!log_has("probe nav") && h_nav_calls == 0, "on: no ROM call");
+    chk(WAIT((free(get_file("ML/LOGS/WFPROBE.BIN", &n)), n == PRB_REC), 3000), "on: one record in WFPROBE.BIN (%ld B)", n);
+    f = get_file("ML/LOGS/WFPROBE.BIN", &n);
+    if (f && n >= PRB_REC) {
+        const uint32_t *w = (const uint32_t *)f;
+        chk(w[0] == 0x42504657u && w[1] == 1 && w[2] == 1 && w[5] == FRAME_A && w[6] == 0 && w[7] == 1,
+            "record: magic, version 1, seq 1, r1, r2, mode");
+        chk(w[8 + 0x50 / 4] == raw_u - 0x40000000u && w[8 + 0x68 / 4] == a1_u - 0x40000000u, "record: parameter block");
+        chk(memcmp(f + 600, b + 0x1100002, 1024) == 0, "record: 1 KB of the raw from the +16 MB window");
+        chk(memcmp(f + 600 + 3 * 1024, (const uint8_t *)in + 0x1000000, 1024) == 0,
+            "record: A1 copy taken at entry (the frame before grading)");
+    }
+    free(f);
+
+    /* on + ROM call */
+    wf_probe_mode = WF_PRB_NAV;
+    log_mark();
+    probe_nn(0);
+    chk(LOGW("probe #2 ", 5000) && h_nav_calls == 5, "nav: record 2, MEMNAVI called for layers 0..4 (%d calls)", h_nav_calls);
+    snprintf(e, sizeof e, "probe nav 1: rc 0 tmp 00001234 | 00000000 00000000 %08x 00000000", h_nav_a[1]);
+    chk(LOGW(e, 3000), "nav: '%s'", log_line("probe nav 1"));
+    chk(ndiff(out, ref, NW) == 0, "nav: frame graded as always");
+    chk(WAIT((free(get_file("ML/LOGS/WFPROBE.BIN", &n)), n == 2 * PRB_REC), 3000), "nav: two records (%ld B)", n);
+
+    /* a gate reject (RAW only) is probed too; r2 != 0 calls are not */
+    wf_probe_mode = WF_PRB_ON;
+    pic_quality = 0x04000000;
+    log_mark();
+    probe_nn(0);
+    pic_quality = 0;
+    chk(ndiff(out, in, NW) == 0, "RAW only: frame untouched");
+    chk(LOGW("probe #3 ", 5000) && strstr(log_line("probe #3 "), " rc 1"), "RAW only: probed, rc 1 ('%s')",
+        log_line("probe #3 "));
+    log_mark();
+    probe_nn(1);
+    usleep(600000);
+    chk(!log_has("probe #4"), "an NN call with r2 != 0 is not probed");
+    mod_deinit();
+}
+#endif
+
 /* ------------------------------------------------------------------ main */
 int main(int argc, char **argv)
 {
@@ -1415,6 +1528,8 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "PRINT")) t_print();
 #ifdef WF_BUILD_5D2
     else if (!strcmp(mode, "5D2")) t_5d2();
+#else
+    else if (!strcmp(mode, "PROBE")) t_probe();
 #endif
     else { fprintf(stderr, "unknown mode %s for %s\n", mode, CAM_NAME); return 2; }
     if (nfail)

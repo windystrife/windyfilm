@@ -52,4 +52,11 @@ extern void *h_menu;
 extern volatile int h_menu_count;
 
 uint32_t wf_host_rom_read(uint32_t addr);
+
+/* RAW probe (EOS M): the Eeko parameter block copy at 0x41E82CEC, EDMAC WR0 / 308 / 408 / A08 / B08, and the
+ * MEMNAVI_GetReadMemory lookup (out[0] = h_nav_a[layer]); other addresses read 0xDEADBEEF */
+extern uint32_t h_pb[56], h_edmac[5], h_nav_a[5];
+extern volatile int h_nav_calls;
+uint32_t wf_host_mem_read(uint32_t addr);
+int wf_host_memnavi(uint32_t *out, uint32_t *tmp, int a, int layer);
 #endif

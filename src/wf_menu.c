@@ -1076,6 +1076,21 @@ static MENU_UPDATE_FUNC(wf_status_update)
     MENU_SET_WARNING(MENU_WARN_INFO, "WindyFilm by WindyStrife, %s. Log: ML/LOGS/WINDYFLM.LOG.", wf_cam_name());
 }
 
+#ifndef WF_BUILD_5D2
+static const char *wf_prb_name[WF_PRB_N] = { "Off", "On", "On + ROM call" };
+static MENU_UPDATE_FUNC(wf_prb_update)
+{
+    if (wf_probe_mode)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Shoot RAW+L (single and burst). Log + ML/LOGS/WFPROBE.BIN.");
+    else
+        MENU_SET_WARNING(MENU_WARN_INFO, "Test only, off at every boot. The photo is never changed.");
+}
+#define WF_PRB_ENTRY { .name = "RAW probe", .priv = &wf_probe_mode, .max = WF_PRB_N - 1, .choices = wf_prb_name, \
+                       .update = wf_prb_update, .help = "Test: logs where Canon keeps the RAW at the shot (EOS M)." },
+#else
+#define WF_PRB_ENTRY
+#endif
+
 #define WF_ROWE(nm, row, sel, hlp) { .name = nm, .priv = (void *)(intptr_t)((row) + 1), .select = sel, \
                                      .update = wf_row_update, .help = hlp, .icon_type = IT_DICE }
 static struct menu_entry wf_menu[] = {
@@ -1111,6 +1126,7 @@ static struct menu_entry wf_menu[] = {
               .help = "Smooth: steady LiveView; the shot's exposure is added digitally." },
             { .name = "EXIF info", .select = wf_exif_select, .update = wf_exif_update,
               .help = "Writes the shot's film and effects into the JPEG's EXIF comment." },
+            WF_PRB_ENTRY
             { .name = "Status", .update = wf_status_update, .icon_type = IT_ACTION,
               .help = "Camera, hooks and film pack state." },
             MENU_EOL

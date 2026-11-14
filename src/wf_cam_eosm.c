@@ -44,10 +44,21 @@ extern void prop_add_handler(uint32_t property, void *handler);
 
 #ifdef WF_HOST
 extern uint32_t wf_host_rom_read(uint32_t addr);
+extern uint32_t wf_host_mem_read(uint32_t addr);
+extern int wf_host_memnavi(uint32_t *out, uint32_t *tmp, int a, int layer);
 #define ROM32(a) wf_host_rom_read(a)
+#define PRB_RD32(a) wf_host_mem_read(a)
+#define PRB_NAVCALL(o, t, a, l) wf_host_memnavi(o, t, a, l)
 #else
 #define ROM32(a) (*(volatile uint32_t *)(a))     /* D-side read: the original word even after patching */
+#define PRB_RD32(a) (*(volatile uint32_t *)(a))
+#define PRB_NAVCALL(o, t, a, l) ((int (*)(uint32_t *, uint32_t *, int, int))PRB_NAV)(o, t, a, l)
 #endif
+
+extern void *FIO_CreateFile(const char *name);
+extern void *FIO_CreateFileOrAppend(const char *name);
+extern int   FIO_WriteFile(void *f, const void *buf, size_t n);
+extern void  FIO_CloseFile(void *f);
 
 enum { K_NN = 0, K_TOP, K_BOT, K_N };
 static const char *const kname[K_N] = { "NN", "TOP", "BOT" };
@@ -124,6 +135,171 @@ static void reject(int k, uint32_t raw, int nojpg)
     last_reject[k] = raw;
 }
 
+/* ------------------------------------------------------------------ RAW probe P0 (DESIGN 3.2)
+ * At the NN entry (CompleteSsrawToYuv, before Canon releases the SS resource) the hook copies into one static record:
+ * the Eeko copy of the 0xE0 parameter block (+0x50 raw input, +0x64.. SSRAW A[0..4]), five EDMAC address registers,
+ * optionally MEMNAVI_GetReadMemory(.., 1, layer) for layers 0..4, and for four candidate sources (raw, EDMAC WR0,
+ * A[0], A[1]) FNV-1a of 4 KB windows at +0 / +8 MB / +16 MB, at entry and again after the worker, plus 1 KB copied
+ * from the last window. Only shoot-pool addresses are read, through the uncached alias. The frame is never written.
+ * wf_task (wf_cam_poll) logs the record and appends it to ML/LOGS/WFPROBE.BIN; until then later calls are skipped. */
+#define PRB_PB      0x41E82CECu                  /* the parameter block's Eeko copy, uncached alias */
+#define PRB_PBW     56                           /* 0xE0 bytes */
+#define PRB_NAV     0xFF234680u                  /* MEMNAVI_GetReadMemory(out, tmp, 1, layer) */
+#define PRB_NSRC    4
+#define PRB_NWIN    3
+#define PRB_WIN     4096
+#define PRB_CPY     1024
+#define PRB_MAX     32                           /* WFPROBE.BIN records per boot */
+#define PRB_PATH    "ML/LOGS/WFPROBE.BIN"
+#define PRB_MAGIC   0x42504657u                  /* "WFPB" */
+
+static const uint32_t prb_edmac[5] = { 0xC0F04008u, 0xC0F26308u, 0xC0F26408u, 0xC0F26A08u, 0xC0F26B08u };
+static const uint32_t prb_woff[PRB_NWIN] = { 0, 0x800000u, 0x1000000u };
+static const char *const prb_sname[PRB_NSRC] = { "raw", "wr0", "A0", "A1" };
+
+struct wf_prb {                                  /* a WFPROBE.BIN record, 4696 bytes, little-endian */
+    uint32_t magic, ver, seq, t_ms, r0, r1, r2, mode;
+    uint32_t pb[PRB_PBW];
+    uint32_t edmac[5];
+    int32_t  nav_rc[5];
+    uint32_t nav[5][8];                          /* the call gets &nav[i][2]: room on both sides */
+    uint32_t nav_tmp[5];
+    uint32_t src[PRB_NSRC];                      /* the uncached address read, 0 = outside the shoot pool */
+    uint32_t fnv[PRB_NSRC][PRB_NWIN];            /* at entry; 0 = window not read */
+    uint32_t fnv2[PRB_NSRC][PRB_NWIN];           /* after the worker (or the reject) */
+    uint32_t t_probe_ms, t_shot_ms, shot_rc;     /* shot_rc 0 graded, 1 gate reject, 2 worker busy */
+    uint8_t  cpy[PRB_NSRC][PRB_CPY];             /* from the +16 MB window (else +0) */
+};
+static struct wf_prb prb;
+static volatile int prb_full, prb_skipped;
+static int prb_n, prb_written, prb_skip_said;
+int wf_probe_mode;
+
+static uint32_t prb_addr(uint32_t a)
+{
+    if (a >= POOL_LO - 0x40000000u && a < POOL_HI - 0x40000000u)
+        a |= 0x40000000u;                        /* a cached twin (SSRAW A[] have bit 30 stripped) */
+    return a >= POOL_LO && a <= POOL_HI - PRB_WIN ? a : 0;
+}
+static int prb_win_ok(uint32_t a, int w) { return a && a + prb_woff[w] <= POOL_HI - PRB_WIN; }
+static uint32_t prb_fnv(uint32_t a)
+{
+    const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)a;
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < PRB_WIN; i++) {
+        h ^= p[i];
+        h *= 16777619u;
+    }
+    return h;
+}
+static void prb_sums(uint32_t (*f)[PRB_NWIN])
+{
+    for (int k = 0; k < PRB_NSRC; k++)
+        for (int w = 0; w < PRB_NWIN; w++)
+            f[k][w] = prb_win_ok(prb.src[k], w) ? prb_fnv(prb.src[k] + prb_woff[w]) : 0;
+}
+static void prb_take(const uint32_t *regs, int mode)
+{
+    int t0 = get_ms_clock();
+    memset(&prb, 0, sizeof prb);
+    prb.magic = PRB_MAGIC;
+    prb.ver = 1;
+    prb.seq = ++prb_n;
+    prb.t_ms = t0;
+    prb.r0 = regs[0];
+    prb.r1 = regs[1];
+    prb.r2 = regs[2];
+    prb.mode = mode;
+    for (int i = 0; i < PRB_PBW; i++)
+        prb.pb[i] = PRB_RD32(PRB_PB + 4 * i);
+    for (int i = 0; i < 5; i++)
+        prb.edmac[i] = PRB_RD32(prb_edmac[i]);
+    if (mode == WF_PRB_NAV)
+        for (int i = 0; i < 5; i++)
+            prb.nav_rc[i] = PRB_NAVCALL(&prb.nav[i][2], &prb.nav_tmp[i], 1, i);
+    const uint32_t s[PRB_NSRC] = { prb.pb[0x50 / 4], prb.edmac[0], prb.pb[0x64 / 4], prb.pb[0x68 / 4] };
+    for (int k = 0; k < PRB_NSRC; k++)
+        prb.src[k] = prb_addr(s[k]);
+    prb_sums(prb.fnv);
+    for (int k = 0; k < PRB_NSRC; k++) {
+        if (!prb.src[k])
+            continue;
+        uint32_t c = prb.src[k] + (prb_win_ok(prb.src[k], PRB_NWIN - 1) ? prb_woff[PRB_NWIN - 1] : 0);
+        const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)c;
+        for (int i = 0; i < PRB_CPY; i++)
+            prb.cpy[k][i] = p[i];
+    }
+    prb.t_probe_ms = get_ms_clock() - t0;
+}
+static void prb_done(int rc, int t_shot)
+{
+    prb.t_shot_ms = get_ms_clock() - t_shot;
+    prb.shot_rc = rc;
+    prb_sums(prb.fnv2);
+    WF_BARRIER();
+    prb_full = 1;
+}
+
+/* n words as " xxxxxxxx" each, built word by word (one short format, no long repeated format strings in .rodata) */
+static const char *prb_hex(char *b, int size, const uint32_t *w, int n)
+{
+    int o = 0;
+    b[0] = 0;
+    for (int i = 0; i < n && o < size - 10; i++)
+        o += snprintf(b + o, size - o, " %08x", (unsigned)w[i]);
+    return b;
+}
+
+/* wf_task: the record to the log and to WFPROBE.BIN (a new file at the first record of a boot) */
+static void prb_flush(void)
+{
+    char hx[80];
+    if (prb_skipped != prb_skip_said) {
+        prb_skip_said = prb_skipped;
+        wf_log("probe: %d NN calls not probed (the previous record was not written yet)", prb_skip_said);
+    }
+    if (!prb_full)
+        return;
+    WF_BARRIER();
+    const struct wf_prb *p = &prb;
+    wf_log("probe #%u r0 %08x r1 %08x r2 %x mode %u: probe %u ms, shot %u ms rc %u", (unsigned)p->seq,
+           (unsigned)p->r0, (unsigned)p->r1, (unsigned)p->r2, (unsigned)p->mode, (unsigned)p->t_probe_ms,
+           (unsigned)p->t_shot_ms, (unsigned)p->shot_rc);
+    for (int i = 0; i < PRB_PBW; i += 8)
+        wf_log("probe pb+%02x%s", i * 4, prb_hex(hx, sizeof hx, p->pb + i, 8));
+    wf_log("probe edmac wr0 %08x 308 %08x 408 %08x a08 %08x b08 %08x", (unsigned)p->edmac[0], (unsigned)p->edmac[1],
+           (unsigned)p->edmac[2], (unsigned)p->edmac[3], (unsigned)p->edmac[4]);
+    if (p->mode == WF_PRB_NAV)
+        for (int i = 0; i < 5; i++)
+            wf_log("probe nav %d: rc %d tmp %08x |%s", i, (int)p->nav_rc[i], (unsigned)p->nav_tmp[i],
+                   prb_hex(hx, sizeof hx, p->nav[i], 8));
+    const uint32_t s[PRB_NSRC] = { p->pb[0x50 / 4], p->edmac[0], p->pb[0x64 / 4], p->pb[0x68 / 4] };
+    for (int k = 0; k < PRB_NSRC; k++) {
+        if (!p->src[k]) {
+            wf_log("probe %s %08x: outside the shoot pool, not read", prb_sname[k], (unsigned)s[k]);
+            continue;
+        }
+        int same = 1;
+        for (int w = 0; w < PRB_NWIN; w++)
+            same &= p->fnv[k][w] == p->fnv2[k][w];
+        wf_log("probe %s %08x: %08x %08x %08x -> %08x %08x %08x %s", prb_sname[k], (unsigned)p->src[k],
+               (unsigned)p->fnv[k][0], (unsigned)p->fnv[k][1], (unsigned)p->fnv[k][2], (unsigned)p->fnv2[k][0],
+               (unsigned)p->fnv2[k][1], (unsigned)p->fnv2[k][2], same ? "same" : "CHANGED");
+    }
+    if (prb_written < PRB_MAX) {
+        void *f = prb_written ? FIO_CreateFileOrAppend(PRB_PATH) : FIO_CreateFile(PRB_PATH);
+        if (!f || ((uint32_t)f & 1)) {
+            wf_log("probe: %s not written", PRB_PATH);
+        } else {
+            FIO_WriteFile(f, p, sizeof *p);
+            FIO_CloseFile(f);
+            prb_written++;
+        }
+    }
+    WF_BARRIER();
+    prb_full = 0;
+}
+
 /* Canon task (ShootSsDevelop / DianaFront / DianaRear): gates, then the worker. No logging, no file I/O here. */
 static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
 {
@@ -138,12 +314,24 @@ static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
         return;
     calls[k]++;
     uint32_t raw = regs[kreg[k]];
+    int pmode = *(volatile int *)&wf_probe_mode, probe = 0;
+    if (k == K_NN && regs[2] == 0 && pmode > WF_PRB_OFF && pmode < WF_PRB_N) {
+        if (prb_full) {
+            prb_skipped++;
+        } else {
+            prb_take(regs, pmode);
+            probe = 1;
+        }
+    }
+    int t_shot = get_ms_clock();
     uint32_t buf = check_buf(raw, k == K_NN ? (uint32_t)FRAME_W * FRAME_H * 2 : HALF_BYTES);
     int nojpg = (k == K_NN && (pic_quality & 0xFF000000) == PICQ_KIND_RAW)      /* RAW only: no JPEG */
         || shooting_mode == SHOOTMODE_NIGHTH || shooting_mode == SHOOTMODE_HDR;   /* multishot sub-frames */
     int w = 0, h = 0, ga = wf_aspect < 0 ? 0 : wf_aspect;                       /* never reported: 3:2 */
     if (!buf || (k == K_NN && regs[2] != 0) || nojpg || (pic_quality & PICQ_SIZE_MASK) || !geom(ga, &w, &h)) {
         reject(k, raw, nojpg);
+        if (probe)
+            prb_done(1, t_shot);
         return;
     }
     struct wf_frame f;
@@ -160,8 +348,11 @@ static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
     f.data = f.dst = (void *)(uintptr_t)buf;
     f.raw = raw;
     f.t_post = get_ms_clock();
-    if (wf_shot_run(&f, 0) != 0)
+    int rc = wf_shot_run(&f, 0);
+    if (rc != 0)
         reject(k, raw, 0);                       /* worker busy / not up: the JPEG stays plain */
+    if (probe)
+        prb_done(rc != 0 ? 2 : 0, t_shot);
 }
 
 int wf_cam_start(void)
@@ -190,9 +381,10 @@ int wf_cam_start(void)
     return 0;
 }
 
-/* wf_task: one line per kind whose reject count changed */
+/* wf_task: one line per kind whose reject count changed; the RAW probe record */
 void wf_cam_poll(void)
 {
+    prb_flush();
     for (int k = 0; k < K_N; k++)
         if (rejects[k] != rej_logged[k]) {
             rej_logged[k] = rejects[k];

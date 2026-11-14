@@ -52,6 +52,30 @@ uint32_t wf_host_rom_read(uint32_t a)
     return 0;
 }
 
+/* ------------------------------------------------------------------ RAW probe (wf_cam_eosm.c): Canon memory, ROM lookup */
+uint32_t h_pb[56], h_edmac[5], h_nav_a[5];
+volatile int h_nav_calls;
+uint32_t wf_host_mem_read(uint32_t a)
+{
+    static const uint32_t ed[5] = { 0xC0F04008u, 0xC0F26308u, 0xC0F26408u, 0xC0F26A08u, 0xC0F26B08u };
+    if (a >= 0x41E82CECu && a < 0x41E82CECu + sizeof h_pb && !(a & 3))
+        return h_pb[(a - 0x41E82CECu) / 4];
+    for (int i = 0; i < 5; i++)
+        if (a == ed[i])
+            return h_edmac[i];
+    return 0xDEADBEEFu;
+}
+int wf_host_memnavi(uint32_t *out, uint32_t *tmp, int a, int layer)
+{
+    h_nav_calls++;
+    if (a != 1 || layer < 0 || layer > 4)
+        return -1;
+    out[0] = h_nav_a[layer];
+    out[1] = 0;
+    *tmp = 0x1234;
+    return 0;
+}
+
 /* ------------------------------------------------------------------ clocks, tasks, semaphores */
 static uint64_t h_us(void)
 {
