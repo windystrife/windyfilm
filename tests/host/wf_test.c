@@ -47,7 +47,6 @@
 #include <time.h>
 #include <unistd.h>
 #define WF_ML_HEADERS
-#include "wf_build.h"
 #include "wf_core.h"
 #include "wf_film.h"
 #include "wf_loglut.h"
@@ -119,13 +118,8 @@ static const uint32_t *const t_dec[WF_LL_NINC] = { wf_ll_dec, wf_ll_dec_c1, wf_l
 
 struct t_modinfo { uint8_t magic, major, minor, patch; const char *name, *long_name; unsigned (*init)(void); unsigned (*deinit)(void); };
 struct t_cbr { const char *name, *symbol; unsigned type; unsigned (*handler)(unsigned); unsigned ctx; };
-/* the module this build makes (src/wf_build.h): windyflm, or windyfls for the film-stage build */
-#define WFCAT_(a, b) a ## b
-#define WFCAT(a, b) WFCAT_(a, b)
-#define WF_INFO WFCAT(__module_info_, WF_MODULE_SYM)
-#define WF_CBR  WFCAT(__module_cbr_, WF_MODULE_SYM)
-extern struct t_modinfo WF_INFO;
-extern struct t_cbr WF_CBR[];
+extern struct t_modinfo __module_info_windyflm;
+extern struct t_cbr __module_cbr_windyflm[];
 extern const char *wf_ex_write(const char *path, const char *txt);
 extern const int wf_t_li_size, wf_t_card_fn, wf_t_card_size;
 
@@ -177,11 +171,11 @@ static void put_cfg(const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(b, sizeof b, fmt, ap);
     va_end(ap);
-    put_file(WF_CFG_PATH, b, strlen(b));
+    put_file("ML/SETTINGS/WINDYFLM.CFG", b, strlen(b));
 }
 
 /* the module's log: lines after the mark */
-#define LOG_PATH WF_LOG_PATH
+#define LOG_PATH "ML/LOGS/WINDYFLM.LOG"
 static long log_at;
 static void log_mark(void) { long n; free(get_file(LOG_PATH, &n)); log_at = n; }
 static int log_has(const char *s)
@@ -497,12 +491,12 @@ static int shot(const uint32_t *src, uint32_t *dst, int w, int h)
 
 static void mod_init(int want_path)
 {
-    struct t_modinfo *mi = &WF_INFO;
-    chk(mi->magic == 0x5A && mi->major == 8 && !strcmp(mi->name, WFSTR(WF_MODULE_SYM)) && mi->init && mi->deinit,
+    struct t_modinfo *mi = &__module_info_windyflm;
+    chk(mi->magic == 0x5A && mi->major == 8 && !strcmp(mi->name, "windyflm") && mi->init && mi->deinit,
         "module_info: magic %#x api %d name %s", mi->magic, mi->major, mi->name);
-    for (int i = 0; i < 8 && WF_CBR[i].name; i++) {
-        if (WF_CBR[i].type == 7) cbr_key = WF_CBR[i].handler;
-        if (WF_CBR[i].type == 4) cbr_disp = WF_CBR[i].handler;
+    for (int i = 0; i < 8 && __module_cbr_windyflm[i].name; i++) {
+        if (__module_cbr_windyflm[i].type == 7) cbr_key = __module_cbr_windyflm[i].handler;
+        if (__module_cbr_windyflm[i].type == 4) cbr_disp = __module_cbr_windyflm[i].handler;
     }
     chk(cbr_key && cbr_disp, "CBR_KEYPRESS and CBR_DISPLAY_FILTER registered");
     log_at = 0;
@@ -516,7 +510,7 @@ static void mod_init(int want_path)
 static void mod_deinit(void)
 {
     log_mark();
-    chk(WF_INFO.deinit() == 0, "deinit returns 0");
+    chk(__module_info_windyflm.deinit() == 0, "deinit returns 0");
     chk(LOGW("unload", 5000), "log: unload");
 }
 static int look_table_ready(void)
@@ -1059,9 +1053,9 @@ static void t_exif(void)
     gen_frame(in, FW, FH, 0);
     chk(WAIT(look_table_ready(), 10000), "table published");
     char p[64], want[200], want30[200], want125[200];
-    snprintf(want, sizeof want, WF_TITLE ": %s | Print Scan | Strength 100%%", wf_films[fC].name);
-    snprintf(want30, sizeof want30, WF_TITLE ": %s | Print Scan | Strength 30%%", wf_films[fC].name);
-    snprintf(want125, sizeof want125, WF_TITLE ": %s | Print Scan | Strength 125%%", wf_films[fC].name);
+    snprintf(want, sizeof want, "WindyFilm: %s | Print Scan | Strength 100%%", wf_films[fC].name);
+    snprintf(want30, sizeof want30, "WindyFilm: %s | Print Scan | Strength 30%%", wf_films[fC].name);
+    snprintf(want125, sizeof want125, "WindyFilm: %s | Print Scan | Strength 125%%", wf_films[fC].name);
     log_mark();
     h_li_set("job", 1);                          /* Canon busy from the shot until its JPEG is on the card */
     shot(in, out, FW, FH);
@@ -1264,7 +1258,7 @@ static void t_cfg(void)
     h_clock_add_ms += 2000;
     usleep(300000);
     long n;
-    char *b = get_file(WF_CFG_PATH, &n);
+    char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=%s\nexptrim=-5\nexif=off\n"
@@ -1276,19 +1270,19 @@ static void t_cfg(void)
     wf_row_step(WF_ROW_GRAIN, 1);
     h_clock_add_ms += 2000;
     usleep(400000);
-    b = get_file(WF_CFG_PATH, &n);
+    b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     chk(b && strstr(b, "grain=normal\n"), "Canon busy: the change not saved yet");
     free(b);
     h_li_set("job", 0);
     h_clock_add_ms += 2000;
     usleep(400000);
-    b = get_file(WF_CFG_PATH, &n);
+    b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     chk(b && !strstr(b, "grain=normal\n") && strstr(b, "grain="), "Canon idle: saved");
     free(b);
     wf_row_step(WF_ROW_GRAIN, -1);
     h_clock_add_ms += 2000;
     usleep(400000);
-    b = get_file(WF_CFG_PATH, &n);
+    b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     chk(b && !strcmp(b, want), "back to the first file");
     free(b);
     put_cfg("film=99999\noutput=nope\nlutei=77\nexptrim=99\ncurve=x\nprint=\nhl=7\nsh=\n");
@@ -1305,7 +1299,7 @@ static void t_cfg(void)
     char big[700];
     memset(big, '#', sizeof big);
     memcpy(big, "film=0\n", 7);
-    put_file(WF_CFG_PATH, big, sizeof big);
+    put_file("ML/SETTINGS/WINDYFLM.CFG", big, sizeof big);
     wf_cfg_load();
     chk(wf_film_id == wf_films[fA].id, "a file over 600 bytes is not read");
     put_cfg("film=0\n");
@@ -1320,7 +1314,7 @@ static void t_cfg(void)
         m2 |= h_change_prop[i] == 0x8000000Du && h_change_val[i] == 1;
     }
     chk(m1 && m2 && h_gm_last == 2 && h_ba_last == -3, "unload: the user's WB from the file back (mode 1, shift 2 / -3)");
-    b = get_file(WF_CFG_PATH, &n);
+    b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     chk(b && strstr(b, "film=0\n") && strstr(b, "grain=fine\n") && strstr(b, "userwb=1,5600,2,-3\n"), "saved at unload (with userwb)");
     free(b);
 }
@@ -1433,7 +1427,7 @@ static void t_light(void)
     h_clock_add_ms += 2000;
     usleep(300000);
     long n;
-    char *b = get_file(WF_CFG_PATH, &n);
+    char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     chk(b && strstr(b, "light=tungsten\n") && strstr(b, "userwb=0,5000,1,-2\n"), "config keeps the user's WB while Light is set");
     free(b);
     h_nchanges = 0;
@@ -1993,7 +1987,7 @@ static void t_log(const char *cs)
         h_li_set("job", 1);                      /* Canon busy: the rename waits */
         mod_init(0);
         usleep(700000);
-        b = get_file(WF_LOG_OLD, &n);
+        b = get_file("ML/LOGS/WINDYFLM.OLD", &n);
         chk(!b && (free(get_file(LOG_PATH, &n)), n == (long)big), "Canon busy: the big log not renamed yet");
         free(b);
         h_li_set("job", 0);
@@ -2001,7 +1995,7 @@ static void t_log(const char *cs)
         b = get_file(LOG_PATH, &n);
         chk(b && n < 64 * 1024 && b[0] != 'x' && strstr(b, "WindyFilm "), "new log after the rotation (%ld B)", n);
         free(b);
-        b = get_file(WF_LOG_OLD, &n);
+        b = get_file("ML/LOGS/WINDYFLM.OLD", &n);
         chk(b && n == (long)big && b[0] == 'x', "the big log kept as WINDYFLM.OLD (%ld B)", n);
         free(b);
         mod_deinit();
@@ -2360,7 +2354,7 @@ static void t_hs(void)
     h_clock_add_ms += 2000;
     usleep(400000);
     long n;
-    char *f = get_file(WF_CFG_PATH, &n);
+    char *f = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     chk(f && strstr(f, "\nhl=1\nsh=0\n"), "saved: hl=1, sh=0");
     free(f);
     put_cfg("hl=-4\nsh=5\n");

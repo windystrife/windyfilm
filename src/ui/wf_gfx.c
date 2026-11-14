@@ -6,7 +6,6 @@
  * plus a 4 x 4 ordered dither between neighbouring ramp entries, so the glow of a film is recoloured by rewriting its
  * ramp entries only (wfp_set_glow), never by redrawing pixels. */
 #include "wf_ui_int.h"
-#include "../wf_build.h"
 
 uint8_t *wfg_cv;
 int wfg_pitch;
@@ -364,13 +363,8 @@ static const uint8_t fixed_rgb[C_NFIXED][3] = {
     { 236, 238, 240 },   /* C_TXT */
     { 146, 155, 168 },   /* C_TXT2 */
     {  98, 106, 118 },   /* C_TXT3 */
-#ifdef WF_STAGE
-    { 232, 132, 158 },   /* C_AMBER: accent, the film-stage build's rose */
-    {  72,  34,  46 },   /* C_AMBERD */
-#else
     { 244, 166,  52 },   /* C_AMBER: accent */
     {  84,  58,  22 },   /* C_AMBERD */
-#endif
     {  38, 168, 158 },   /* C_TEAL: Film LUT group */
     {  16,  62,  58 },   /* C_TEALD */
     {  96, 204, 116 },   /* C_GRN: loaded */

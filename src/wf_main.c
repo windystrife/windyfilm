@@ -10,7 +10,6 @@
  *     tables, effects, preview tables, config save, EXIF writer, Light, the browser request, log flush.
  *   worker film_yuv (prio 0x1C, wf_shot.c) and the Canon hook tasks never log and never touch files. */
 #include <module.h>
-#include "wf_build.h"
 #include "wf_core.h"
 #include "wf_expsim.h"
 #include "wf_film.h"
@@ -127,8 +126,8 @@ void *wf_fopen_w(const char *path, int how, uint32_t pos, struct wf_fe *e)
  * them); a line that finds the ring full, or the semaphore taken for
  * 50 ms, is dropped and counted ("log: N lines lost"). The log is appended across boots (the first line of a boot is
  * "WindyFilm <date>: camera ..."); at the first write of a boot a log over WF_LOG_MAX becomes WINDYFLM.OLD. */
-/* WF_LOG_PATH / WF_LOG_OLD come from wf_build.h: the catalogue build logs to WINDYFLM.LOG, the film-stage build to
- * WINDYFLS.LOG, so two modules on one card never append to one another's log. */
+#define WF_LOG_PATH  "ML/LOGS/WINDYFLM.LOG"
+#define WF_LOG_OLD   "ML/LOGS/WINDYFLM.OLD"
 #define WF_LOG_MAX   (512 * 1024)
 #define WF_LOG_RING  16384                       /* a power of two */
 #define WF_LOG_W     120

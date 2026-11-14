@@ -4,8 +4,6 @@
 #   bash test.sh                    EOS M, every mode
 #   CAM=5D2 bash test.sh            5D2, every mode
 #   bash test.sh CAM=5D2 FX MIST    only these modes ("PACK" = every PACK case, "PACK:top" = one case)
-#   STAGE=1 bash test.sh            the film-stage build (build/<cam>-stage, -DWF_STAGE): same suite, its own
-#                                   WINDYFLS.CFG / WINDYFLS.LOG (the paths come from src/wf_build.h in the tests too)
 # Env: OUT = build dir of build.sh (default <repo>/build/<cam>), LOGCHK_NRAND (default 1000000), WF_PACK_REAL = a real
 #      WFFILMS.DAT for "PACK real" (default /root/ml/wf_data/out/WFFILMS.DAT; skipped when missing).
 # Never run the EOS M and the 5D2 suite at the same time (one build tree each, but the machine is shared).
@@ -19,9 +17,7 @@
 set -u
 CAM=${CAM:-EOSM}
 MODES=
-for a in "$@"; do case $a in CAM=*) CAM=${a#CAM=} ;; STAGE=*) STAGE=${a#STAGE=} ;; *) MODES="$MODES $a" ;; esac; done
-# the film-stage build: its own tree, its own -DWF_STAGE (src/wf_build.h picks names, cfg and log from it)
-if [ "${STAGE:-0}" = 1 ]; then STAGEDEF=-DWF_STAGE; SUF=-stage; else STAGEDEF=; SUF=; fi
+for a in "$@"; do case $a in CAM=*) CAM=${a#CAM=} ;; *) MODES="$MODES $a" ;; esac; done
 R=$(cd "$(dirname "$0")" && pwd)
 S=$R/src
 H=$R/tests/host
@@ -34,7 +30,7 @@ case $CAM in
 esac
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
-B=${OUT:-$R/build/$cam$SUF}
+B=${OUT:-$R/build/$cam}
 O=$B/obj
 G=$O/gen
 T=$B/test
@@ -43,7 +39,7 @@ REAL=${WF_PACK_REAL:-/root/ml/wf_data/out/WFFILMS.DAT}
 
 if [ ! -f $O/wf_shot.o ] || [ ! -f $O/wf_logout.o ]; then
   echo "== build.sh CAM=$CAM (module objects missing)"
-  CAM=$CAM STAGE=${STAGE:-0} PACKS=0 OUT=$B bash $R/build.sh > $B.build.log 2>&1
+  CAM=$CAM PACKS=0 OUT=$B bash $R/build.sh > $B.build.log 2>&1
   [ -f $O/wf_shot.o ] || { tail -30 $B.build.log; echo "build failed"; exit 1; }
 fi
 rm -rf $T
@@ -52,14 +48,14 @@ mkdir -p $T/obj $T/run
 # the same flags as build.sh (keep in step)
 MODFLAGS="-Os -march=armv5t -marm -mlong-calls -mfloat-abi=soft -ffast-math -fsingle-precision-constant -fno-common
  -nostdlib -ffreestanding -fomit-frame-pointer -fno-strict-aliasing -std=gnu99 -fno-unwind-tables
- -fno-asynchronous-unwind-tables -Wall -Wno-comment -DMODULE -DMODULE_NAME=windyflm $STAGEDEF $CAMDEF -I$S -I$G"
+ -fno-asynchronous-unwind-tables -Wall -Wno-comment -DMODULE -DMODULE_NAME=windyflm $CAMDEF -I$S -I$G"
 MLFLAGS="-D__ARM__ -I$ML/include -I$ML/src -I$ML/platform/$PLAT -DCONFIG_MAGICLANTERN=1 -DCONFIG_DEBUGMSG=
  -Wno-unused-parameter"
 set -e
 arm-none-eabi-gcc $MODFLAGS -DWF_HOST -c -o $T/obj/wf_cam_host.o $S/$CAMSRC
 arm-none-eabi-gcc $MODFLAGS -c -o $T/obj/wf_ui_stub.o $S/wf_ui_stub.c
 arm-none-eabi-gcc $MODFLAGS $MLFLAGS -Wno-unused-function -c -o $T/obj/wf_expoff.o $H/wf_expoff.c
-HCC="arm-linux-gnueabi-gcc -O1 -marm -march=armv5te -Wall -Wno-unused-function -Wno-comment -Wno-format-truncation $STAGEDEF $CAMDEF -I$S -I$H -I$G"
+HCC="arm-linux-gnueabi-gcc -O1 -marm -march=armv5te -Wall -Wno-unused-function -Wno-comment -Wno-format-truncation $CAMDEF -I$S -I$H -I$G"
 $HCC -c -o $T/obj/host_ml.o $H/host_ml.c
 $HCC -c -o $T/obj/wf_test.o $H/wf_test.c
 MOD="wf_main.o wf_menu.o wf_shot.o wf_pv.o wf_probe.o wf_loglut.o wf_llk.o wf_llk_arm.o wf_film.o yh_halo.o wf_mist.o yg_grain.o yg_stocks.o

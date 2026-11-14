@@ -24,7 +24,6 @@
 #include <property.h>
 #include <fileprefix.h>
 #define WF_ML_HEADERS
-#include "wf_build.h"
 #include "wf_core.h"
 #include "wf_loglut.h"
 #include "wf_film.h"
@@ -36,7 +35,7 @@ extern int lv;
 extern int get_global_draw(void);
 extern int get_global_draw_setting(void);
 
-#define WF_CFG WF_CFG_PATH
+#define WF_CFG "ML/SETTINGS/WINDYFLM.CFG"
 #define WF_CFG_MAX 600
 
 /* ------------------------------------------------------------------ the state */
@@ -793,7 +792,7 @@ void wf_exif_none(void) { wf_ex_push(""); }
 void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev)
 {
     char b[WF_EX_T], t[48];
-    int n = snprintf(b, sizeof b, WF_TITLE ": %s", wf_look_title(lk, t, sizeof t));
+    int n = snprintf(b, sizeof b, "WindyFilm: %s", wf_look_title(lk, t, sizeof t));
     if (lk->output == WF_OUT_FILM && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, " | Print %s | Strength %d%%", wf_print_name[lk->variant < WF_NPRINTS ? lk->variant : 0],
                       wf_strength_pct(lk->strength));
@@ -1091,7 +1090,7 @@ static MENU_SELECT_FUNC(wf_exp_select)
 }
 static MENU_SELECT_FUNC(wf_exif_select) { (void)priv; (void)delta; wf_exif_off = !wf_exif_off; wf_dirty(); }
 
-#define WF_NOT_ACTIVE() MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "%s", *wf_status() ? wf_status() : "Hooks not active (" WF_LOG_PATH ").")
+#define WF_NOT_ACTIVE() MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "%s", *wf_status() ? wf_status() : "Hooks not active (ML/LOGS/WINDYFLM.LOG).")
 
 static MENU_UPDATE_FUNC(wf_top_update)
 {
@@ -1261,7 +1260,7 @@ static MENU_UPDATE_FUNC(wf_status_update)
     int ws = wf_ws_state();
     MENU_SET_VALUE("%s", *wf_status() ? wf_status() : !wf_yuv_active() ? "Not active" : ws < 0 ? "No film pack"
                          : ws == 0 ? "Reading pack" : "OK");
-    MENU_SET_WARNING(MENU_WARN_INFO, WF_NAME " by WindyStrife, %s. Log: " WF_LOG_PATH ".", wf_cam_name());
+    MENU_SET_WARNING(MENU_WARN_INFO, "WindyFilm by WindyStrife, %s. Log: ML/LOGS/WINDYFLM.LOG.", wf_cam_name());
 }
 
 #if WF_PRB_CAN
@@ -1285,7 +1284,7 @@ static MENU_UPDATE_FUNC(wf_prb_update)
                                      .update = wf_row_update, .help = hlp, .icon_type = IT_DICE }
 static struct menu_entry wf_menu[] = {
     {
-        .name = WF_MENU_NAME,
+        .name = "WindyFilm",
         .select = menu_open_submenu,
         .update = wf_top_update,
         .help = "Film looks at the shot (WindyStrife). SET: settings; browser from inside.",

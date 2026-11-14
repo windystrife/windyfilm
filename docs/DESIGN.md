@@ -60,10 +60,9 @@ What this branch adds on top (14 Nov 2026, same day):
   everything below code 0.35 into the toe (measured), so the two ends are pinned on the **output** instead - base fog
   to 0, print white to 1, i.e. printer points - and the exposure offset is fitted so 18 % grey lands on 0.18. What is
   left in between is the film's own curve.
-- **A separate module**: `STAGE=1 bash build.sh` makes `windyfls.mo` ("WindyFilm Stage") beside `windyflm.mo`, with
-  its own `WINDYFLS.CFG` / `WINDYFLS.LOG`, the menu entry **Film Stage** instead of **WindyFilm**, `Film Stage:` as
-  the EXIF prefix and a rose accent instead of the amber one (`src/wf_build.h` holds every name). Both install on one
-  card; neither reads the other's settings. `STAGE=1 bash test.sh` runs the same 693 checks against that build.
+- **One module.** The films are part of `windyflm.mo` like every other film: no second build, no second module, no
+  separate settings file (owner 14 Nov 2026: "code tiếp từ windyfilm, rồi dùng đường RAW của windyfilm"). The tables
+  ride on the WindyFilm the camera already has.
 - The four tables are **not committed** (bullet above): `build.sh` calls `tools/mk_genesis_films.py stage
   films/tables` when they are missing, and `mk_wfpack.py` leaves a film off the card when its table is not there. A
   tree that never had the port tree builds the other 53 films and says so.
