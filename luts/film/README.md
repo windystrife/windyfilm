@@ -39,7 +39,7 @@ bash /mnt/f/MagicLatern/_port/luts_film/mk_all.sh /root/ml/flut/out  # 12 cubes 
 ```
 
 Same parameters give the same bytes: on 2026-11-12 the repo copy rebuilt `V250D_S3/VL/LC.CUB` identical to the card
-(md5 list in `docs/HANDOFF-QWEN.md`). `ref/` holds the shipped run's `params.json`, `check.txt`, `CHANGELOG.txt` and
+(md5 list in the old port's `docs/HANDOFF-QWEN.md`, `F:\MagicLatern\_port`). `ref/` holds the shipped run's `params.json`, `check.txt`, `CHANGELOG.txt` and
 `camerr_table.txt`.
 
 ## What the camera makes of a cube

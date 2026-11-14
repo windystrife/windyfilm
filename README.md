@@ -14,7 +14,7 @@ WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Bản c�
 > - Test host: EOS M 449 phép kiểm tra (có probe RAW P0 và hai đường cong Film 1, Neutral), 5D2 403 phép, đều 0 lỗi.
 > - Cổng kiểm tra nguồn gốc: PASS.
 >
-> Tình trạng mới nhất ở `docs/HANDOFF-QWEN.md`.
+> Tình trạng mới nhất (nhánh, thẻ, việc còn mở, nhật ký) ở `docs/HANDOFF.md`.
 
 ## Tính năng
 
@@ -112,5 +112,6 @@ Không chạy bộ test EOS M và 5D2 cùng lúc.
 ## Tài liệu
 
 - `docs/DESIGN.md`: kiến trúc, định dạng các file trên thẻ, giao diện giữa các phần.
-- `docs/PLAYBOOK-QWEN.md`, `docs/HANDOFF-QWEN.md`: hướng dẫn cho Qwen Code và tình trạng hiện tại.
+- `docs/HANDOFF.md`: điểm vào duy nhất: tình trạng hiện tại, sơ đồ nhánh, các thẻ, việc còn mở, nhật ký.
+- `docs/PLAYBOOK-QWEN.md`: hướng dẫn cho Qwen Code (quy tắc, lệnh build / test / thẻ, bẫy).
 - `ATTRIBUTIONS.md`: ghi công dữ liệu và thông số bên thứ ba.
