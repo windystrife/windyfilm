@@ -115,7 +115,35 @@ int get_ms_clock(void) { return clock_ms; }
 int gui_menu_shown(void) { return 0; }
 void gui_stop_menu(void) {}
 int is_movie_mode(void) { return 0; }
-int display_is_on(void) { return 1; }
+static int gui_mode, gui_next = -1, gui_at, gui_lights = 1, disp = 1, gui_nreq, gui_req0_front = -1, disp_ons;
+static void gui_step(void)
+{
+    if (gui_next >= 0 && clock_ms - gui_at >= 0)
+    {
+        gui_mode = gui_next;
+        gui_next = -1;
+        if (gui_mode && gui_lights) disp = 1;
+    }
+}
+int display_is_on(void) { gui_step(); return disp; }
+void display_on(void) { disp_ons++; disp = 1; }
+int get_gui_mode(void) { gui_step(); return gui_mode; }
+void SetGUIRequestMode(int mode)
+{
+    gui_nreq++;
+    if (!mode) gui_req0_front = front_disabled;
+    gui_next = mode;
+    gui_at = clock_ms + 60;
+}
+void host_gui_set(int mode, int display, int lights)
+{
+    gui_mode = mode; gui_next = -1; disp = display; gui_lights = lights; gui_nreq = 0; gui_req0_front = -1; disp_ons = 0;
+}
+void host_gui_later(int mode, int after_ms) { gui_next = mode; gui_at = clock_ms + after_ms; }
+int host_gui_mode(void) { gui_step(); return gui_mode; }
+int host_gui_requests(void) { return gui_nreq; }
+int host_gui_req0_front(void) { return gui_req0_front; }
+int host_display_ons(void) { return disp_ons; }
 int host_front_disabled(void) { return front_disabled; }
 
 /* ------------------------------------------------------------------ harness */

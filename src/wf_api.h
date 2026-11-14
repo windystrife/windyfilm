@@ -69,6 +69,7 @@ void wf_ui_close(void);
 int  wf_ui_is_open(void);
 unsigned int wf_ui_key(unsigned int key); /* from the core's CBR_KEYPRESS while open: 0 = consumed, 1 = pass on */
 int  wf_ui_open_key(unsigned int key);    /* 1 = this key opens the browser (EOS M: long DOWN; 5D2: TRASH) */
+void wf_ui_open_refused(unsigned int key, int play);   /* the open key did not open it: log why */
 
 /* ------------------------------------------------------------------ core services */
 void wf_log(const char *fmt, ...);        /* ML/LOGS/WINDYFLM.LOG (buffered, written by the core task) */

@@ -133,7 +133,8 @@ Final screenshots: notes folder `windyfilm-ui/`.
   - fires on MODULE_KEY_TRASH, with no ML menu and gui_state IDLE;
   - on EOS M, long DOWN arrives as TRASH (patch 0002), and it also needs stills LiveView (Canon's LV Set dialog only
     comes up there);
-  - on 5D2, it fires on TRASH anywhere outside playback.
+  - on 5D2, it fires on TRASH anywhere outside playback; without LiveView the browser first asks Canon for GUI mode 2
+    (display on, as ML's menu; DESIGN 5), mode 0 again on close.
 
 **Strip.**
 - 11 slots, `x = -20 + 72 i`.

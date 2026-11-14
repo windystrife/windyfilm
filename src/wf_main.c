@@ -310,6 +310,8 @@ static unsigned int wf_keypress(unsigned int key)
         wf_ui_open();
         return 0;
     }
+    if (key == MODULE_KEY_TRASH)                 /* the next log says why the browser did not come up */
+        wf_ui_open_refused(key, is_play_mode());
     return 1;
 }
 

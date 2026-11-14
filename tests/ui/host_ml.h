@@ -65,6 +65,9 @@ extern int gui_state;
 extern int lv;
 int is_movie_mode(void);
 int display_is_on(void);
+void display_on(void);
+int get_gui_mode(void);
+void SetGUIRequestMode(int mode);
 
 /* module.h portable key codes */
 #define MODULE_KEY_PRESS_HALFSHUTTER       ( 1)
@@ -98,6 +101,14 @@ int display_is_on(void);
 void host_init(const char *rbf_dir, uint32_t canon_white, uint32_t canon_black);
 int  host_dump(const char *ppm_path);           /* front buffer through the hardware palette -> PPM; returns stray px */
 int  host_front_disabled(void);
+/* Canon's GUI mode and display (5D2 without LiveView): a request is applied 60 ms later; a mode other than 0 turns the
+ * display on when `lights` (Canon's menu does), display_on() always does */
+void host_gui_set(int mode, int display, int lights);
+void host_gui_later(int mode, int after_ms);
+int  host_gui_mode(void);
+int  host_gui_requests(void);
+int  host_gui_req0_front(void);         /* front buffer state at the last SetGUIRequestMode(0): 1 = still disabled */
+int  host_display_ons(void);
 int  host_palette_is_canon(void);               /* every entry 0x50..0xFE back to Canon's value */
 int  host_front_is_clear(void);
 long host_live_allocs(void);

@@ -30,7 +30,9 @@ Grain và Halation mặc định tắt trên 5D2 (mỗi nửa ảnh tốn vài g
 2. DÙNG
 -------
 - Menu ML: Shoot > WindyFilm. Mở trình chọn phim bằng "Open film browser",
-  hoặc bấm TRASH (không mở trong chế độ xem ảnh, nơi TRASH là xoá).
+  hoặc bấm TRASH (không mở trong chế độ xem ảnh, nơi TRASH là xoá). Có
+  LiveView hay ngắm qua kính đều mở được. Ngắm qua kính thì màn hình tự bật
+  lên như khi mở menu ML (có thể thấy menu Canon loé lên một chút).
 - Trong trình chọn phim:
     Đổi phim ............. joystick trái / phải
     Chọn hàng ............ joystick lên / xuống

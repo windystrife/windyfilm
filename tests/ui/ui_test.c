@@ -270,6 +270,67 @@ int main(int argc, char **argv)
         close_ui(MODULE_KEY_MENU, 0);
     }
 
+    /* 5c. 5D2 without LiveView (owner 11-14: the browser came up only with LV on): Canon's menu mode 2 brings the display
+     * up before the browser draws, mode 0 again on close while the front buffer is still ours */
+    fake_reset();
+    fake_set_cam(WF_CAM_5D2);
+    fake_set_card(card);
+    lv = 0;
+    host_gui_set(0, 0, 1);                                          /* viewfinder, display off */
+    open_ui();
+    CHECK(host_gui_mode() == 2 && display_is_on() && host_gui_requests() == 1, "5D2 no LV: gui mode %d, display %d, %d requests",
+          host_gui_mode(), display_is_on(), host_gui_requests());
+    go_to("LV250D");
+    shot("b2s_5d2_vf");
+    close_ui(MODULE_KEY_TRASH, 0);
+    CHECK(host_gui_mode() == 0 && host_gui_requests() == 2 && host_gui_req0_front() == 1,
+          "5D2 no LV close: gui mode %d, %d requests, front buffer at mode 0: %d", host_gui_mode(), host_gui_requests(),
+          host_gui_req0_front());
+
+    fake_reset();                                                   /* Canon leaves the menu mode itself: we close */
+    fake_set_cam(WF_CAM_5D2);
+    fake_set_card(card);
+    host_gui_set(0, 1, 1);
+    open_ui();
+    host_gui_later(0, 0);
+    tick(2);
+    CHECK(closed, "5D2 no LV: still open after Canon left its menu mode");
+    wfui_task_end();
+    CHECK(!wf_ui_is_open() && !host_front_disabled(), "5D2 no LV: not closed cleanly");
+
+    fake_reset();                                                   /* the mode does not light the display: display_on */
+    fake_set_cam(WF_CAM_5D2);
+    fake_set_card(card);
+    host_gui_set(0, 0, 0);
+    open_ui();
+    CHECK(host_display_ons() == 1 && display_is_on(), "5D2 no LV: display_on not used (%d)", host_display_ons());
+    close_ui(MODULE_KEY_MENU, 0);
+
+    fake_reset();                                                   /* from the ML menu entry: its mode 0 comes first */
+    fake_set_cam(WF_CAM_5D2);
+    fake_set_card(card);
+    host_gui_set(2, 1, 1);
+    host_gui_later(0, 300);
+    open_ui();
+    CHECK(host_gui_mode() == 2 && host_gui_requests() == 1, "5D2 no LV after the ML menu: gui mode %d, %d requests",
+          host_gui_mode(), host_gui_requests());
+    close_ui(MODULE_KEY_MENU, 0);
+
+    fake_reset();                                                   /* with LiveView, and on the EOS M: no mode asked */
+    fake_set_cam(WF_CAM_5D2);
+    fake_set_card(card);
+    lv = 1;
+    host_gui_set(0, 1, 1);
+    open_ui();
+    close_ui(MODULE_KEY_MENU, 0);
+    fake_reset();
+    fake_set_card(card);
+    lv = 0;
+    open_ui();
+    close_ui(MODULE_KEY_MENU, 0);
+    CHECK(host_gui_requests() == 0, "LV / EOS M: %d gui mode requests", host_gui_requests());
+    lv = 1;
+
     /* 6. keys while closed pass on; the open key */
     CHECK(wf_ui_key(MODULE_KEY_PRESS_LEFT) == 1, "a key was eaten while closed");
     fake_set_cam(WF_CAM_EOSM);
