@@ -387,7 +387,7 @@ grade), Luca Bono, the Kodak / Fuji cubes and Leica Vivid are unchanged.
 
 ### 3.6 Roll + Darkroom (owner 2026-11-14)
 
-You shoot a roll: one film, 12 / 24 / 36 RAW+L frames, no playback. Afterwards the in-camera Darkroom develops each
+You shoot a roll: one film, 3 / 6 / 12 / 24 / 36 RAW+L frames (3 and 6: owner 11-15, a short roll), no playback. Afterwards the in-camera Darkroom develops each
 frame's CR2 from the card with the roll's film, through WindyFilm's own full RAW develop B, into a print JPEG. The EOS M
 comes first. The 5D2 follows once the EOS M works (raw 5792 x 3804, pitch 10136, black 1024, GBRG).
 
@@ -406,7 +406,7 @@ Stocks keep their Windy names, and there are no brand logos.
 
 **Roll (shooting).**
 - **One roll at a time.** The roll picker (UI screen ROLL) has shelf tabs Colour / Slide / B&W / Cine / LUT, a can
-  carousel, and 12 / 24 / 36 exposures (default 24). SET loads the roll and plays the same load animation as a film
+  carousel, and 3 / 6 / 12 / 24 / 36 exposures (default 24). SET loads the roll and plays the same load animation as a film
   load in the browser ("Loading the roll", the can, the film's chips and "12 EXP"), then the UI closes and LiveView
   shows. A key skips the rest of the animation.
   - While the roll has frames, loading is refused ("develop it first"). A roll with no frames yet is simply reloaded

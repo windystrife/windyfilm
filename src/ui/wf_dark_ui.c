@@ -98,11 +98,12 @@ static void mark(int x, int y, int bg)                     /* own mark: a frame 
 enum { RT_COLOUR = 0, RT_SLIDE, RT_BW, RT_CINE, RT_LUT, RT_N };
 static const char *const rt_name[RT_N] = { "COLOUR", "SLIDE", "B&W", "CINE", "LUT" };
 static const char *const rt_process[RT_N] = { "C-41", "E-6", "B&W", "ECN-2", "LOG" };
-static const int exps[3] = { 12, 24, 36 };
+#define NEXP 5
+static const int exps[NEXP] = { 3, 6, 12, 24, 36 };        /* 3 and 6: owner 11-15, a short roll */
 
 static uint8_t rl[RT_N][64];                               /* wf_films index per tab, by catalogue order */
 static int rn[RT_N];
-static int rtab, rsel[RT_N], rexp = 1, rbuilt, rglow = -1;
+static int rtab, rsel[RT_N], rexp = 3, rbuilt, rglow = -1;   /* 24 */
 
 static int tab_of(const struct wf_film *f)
 {
@@ -149,7 +150,7 @@ static void roll_enter(void)
     if (id) roll_select_id(id);
     if (!rn[rtab])
         for (int t = 0; t < RT_N; t++) if (rn[t]) { rtab = t; break; }
-    if (wf_roll_open(r)) for (int k = 0; k < 3; k++) if (exps[k] == r->exp) rexp = k;
+    if (wf_roll_open(r)) for (int k = 0; k < NEXP; k++) if (exps[k] == r->exp) rexp = k;
     wfg_glow_centre(360, 168, 360, 290);
     rglow = -1;                                            /* the glow ramp again (the palette may be the darkroom's) */
     msg = 0;
@@ -183,10 +184,10 @@ static int roll_key(int key, int now)
         roll_next_tab(1);
         break;
     case MODULE_KEY_PRESS_UP: case MODULE_KEY_INFO:
-        rexp = (rexp + 1) % 3;
+        rexp = (rexp + 1) % NEXP;
         break;
     case MODULE_KEY_PRESS_DOWN:
-        rexp = (rexp + 2) % 3;
+        rexp = (rexp + NEXP - 1) % NEXP;
         break;
     case MODULE_KEY_PRESS_SET: case MODULE_KEY_JOY_CENTER:
     {

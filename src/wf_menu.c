@@ -1403,7 +1403,7 @@ static struct menu_entry wf_menu[] = {
             { .name = "Open film browser", .select = wf_open_select, .icon_type = IT_ACTION,
               .help = "The film strip: pick a film or Film LUT can, Light, Print, effects." },
             { .name = "Film roll", .select = wf_roll_select, .update = wf_roll_update, .icon_type = IT_ACTION,
-              .help = "Load a roll: one film, 12 / 24 / 36 RAW+L frames, developed later in the Darkroom." },
+              .help = "Load a roll: one film, 3 / 6 / 12 / 24 / 36 RAW+L frames, developed later in the Darkroom." },
             { .name = "Blind roll", .priv = (void *)&wf_blind, .max = 1, .select = wf_blind_select,
               .help = "On: no image review and no PLAY while a roll is in the camera." },
             { .name = "Darkroom", .select = wf_dark_select, .update = wf_dark_update, .icon_type = IT_ACTION,

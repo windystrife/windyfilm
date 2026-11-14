@@ -4,7 +4,7 @@ Bản thử thứ hai, 14/11/2026 tối: Darkroom gộp chung thẻ với RAW de
 độ chạy cùng lúc. CHƯA chạy trên máy thật lần nào: lần chụp này để đo bộ nhớ, thời
 gian và xem mọi bước có chạy không.
 
-Ý tưởng: chụp một cuộn phim (12 / 24 / 36 kiểu RAW + L, không xem lại ảnh), rồi
+Ý tưởng: chụp một cuộn phim (3 / 6 / 12 / 24 / 36 kiểu RAW + L, không xem lại ảnh), rồi
 "tráng" cả cuộn trong máy: Darkroom đọc từng file CR2 trên thẻ, develop bằng RAW
 develop B của WindyFilm với phim của cuộn, ghi ra một JPEG "bản in" riêng. Toàn
 bộ code Darkroom là code mới của WindyFilm (không dùng code Film Roll).
@@ -35,7 +35,7 @@ bộ code Darkroom là code mới của WindyFilm (không dùng code Film Roll).
 Menu ML: Shoot > WindyFilm > "Film roll" -> màn hình chọn cuộn:
 - Q (hoặc chạm 1 ngón): đổi kệ Colour / Slide / B&W / Cine / LUT.
 - Trái / phải hoặc xoay bánh xe: chọn hộp phim.
-- Lên / xuống (hoặc INFO): 12 / 24 / 36 kiểu (mặc định 24).
+- Lên / xuống (hoặc INFO): 3 / 6 / 12 / 24 / 36 kiểu (mặc định 24; 3 và 6 để thử nhanh).
 - SET: nạp cuộn: chạy hoạt ảnh nạp phim giống lúc nạp phim trong browser ("Loading the
   roll" -> "Roll loaded"), rồi tự đóng và về LiveView. MENU: thoát.
 
