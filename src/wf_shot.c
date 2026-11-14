@@ -465,7 +465,7 @@ static void wf_ws_index(void)
     if (rc)
         wf_log("pack %s %s (%d): films stay plain", WF_WS_PACK, rc == -1 ? "missing" : "bad", rc);
     else
-        wf_log("pack ok: %d tables, index %dms", nok, get_ms_clock() - t0);
+        wf_log("pack ok: %d tables, index %dms, catalog %d films", nok, get_ms_clock() - t0, wf_nfilms);
     wf_gen_bump();
 }
 
