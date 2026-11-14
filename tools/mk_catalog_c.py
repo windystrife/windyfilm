@@ -146,10 +146,14 @@ def main(argv):
             if len(txt[key]) > lim:
                 sys.exit("mk_catalog_c: id %d: %s %r longer than %d" % (f["id"], key, txt[key], lim))
         can = k if k < 255 else 255
-        L.append("    { %d, %d, 0x%02x, %d, %d, %d, %d, 0x%02x, 0, %s, %s, %s, %s, %s, %s, %s }," % (
-            f["id"], GROUPS.index(f["group"]), flags, can, int(f.get("iso") or 0), int(f.get("kelvin") or 0),
-            int(f.get("order") or 0), pb, cstr(txt["code"]), cstr(txt["name"]), cstr(txt["short"]), cstr(txt["line1"]),
-            cstr(txt["line2"]), cstr(txt["kind"]), cstr(txt["fmt"])))
+        # designated initializers: a field added to / removed from struct wf_film (prints went 8 -> 32 bit) must not be
+        # able to silently shift every pointer in the catalogue
+        L.append("    { .id = %d, .group = %d, .flags = 0x%02x, .can = %d, .iso = %d, .kelvin = %d, .order = %d, "
+                 ".prints = 0x%xu, .code = %s, .name = %s, .shortname = %s, .line1 = %s, .line2 = %s, .kind = %s, "
+                 ".format = %s }," % (
+                     f["id"], GROUPS.index(f["group"]), flags, can, int(f.get("iso") or 0), int(f.get("kelvin") or 0),
+                     int(f.get("order") or 0), pb, cstr(txt["code"]), cstr(txt["name"]), cstr(txt["short"]),
+                     cstr(txt["line1"]), cstr(txt["line2"]), cstr(txt["kind"]), cstr(txt["fmt"])))
     L.append("};")
     n = len(rows)
     L.append("const int wf_nfilms = %d;" % n)

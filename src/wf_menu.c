@@ -320,8 +320,8 @@ int wf_loaded(void)
 }
 
 /* ------------------------------------------------------------------ rows (wf_api.h) */
-static const char *const wf_rname[WF_NROWS] = { "Light", "Print", "Grain", "Halation", "Mist", "Strength", "Highlights",
-                                                "Shadows", "Film LUT" };
+static const char *const wf_rname[WF_NROWS] = { "Light", "Print stock", "Grain", "Halation", "Mist", "Strength",
+                                                "Highlights", "Shadows", "Film LUT" };
 
 const char *wf_row_name(int row) { return row >= 0 && row < WF_NROWS ? wf_rname[row] : ""; }
 
