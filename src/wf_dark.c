@@ -69,7 +69,8 @@ const char *wf_exif_text(const struct wf_look *lk, int g, int h, int m, int ev, 
 /* ================================================================== the roll (wf_task) */
 static struct wf_roll roll;
 static volatile uint32_t roll_gen_n = 1;
-static int roll_read_done, roll_have_file, roll_dirty, roll_save_fail_t;
+static int roll_read_done, roll_have_file, roll_dirty, roll_save_fail_t, roll_save_fails;
+static struct wf_fe roll_save_fe;
 static char roll_txt[WF_ROLL_FILE] __attribute__((aligned(32)));
 volatile int wf_blind = 1;
 static volatile int req_kind, req_film, req_exp;  /* 1 load, 2 rewind, 3 close */
@@ -152,6 +153,10 @@ static void roll_read(void)
     roll_have_file = FIO_GetFileSize(WF_ROLL_PATH, &size) == 0;
     if (!roll_have_file)
         return;
+    if (size == 0) {                             /* RAWB8's card: created, then the write never came */
+        wf_log("roll: %s is empty (a save that did not finish): no roll", WF_ROLL_PATH);
+        return;                                  /* (roll_have_file: the next save writes it in place) */
+    }
     uint32_t n = size < WF_ROLL_FILE ? size : WF_ROLL_FILE;
     if (wf_card_read(WF_ROLL_PATH, 0, roll_txt, n, 0) != 0 || wf_roll_parse(&roll, roll_txt, (int)n) != 0) {
         wf_log("roll: %s unreadable (%d bytes): no roll", WF_ROLL_PATH, (int)size);
@@ -163,22 +168,34 @@ static void roll_read(void)
     wf_log("roll: %03d %s film %d %d/%d", roll.num, wf_roll_state_name(roll.state), roll.film, roll.nshot, roll.exp);
 }
 
+/* a failed save: logged once per failing step (not at every 3 s try), "saved after n tries" once it went */
+static int roll_save_err(int step, int rc)
+{
+    if (!roll_save_fails++ || step != roll_save_fe.step)
+        wf_log("roll: %s not saved (%s rc %d), retry", WF_ROLL_PATH, wf_fe_name(step), rc);
+    roll_save_fe.step = step;
+    roll_save_fe.rc = rc;
+    return -1;
+}
 static int roll_save(void)
 {
     if (wf_roll_text(&roll, roll_txt, sizeof roll_txt) != WF_ROLL_FILE)
-        return -1;
+        return roll_save_err(WF_FE_WRITE, -1);
     struct wf_fe e = { 0, 0 };
     void *f = wf_fopen_w(WF_ROLL_PATH, roll_have_file ? WF_FO_AT : WF_FO_NEW, 0, &e);
     if (!f) {
         if (e.step == WF_FE_OPEN && roll_have_file)
             roll_have_file = 0;                  /* gone (card swapped): created again next time */
-        return -1;
+        return roll_save_err(e.step, e.rc);
     }
+    roll_have_file = 1;                          /* on the card now: a later try opens it in place (no create) */
     int w = FIO_WriteFile(f, roll_txt, WF_ROLL_FILE);
     FIO_CloseFile(f);
     if (w != WF_ROLL_FILE)
-        return -1;
-    roll_have_file = 1;
+        return roll_save_err(WF_FE_WRITE, w);
+    if (roll_save_fails)
+        wf_log("roll: %s saved after %d tries", WF_ROLL_PATH, roll_save_fails + 1);
+    roll_save_fails = 0;
     roll_dirty = 0;
     return 0;
 }
@@ -421,10 +438,8 @@ void wf_roll_poll(void)
         }
     }
     roll_props(idle);
-    if (roll_dirty && idle && get_ms_clock() - roll_save_fail_t > 3000 && roll_save() != 0) {
-        roll_save_fail_t = get_ms_clock();
-        wf_log("roll: %s not saved, retry", WF_ROLL_PATH);
-    }
+    if (roll_dirty && idle && get_ms_clock() - roll_save_fail_t > 3000 && roll_save() != 0)
+        roll_save_fail_t = get_ms_clock();       /* (roll_save logged it) */
     roll_hud();
 }
 
@@ -680,7 +695,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     uint32_t fsize = 0;
     if (FIO_GetFileSize(cr2, &fsize) != 0 || fsize < 4096) { dk_why = "no CR2"; return DK_ERR; }
     void *f = FIO_OpenFile(cr2, 0);
-    if (!f || !DRY_OK(f)) { dk_why = "open CR2"; return DK_ERR; }
+    if (!WF_FH_OK(f)) { dk_why = "open CR2"; return DK_ERR; }
     uint32_t nh = fsize < WF_CR2_HEAD ? fsize : WF_CR2_HEAD;
     rc = dk_read_at(f, 0, M.in, nh) ? WF_CR2_E_READ : wf_cr2_parse(M.in, nh, fsize, &dk_inf);
     if (rc == 0) {
@@ -707,7 +722,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     if (FIO_GetFileSize(jpg, &jn) == 0 && jn > 1024) {   /* Canon's APP1 from the shot's own JPEG */
         void *g = FIO_OpenFile(jpg, 0);
         uint32_t n = jn < DK_APP1 ? jn : DK_APP1;
-        if (g && DRY_OK(g)) {
+        if (WF_FH_OK(g)) {
             if (dk_read_at(g, 0, M.app1, n) != 0 || wf_dk_app1(M.app1, n, &ao, &al) != 0)
                 al = 0;
             FIO_CloseFile(g);

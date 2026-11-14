@@ -3001,8 +3001,97 @@ static int menu_set(const char *nm)                 /* SET on the entry: its sel
 }
 #define H_KEY_HALFSHUTTER 1                       /* ML module.h MODULE_KEY_PRESS_HALFSHUTTER / _SET (as WF_KEY_PLAY) */
 #define H_KEY_SET 9
-static void t_roll(void)
+#define H_ROLLF "ML/SETTINGS/WFROLL.TXT"
+static int roll_cr2_yes(void *ctx, int folder, int file) { (void)ctx; (void)folder; (void)file; return 1; }
+static char *roll_file_wait(const char *want, long *n, int ms)   /* wf_task writes it after the state changed in memory */
 {
+    char *b = 0;
+    for (int t = 0; t <= ms; t += 100) {
+        free(b);
+        b = get_file(H_ROLLF, n);
+        if (b && *n == 1536 && strstr(b, want))
+            break;
+        usleep(100000);
+    }
+    return b;
+}
+/* ROLL:save / short / back - the roll file on RAWB8's card (owner 11-15): "not saved, retry" every 3 s, 0 bytes after a
+ * reboot. Every file handle odd here (DryOS hands out 3, 5, 7 as often as even ones; RAWB8 took them for errors and left
+ * them open). save: the empty WFROLL.TXT that card was left with; short: no file, the first write cut short; back: a
+ * roll file read at boot. One boot per case (the module loads once per boot) */
+static void t_roll_save(const char *cs)
+{
+#ifdef WF_BUILD_5D2
+    (void)cs;
+    chk(1, "5D2: no roll");
+#else
+    long n = 0;
+    char *b;
+    std_pack();
+    h_set_folder_number(100);
+    h_set_file_number(300);
+    h_fio_odd_fd = 1;
+    snprintf(h_fio_cpath, sizeof h_fio_cpath, "%s", H_ROLLF);
+    const int film = wf_films[fA].id;
+    if (!strcmp(cs, "save")) {
+        put_file(H_ROLLF, "", 0);
+        log_mark();
+        mod_init(1);
+        chk(LOGW("roll: " H_ROLLF " is empty", 3000) && wf_roll_now()->state == WF_RS_EMPTY,
+            "RAWB8's empty roll file at boot: no roll (%s)", log_line("roll: "));
+        int rc = wf_roll_req_load(film, 12);
+        chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000), "a roll loads (%d)", rc);
+        b = roll_file_wait("state=loaded", &n, 3000);
+        chk(b && n == 1536 && h_fio_cpath_n == 0 && !log_has("not saved"),
+            "odd handles, the empty file: saved in place at once (%ld bytes, %d creates)", n, h_fio_cpath_n);
+        free(b);
+    } else if (!strcmp(cs, "short")) {
+        unlink(H_ROLLF);
+        snprintf(h_fio_wpath, sizeof h_fio_wpath, "%s", H_ROLLF);
+        h_fio_wmax = 100;
+        log_mark();
+        mod_init(1);
+        int rc = wf_roll_req_load(film, 12);
+        chk(rc == 0 && LOGW("roll: " H_ROLLF " not saved (write rc 100), retry", 3000),
+            "a short first write: logged with its step ('%s')", log_line("not saved"));
+        b = roll_file_wait("state=loaded", &n, 6000);
+        long nl = 0;
+        char *lg = get_file(LOG_PATH, &nl);
+        int said = lg ? count_str(lg + (nl > log_at ? log_at : nl), "not saved") : -1;
+        free(lg);
+        chk(b && n == 1536 && LOGW("roll: " H_ROLLF " saved after 2 tries", 2000) && said == 1 && h_fio_cpath_n == 1,
+            "saved by the next try, in place (%ld bytes, %d 'not saved' lines, %d creates)", n, said, h_fio_cpath_n);
+        free(b);
+        h_fio_wpath[0] = 0;
+    } else {                                     /* back: a roll file from an earlier boot, read through an odd handle */
+        struct wf_roll r;
+        char t[1536];
+        wf_roll_reset(&r);
+        wf_roll_load(&r, film, 12, 100, 290);
+        wf_roll_seen(&r, 100, 292, roll_cr2_yes, 0);
+        chk(wf_roll_text(&r, t, sizeof t) == 1536, "a roll file of 2 frames made");
+        put_file(H_ROLLF, t, sizeof t);
+        log_mark();
+        mod_init(1);
+        chk(LOGW("roll: 001 loaded film", 3000) && wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->nshot == 2,
+            "the roll read back at boot (%s)", log_line("roll: "));
+    }
+    chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "the roll closes");
+    b = roll_file_wait("state=done", &n, 3000);
+    chk(b && h_fio_cpath_n == (!strcmp(cs, "short") ? 1 : 0), "state=done on the card, rewritten in place (%d creates)",
+        h_fio_cpath_n);
+    free(b);
+    mod_deinit();
+    h_fio_cpath[0] = 0;
+    h_fio_odd_fd = 0;
+#endif
+}
+static void t_roll(const char *cs)
+{
+    if (!strcmp(cs, "save") || !strcmp(cs, "short") || !strcmp(cs, "back")) {
+        t_roll_save(cs);
+        return;
+    }
     std_pack();
     h_set_folder_number(100);
     h_set_file_number(206);
@@ -3674,7 +3763,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LOG")) t_log(cs);
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();
-    else if (!strcmp(mode, "ROLL")) t_roll();
+    else if (!strcmp(mode, "ROLL")) t_roll(cs);
     else if (!strcmp(mode, "LEICA")) t_leica();
     else if (!strcmp(mode, "CLOG2")) t_clog2();
     else if (!strcmp(mode, "CUBE65")) t_cube65();
