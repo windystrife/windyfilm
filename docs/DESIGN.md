@@ -173,7 +173,7 @@ read for ideas.
   costs 1 EV of shadow noise. It is the owner's call.
 
 **P0. Probe that only logs (EOS M, never changes the image).** The probe answers whether the raw and SSRAW are still
-intact at the hook.
+intact at the hook. It is implemented in commit a675c8a (`wf_cam_eosm.c`, host test `PROBE`).
 - It is a menu toggle under a debug entry, default off.
 - At the NN hook entry (`CompleteSsrawToYuv` 0xFF169414; r0 = job, r1 = finished YUV), the camera layer snapshots into
   a static struct:

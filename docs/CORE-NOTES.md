@@ -137,10 +137,16 @@ plan, the numbers and the traps. Exact touch points per step:
   - fold K into both decode and encode tables (DESIGN 3.2, Headroom). `mk_logasm_tab.py` then follows, and its
     asserts (`wf_dec <= 16384`, `max(wf_lenc) <= 65279`) must still pass;
   - rerun `logchk`, the LOG / LOGCHK host tests and the gate, and write the curve name into the boot log line.
-- **P0** (EOS M only): `wf_cam_eosm.c` takes the snapshot in the NN hook before the gate (a static struct, no calls
-  except the optional `ff234680`). `wf_main.c` `wf_task` writes the lines and `ML/LOGS/WFPROBE.BIN`. A menu toggle
-  goes under a debug entry, default off; nothing is written to the config. Add a host test with a fake parameter block
-  and fake EDMAC words, and assert that the frame stays byte-identical.
+- **P0** (EOS M only; done in a675c8a, 33 host checks in mode `PROBE`). `wf_cam_eosm.c` takes the snapshot in the NN
+  hook (r2 == 0 calls), before the gate:
+  - one static `struct wf_prb`, with no calls except the optional `ff234680`;
+  - `prb_done()` re-hashes the windows after the worker or the reject.
+
+  `wf_cam_poll()` (wf_task) writes the lines and appends the record to `ML/LOGS/WFPROBE.BIN`; calls that arrive before
+  that are counted as skipped. The menu entry "RAW probe" is Off / On / On + ROM call and is not in the config. The
+  host shim fakes the parameter block, the EDMAC words and the ROM lookup (`wf_host_mem_read`, `wf_host_memnavi`).
+  The probe's own `" %08x"` lines are built word by word: a long repeated format string matched the old binary in the
+  gate.
 - **H**: the aux-plane fields in `src/wf_frame.h`; `wf_cam_eosm.c` fills them from what P0 found. A new stage goes in
   `wf_shot.c` `wf_dispatch()` for (UYVY8 + aux, Log + LUT); it works on bands or after a scan pass (DESIGN 3.2). The
   reconstruction is a new file `src/wf_hl.c`, with a host test on a synthetic raw plane.
