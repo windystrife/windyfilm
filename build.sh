@@ -75,6 +75,7 @@ cc wf_menu.o     $MODFLAGS $MLFLAGS $S/wf_menu.c
 cc wf_shot.o     $MODFLAGS $S/wf_shot.c
 cc wf_pv.o       $MODFLAGS $S/wf_pv.c
 cc wf_cam.o      $MODFLAGS $S/$CAMSRC
+cc wf_probe.o    $MODFLAGS $S/wf_probe.c
 cc wf_loglut.o   $MODFLAGS -DWF_LL_EXTERN_ENC $S/wf_loglut.c
 cc wf_llk.o      $MODFLAGS -O2 -DWF_LL_ASM $S/wf_llk.c
 cc wf_llk_arm.o  -march=armv5t -marm $S/wf_llk_arm.S

@@ -160,13 +160,20 @@ plan, the numbers and the traps. Exact touch points per step:
   - a synthetic slot-2 CSV (scratch, never committed) checks the Neutral path before the measured curve exists:
     `CURVE_NEUTRAL=<csv> OUT=<scratch dir>` for both build.sh and test.sh;
   - still open: flat Log (`wf_dec`, K fold).
-- **P0** (EOS M only; done in a675c8a, 33 host checks in mode `PROBE`). `wf_cam_eosm.c` takes the snapshot in the NN
-  hook (r2 == 0 calls), before the gate:
-  - one static `struct wf_prb`, with no calls except the optional `ff234680`;
-  - `prb_done()` re-hashes the windows after the worker or the reject.
+- **P0** (EOS M done in a675c8a, 33 host checks in mode `PROBE`; 5D2 prepared, waits for
+  `raw-path/P0_5D2_SPEC.md`). The camera-independent part is `wf_probe.c` / `wf_probe.h` (split out on 14 Nov, the
+  EOS M record and log lines unchanged):
+  - one static `struct wf_prb` (4696 B, version 1 on the EOS M; `mode` bits 8-15 = the probed call's kind);
+  - the camera layer hands a `struct wf_prb_cam` to `wf_prb_setup()` in `wf_cam_init()`: pool bounds, log names, and
+    `read()` (block words, register words, the optional ROM call, raw source addresses). EOS M: `prb_read_eosm`
+    (parameter block 0x41E82CEC, five EDMAC words, `ff234680`);
+  - hook: `wf_prb_enter(regs, kind)` at the probed call (EOS M: NN with r2 == 0, before the gate), then
+    `wf_prb_leave(rc, t)` re-hashes the windows after the worker or the reject;
+  - 5D2: `wf_cam_5d2.c` calls `PRB_ENTER` / `PRB_LEAVE` in both hooks (TOP, BOT), empty while `WF_PRB_CAN` is 0
+    (wf_cam.h); `prb_5d2` waits for the spec's block, registers, sources and safe range.
 
-  `wf_cam_poll()` (wf_task) writes the lines and appends the record to `ML/LOGS/WFPROBE.BIN`; calls that arrive before
-  that are counted as skipped. The menu entry "RAW probe" is Off / On / On + ROM call and is not in the config. The
+  `wf_cam_poll()` (wf_task) calls `wf_prb_flush()`, which writes the lines and appends the record to
+  `ML/LOGS/WFPROBE.BIN`; calls that arrive before that are counted as skipped. The menu entry "RAW probe" is Off / On / On + ROM call and is not in the config. The
   host shim fakes the parameter block, the EDMAC words and the ROM lookup (`wf_host_mem_read`, `wf_host_memnavi`).
   The probe's own `" %08x"` lines are built word by word: a long repeated format string matched the old binary in the
   gate.

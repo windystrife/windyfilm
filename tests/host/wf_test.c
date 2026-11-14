@@ -37,6 +37,7 @@
 #include "wf_fx.h"
 #include "wf_expsim.h"
 #include "host_ml.h"
+#include "wf_probe.h"
 /* this build's input curve decode tables (generated header, static copies for the checks) */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-const-variable"
@@ -1519,7 +1520,8 @@ static void t_5d2(void)
 
 #ifndef WF_BUILD_5D2
 /* ------------------------------------------------------------------ PROBE (RAW probe P0, EOS M) */
-#define PRB_REC 4696                             /* sizeof(struct wf_prb) in wf_cam_eosm.c */
+#define PRB_REC 4696                             /* sizeof(struct wf_prb), wf_probe.h: the EOS M record version 1 */
+typedef char prb_rec_check[sizeof(struct wf_prb) == PRB_REC ? 1 : -1];
 static uint32_t fnv4k(const uint8_t *p)
 {
     uint32_t h = 2166136261u;

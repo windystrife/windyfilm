@@ -101,11 +101,11 @@ int  wf_cam_shot_ok(void);                        /* the in-camera path is up (w
 int  wf_cam_gate_pv(void);                        /* preview: a shot now would get a look at all (JPEG L, no multishot) */
 const char *wf_cam_name(void);                    /* "EOS M" / "5D2" */
 extern volatile int wf_aspect;                    /* JPEG aspect (EOS M property), -1 not reported; 5D2 always 0 */
-#ifndef WF_BUILD_5D2
-/* RAW probe P0 (wf_cam_eosm.c, DESIGN 3.2): log only, the frame is never touched; off at every boot, never saved */
-enum { WF_PRB_OFF = 0, WF_PRB_ON, WF_PRB_NAV, WF_PRB_N };   /* NAV: also the MEMNAVI_GetReadMemory ROM call */
+/* RAW probe P0 (wf_probe.c + the camera layer, DESIGN 3.2): log only, the frame is never touched; off at every boot,
+   never saved. The menu entry is built where WF_PRB_CAN (wf_cam.h). */
+enum { WF_PRB_OFF = 0, WF_PRB_ON, WF_PRB_NAV, WF_PRB_N };   /* NAV: also the camera's ROM call (EOS M: MEMNAVI) */
 extern int wf_probe_mode;
-#endif
+int wf_prb_can(void);                             /* the camera layer set the probe up (body supported) */
 extern volatile int wf_req_live;                  /* a shot is between its hook post and done (preview stays off) */
 
 /* ------------------------------------------------------------------ wf_shot.c */

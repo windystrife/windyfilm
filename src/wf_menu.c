@@ -1181,17 +1181,19 @@ static MENU_UPDATE_FUNC(wf_status_update)
     MENU_SET_WARNING(MENU_WARN_INFO, "WindyFilm by WindyStrife, %s. Log: ML/LOGS/WINDYFLM.LOG.", wf_cam_name());
 }
 
-#ifndef WF_BUILD_5D2
+#if WF_PRB_CAN
 static const char *wf_prb_name[WF_PRB_N] = { "Off", "On", "On + ROM call" };
 static MENU_UPDATE_FUNC(wf_prb_update)
 {
-    if (wf_probe_mode)
+    if (!wf_prb_can())
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Not on this camera / firmware.");
+    else if (wf_probe_mode)
         MENU_SET_WARNING(MENU_WARN_INFO, "Shoot RAW+L (single and burst). Log + ML/LOGS/WFPROBE.BIN.");
     else
         MENU_SET_WARNING(MENU_WARN_INFO, "Test only, off at every boot. The photo is never changed.");
 }
 #define WF_PRB_ENTRY { .name = "RAW probe", .priv = &wf_probe_mode, .max = WF_PRB_N - 1, .choices = wf_prb_name, \
-                       .update = wf_prb_update, .help = "Test: logs where Canon keeps the RAW at the shot (EOS M)." },
+                       .update = wf_prb_update, .help = "Test: logs where Canon keeps the RAW at the shot." },
 #else
 #define WF_PRB_ENTRY
 #endif
