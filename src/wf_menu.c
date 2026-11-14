@@ -11,6 +11,7 @@
  *   input=jpeg       reserved for a RAW input path (docs/DESIGN.md 3.1); "jpeg" is the only value, no menu entry
  *   film=<id>        loaded film / Film LUT can id (0 none)          output=film|log|lut|off
  *   curve=slog3|vlog|logc3|clog2|clog3                                 flut=technical|<cube code>   lutei=<1/3 EV>
+ *   incurve=srgb|film1   how Log + LUT reads the JPEG (film1: only when the build has the Canon curve table)
  *   print=scan|cine|paper   light=auto|day|cloudy|tungsten   strength=subtle|normal|strong
  *   grain=off|fine|normal|strong   halation=off|halation|bloom|spk|spkbloom   mist=off|w8|w4|w2|w1|b8|b4|b2|b1
  *   preview=off|on|fast   exposure=camera|smooth   exptrim=<1/8 EV>   exif=on|off
@@ -43,6 +44,7 @@ volatile int wf_light = WF_LIGHT_AUTO;
 volatile int wf_curve = WF_CURVE_VLOG;
 volatile int wf_flut;                             /* 0 Technical (the user's own <LOG>.CUB) */
 volatile int wf_lut_ei;                           /* 1/3 EV, WF_LL_EI_MIN..WF_LL_EI_MAX */
+volatile int wf_incurve;                          /* WF_INC_*: how Log + LUT reads the JPEG (wf_incurve_t) */
 volatile int wf_strength = 1;                     /* 30 / 100 / 125 % */
 volatile int wf_exif_off;
 volatile int wf_cfg_dirty;
@@ -63,6 +65,8 @@ int wf_lut_ei_t(void)
     int v = wf_lut_ei;
     return v >= WF_LL_EI_MIN && v <= WF_LL_EI_MAX ? v : 0;
 }
+
+int wf_incurve_t(void) { return wf_incurve == WF_INC_FILM1 && wf_ll_canon_have() ? WF_INC_FILM1 : WF_INC_SRGB; }
 
 static const int wf_spct[WF_NSTRENGTH] = { 30, 100, 125 };
 int wf_strength_pct(int level) { return wf_spct[level >= 0 && level < WF_NSTRENGTH ? level : 1]; }
@@ -106,6 +110,8 @@ static const char *wf_out_menu[WF_NOUT] = { "Film", "Log", "Log + LUT", "Off" };
 static const char *wf_lei_name[WF_LL_EI_MAX - WF_LL_EI_MIN + 1] = { "-1 EV", "-2/3 EV", "-1/3 EV", "0", "+1/3 EV", "+2/3 EV",
                                                                     "+1 EV", "+1 1/3 EV", "+1 2/3 EV", "+2 EV" };
 typedef char wf_lei_check[sizeof wf_lei_name / sizeof *wf_lei_name == 10 && WF_LL_EI_MIN == -3 ? 1 : -1];
+static const char *wf_inc_name[WF_INC_N] = { "sRGB", "Canon Film 1" };
+static const char *const wf_inc_key[WF_INC_N] = { "srgb", "film1" };
 
 static const char *wf_pick(const char *const *t, int n, int v) { return t[v >= 0 && v < n ? v : 0]; }
 static int wf_cur(void) { int c = wf_curve; return c >= 1 && c <= WF_NCURVE ? c : WF_CURVE_VLOG; }
@@ -524,6 +530,8 @@ void wf_cfg_load(void)
             x = wf_cfg_int(&v, &ok);
             if (ok && x >= WF_LL_EI_MIN && x <= WF_LL_EI_MAX)
                 wf_lut_ei = x;
+        } else if ((v = wf_cfg_val(l, "incurve"))) {
+            wf_incurve = wf_cfg_word(v, wf_inc_key, WF_INC_N, WF_INC_SRGB);
         } else if ((v = wf_cfg_val(l, "print"))) {
             wf_print = wf_cfg_word(v, wf_print_key, WF_NPRINTS, WF_PRINT_SCAN);
         } else if ((v = wf_cfg_val(l, "light"))) {
@@ -576,10 +584,11 @@ static int wf_cfg_save(void)
     char b[WF_CFG_MAX];
     int lei = wf_lut_ei_t(), fl = wf_flut > 0 && wf_flut < WF_FLUT_N ? wf_flut : 0;
     int n = snprintf(b, sizeof b,
-                     "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nprint=%s\nlight=%s\nstrength=%s\n"
-                     "grain=%s\nhalation=%s\nmist=%s\npreview=%s\nexposure=%s\nexptrim=%d\nexif=%s\n",
+                     "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
+                     "strength=%s\ngrain=%s\nhalation=%s\nmist=%s\npreview=%s\nexposure=%s\nexptrim=%d\nexif=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
-                     fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_print_key, WF_NPRINTS, wf_print),
+                     fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
+                     wf_pick(wf_print_key, WF_NPRINTS, wf_print),
                      wf_pick(wf_light_key, WF_NLIGHT, wf_light), wf_pick(wf_strength_key, WF_NSTRENGTH, wf_strength),
                      wf_pick(wf_grain_key, WF_GRAIN_MAX + 1, wf_grain), wf_pick(wf_halo_key, WF_HALO_MAX + 1, wf_halo),
                      wf_pick(wf_mist_key, WF_MIST_MAX + 1, wf_mist), wf_pick(wf_pv_key, 3, wf_pv_mode),
@@ -670,6 +679,8 @@ void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev)
         n += snprintf(b + n, sizeof b - n, " | %s", wf_out_name(WF_OUT_LLUT, lk->curve));
     if (lk->output == WF_OUT_LLUT && lk->lei && lk->lei >= WF_LL_EI_MIN && lk->lei <= WF_LL_EI_MAX && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, " | LUT EI %s", wf_lei_name[lk->lei - WF_LL_EI_MIN]);
+    if (lk->output == WF_OUT_LLUT && lk->incurve == WF_INC_FILM1 && n < (int)sizeof b)
+        n += snprintf(b + n, sizeof b - n, " | In %s", wf_inc_name[WF_INC_FILM1]);
     if (lk->light && lk->light < WF_NLIGHT && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, " | Light %s", wf_light_name[lk->light]);
     if (g > 0 && g <= WF_GRAIN_MAX && n < (int)sizeof b)
@@ -912,6 +923,12 @@ static MENU_SELECT_FUNC(wf_out_select)
 static MENU_SELECT_FUNC(wf_curve_select) { (void)priv; wf_step_int(&wf_curve, 1, WF_NCURVE, delta); }
 static MENU_SELECT_FUNC(wf_flut_select) { (void)priv; wf_step_int(&wf_flut, 0, WF_FLUT_N - 1, delta); }
 static MENU_SELECT_FUNC(wf_lei_select) { (void)priv; wf_step_int(&wf_lut_ei, WF_LL_EI_MIN, WF_LL_EI_MAX, delta); }
+static MENU_SELECT_FUNC(wf_inc_select)
+{
+    (void)priv;
+    if (wf_ll_canon_have())
+        wf_step_int(&wf_incurve, 0, WF_INC_N - 1, delta);
+}
 static MENU_SELECT_FUNC(wf_light_select) { (void)priv; wf_row_step(WF_ROW_LIGHT, delta); }
 static MENU_SELECT_FUNC(wf_print_select) { (void)priv; wf_row_step(WF_ROW_PRINT, delta); }
 static MENU_SELECT_FUNC(wf_grain_select) { (void)priv; wf_row_step(WF_ROW_GRAIN, delta); }
@@ -991,6 +1008,21 @@ static MENU_UPDATE_FUNC(wf_lut_update)
         MENU_SET_WARNING(MENU_WARN_INFO, "Used by the Log + LUT output (and the Film LUT cans).");
     else if (WF_FLUT_VLONLY(wf_flut) && wf_cur() != WF_CURVE_VLOG)
         MENU_SET_WARNING(MENU_WARN_ADVICE, "%s is a V-Log cube: set Log curve to V-Log.", wf_flut_name[wf_flut]);
+}
+
+static MENU_UPDATE_FUNC(wf_inc_update)
+{
+    MENU_SET_VALUE("%s", wf_inc_name[wf_incurve_t()]);
+    if (!wf_ll_canon_have())
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "This build has no Canon curve table: sRGB only.");
+    else if (!wf_yuv_active())
+        WF_NOT_ACTIVE();
+    else if (wf_out != WF_OUT_LLUT)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Used by the Log + LUT output (and the Film LUT cans).");
+    else if (wf_incurve_t() == WF_INC_FILM1)
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Picture Style to Film 1 (User Def. 1). Measured on EOS M.");
+    else
+        MENU_SET_WARNING(MENU_WARN_INFO, "The JPEG is read as sRGB (any Picture Style).");
 }
 
 static MENU_UPDATE_FUNC(wf_row_update)
@@ -1113,6 +1145,9 @@ static struct menu_entry wf_menu[] = {
             { .name = "LUT EI", .priv = (void *)&wf_lut_ei, .min = WF_LL_EI_MIN, .max = WF_LL_EI_MAX,
               .choices = wf_lei_name, .select = wf_lei_select,
               .help = "Extra exposure into Log + LUT, like a log EI." },
+            { .name = "Input curve", .priv = (void *)&wf_incurve, .max = WF_INC_N - 1, .choices = wf_inc_name,
+              .select = wf_inc_select, .update = wf_inc_update,
+              .help = "How Log + LUT reads the JPEG: sRGB, or Canon's Film 1 style undone." },
             WF_ROWE("Light", WF_ROW_LIGHT, wf_light_select, "White balance: Auto (yours), the stock's Day, Cloudy, Tungsten."),
             WF_ROWE("Print", WF_ROW_PRINT, wf_print_select, "Scan, cine print or paper print of the loaded film."),
             WF_ROWE("Grain", WF_ROW_GRAIN, wf_grain_select, "Film grain at the shot (films and Log + LUT)."),

@@ -131,12 +131,20 @@ Deny input: the old module's binary (path assembled inside the script, read only
 Nothing RAW is implemented yet. The owner chose **Hybrid + Canon curve inversion** (2026-11-14); DESIGN 3.2 has the
 plan, the numbers and the traps. Exact touch points per step:
 
-- **A1** (waits for `luts/canon_curve/<STYLE>.csv` from the owner's RAW+L pairs):
-  - read the CSV in `tools/mk_logtab.py` (`wf_dec`) and `tools/mk_loglut_tab.py` (`wf_ll_dec`), in place of
-    `srgb_eotf`. Keep `--curve srgb` as the default, so the build stays reproducible without the CSV;
-  - fold K into both decode and encode tables (DESIGN 3.2, Headroom). `mk_logasm_tab.py` then follows, and its
-    asserts (`wf_dec <= 16384`, `max(wf_lenc) <= 65279`) must still pass;
-  - rerun `logchk`, the LOG / LOGCHK host tests and the gate, and write the curve name into the boot log line.
+- **A1** (done for Log + LUT and the cans; curve `luts/canon_curve/EOSM_Film1.csv`, Picture Style Film 1):
+  - `tools/mk_loglut_tab.py <out> [csv]`: `read_curve()` checks codes 0..255, strictly increasing, 0 <= v <= 4.0;
+    `wf_ll_dec_c[1022]` interpolates per quarter code. `build.sh` passes the CSV when it exists;
+  - `wf_loglut.c`:
+    - `struct wf_ll_b.dec` picks the table;
+    - in `wf_ll_coords` the gain multiply (`eik`) and the log-segment up-shift (`eib && x > 1.0`) are separate steps.
+      `wf_ll_build` sets `eib` / `eid` for the curve even at gain 1;
+    - `wf_ll_lin8` follows the table, and the auto grey reference is `WF_LL_GREY18` (0.18 Q24);
+    - the cache key gets `| incurve << 17`;
+  - state: `wf_incurve` / `wf_incurve_t()` (wf_menu.c, cfg `incurve`), `wf_look.incurve`. `wf_ll_poll` reloads on a
+    change (`wf_ll_tried_inc`), and `wf_dispatch` stamps the tables' value on the look;
+  - host tests (SHOT): at Film 1, code 139 comes out within 2 codes of sRGB code 118, and code 250 comes out at least
+    8 codes above sRGB white; going back to sRGB gives the same tables; plus a CFG round trip;
+  - still open: flat Log (`wf_dec`, K fold) and a Picture Style check through the .sym.
 - **P0** (EOS M only; done in a675c8a, 33 host checks in mode `PROBE`). `wf_cam_eosm.c` takes the snapshot in the NN
   hook (r2 == 0 calls), before the gate:
   - one static `struct wf_prb`, with no calls except the optional `ff234680`;

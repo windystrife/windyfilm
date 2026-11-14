@@ -499,6 +499,7 @@ struct wf_ll_b {
     struct wf_lltabs *out;
     uint16_t *slab;                              /* two B-slabs of n*n RGB samples */
     uint8_t *kb;                                 /* per node: the blue grid cell */
+    const uint32_t *dec;                         /* wf_ll_dec (sRGB) or wf_ll_dec_c (the Canon curve) */
     const int32_t *mat;
     const uint16_t *enc;
     int32_t eik, eib, eid;                       /* LUT EI: gain Q16 (0 = none), the curve's log offset b (Q24) and step
@@ -511,6 +512,17 @@ struct wf_ll_b {
 #define WF_LL_NN (256 + WF_LL_NODES)
 
 int wf_ll_ei;                                    /* LUT EI in 1/3 EV (wf_loglut.h); wf_task sets it before a load */
+int wf_ll_incurve;                               /* 1 = the Canon curve (wf_loglut.h); wf_task sets it before a load */
+
+#if WF_LL_HAVE_CANON
+int wf_ll_canon_have(void) { return 1; }
+const char *wf_ll_canon_src(void) { return WF_LL_CANON_SRC; }
+#else
+int wf_ll_canon_have(void) { return 0; }
+const char *wf_ll_canon_src(void) { return ""; }
+#define wf_ll_dec_c wf_ll_dec
+#endif
+#define WF_LL_GREY18 3019899                     /* 0.18 in Q24 */
 
 /* node -> grid coordinates (Q16, 0 .. (n-1) << 16) */
 static void wf_ll_coords(const struct wf_ll_b *B, int y, int cb, int cr, int32_t *g)
@@ -521,21 +533,20 @@ static void wf_ll_coords(const struct wf_ll_b *B, int y, int cb, int cr, int32_t
     for (int c = 0; c < 3; c++) {
         int32_t v = q[c] < 0 ? 0 : q[c] > (255 << 20) ? (255 << 20) : q[c];
         int idx = v >> 18;
-        uint32_t fr = (v >> 4) & 0x3fff, d0 = wf_ll_dec[idx];
-        lin[c] = (int32_t)(d0 + (((wf_ll_dec[idx + 1] - d0) * fr) >> 14));
+        uint32_t fr = (v >> 4) & 0x3fff, d0 = B->dec[idx];
+        lin[c] = (int32_t)(d0 + (((B->dec[idx + 1] - d0) * fr) >> 14));
     }
     for (int c = 0; c < 3; c++) {
         const int32_t *m = B->mat + 3 * c;
         int64_t s = (int64_t)m[0] * lin[0] + (int64_t)m[1] * lin[1] + (int64_t)m[2] * lin[2];
         int32_t x = (int32_t)((s + (1 << 19)) >> 20), up = 0;
         x = x < 0 ? 0 : x;
-        if (B->eik) {                            /* LUT EI x auto: gain x scene light (<= 8.0: fits, x <= 2^28) */
+        if (B->eik)                              /* LUT EI x auto: gain x scene light (<= 8.0: fits, x <= 2^28) */
             x = (int32_t)(((int64_t)x * B->eik + 32768) >> 16);
-            if (x > WF_LL_ONE) {                 /* above white each curve is a log10(x + b) + c, so with x / 2^up <= 1: */
-                int32_t h = x;                   /* log(x) = log((x + b) / 2^up - b) + up a log10 2, exact */
-                while (h > WF_LL_ONE) { h >>= 1; up++; }
-                x = (int32_t)(((int64_t)x + B->eib + (1 << (up - 1))) >> up) - B->eib;
-            }
+        if (B->eib && x > WF_LL_ONE) {           /* a gain or the Canon curve (light over 1.0). Above white each curve */
+            int32_t h = x;                       /* is a log10(x + b) + c, so with x / 2^up <= 1: */
+            while (h > WF_LL_ONE) { h >>= 1; up++; }     /* log(x) = log((x + b) / 2^up - b) + up a log10 2, exact */
+            x = (int32_t)(((int64_t)x + B->eib + (1 << (up - 1))) >> up) - B->eib;
         }
         x = x > WF_LL_ONE ? WF_LL_ONE : x;
         int idx = x >> 12;
@@ -704,10 +715,12 @@ static int wf_ll_build(const char *path, int mode, struct wf_lltabs *out, struct
     char *z = (char *)&B;
     for (unsigned i = 0; i < sizeof B; i++) z[i] = 0;
     B.out = out;
+    B.dec = wf_ll_incurve && wf_ll_canon_have() ? wf_ll_dec_c : wf_ll_dec;
     B.mat = wf_ll_mat[mode - 1];
     B.enc = wf_ll_enc[mode - 1];
-    if (gain != 65536) {
+    if (gain != 65536)
         B.eik = gain;
+    if (gain != 65536 || B.dec != wf_ll_dec) {
         B.eib = wf_ll_eib[mode - 1];
         B.eid = wf_ll_eid[mode - 1];
     }
@@ -731,9 +744,10 @@ static int wf_ll_cross(const uint8_t *N, int t2)
 /* linear light (Q24) of an input luma in Q8 (the node decoding of wf_ll_coords) */
 static uint32_t wf_ll_lin8(int y8)
 {
+    const uint32_t *dec = wf_ll_incurve && wf_ll_canon_have() ? wf_ll_dec_c : wf_ll_dec;
     int idx = y8 >> 6;
-    uint32_t fr = (uint32_t)(y8 << 8) & 0x3fff, d0 = wf_ll_dec[idx];
-    return d0 + (((wf_ll_dec[idx + 1] - d0) * fr) >> 14);
+    uint32_t fr = (uint32_t)(y8 << 8) & 0x3fff, d0 = dec[idx];
+    return d0 + (((dec[idx + 1] - d0) * fr) >> 14);
 }
 
 /* n / d for n < 2^40 by shift and subtract: GCC leaves a __aeabi_ldivmod reference for a 64-bit division here,
@@ -783,7 +797,8 @@ int wf_loglut_load(const char *path, int mode, struct wf_lltabs *out, struct wf_
         else if (lo > 255 << 8 || hi > 255 << 8)
             ga = 262144;                         /* never reaches 118: the brightest */
         else {
-            uint32_t g = wf_ll_div40((uint64_t)wf_ll_lin8((lo + hi + 1) >> 1) << 16, wf_ll_lin8(118 << 8));
+            uint32_t grey = wf_ll_incurve && wf_ll_canon_have() ? WF_LL_GREY18 : wf_ll_lin8(118 << 8);
+            uint32_t g = wf_ll_div40((uint64_t)wf_ll_lin8((lo + hi + 1) >> 1) << 16, grey);
             ga = g < 16384 ? 16384 : g > 262144 ? 262144 : (int32_t)g;
         }
         uint64_t t = ((uint64_t)(uint32_t)ga * (uint32_t)gain + 32768) >> 16;   /* unsigned: no __aeabi_ldivmod */
@@ -1016,8 +1031,9 @@ int wf_loglut_load_cached(const char *cube, const char *cache, int mode, struct 
             if (wf_llc_stat(cube, &k) == 0 && (k.chash = wf_llc_key(cube, k.csize, dma)) != 0) {
                 k.magic = WF_LLC_MAGIC;
                 k.ver = WF_LLC_VER;
-                k.mode = (uint32_t)mode | (uint32_t)(wf_ll_ei & 0xff) << 8    /* LUT EI 0, no auto: */
-                         | (uint32_t)(wf_ll_auto != 0) << 16;                 /* the key as before */
+                k.mode = (uint32_t)mode | (uint32_t)(wf_ll_ei & 0xff) << 8    /* LUT EI 0, no auto, sRGB: */
+                         | (uint32_t)(wf_ll_auto != 0) << 16                  /* the key as before */
+                         | (uint32_t)(wf_ll_incurve && wf_ll_canon_have()) << 17;
                 k.tabsize = sizeof *out;
                 key = 1;
                 z = (char *)info;

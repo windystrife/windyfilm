@@ -43,6 +43,8 @@ Grain và Halation mặc định tắt trên 5D2 (mỗi nửa ảnh tốn vài g
 - Hàng Print: Scan / Cine print / Paper (chỉ với phim có mô hình in).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.
+- Input curve (cho Log + LUT và lon Film LUT): sRGB, hoặc Canon Film 1. Đường
+  cong Film 1 đo trên EOS M; trên 5D2 chưa kiểm, cứ để sRGB nếu không chắc.
 - Xem trước trên LiveView: cần bật Overlay > Global Draw của ML.
 - RAW probe chỉ có trên EOS M.
 

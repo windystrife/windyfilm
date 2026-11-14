@@ -68,6 +68,13 @@ extern int wf_ll_ei;
  * the LUT EI on top. The result's pad[0] = that correction in 0.1 EV (int8), pad[1] = 0xa5; the .FRT key holds it. */
 extern int wf_ll_auto;
 #define WF_LL_AUTO_MARK 0xa5
+/* Input curve (DESIGN 3.2 A1, menu "Input curve"): 0 = the JPEG is read as sRGB (as before), 1 = through the measured
+ * Canon Picture Style curve (luts/canon_curve/, built in when build.sh found the CSV: wf_ll_canon_have()). Scene light
+ * above 1.0 then goes through each curve's log segment, as the LUT EI does. 18 % grey is 0.18 of the curve for the
+ * cube auto exposure. wf_task sets it before a load; the .FRT key holds it (0: the key as before). */
+extern int wf_ll_incurve;
+int wf_ll_canon_have(void);
+const char *wf_ll_canon_src(void);               /* the CSV's first comment line, "" without */
 
 /* results (distinct, for the log line and the menu warning) */
 enum {

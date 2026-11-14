@@ -694,6 +694,51 @@ static void t_shot(const char *cs)
         memcpy(ref, in, NW * 4);
         ref_fn(ref, NW, wf_ll_words, (int)(uintptr_t)wf_ll_tables());
         chk(ndiff(out, ref, NW) == 0 && sb == 0, "can shot: bit-exact vs wf_ll_words on the published tables");
+
+        /* Input curve Canon Film 1 (DESIGN 3.2 A1), on the technical V-Log cube (identity): only the decode differs, so
+         * the curve's 18 % grey (code 139 -> 0.18) must come out where sRGB's (118) does, and its light above 1.0
+         * (white 2.07) above sRGB white through the log segment */
+        log_mark();
+        wf_flut = 0;
+        chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&ll, wf_ll_tables()),
+            "back to the technical cube, sRGB: %s", log_line("lut "));
+        chk(wf_incurve_t() == WF_INC_SRGB && !strstr(log_line("lut "), "in-film1"), "Input curve sRGB by default");
+        enum { GN = 64 };
+        static const uint8_t gy[4] = { 118, 255, 139, 250 };
+        uint32_t gs[GN], gc[GN];
+        for (int i = 0; i < GN; i++) gs[i] = gc[i] = word(0, gy[i & 3], 0, gy[i & 3]);
+        wf_ll_words_c(gs, GN, (int)(uintptr_t)&ll);
+        if (wf_ll_canon_have()) {
+            static struct wf_lltabs lc;
+            log_mark();
+            wf_incurve = WF_INC_FILM1;
+            chk(LOGW(" in-film1", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000),
+                "Input curve Film 1 loaded: %s", log_line("lut "));
+            wf_ll_incurve = 1;
+            rc = wf_loglut_load("ML/DATA/VLOG.CUB", WF_CURVE_VLOG, &lc, &inf);
+            chk(rc == WF_LL_OK && ll_same(&lc, wf_ll_tables()) && !ll_same(&ll, &lc),
+                "Film 1 tables = wf_loglut_load with the curve, not the sRGB ones (rc %d)", rc);
+            sb = shot(in, out, FW, FH);
+            memcpy(ref, in, NW * 4);
+            ref_fn(ref, NW, wf_ll_words, (int)(uintptr_t)&lc);
+            chk(ndiff(out, ref, NW) == 0 && sb == 0, "Film 1 shot: bit-exact vs wf_ll_words on its tables");
+            wf_ll_words_c(gc, GN, (int)(uintptr_t)&lc);
+            int y18s = WY0(gs[0]), yws = WY0(gs[1]), y18c = WY0(gc[2]), ywc = WY0(gc[3]);
+            chk(abs(y18c - y18s) <= 2 && WY1(gc[2]) == y18c, "18 %% grey: Film 1 code 139 -> %d, sRGB code 118 -> %d", y18c,
+                y18s);
+            chk(ywc >= yws + 8, "headroom: Film 1 code 250 -> %d, sRGB white -> %d", ywc, yws);
+            struct wf_look lk;
+            wf_look_now(&lk);
+            chk(lk.output == WF_OUT_LLUT && lk.incurve == WF_INC_FILM1, "the look carries the input curve");
+            log_mark();
+            wf_incurve = WF_INC_SRGB;
+            chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&ll, wf_ll_tables())
+                && !strstr(log_line("lut "), "in-film1"), "back to sRGB: the same tables as before: %s", log_line("lut "));
+        } else {
+            wf_incurve = WF_INC_FILM1;
+            chk(wf_incurve_t() == WF_INC_SRGB, "no Canon curve table in this build: Film 1 reads as sRGB");
+            wf_incurve = WF_INC_SRGB;
+        }
     }
 
     /* Off, no film */
@@ -1091,12 +1136,14 @@ static void t_cfg(void)
 {
     std_pack();
     const char *code1 = wf_flut_code[1];
-    put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nprint=CINE\nlight=tungsten\nstrength=strong\n"
+    put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "grain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
             "userwb=1,5600,2,-3\n", wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
+    chk(wf_incurve == WF_INC_FILM1 && wf_incurve_t() == (wf_ll_canon_have() ? WF_INC_FILM1 : WF_INC_SRGB),
+        "incurve %d (in use %d)", wf_incurve, wf_incurve_t());
     chk(wf_print == 1 && wf_light == 3 && wf_strength == 2 && wf_grain == 1 && wf_halo == 4 && wf_mist == 7 && wf_pv_mode == 2,
         "print %d light %d strength %d grain %d halation %d mist %d preview %d", wf_print, wf_light, wf_strength, wf_grain, wf_halo,
         wf_mist, wf_pv_mode);
@@ -1109,7 +1156,7 @@ static void t_cfg(void)
     long n;
     char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     char want[700];
-    snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nprint=cine\nlight=tungsten\n"
+    snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\ngrain=normal\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=%s\nexptrim=-5\nexif=off\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");

@@ -42,6 +42,9 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 - Hàng Print: Scan / Cine print / Paper (chỉ với phim có mô hình in).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.
+- Input curve (cho Log + LUT và lon Film LUT): sRGB, hoặc Canon Film 1. Chọn
+  Canon Film 1 khi máy để Picture Style Film 1 (User Def. 1): module đảo đúng
+  đường cong của style đó, đo từ ảnh RAW+L của bạn.
 - Xem trước trên LiveView: cần bật Overlay > Global Draw của ML.
 
 
@@ -56,6 +59,9 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 3. Light Day / Cloudy / Tungsten rồi về Auto: WB trở lại như cũ.
 4. Các phím của trình chọn phim; màu giao diện khi LiveView ở phía sau.
 5. EXIF (UserComment) của ảnh có dòng "WindyFilm: ...".
+6. Picture Style Film 1, Log + LUT, Input curve Canon Film 1: dòng "lut ..."
+   trong log có "in-film1", EXIF có "In Canon Film 1". Chụp RAW+L cùng lúc để
+   so với RAW.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

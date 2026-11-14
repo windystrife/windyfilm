@@ -151,24 +151,36 @@ read for ideas.
   - linear is scene-linear Rec.709 with 18 % grey = 0.18, and code 255 maps to at most 4.0.
 
   One curve serves all three channels. Columns `code,r,g,b` are accepted if the pairs show a per-channel curve.
-- **Where it plugs in:** the decode tables are generated, so there is no runtime change.
-  - `tools/mk_logtab.py`, `wf_dec[1024]` (Q14). `mk_logasm_tab.py` reads `wf_logtab.h`, so the ARM Log kernel's padded
-    table follows automatically.
-  - `tools/mk_loglut_tab.py`, `wf_ll_dec[1022]` (Q24): the Log + LUT composite.
-  - `tools/mk_exptab.py` (preview exposure) keeps the sRGB EOTF: it only estimates brightness.
-- **Headroom (the one real change).** Today the decode tables end at 1.0, and the encode tables `wf_lenc` /
-  `wf_ll_enc` cover linear 0..1.0; an index >= 4096 is clamped. The ARM kernel relies on `wf_dec <= 16384` and on
-  `max(wf_lenc) <= 65279`, and the generator asserts both. A Canon inverse puts code 255 above 1.0 (about 1.6 in the
-  simulation). Fold the scale into the tables:
-  - decode stores linear / K, with K = the curve's value at code 255 rounded up to a power of 2 (K <= 4);
-  - encode is generated as `enc(i) = curve(i / 4096 * K)`.
+- **Implemented (Log + LUT and the cans), 14 Nov 2026.** The first curve is `luts/canon_curve/EOSM_Film1.csv`,
+  measured by the raw-film-engine session from the owner's RAW+L pairs:
+  - EOS M, Picture Style **Film 1** (User Def. 1, a third-party style file), not Standard;
+  - one curve for R, G and B; 18 % grey = 0.18 at code 139 (an assumed scale); white clips at code 242 with linear
+    2.07.
 
-  All Q formats and kernel identities stay. The encode step near black grows K times. The curves are linear down
-  there and the tables interpolate, so check it against `logchk` and the host LOG tests.
-- **Picture Style.** The tables are built for one Picture Style. If the camera is set to another style, log
-  `curve: style <n> != <built>` once per boot and keep going. This needs a way to read the style through the card
-  .sym; check that both cameras have one. A table per style comes later, only if the owner shoots
-  several styles.
+  Because the curve fits that one style only, it is a menu choice, not a replacement:
+  - menu "Input curve" = sRGB (default) / Canon Film 1, config key `incurve=srgb|film1`;
+  - `build.sh` passes the CSV to `tools/mk_loglut_tab.py`, which emits `wf_ll_dec_c[1022]` (Q24) and
+    `WF_LL_HAVE_CANON 1`. Without the CSV the build has no table, and the entry is greyed and reads sRGB;
+  - only the load-time Log + LUT builder (`wf_loglut.c`) reads it, so the cost per shot is 0. Flat Log (the ARM kernel,
+    `wf_dec`), the preview exposure tables and the catalogue film tables keep the sRGB EOTF;
+  - the shot's EXIF comment says `| In Canon Film 1`, and the `lut` log line says `in-film1`.
+- **Headroom without a K fold.** The Log + LUT builder already handles linear above 1.0 for the LUT EI. Above white
+  each curve is `a log10(x + b) + c`, so the builder shifts x down by 2^up and adds `up a log10 2` in the encode
+  domain, which is exact. The Canon decode (max 2.07 -> 34.7 M in Q24, below 2^31) goes through that same path:
+  - the gain multiply (only when the LUT EI or auto is set) and the up-shift (whenever `eib` is set and x > 1.0) are
+    now separate steps;
+  - the curve sets `eib` / `eid` even at gain 1. sRGB without a gain keeps `eib = 0`, so its tables are bit-identical
+    to before (host test).
+- **The K fold is still the plan for flat Log.** It applies if the owner wants Film 1 there too, because the ARM
+  kernel relies on `wf_dec <= 16384` and `max(wf_lenc) <= 65279`:
+  - decode stores linear / K, with K = the curve's value at code 255 rounded up to a power of 2;
+  - encode is generated as `enc(i) = curve(i / 4096 * K)`;
+  - then check `logchk` and the host LOG tests.
+- **Auto exposure of the Film LUT cubes.** The grey reference is 0.18 with the curve; sRGB keeps `lin(118)`.
+- **Table cache.** Bit 17 of the `.FRT` key is the curve. Old caches have 0 there, so sRGB caches stay valid.
+- **Picture Style.** Nothing checks the camera's style yet: the menu tells the user to set Film 1. Reading the style
+  through the card .sym, and a table per style, come later, and only if the owner shoots several styles. The 5D2
+  gets the same table, but the curve was measured on the EOS M only.
 - Optional later: **A2** (HTP + the same inversion, sun-area error 1.4, 3 degrees of hue drift) needs ISO >= 200 and
   costs 1 EV of shadow noise. It is the owner's call.
 
