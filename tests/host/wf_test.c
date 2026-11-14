@@ -2338,6 +2338,15 @@ static void t_rawb(void)
     chk(LOGW("rawb: tables cube c2 VLOG.CUB", 60000), "Log + LUT: '%s'", log_line("rawb: tables"));
     rb_stopped("Log + LUT", "buf 0 52000000 of 3,");
     chk(strstr(log_line("rawb: black"), "roll 1") != 0, "Log + LUT: shoulder on ('%s')", log_line("rawb: black"));
+    /* Leica Vivid (WF_FLUT_DISP, a look on the Standard JPEG): B leaves it to the 8-bit path, tables freed */
+    wf_flut = WF_FLUT_LEICAV;
+    chk(WAIT(wf_rawb_state() == WF_RB_IDLE, 3000) && WAIT(h_arena_live == live0, 3000),
+        "Leica Vivid: B idle, tables freed (state %d, blocks %d)", wf_rawb_state(), h_arena_live - live0);
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    chk(sb == 0 && LOGW("rawb: 8-bit (look)", 3000) && !log_has("rawb: buf"), "Leica Vivid shot: the 8-bit look ('%s')",
+        log_line("rawb: "));
+    wf_flut = 0;
     log_mark();
     wf_out = WF_OUT_FILM;
     chk(LOGW("rawb: tables srgb", 10000), "back to the film: base tables again");
@@ -2583,6 +2592,20 @@ static void t_rawb(void)
     log_mark();
     sb = shot(in, out, FW, FH);
     chk(sb == 0 && ndiff(out, ref, NW) == 0, "after the stop: developed again, bit-exact");
+
+    /* Leica Vivid (WF_FLUT_DISP, a look on the Standard JPEG): B leaves both halves to the 8-bit path, tables freed */
+    int out0 = wf_out, fl0 = wf_flut;
+    wf_out = WF_OUT_LLUT;
+    wf_flut = WF_FLUT_LEICAV;
+    chk(WAIT(wf_rawb_state() == WF_RB_IDLE, 3000) && WAIT(h_arena_live == live0, 3000),
+        "Leica Vivid: B idle, tables freed (state %d, blocks %d)", wf_rawb_state(), h_arena_live - live0);
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    usleep(500000);
+    chk(sb == 0 && LOGW("rawb: 8-bit (look)", 3000) && !log_has("rawb: buf") && !log_has("TOP half not developed"),
+        "Leica Vivid shot: TOP and BOT the 8-bit look ('%s')", log_line("rawb: "));
+    wf_out = out0;
+    wf_flut = fl0;
 
     /* off: the memory goes back */
     wf_rawb = 0;

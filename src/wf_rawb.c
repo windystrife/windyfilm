@@ -91,7 +91,10 @@ static int rb_key(const struct wf_look *lk)
     switch (lk->output) {
     case WF_OUT_FILM: return 1;                                   /* the sRGB base develop, the film tables after */
     case WF_OUT_LOG:  return 2 | lk->curve << 4;                  /* the log code itself */
-    case WF_OUT_LLUT: return 3 | lk->curve << 4 | lk->flut << 8 | ((uint8_t)lk->lei) << 16;
+    case WF_OUT_LLUT:                                             /* a look on Canon's Standard picture (Leica Vivid) is */
+        if (WF_FLUT_DISP(lk->flut))                               /* defined on the sRGB JPEG, not on the linear raw: */
+            return 0;                                             /* the 8-bit path keeps it (DESIGN 3.4) */
+        return 3 | lk->curve << 4 | lk->flut << 8 | ((uint8_t)lk->lei) << 16;
     }
     return 0;
 }
@@ -159,7 +162,7 @@ int wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk)
     if (bot) {
         int tk = rb_top_key;
         rb_top_key = 0;                          /* a TOP is continued once */
-        if (tk != key || rb_top_gen != rb_gen) {
+        if (key && (tk != key || rb_top_gen != rb_gen)) {   /* key 0: the look check below says why */
             e->why = WF_RBW_TOP;
             goto out;
         }

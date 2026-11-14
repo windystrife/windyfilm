@@ -131,6 +131,8 @@ Chụp:
   nếu máy treo thì tháo pin, và ghi lại lúc đó đang ở bao nhiêu %.
 - Highlights / Shadows có tác dụng với phim; với Log + LUT khi bật RAW develop
   thì chưa.
+- Lon Leica Vivid: RAW develop không áp dụng (look này làm trên ảnh JPEG
+  Standard), ảnh đi đường JPEG như thường, log ghi "rawb: 8-bit (look)".
 
 Gửi lại: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG (kèm 1 tấm cùng cảnh với
 RAW develop Off). Log có các dòng "rawb: ..." cho từng nửa ảnh: địa chỉ RAW,

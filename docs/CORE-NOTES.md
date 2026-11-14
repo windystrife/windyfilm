@@ -617,6 +617,11 @@ in rows (10.3), so plan on 32-40 s per shot.
 
 ### 10.8 5D2 (2026-11-14, from raw-path P0_5D2_SPEC.md; not probed on the camera)
 
+**Leica Vivid** (after main 94751f9, both cameras): `rb_key` returns 0 for `WF_FLUT_DISP` cans. The look is defined on
+the sRGB Standard JPEG (DESIGN 3.4: sRGB input, no auto exposure), not on the linear raw. So B stays idle and frees its
+tables, and the shot takes the 8-bit path with "rawb: 8-bit (look)". On the 5D2 the BOT gives the same reason (the TOP
+continue check runs only for a non-zero key).
+
 **Camera layer** (`wf_cam_5d2.c rawb_fill`, at both hooks while the menu is on):
 - gates: RAW + L fine, drive single / self-timer;
 - job handle H: TOP `[0x369C + 0x3C]`, BOT `[0x3630 + 0x2C]`;

@@ -129,6 +129,8 @@ Bật:
   có màu phim thường (8-bit), log ghi lý do.
 - Highlights / Shadows có tác dụng với phim. Với Log + LUT khi RAW develop
   đang bật thì chưa có tác dụng (bản thử này).
+- Lon Leica Vivid: RAW develop không áp dụng (look này làm trên ảnh JPEG
+  Standard), ảnh đi đường JPEG như thường, log ghi "rawb: 8-bit (look)".
 - Khi RAW develop Off, thẻ này chạy giống thẻ EOSM_WindyFilm (cùng bản main,
   có RAW probe v2 và Highlights / Shadows).
 - Dòng menu báo trạng thái: đang nạp bảng, sẵn sàng ("About 30 s per shot"),
