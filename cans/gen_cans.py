@@ -505,7 +505,8 @@ S("LLEICV", "Leica Vivid", ("Film LUT", SV), [("Leica", WH, 1.0), ("Vivid", LEIC
   side="digital look", side35="")             # a look on the Standard picture, not a log / film look (owner 11-14)
 # 14/11/2026, branch film-stage: the four films baked out of the declared exception's chain (catalog.py 85..88). Our own
 # house layout: charcoal body, one accent per stock family, the name in our font, foot "35mm" - nothing of Kodak's or
-# Fuji's packaging, the stock name only as the film's name.
+# Fuji's packaging, the stock name only as the film's name. (These four rows are ready=False since the matrix below
+# replaced them; the styles stay for the record.)
 for _c, _nm, _words, _iso, _acc, _bg in (
         ("GX500T", "Vision3 500T 2393", ("Vision3", "500T"), "500", (132, 176, 244), V((30, 44, 86), (12, 18, 40))),
         ("GX250D", "Vision3 250D 2383", ("Vision3", "250D"), "250", (250, 170, 80), V((96, 62, 32), (50, 30, 16))),
@@ -515,6 +516,17 @@ for _c, _nm, _words, _iso, _acc, _bg in (
       [band(0, 30, V((64, 66, 74), (44, 44, 50)), _acc),
        ribbon((58, 58, 64), (40, 40, 46), hi=_acc)],
       lay=dict(maker=(6, 25), name=(34, 82), iso=(82, 124), maxw=100), foot_text="35mm")
+# the chain matrix: one can per negative stock (catalog.py 89.., codes G00..G44), our own colours - Kodak-family stocks
+# warm (amber), Fuji-family cool (teal), the last digit group in the accent word. No packaging of either maker is copied.
+_CHAIN_CANS = [(n, "Kodak") for n in range(36)] + [(n, "Fuji") for n in range(36, 46)]
+for _n, _fam in _CHAIN_CANS:
+    if _n in (33, 45):                                # 33 has no usable print, 45 aliases 0: no row, no can
+        continue
+    _acc = (226, 170, 96) if _fam == "Kodak" else (110, 206, 196)
+    _bg = V((62, 46, 26), (26, 18, 10)) if _fam == "Kodak" else V((22, 56, 54), (8, 24, 22))
+    S("G%02d" % _n, "Negative %02d" % _n, ("WindyStrife", SV), [(_fam, WH), ("%02d" % _n, _acc)], ("", WH), SV, _acc,
+      _bg, [band(0, 30, V((58, 60, 68), (40, 40, 46)), _acc), ribbon((52, 52, 58), (36, 36, 42), hi=_acc)],
+      lay=dict(maker=(6, 25), name=(34, 82), iso=(0, 1), maxw=100), foot_text="35mm")
 # ---- shipped films
 S("CHROME", "Classic Chrome", ("WindyStrife", (214, 208, 204)), [("Classic", WH), ("Chrome", SV)], ("200", WH), SV,
   (226, 120, 110), V((92, 95, 108), (62, 64, 74)),
@@ -550,7 +562,8 @@ DEFAULT_CODES = ["PRT160", "PRT400", "PRT800", "PAS400", "BLD100", "SUN200", "SN
                  "VTG100", "CLS125", "BAS200", "CRX125", "CHROME", "CLSNEG", "PRONEG", "ETERNA", "CHUNGK", "C250D",
                  "LV250D", "LV500T", "LPR400", "LFP400", "LF3513", "LK83V3", "LK83V5", "LEKTR5", "LTUNGN", "LLBONO", "LEKTAP",
                  "LT25DP", "LT25DM", "LT50TP", "LT50TM", "LTEKTM", "LTEKAP", "LTEKAM", "LTEXRP", "LTEXRM", "LTEXAP", "LTEXAM", "LLEICV",
-                 "GX500T", "GX250D", "GXP400", "GXE100"]
+                 ] + ["G%02d" % n for n in range(46) if n not in (33, 45)]
+# G00..G44: the 44 negative stocks of the chain matrix (catalog.py 89..132); 33 has no usable print and 45 aliases 0
 # rows for codes the catalogue does not (yet) have: id, ISO, type; the shipped films' names as in catalog.py
 SYNTH = {"CLS125": (125, "bw"), "BAS200": (200, "bw"), "CRX125": (125, "neg")}
 FALLBACK_ROW = {"CHROME": (26, 200, "slide", "Classic Chrome"), "CLSNEG": (27, 400, "neg", "Classic Neg"),
