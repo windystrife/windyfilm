@@ -617,10 +617,15 @@ in rows (10.3), so plan on 32-40 s per shot.
 
 ### 10.8 5D2 (2026-11-14, from raw-path P0_5D2_SPEC.md; not probed on the camera)
 
-**Leica Vivid** (after main 94751f9, both cameras): `rb_key` returns 0 for `WF_FLUT_DISP` cans. The look is defined on
-the sRGB Standard JPEG (DESIGN 3.4: sRGB input, no auto exposure), not on the linear raw. So B stays idle and frees its
-tables, and the shot takes the 8-bit path with "rawb: 8-bit (look)". On the 5D2 the BOT gives the same reason (the TOP
-continue check runs only for a non-zero key).
+**Leica Vivid on B** (owner 11-14: "van trang tu raw ay, co ma ko convert qua vlog dau"): `WF_DEV_DISP` in wf_dev.c.
+The SRGB base develop's grid and enc (sRGB code, the film shoulder `j.roll`), nodes = the owner's display cube itself
+(`ML/DATA/LEICAVSR.CUB` = "L Leica 2.cube", 33^3, md5 9740c77f, sRGB in / sRGB out) sampled at those codes: no log curve,
+no V-Log wrapper. LUT EI scales the linear light, no auto exposure; Highlights / Shadows bend each cube output channel with
+wf_hs_bend's curve at build time (key bits 24-31). Grain / halation / mist as every Log + LUT output (wf_colour_fx).
+The JPEG path (8-bit fallback) still uses main's LEICAVVL.CUB.
+
+**5D2 raw base** (probe 11-14, 8 records, TOP and BOT, IMG_4467..4476): MEM1 + 0x76C8 is CR2 row 1 (byte-exact or NCC 1.0000,
+0..1 LSB). B now reads CR2 row 0 at MEM1 + 0x76C8 - pitch; before that its CFA rows were swapped (GBRG read as RGGB).
 
 **Camera layer** (`wf_cam_5d2.c rawb_fill`, at both hooks while the menu is on):
 - gates: RAW + L fine, drive single / self-timer;

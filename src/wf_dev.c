@@ -182,8 +182,9 @@ static void wf_dv_node(uint32_t *nd, const uint32_t s[3])
 /* cube resampler: the 33^3 nodes at n-grid position i (n - 1) / 32, tetrahedral in two B-slabs (streamed) */
 struct wf_dv_b {
     struct wf_dev_tabs *t;
-    int n, nn3, ir, ig, ib, curve;
+    int n, nn3, ir, ig, ib, curve, disp, hs;
     uint16_t *slab, *wp;
+    uint8_t N[256];                              /* WF_DEV_DISP: wf_hs_bend curve on the output codes */
     int32_t pos[WF_DEV_G];                       /* Q16 position on the n-grid */
     uint8_t cell[WF_DEV_G];
 };
@@ -207,6 +208,8 @@ static void wf_dv_eval(struct wf_dv_b *B, int i, int j, int k)
     wf_dv_node(B->t->node + 2 * (i + WF_DEV_G * j + WF_DEV_BSTR * k), s);
 }
 
+static void wf_dv_enc_srgb(uint32_t *e, int ch);
+
 static int wf_dv_hdr(void *ctx, const struct wf_ll_hdr *h)
 {
     struct wf_dv_b *B = ctx;
@@ -220,6 +223,12 @@ static int wf_dv_hdr(void *ctx, const struct wf_ll_hdr *h)
     }
     int same = 1;
     for (int c = 0; c < 3; c++) {
+        if (B->disp) {                           /* the cube's input is the sRGB code 0..1: the SRGB develop's enc */
+            if (h->dmin[c] != 0 || h->dmax[c] != WF_DV_ONE)
+                return WF_LL_E_DOMAIN;
+            wf_dv_enc_srgb(B->t->enc[c], c);
+            continue;
+        }
         wf_dv_enc(B->t->enc[c], c, B->curve, h->dmin[c], h->dmax[c]);
         if (h->dmin[c] != 0 || h->dmax[c] != WF_DV_ONE)
             B->t->domain = 1;
@@ -239,6 +248,12 @@ static void wf_dv_smp(void *ctx, const uint16_t *rgb)
     struct wf_dv_b *B = ctx;
     uint16_t *w = B->wp;
     w[0] = rgb[0]; w[1] = rgb[1]; w[2] = rgb[2];
+    if (B->hs)                                   /* Highlights / Shadows on the output code, linear between codes */
+        for (int c = 0; c < 3; c++) {
+            uint32_t p = (uint32_t)w[c] * 255u, i = p / 65535u, f = p - i * 65535u;
+            uint32_t a = B->N[i], b = B->N[i < 255 ? i + 1 : 255];   /* N non-decreasing: b >= a */
+            w[c] = (uint16_t)(a * 257u + ((b - a) * 257u * f + 32767u) / 65535u);   /* < 2^32 */
+        }
     B->wp = w + 3;
     if (++B->ir < B->n)
         return;
@@ -286,6 +301,34 @@ static void wf_dv_enc_srgb(uint32_t *e, int ch)
         e[i] = wf_dv_entry(ch, (wf_dv_oetf(wf_dv_bin24(i)) * (uint32_t)((WF_DEV_G - 1) * 128) + 32767) / 65535);
 }
 
+/* wf_film.c wf_hs_bend, the same curve (wf_dev.o links without wf_film.o in tools/dev_check.sh) */
+static void wf_dv_hs_bend(uint8_t *N, int h, int s)
+{
+    int p = 0;
+    for (int y = 0; y < 256; y++) {
+        int x = N[y], w = 255 - x;
+        int d = h * (x * x * w) + s * (x * w * w);
+        unsigned m = (unsigned)(d < 0 ? -d : d);
+        int q = (int)((m + 192670u) / 385341u);
+        int v = x + (d < 0 ? -q : q);
+        if (v > 255) v = 255;
+        if (v < p) v = p;
+        N[y] = (uint8_t)v;
+        p = v;
+    }
+}
+
+static int wf_dv_hs_h, wf_dv_hs_s;                /* wf_dev_build_disp's H / S for the build in progress (wf_task) */
+
+int wf_dev_build_disp(struct wf_dev_tabs *t, int cam, const char *cube, int ei, int h, int s, struct wf_ll_info *info)
+{
+    wf_dv_hs_h = h < -5 ? -5 : h > 5 ? 5 : h;
+    wf_dv_hs_s = s < -5 ? -5 : s > 5 ? 5 : s;
+    int rc = wf_dev_build(t, WF_DEV_DISP, 0, cam, cube, ei, 0, info);
+    wf_dv_hs_h = wf_dv_hs_s = 0;
+    return rc;
+}
+
 int wf_dev_build(struct wf_dev_tabs *t, int src, int curve, int cam, const char *cube, int ei, int autoexp,
                  struct wf_ll_info *info)
 {
@@ -296,11 +339,13 @@ int wf_dev_build(struct wf_dev_tabs *t, int src, int curve, int cam, const char 
         char *z = (char *)info;
         for (unsigned i = 0; i < sizeof *info; i++) z[i] = 0;
     }
-    if (!t || src < WF_DEV_CUBE || src > WF_DEV_SRGB || cam < 0 || cam >= WF_DEV_NCAM
-        || (src != WF_DEV_SRGB && (curve < 1 || curve > WF_LL_NCURVE)))
+    if (!t || src < WF_DEV_CUBE || src > WF_DEV_DISP || cam < 0 || cam >= WF_DEV_NCAM
+        || (src < WF_DEV_SRGB && (curve < 1 || curve > WF_LL_NCURVE)))
         return WF_LL_E_MODE;
-    if (src == WF_DEV_SRGB)
+    if (src >= WF_DEV_SRGB) {
         curve = 0;                               /* no log curve: an sRGB-coded grid */
+        autoexp = 0;
+    }
     if (ei < WF_LL_EI_MIN || ei > WF_LL_EI_MAX)
         ei = 0;
     t->src = (uint8_t)src;
@@ -312,18 +357,25 @@ int wf_dev_build(struct wf_dev_tabs *t, int src, int curve, int cam, const char 
     t->domain = 0;
     t->pad = 0;
     t->gain = wf_dv_eik[ei - WF_LL_EI_MIN];
-    if (src == WF_DEV_SRGB) {
+    if (src >= WF_DEV_SRGB) {                    /* Rec.709 primaries; DISP keeps the LUT EI gain */
         for (int k = 0; k < 9; k++) t->gm[k] = wf_dev_rgbcam[cam][k];
-        t->gain = 65536;
+        if (src == WF_DEV_SRGB)
+            t->gain = 65536;
     } else {
         wf_dv_mat(wf_ll_mat[curve - 1], wf_dev_rgbcam[cam], t->gm);
     }
-    if (src == WF_DEV_CUBE) {
+    if (src == WF_DEV_CUBE || src == WF_DEV_DISP) {
         struct wf_dv_b B;
         char *z = (char *)&B;
         for (unsigned i = 0; i < sizeof B; i++) z[i] = 0;
         B.t = t;
         B.curve = curve;
+        B.disp = src == WF_DEV_DISP;
+        if (B.disp && (wf_dv_hs_h || wf_dv_hs_s)) {
+            for (int y = 0; y < 256; y++) B.N[y] = (uint8_t)y;
+            wf_dv_hs_bend(B.N, wf_dv_hs_h, wf_dv_hs_s);
+            B.hs = 1;
+        }
         int rc = wf_ll_parse(cube, wf_dv_hdr, wf_dv_smp, &B, info);
         if (B.slab)
             __mem_free(B.slab);

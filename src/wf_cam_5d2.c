@@ -194,7 +194,8 @@ static const struct wf_prb_cam prb_5d2 = {
  * raw-path P0_5D2_SPEC.md [code, not yet probed on the camera]: each half's develop state holds the job handle H
  * (TOP [0x369C + 0x3C], BOT [0x3630 + 0x2C]); a live job has H[0] = 0xFFCD0761, P = H[1], MEM1 = [P + 0xC68], and the
  * capture EDMAC wrote the raw at MEM1 + 0x76C8: 5792 x 3804, pitch 10136, 14-bit packed, GBRG at (0, 0) and at the JPEG
- * crop (168, 56), black 1024. MEM1 is freed only after the BOT hook returns. Every pointer is read only where prb_ok
+ * crop (168, 56), black 1024. The owner's probe run (11-14, 8 records, TOP and BOT, IMG_4467..4476) found MEM1 + 0x76C8 =
+ * CR2 row 1 (byte-exact or NCC 1.0000, 0..1 LSB): CR2 row 0, where these coordinates start, is one pitch before it. MEM1 is freed only after the BOT hook returns. Every pointer is read only where prb_ok
  * says it cannot fault, the raw only inside the RscMgr pool; the worker then checks its content against Canon's TOP
  * half (wf_rsrc.c) before anything is developed, and the BOT continues only the same raw, unchanged (wf_rawb.c).
  * Only RAW + L fine single shots (drive single / self-timer). */
@@ -234,7 +235,7 @@ static void rawb_fill(struct wf_frame *f, int k)
             m1 = PRB_RD32(p + 0xC68);
     }
     if (m1 && m1 + PRB_MEM1_RAW > m1)
-        b = check_buf(m1 + PRB_MEM1_RAW, (uint32_t)RB_PITCH * RB_RH);
+        b = check_buf(m1 + PRB_MEM1_RAW - RB_PITCH, (uint32_t)RB_PITCH * RB_RH);   /* CR2 row 0 (probe 11-14) */
     if (b > PRB_POOL_HI - (uint32_t)RB_PITCH * RB_RH)
         b = 0;                                   /* past the RscMgr pool's end */
     if (!b) {

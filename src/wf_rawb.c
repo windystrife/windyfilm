@@ -91,9 +91,9 @@ static int rb_key(const struct wf_look *lk)
     switch (lk->output) {
     case WF_OUT_FILM: return 1;                                   /* the sRGB base develop, the film tables after */
     case WF_OUT_LOG:  return 2 | lk->curve << 4;                  /* the log code itself */
-    case WF_OUT_LLUT:                                             /* a look on Canon's Standard picture (Leica Vivid) is */
-        if (WF_FLUT_DISP(lk->flut))                               /* defined on the sRGB JPEG, not on the linear raw: */
-            return 0;                                             /* the 8-bit path keeps it (DESIGN 3.4) */
+    case WF_OUT_LLUT:
+        if (WF_FLUT_DISP(lk->flut))                               /* Leica Vivid: raw -> sRGB -> the display cube */
+            return 4 | lk->flut << 8 | ((uint8_t)lk->lei) << 16 | (lk->hl & 15) << 24 | (lk->sh & 15) << 28;
         return 3 | lk->curve << 4 | lk->flut << 8 | ((uint8_t)lk->lei) << 16;
     }
     return 0;
@@ -437,7 +437,19 @@ void wf_rawb_poll(void)
     rb_nomem = 0;
     char cn[WF_LL_NAME];
     const char *cube = 0;
-    int src = lk.output == WF_OUT_FILM ? WF_DEV_SRGB : lk.output == WF_OUT_LOG ? WF_DEV_LOG : WF_DEV_CUBE;
+    int src = lk.output == WF_OUT_FILM ? WF_DEV_SRGB : lk.output == WF_OUT_LOG ? WF_DEV_LOG
+            : WF_FLUT_DISP(lk.flut) ? WF_DEV_DISP : WF_DEV_CUBE;
+    if (src == WF_DEV_DISP) {                    /* the owner's display cube itself (sRGB in, sRGB out): <CODE>SR.CUB, as the JPEG path */
+        static const char pre[] = "ML/DATA/", suf[] = "SR.CUB";   /* by hand: ML's printf has no precision (trap W23) */
+        const char *code = wf_flut_code[lk.flut];
+        int n = 0, len = 0;
+        while (len < 6 && code[len]) len++;
+        for (int i = 0; pre[i]; i++) cn[n++] = pre[i];
+        for (int i = 0; i < 6; i++) cn[n++] = i < len ? code[i] : '_';
+        for (int i = 0; suf[i]; i++) cn[n++] = suf[i];
+        cn[n] = 0;
+        cube = cn;
+    }
     if (src == WF_DEV_CUBE && !(cube = wf_loglut_name(cn, lk.curve, lk.flut, 0))) {
         rb_rc = WF_LL_E_MODE;
         wf_log("rawb: no cube name (curve %d lut %d)", lk.curve, lk.flut);
@@ -445,12 +457,15 @@ void wf_rawb_poll(void)
     }
     int t0 = get_ms_clock();
     /* plain log has no EI in the JPEG path (wf_log_words) either; the Film LUT cubes get their auto exposure */
-    rb_rc = wf_dev_build(rb_tabs, src, src == WF_DEV_SRGB ? 0 : lk.curve, RB_CAM, cube,
+    /* Leica Vivid: no auto exposure (LUT EI by hand), Highlights / Shadows on the cube's output */
+    rb_rc = src == WF_DEV_DISP ? wf_dev_build_disp(rb_tabs, RB_CAM, cube, lk.lei, lk.hl, lk.sh, &rb_inf)
+          : wf_dev_build(rb_tabs, src, src == WF_DEV_SRGB ? 0 : lk.curve, RB_CAM, cube,
                          src == WF_DEV_CUBE ? lk.lei : 0, src == WF_DEV_CUBE && lk.flut != 0, &rb_inf);
     rb_build_ms = get_ms_clock() - t0;
     if (rb_rc == WF_LL_OK) {
         wf_log("rawb: tables %s c%d%s%s %dms (%d KB shoot memory)",
-               src == WF_DEV_SRGB ? "srgb" : src == WF_DEV_LOG ? "log" : "cube", src == WF_DEV_SRGB ? 0 : lk.curve,
+               src == WF_DEV_SRGB ? "srgb" : src == WF_DEV_LOG ? "log" : src == WF_DEV_DISP ? "disp" : "cube",
+               src >= WF_DEV_SRGB ? 0 : lk.curve,
                cube ? " " : "", cube ? cube + 8 : "", rb_build_ms,
                (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10));
         WF_BARRIER();

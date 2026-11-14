@@ -289,6 +289,20 @@ static void cube_write(const char *path, int n)
     fclose(f);
 }
 
+/* a display-referred look cube at size n (sRGB in, sRGB out), not the identity: R a little G, G^1.15, B down and lifted */
+static void dcube_write(const char *path, int n)
+{
+    FILE *f = fopen(path, "w");
+    fprintf(f, "TITLE \"display look %d\"\nLUT_3D_SIZE %d\n", n, n);
+    for (int b = 0; b < n; b++)
+        for (int g = 0; g < n; g++)
+            for (int r = 0; r < n; r++) {
+                double R = r / (double)(n - 1), G = g / (double)(n - 1), B = b / (double)(n - 1);
+                fprintf(f, "%.6f %.6f %.6f\n", 0.92 * R + 0.08 * G, pow(G, 1.15), 0.85 * B + 0.1);
+            }
+    fclose(f);
+}
+
 /* ------------------------------------------------------------------ catalogue picks */
 static int fA = -1, fB = -1, fC = -1, fX = -1, fCan = -1;    /* rows: colour + 3 prints, B&W, colour, not in pack, a can */
 static int colour_film(int k) { return (wf_films[k].flags & (WF_F_READY | WF_F_LUTCAN | WF_F_BW)) == WF_F_READY; }
@@ -2160,11 +2174,13 @@ static void rb_raw(uint8_t *raw, const uint32_t *src)
     }
 }
 /* the develop of RB_A called directly, the way wf_rawb_stage does it (levels, then prepare on Canon's frame, rows) */
+static int rb_ref_hl, rb_ref_sh;                 /* WF_DEV_DISP: Highlights / Shadows of the reference */
 static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
 {
     static struct wf_dev_tabs T;
     struct wf_ll_info inf;
-    int rc = wf_dev_build(&T, src, 0, WF_DEV_EOSM, 0, 0, 0, &inf);
+    int rc = src == WF_DEV_DISP ? wf_dev_build_disp(&T, WF_DEV_EOSM, "ML/DATA/LEICAVSR.CUB", 0, rb_ref_hl, rb_ref_sh, &inf)
+                                : wf_dev_build(&T, src, 0, WF_DEV_EOSM, 0, 0, 0, &inf);
     void *scr = memalign(32, wf_dev_scratch_bytes(FW, FH));
     struct wf_dev_job j;
     memset(&j, 0, sizeof j);
@@ -2338,15 +2354,35 @@ static void t_rawb(void)
     chk(LOGW("rawb: tables cube c2 VLOG.CUB", 60000), "Log + LUT: '%s'", log_line("rawb: tables"));
     rb_stopped("Log + LUT", "buf 0 52000000 of 3,");
     chk(strstr(log_line("rawb: black"), "roll 1") != 0, "Log + LUT: shoulder on ('%s')", log_line("rawb: black"));
-    /* Leica Vivid (WF_FLUT_DISP, a look on the Standard JPEG): B leaves it to the 8-bit path, tables freed */
-    wf_flut = WF_FLUT_LEICAV;
-    chk(WAIT(wf_rawb_state() == WF_RB_IDLE, 3000) && WAIT(h_arena_live == live0, 3000),
-        "Leica Vivid: B idle, tables freed (state %d, blocks %d)", wf_rawb_state(), h_arena_live - live0);
-    log_mark();
-    sb = shot(in, out, FW, FH);
-    chk(sb == 0 && LOGW("rawb: 8-bit (look)", 3000) && !log_has("rawb: buf"), "Leica Vivid shot: the 8-bit look ('%s')",
-        log_line("rawb: "));
-    wf_flut = 0;
+    /* Leica Vivid (WF_FLUT_DISP): raw -> the sRGB develop -> the owner's display cube on the sRGB codes, no log step */
+    {
+        char nb[WF_LL_NAME];
+        cube_write(wf_loglut_name(nb, WF_CURVE_VLOG, WF_FLUT_LEICAV, 0), 5);   /* the JPEG path's cube */
+        dcube_write("ML/DATA/LEICAVSR.CUB", 33);
+        uint32_t *l0 = malloc(NW * 4);
+        log_mark();
+        wf_flut = WF_FLUT_LEICAV;
+        chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 30000), "Leica Vivid: '%s'", log_line("rawb: tables"));
+        rb_ref_hl = rb_ref_sh = 0;
+        rb_ref(ref, in, WF_DEV_DISP, 1);
+        log_mark();
+        sb = shot(in, out, FW, FH);
+        chk(sb == 0 && LOGW("rawb: done", 3000) && ndiff(out, ref, NW) == 0,
+            "Leica Vivid shot: bit-exact vs the sRGB develop + display cube (%d words differ)", ndiff(out, ref, NW));
+        memcpy(l0, out, NW * 4);
+        log_mark();
+        wf_hl = 2; wf_sh = -2;
+        chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 30000), "Leica Vivid +2 / -2: tables again");
+        rb_ref_hl = 2; rb_ref_sh = -2;
+        rb_ref(ref, in, WF_DEV_DISP, 1);
+        log_mark();
+        sb = shot(in, out, FW, FH);
+        chk(sb == 0 && LOGW("rawb: done", 3000) && ndiff(out, ref, NW) == 0 && ndiff(out, l0, NW) > NW / 4,
+            "Leica Vivid +2 / -2: bit-exact (%d words differ), bent (%d words moved)", ndiff(out, ref, NW), ndiff(out, l0, NW));
+        wf_hl = wf_sh = 0; rb_ref_hl = rb_ref_sh = 0;
+        wf_flut = 0;
+        free(l0);
+    }
     log_mark();
     wf_out = WF_OUT_FILM;
     chk(LOGW("rawb: tables srgb", 10000), "back to the film: base tables again");
@@ -2381,10 +2417,10 @@ static void t_rawb(void)
     free(alt); free(rb_dev);
 }
 #else
-/* 5D2: RAW develop "B" over Canon's TOP + BOT halves. The raw sits at MEM1 + 0x76C8 (MEM1 = R5_M1, named by the job
+/* 5D2: RAW develop "B" over Canon's TOP + BOT halves. CR2 row 0 sits at MEM1 + 0x76C8 - pitch (MEM1 = R5_M1, named by the job
  * handles of p5_job as wf_cam_5d2.c reads them), 5792 x 3804, pitch 10136, GBRG, black 1024. */
 #define R5_M1     0x54000000u
-#define R5_RAW    (R5_M1 + 0x76C8u)
+#define R5_RAW    (R5_M1 + 0x76C8u - R5_PITCH)   /* CR2 row 0: MEM1 + 0x76C8 is row 1 (probe 11-14) */
 #define R5_PITCH  10136
 #define R5_RW     5792
 #define R5_RH     3804
@@ -2432,11 +2468,13 @@ static void r5_raw(uint8_t *raw, const uint32_t *src)   /* the same noise every 
     }
 }
 /* the develop called directly as wf_rawb_stage does over the two halves: levels, prepare on the TOP half, all rows */
+static int r5_disp;                              /* the reference with the Leica display cube (WF_DEV_DISP) */
 static void r5_ref(uint32_t *dst, const uint32_t *canon)
 {
     static struct wf_dev_tabs T;
     struct wf_ll_info inf;
-    int rc = wf_dev_build(&T, WF_DEV_SRGB, 0, WF_DEV_5D2, 0, 0, 0, &inf);
+    int rc = r5_disp ? wf_dev_build_disp(&T, WF_DEV_5D2, "ML/DATA/LEICAVSR.CUB", 0, 0, 0, &inf)
+                     : wf_dev_build(&T, WF_DEV_SRGB, 0, WF_DEV_5D2, 0, 0, 0, &inf);
     void *scr = memalign(32, wf_dev_scratch_bytes(FW, FH));
     struct wf_dev_job j;
     memset(&j, 0, sizeof j);
@@ -2528,8 +2566,8 @@ static void t_rawb(void)
         "wf_film_words (%d words differ)", ndiff(out, ref, NW));
     chk(ndiff(out, out2, NW) > NW / 4, "and not the 8-bit look");
     usleep(500000);
-    chk(LOGW("rawb: buf 0 540076c8 of 1,", 3000) && r5_count("rawb: done rows 1872,") == 2 && !log_has("rawb: 8-bit"),
-        "log: buffer MEM1 + 0x76C8, both halves done ('%s')", log_line("rawb: buf"));
+    chk(LOGW("rawb: buf 0 54004f30 of 1,", 3000) && r5_count("rawb: done rows 1872,") == 2 && !log_has("rawb: 8-bit"),
+        "log: buffer MEM1 + 0x76C8 - pitch (CR2 row 0), both halves done ('%s')", log_line("rawb: buf"));
     chk(log_has("rawb: black 1024 white 14600,") && log_has("rawb: BOT half continues the TOP"), "TOP levels measured (black 1024, white 14600), BOT continues ('%s')", log_line("rawb: black"));
     chk(LOGW(": film ", 3000) && strstr(log_line(": film "), " raw"), "shot line marks the develop: '%s'",
         log_line(": film "));
@@ -2593,17 +2631,25 @@ static void t_rawb(void)
     sb = shot(in, out, FW, FH);
     chk(sb == 0 && ndiff(out, ref, NW) == 0, "after the stop: developed again, bit-exact");
 
-    /* Leica Vivid (WF_FLUT_DISP, a look on the Standard JPEG): B leaves both halves to the 8-bit path, tables freed */
+    /* Leica Vivid (WF_FLUT_DISP): both halves developed through the display cube on the sRGB codes */
     int out0 = wf_out, fl0 = wf_flut;
+    {
+        char nb[WF_LL_NAME];
+        cube_write(wf_loglut_name(nb, WF_CURVE_VLOG, WF_FLUT_LEICAV, 0), 5);
+        dcube_write("ML/DATA/LEICAVSR.CUB", 33);
+    }
+    log_mark();
     wf_out = WF_OUT_LLUT;
     wf_flut = WF_FLUT_LEICAV;
-    chk(WAIT(wf_rawb_state() == WF_RB_IDLE, 3000) && WAIT(h_arena_live == live0, 3000),
-        "Leica Vivid: B idle, tables freed (state %d, blocks %d)", wf_rawb_state(), h_arena_live - live0);
+    chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 30000), "Leica Vivid: '%s'", log_line("rawb: tables"));
+    r5_disp = 1;
+    r5_ref(ref, in);
+    r5_disp = 0;
     log_mark();
     sb = shot(in, out, FW, FH);
     usleep(500000);
-    chk(sb == 0 && LOGW("rawb: 8-bit (look)", 3000) && !log_has("rawb: buf") && !log_has("TOP half not developed"),
-        "Leica Vivid shot: TOP and BOT the 8-bit look ('%s')", log_line("rawb: "));
+    chk(sb == 0 && LOGW("BOT half continues", 3000) && ndiff(out, ref, NW) == 0,
+        "Leica Vivid shot: TOP + BOT bit-exact vs the sRGB develop + display cube (%d words differ)", ndiff(out, ref, NW));
     wf_out = out0;
     wf_flut = fl0;
 
