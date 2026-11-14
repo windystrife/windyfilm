@@ -14,7 +14,10 @@
  * Tables: wf_task builds the look's develop tables (wf_dev_build, file I/O there) whenever the look changes, into one
  * shoot-memory block with the per-shot scratch (about 0.8 MB, shoot_malloc_suite_contig, cacheable, wf_fx.c rules),
  * given back while Canon playback is shown and when the menu is off. Published like the Log + LUT tables: wf_task
- * clears the key, the worker marks itself inside the stage first and reads the key after.
+ * clears the key, the worker marks itself inside the stage first and reads the key after. Cube tables (Log + LUT, Leica
+ * Vivid) are kept in ML/DATA/<cube name>.RBT (356 KB, wf_llb_*: builder id, look key, cube size / time / content hash):
+ * a matching file is read instead of the parse, any other is rebuilt and rewritten (only while Canon is idle; a busy
+ * write is tried again every 2 s while the tables stay). No shoot memory beyond the 0.8 MB block.
  *
  * Log: one line per shot that asked for B (wf_task): the buffer and its score, levels, WB source, the shoulder, the
  * time per phase, or why the shot got the 8-bit look. */

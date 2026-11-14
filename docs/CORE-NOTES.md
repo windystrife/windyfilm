@@ -627,6 +627,23 @@ The JPEG path (8-bit fallback) still uses main's LEICAVVL.CUB.
 **5D2 raw base** (probe 11-14, 8 records, TOP and BOT, IMG_4467..4476): MEM1 + 0x76C8 is CR2 row 1 (byte-exact or NCC 1.0000,
 0..1 LSB). B now reads CR2 row 0 at MEM1 + 0x76C8 - pitch; before that its CFA rows were swapped (GBRG read as RGGB).
 
+**B table cache `.RBT`** (11-14 evening, top session's request after the owner's RAWB2 log: a 33^3 B build took 0.8-6 s
+on the EOS M, after every boot, look change and playback -> shoot, and a 65^3 CinePrint cube parses ~6x longer):
+- cube tables only (CUBE, DISP); SRGB / LOG tables are computed and stay uncached. File ML/DATA/<cube name>.RBT next to
+  the cube (T250DPC2.CUB -> T250DPC2.RBT), 356,440 B = 9 key words + `struct wf_dev_tabs` + FNV-1a.
+- key: "RBT1", `wf_dev_tabs_id` (WF_DEV_TABS_VER, table size, camera, src, curve and every constant table the build
+  reads: camera matrix, LUT EI gains, sRGB decode, the curve's gamut matrix / encode / EI constants), the look key
+  (`rb_key`: source, curve, Film LUT, LUT EI; DISP also H / S), auto exposure + camera, table size, then the cube's size,
+  time stamp and content hash (`wf_llb_cube_id` = the .FRT's wf_llc_stat + wf_llc_key). One file per cube.
+- generic helpers in wf_loglut.c (`wf_llb_cube_id / read / write`) on the .FRT's I/O; writes through `wf_fcreate`
+  (Canon idle only). A busy write is owed and retried every 2 s while the same tables stay published
+  (`rawb: <name>.RBT written N ms`). A read that fails the key, size or hash rebuilds and rewrites.
+- log suffix on `rawb: tables ...`: `, T250DPC2.RBT hit` / `none|key|bad, written N ms` / `write later (busy)` /
+  `not written (step)`. The time on a hit line is the read time.
+- host (RAWB test): 33^3 build 37 ms / hit 25 ms, 65^3 build 193 ms / hit 26 ms; hits are bit-exact against a build.
+  Camera estimate from the .FRT (181 KB, 0.2-0.6 s per hit): about 0.3-1 s per .RBT hit.
+- bump WF_DEV_TABS_VER whenever wf_dev_build's arithmetic changes a cube's tables. card/EXCLUDE.txt drops `*.RBT`.
+
 **Camera layer** (`wf_cam_5d2.c rawb_fill`, at both hooks while the menu is on):
 - gates: RAW + L fine, drive single / self-timer;
 - job handle H: TOP `[0x369C + 0x3C]`, BOT `[0x3630 + 0x2C]`;

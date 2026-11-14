@@ -311,12 +311,60 @@ out:
 }
 
 /* ------------------------------------------------------------------ wf_task */
+/* table cache (.RBT): the cube tables (CUBE, DISP) of one look next to its cube, ML/DATA/<name>.RBT for <name>.CUB.
+ * Key: magic, the builder id (wf_dev_tabs_id: format version, table size, camera, curve -> gamut, constants), the look key
+ * (rb_key: source, curve, Film LUT, LUT EI; DISP also H / S), auto exposure + camera, the table size, then the cube's
+ * size, time stamp and content hash (wf_llb_cube_id, as the .FRT). B's tables have no JPEG input curve. One file per
+ * cube: another LUT EI rebuilds and rewrites it. SRGB / LOG tables are computed (no parse): never cached. A file that
+ * does not match (key, size, hash) is rebuilt and rewritten; a write while Canon is busy is owed and tried again
+ * every RB_RBT_MS while the same tables stay published. */
+#define RB_RBT_MAGIC 0x31544252u                 /* "RBT1" */
+#define RB_RBT_NKEY  9
+#define RB_RBT_MS    2000
+static uint32_t rb_rbt_k[RB_RBT_NKEY];           /* the owed write: its key, file and tables key (0 = none) */
+static char rb_rbt_path[WF_LL_NAME];
+static int rb_rbt_owed, rb_rbt_t;
+static const char *const rb_llbname[4] = { "hit", "none", "key", "bad" };
+
+static int rb_rbt_name(char *d, const char *cube)          /* ML/DATA/<name>.CUB -> ML/DATA/<name>.RBT */
+{
+    int n = 0;
+    while (cube[n] && n < WF_LL_NAME - 1) {
+        d[n] = cube[n];
+        n++;
+    }
+    d[n] = 0;
+    if (cube[n] || n < 5 || d[n - 4] != '.')
+        return 0;
+    d[n - 3] = 'R';
+    d[n - 2] = 'B';
+    d[n - 1] = 'T';
+    return 1;
+}
+
+static void rb_rbt_retry(void)
+{
+    int now = get_ms_clock();
+    if (now - rb_rbt_t < RB_RBT_MS)
+        return;
+    rb_rbt_t = now;
+    int wr = wf_llb_write(rb_rbt_path, rb_rbt_k, RB_RBT_NKEY, rb_tabs, sizeof(struct wf_dev_tabs));
+    if (wr == WF_FE_BUSY)
+        return;
+    rb_rbt_owed = 0;
+    if (wr)
+        wf_log("rawb: %s not written (%s)", rb_rbt_path + 8, wf_fe_name(wr));
+    else
+        wf_log("rawb: %s written %dms", rb_rbt_path + 8, get_ms_clock() - now);
+}
+
 static void rb_free(void)
 {
     if (rb_suite)
         shoot_free_suite(rb_suite);
     rb_suite = 0;
     rb_mem = 0;
+    rb_rbt_owed = 0;
 }
 
 static int rb_alloc(void)
@@ -418,8 +466,12 @@ void wf_rawb_poll(void)
         rb_nomem = 0;
         return;
     }
-    if (want == rb_have)
+    if (want == rb_have) {
+        if (rb_rbt_owed == want)
+            rb_rbt_retry();                      /* the .RBT of these tables, once Canon is idle */
         return;
+    }
+    rb_rbt_owed = 0;                             /* rb_tabs are rebuilt below */
     int now = get_ms_clock();
     if (want == rb_tried && (!rb_nomem || now - rb_retry < RB_RETRY_MS))
         return;                                  /* this key failed: wait for a change (or the no-memory retry) */
@@ -456,18 +508,58 @@ void wf_rawb_poll(void)
         return;
     }
     int t0 = get_ms_clock();
-    /* plain log has no EI in the JPEG path (wf_log_words) either; the Film LUT cubes get their auto exposure */
-    /* Leica Vivid: no auto exposure (LUT EI by hand), Highlights / Shadows on the cube's output */
-    rb_rc = src == WF_DEV_DISP ? wf_dev_build_disp(rb_tabs, RB_CAM, cube, lk.lei, lk.hl, lk.sh, &rb_inf)
-          : wf_dev_build(rb_tabs, src, src == WF_DEV_SRGB ? 0 : lk.curve, RB_CAM, cube,
-                         src == WF_DEV_CUBE ? lk.lei : 0, src == WF_DEV_CUBE && lk.flut != 0, &rb_inf);
+    int curve = src >= WF_DEV_SRGB ? 0 : lk.curve, autoexp = src == WF_DEV_CUBE && lk.flut != 0;
+    /* the .RBT first (cube tables only) */
+    uint32_t rk[RB_RBT_NKEY];
+    char rp[WF_LL_NAME];
+    int rbt = cube && rb_rbt_name(rp, cube) && wf_llb_cube_id(cube, rk + 5) == 0, got = -1;
+    if (rbt) {
+        rk[0] = RB_RBT_MAGIC;
+        rk[1] = wf_dev_tabs_id(RB_CAM, src, curve);
+        rk[2] = (uint32_t)want;
+        rk[3] = (uint32_t)autoexp | (uint32_t)RB_CAM << 8;
+        rk[4] = (uint32_t)sizeof(struct wf_dev_tabs);
+        got = wf_llb_read(rp, rk, RB_RBT_NKEY, rb_tabs, sizeof(struct wf_dev_tabs));
+        if (got == WF_LLB_HIT && (rb_tabs->src != src || rb_tabs->curve != curve || rb_tabs->cam != RB_CAM
+                                  || rb_tabs->n < 2 || rb_tabs->n > 65))
+            got = WF_LLB_BAD;                    /* never a key match, but cheap */
+    }
+    if (got == WF_LLB_HIT) {
+        rb_rc = WF_LL_OK;
+        char *z = (char *)&rb_inf;
+        for (unsigned i = 0; i < sizeof rb_inf; i++) z[i] = 0;
+    } else {
+        /* plain log has no EI in the JPEG path (wf_log_words) either; the Film LUT cubes get their auto exposure */
+        /* Leica Vivid: no auto exposure (LUT EI by hand), Highlights / Shadows on the cube's output */
+        rb_rc = src == WF_DEV_DISP ? wf_dev_build_disp(rb_tabs, RB_CAM, cube, lk.lei, lk.hl, lk.sh, &rb_inf)
+              : wf_dev_build(rb_tabs, src, curve, RB_CAM, cube, src == WF_DEV_CUBE ? lk.lei : 0, autoexp, &rb_inf);
+    }
     rb_build_ms = get_ms_clock() - t0;
     if (rb_rc == WF_LL_OK) {
-        wf_log("rawb: tables %s c%d%s%s %dms (%d KB shoot memory)",
+        char rs[64];                             /* ", <name>.RBT hit" / ", <name>.RBT none, written 12ms" */
+        rs[0] = 0;
+        if (rbt && got == WF_LLB_HIT)
+            snprintf(rs, sizeof rs, ", %s hit", rp + 8);
+        else if (rbt) {
+            int t1 = get_ms_clock(), wr = wf_llb_write(rp, rk, RB_RBT_NKEY, rb_tabs, sizeof(struct wf_dev_tabs));
+            if (!wr)
+                snprintf(rs, sizeof rs, ", %s %s, written %dms", rp + 8, rb_llbname[got], get_ms_clock() - t1);
+            else
+                snprintf(rs, sizeof rs, ", %s %s, %s (%s)", rp + 8, rb_llbname[got],
+                         wr == WF_FE_BUSY ? "write later" : "not written", wf_fe_name(wr));
+            if (wr == WF_FE_BUSY) {
+                for (int i = 0; i < RB_RBT_NKEY; i++)
+                    rb_rbt_k[i] = rk[i];
+                for (int i = 0; i < WF_LL_NAME; i++)
+                    rb_rbt_path[i] = rp[i];
+                rb_rbt_owed = want;
+                rb_rbt_t = get_ms_clock();
+            }
+        }
+        wf_log("rawb: tables %s c%d%s%s %dms (%d KB shoot memory)%s",
                src == WF_DEV_SRGB ? "srgb" : src == WF_DEV_LOG ? "log" : src == WF_DEV_DISP ? "disp" : "cube",
-               src >= WF_DEV_SRGB ? 0 : lk.curve,
-               cube ? " " : "", cube ? cube + 8 : "", rb_build_ms,
-               (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10));
+               curve, cube ? " " : "", cube ? cube + 8 : "", rb_build_ms,
+               (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10), rs);
         WF_BARRIER();
         rb_gen++;                                /* a TOP half of the old tables cannot be continued */
         rb_have = want;                          /* published last */

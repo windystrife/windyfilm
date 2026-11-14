@@ -2212,6 +2212,33 @@ static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
            st.clip_quads, st.roll);
     free(scr);
 }
+/* B table cache (.RBT) helpers: switch the Film LUT and wait for B's tables line holding `expect` (ms = its time) */
+static int rb_lut_to(int fl, const char *expect, int *ms)
+{
+    log_mark();
+    wf_flut = fl;
+    int ok = LOGW(expect, 120000);
+    if (ms) {
+        const char *l = log_line("rawb: tables cube");
+        const char *p = l ? strstr(l, ".CUB ") : 0;
+        *ms = p ? atoi(p + 5) : -1;
+    }
+    return ok;
+}
+static long rb_fsize(const char *p) { struct stat st; return stat(p, &st) ? -1 : (long)st.st_size; }
+static void rb_fflip(const char *p)              /* one byte in the middle of the file */
+{
+    FILE *f = fopen(p, "r+b");
+    if (!f)
+        return;
+    fseek(f, 0, SEEK_END);
+    long at = ftell(f) / 2;
+    fseek(f, at, SEEK_SET);
+    int c = fgetc(f);
+    fseek(f, at, SEEK_SET);
+    fputc(c ^ 0x5a, f);
+    fclose(f);
+}
 static void rb_point(uint32_t pb50, uint32_t wr0)  /* Canon's pointers as the hook reads them (cached twins) */
 {
     h_pb[0x50 / 4] = pb50 ? pb50 + RB_PBOFF - 0x40000000u : 0;
@@ -2395,12 +2422,16 @@ static void t_rawb(void)
         free(l0);
     }
     /* a CinePrint can (main 856178c): Canon Log 2 + Cinema Gamut, auto exposure, its <code>C2.CUB; a 33^3 and a 65^3 cube
-     * (same .FRT-free B tables, the load time grows with the cube) */
+     * (the load time grows with the cube), then B's table cache: ML/DATA/<name>.RBT next to the cube */
     {
         uint32_t *v0 = malloc(NW * 4);
-        int ms[2] = { -1, -1 };
+        int ms[2] = { -1, -1 }, hm[2] = { -1, -1 };
         static const int fl[2] = { WF_FLUT_TUNG0, WF_FLUT_TUNG0 + 4 }, nn[2] = { 33, 65 };
         static const char *const cn[2] = { "ML/DATA/T250DPC2.CUB", "ML/DATA/TEKTAMC2.CUB" };
+        static const char *const rn[2] = { "ML/DATA/T250DPC2.RBT", "ML/DATA/TEKTAMC2.RBT" };
+        const long rsz = 4 * 9 + (long)sizeof(struct wf_dev_tabs) + 4;
+        remove(rn[0]);                               /* a run directory of before may hold them */
+        remove(rn[1]);
         for (int t = 0; t < 2; t++) {
             char want[64], nb[WF_LL_NAME];
             dcube_write(cn[t], nn[t]);
@@ -2416,6 +2447,8 @@ static void t_rawb(void)
             const char *p = l ? strstr(l, "C2.CUB ") : 0;
             if (p)
                 ms[t] = atoi(p + 7);
+            chk(l && strstr(l, ".RBT none, written") && rb_fsize(rn[t]) == rsz,
+                "CinePrint %d^3: no .RBT yet: built, %s written (%ld B, want %ld)", nn[t], rn[t] + 8, rb_fsize(rn[t]), rsz);
             rb_ref_curve = WF_LL_CLOG2;
             rb_ref_cube = cn[t];
             rb_ref(ref, in, WF_DEV_CUBE, 1);
@@ -2429,7 +2462,65 @@ static void t_rawb(void)
         rb_ref(v0, in, WF_DEV_CUBE, 1);
         chk(ndiff(out, v0, NW) > NW / 4, "CinePrint: Canon Log 2 / Cinema Gamut, not V-Log (%d words differ)",
             ndiff(out, v0, NW));
-        printf("CinePrint B table build: 33^3 %d ms, 65^3 %d ms (host)\n", ms[0], ms[1]);
+        /* the cache: a hit gives the tables of a build (bit-exact shots) */
+        rb_ref_curve = WF_LL_CLOG2;
+        for (int t = 0; t < 2; t++) {
+            char want[48];
+            snprintf(want, sizeof want, "%s hit", rn[t] + 8);
+            chk(rb_lut_to(fl[t], want, &hm[t]), "%d^3 again: %s ('%s')", nn[t], want, log_line("rawb: tables"));
+            rb_ref_cube = cn[t];
+            rb_ref(ref, in, WF_DEV_CUBE, 1);
+            log_mark();
+            sb = shot(in, out, FW, FH);
+            chk(sb == 0 && LOGW("rawb: done", 3000) && ndiff(out, ref, NW) == 0,
+                "%d^3 from the .RBT: bit-exact vs a build (%d words differ)", nn[t], ndiff(out, ref, NW));
+        }
+        printf("CinePrint B tables (host): 33^3 build %d ms, .RBT %d ms; 65^3 build %d ms, .RBT %d ms\n", ms[0], hm[0],
+               ms[1], hm[1]);
+        /* another key: LUT EI +2/3 EV (one file per cube: EI 0 again rebuilds and rewrites it) */
+        log_mark();
+        wf_lut_ei = 2;
+        chk(LOGW("TEKTAMC2.RBT key, written", 120000), "LUT EI +2: another key, rebuilt + rewritten ('%s')",
+            log_line("rawb: tables"));
+        log_mark();
+        wf_lut_ei = 0;
+        chk(LOGW("TEKTAMC2.RBT key, written", 120000), "LUT EI 0 again: rebuilt + rewritten ('%s')",
+            log_line("rawb: tables"));
+        /* damaged files: one byte flipped in the tables (hash), a cut file (size) */
+        rb_fflip(rn[1]);
+        chk(rb_lut_to(fl[0], "T250DPC2.RBT hit", 0) && rb_lut_to(fl[1], "TEKTAMC2.RBT bad, written", 0),
+            "a flipped byte: rebuilt + rewritten ('%s')", log_line("rawb: tables"));
+        log_mark();
+        sb = shot(in, out, FW, FH);
+        chk(sb == 0 && LOGW("rawb: done", 3000) && ndiff(out, ref, NW) == 0,
+            "after the flipped byte: bit-exact (%d words differ)", ndiff(out, ref, NW));
+        chk(truncate(rn[0], 1000) == 0 && rb_lut_to(fl[0], "T250DPC2.RBT bad, written", 0) && rb_fsize(rn[0]) == rsz,
+            "a cut file: rebuilt + rewritten ('%s')", log_line("rawb: tables"));
+        /* the cube changed on the card under the same name: another content hash */
+        cube_write(cn[0], 33);
+        chk(rb_lut_to(fl[1], "TEKTAMC2.RBT hit", 0) && rb_lut_to(fl[0], "T250DPC2.RBT key, written", 0),
+            "a new T250DPC2.CUB: rebuilt + rewritten ('%s')", log_line("rawb: tables"));
+        rb_ref_cube = cn[0];
+        rb_ref(ref, in, WF_DEV_CUBE, 1);
+        log_mark();
+        sb = shot(in, out, FW, FH);
+        chk(sb == 0 && LOGW("rawb: done", 3000) && ndiff(out, ref, NW) == 0,
+            "the new cube: bit-exact (%d words differ)", ndiff(out, ref, NW));
+        /* Canon busy at the build: no file then, written once Canon is idle (wf_fio rules) */
+        remove(rn[1]);
+        h_li_set("job", 1);
+        log_mark();
+        wf_flut = fl[1];
+        int rdy = WAIT(wf_rawb_state() == WF_RB_READY, 120000);
+        usleep(300000);
+        long busy_sz = rb_fsize(rn[1]);
+        h_li_set("job", 0);
+        chk(rdy && busy_sz < 0 && LOGW("TEKTAMC2.RBT none, write later (busy)", 5000),
+            "Canon busy: tables built, no file (%ld), write later ('%s')", busy_sz, log_line("rawb: tables"));
+        chk(LOGW("rawb: TEKTAMC2.RBT written", 10000) && rb_fsize(rn[1]) == rsz, "Canon idle: the owed .RBT written ('%s')",
+            log_line("rawb: TEKTAMC2.RBT"));
+        chk(rb_lut_to(fl[0], "T250DPC2.RBT hit", 0) && rb_lut_to(fl[1], "TEKTAMC2.RBT hit", 0),
+            "the owed file is a hit ('%s')", log_line("rawb: tables"));
         rb_ref_cube = 0;
         wf_flut = 0;
         wf_curve = WF_CURVE_VLOG;
