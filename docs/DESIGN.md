@@ -96,9 +96,9 @@ shot: Canon YUV conversion site ─ hook (patch_hook_function) ─ gate ─ sema
 
 ### 3.1 Input stage: open for a RAW path (owner request 2026-11-14)
 
-Today every look grades Canon's developed 8-bit UYVY 4:2:2 frame. A RAW input path (our own develop from the 14-bit
-Bayer buffer, or a hybrid) is being researched in another session; it will report its conclusion here. The pipeline
-must take a new input without a rewrite:
+Today every look grades Canon's developed 8-bit UYVY 4:2:2 frame. The RAW path was researched by the raw-film-engine
+session (report `F:\MagicLatern\_research\raw-path\BAOCAO-raw-path.md`, ROM notes `rom_ssraw_RE.md` there). The
+owner's choice and the plan built on it are in 3.2. The pipeline must take a new input without a rewrite:
 
 ```
 camera input layer  ->  [develop stage]  ->  look stage  ->  output
@@ -125,6 +125,111 @@ camera input layer  ->  [develop stage]  ->  look stage  ->  output
   plus a LOG16 variant of the Log + LUT / film path, without touching the UYVY8 kernels, the menu rows or the UI.
 - **Config:** key `input` is reserved (value `jpeg`, the only one now). The menu shows no input choice until a RAW
   path exists.
+
+### 3.2 RAW plan chosen by the owner: Hybrid + Canon curve inversion (2026-11-14)
+
+What the research found (synthetic HDR scene through an EOS M sensor model and the owner's V-Log cube T250DMVL;
+times from memsim at 200 MHz, where the 5D2 camera measured 0.83 x memsim; EOS M not measured; +-20-30 %):
+- The 8-bit path loses the highlights. Neutral grey goes flat at +3.1 EV over 18 % grey (RAW: +5.0 EV). Warm lights at
+  +2..+5 EV keep chroma 36 of 68 and drift 26 degrees in hue. Neon and lamp cores turn into a cold grey, because the
+  V-Log cube expects 5-6 EV above linear 1.0, while JPEG clip is only +2.5 EV. Shadows: no visible gain with a film cube.
+- There is no >8-bit demosaiced frame to hook. Canon develops raw -> SSRAW (5-layer pyramid; layer 0 is 14/16-bit
+  Bayer) -> UYVY 8-bit inside the Eeko hardware.
+- A full in-camera develop costs 43 s per shot (MHC demosaic); half resolution costs 11 s but gives only 4.5 MP.
+
+The plan, in this order. Each step is our own code; the prototypes in `raw-path\proto\` are WindyStrife's and may be
+read for ideas.
+
+**A1. Invert Canon's real Picture Style tone curve instead of the sRGB EOTF (both cameras, 0 s per shot).**
+- In the simulation, the error in the sun area drops from 12.4 to 2.6 codes. Truly clipped areas stay colourless.
+- It applies to the scene-linear outputs only: Log, Log + LUT and the Film LUT cans. Catalogue film tables come from
+  display-referred sRGB-in / sRGB-out cubes (`mk_wtab.py`), so they keep reading the JPEG as it is.
+- **The curve comes from the owner's RAW+L pairs** (3-5 pairs with the Picture Style in use and the look off;
+  `F:\MagicLatern\_research\raw-path\cr2\`). It is delivered as `luts/canon_curve/<STYLE>.csv`:
+  - comment lines start with `#` and name the camera, the Picture Style with its settings, and the source pairs;
+  - then 256 rows `code,linear` for codes 0..255, strictly increasing;
+  - linear is scene-linear Rec.709 with 18 % grey = 0.18, and code 255 maps to at most 4.0.
+
+  One curve serves all three channels. Columns `code,r,g,b` are accepted if the pairs show a per-channel curve.
+- **Where it plugs in:** the decode tables are generated, so there is no runtime change.
+  - `tools/mk_logtab.py`, `wf_dec[1024]` (Q14). `mk_logasm_tab.py` reads `wf_logtab.h`, so the ARM Log kernel's padded
+    table follows automatically.
+  - `tools/mk_loglut_tab.py`, `wf_ll_dec[1022]` (Q24): the Log + LUT composite.
+  - `tools/mk_exptab.py` (preview exposure) keeps the sRGB EOTF: it only estimates brightness.
+- **Headroom (the one real change).** Today the decode tables end at 1.0, and the encode tables `wf_lenc` /
+  `wf_ll_enc` cover linear 0..1.0; an index >= 4096 is clamped. The ARM kernel relies on `wf_dec <= 16384` and on
+  `max(wf_lenc) <= 65279`, and the generator asserts both. A Canon inverse puts code 255 above 1.0 (about 1.6 in the
+  simulation). Fold the scale into the tables:
+  - decode stores linear / K, with K = the curve's value at code 255 rounded up to a power of 2 (K <= 4);
+  - encode is generated as `enc(i) = curve(i / 4096 * K)`.
+
+  All Q formats and kernel identities stay. The encode step near black grows K times. The curves are linear down
+  there and the tables interpolate, so check it against `logchk` and the host LOG tests.
+- **Picture Style.** The tables are built for one Picture Style. If the camera is set to another style, log
+  `curve: style <n> != <built>` once per boot and keep going. This needs a way to read the style through the card
+  .sym; check that both cameras have one. A table per style comes later, only if the owner shoots
+  several styles.
+- Optional later: **A2** (HTP + the same inversion, sun-area error 1.4, 3 degrees of hue drift) needs ISO >= 200 and
+  costs 1 EV of shadow noise. It is the owner's call.
+
+**P0. Probe that only logs (EOS M, never changes the image).** The probe answers whether the raw and SSRAW are still
+intact at the hook.
+- It is a menu toggle under a debug entry, default off.
+- At the NN hook entry (`CompleteSsrawToYuv` 0xFF169414; r0 = job, r1 = finished YUV), the camera layer snapshots into
+  a static struct:
+  - the 56 words at 0x41E82CEC (the Eeko copy of the 0xE0 parameter block, uncached alias): +0x50 raw input,
+    +0x64..+0x74 SSRAW A[0..4], +0x78 B-set valid, +0x94.. output geometry;
+  - EDMAC 0xC0F04008 (ML's raw WR0), 0xC0F26308, 0xC0F26408, 0xC0F26A08, 0xC0F26B08. At completion these hold the
+    last stripe, so they are a cross-check only;
+  - `ff234680(&out[2], &tmp, 1, i)` for i = 0..4 (MEMNAVI_GetReadMemory; out[0] = A[i], out[1] = B[i]). It is a ROM
+    call from the hook ([likely] safe), so it has its own sub-toggle;
+  - an FNV-1a over the first 4 KB at the raw address and at A[0] / A[1], plus a copy of the first 1 KB of layers 0 and 1.
+    Read an address only if it lies in the shoot pool 0x40D6C000..0x60000000.
+- `wf_task` writes the lines to `WINDYFLM.LOG` and the 1 KB copies to `ML/LOGS/WFPROBE.BIN` after the shot. Hooks never
+  log.
+- **Run it with RAW+L, single and continuous drive.** Compare the raw checksum with the CR2. The open risk: after
+  `DelayCompleteRawToSsraw`, Canon calls `ReallocateMemory` / `sssCompleteMemShrinkCB`, so in burst the raw may already
+  be reused. SSRAW layer 0 is released only inside 0xFF169414, after our entry hook, which makes it the fallback.
+  WindyFilm already finishes the frame before the hook returns, so nothing is lost to the next shot.
+
+**H. Hybrid highlights (EOS M first; Log + LUT and Film LUT cans).** The source is the raw or SSRAW layer 0,
+whichever P0 shows intact.
+- The 8-bit look pass stays, with A1.
+- Mark the 16x16 blocks where max(R', G', B') >= 241. The frame has 324 x 216 = 69,984 blocks: a byte map is 70 KB,
+  a bit map 8.75 KB.
+- In marked blocks only:
+  1. read the raw rows and build 2x2 superpixels (half resolution);
+  2. black and white levels, WB, the camera matrix;
+  3. rebuild the clipped channels from the block's colour ratios;
+  4. blend with the A1 value in linear light (weight smoothstep from 240 to 253 on the 8-bit max);
+  5. V-Log, then the cube, then UYVY.
+- **Trap: colour ratios.** Take them only from pixels at least 3 px from the clipped area and between 55 % and 92 % of
+  clip. Samples right at the edge give a pink core and green / magenta rims.
+- **Raw geometry (EOS M, ML `raw.c`):**
+  - 5280 x 3528, pitch 9240 (14-bit packed);
+  - active area 5184 x 3456 at left 72 / top 52, which maps 1:1 onto the NN frame (Diana halves: add the half's row
+    offset);
+  - black 2048, white 13400 at ISO 100 and 15200 at the other ISOs.
+
+  The SSRAW layer-0 packing and stride come from the P0 dump.
+- **The UYVY8 kernels work in place**, so the hybrid stage needs a marked block's input values before the look pass
+  overwrites them. Two choices:
+  - (a) a scan pass before the look pass: simple, 2.4 s memsim on the heavy scene;
+  - (b) process bands of 16 rows: scan the band, run the look on it, then fix its marked blocks. A band is 166 KB of
+    scratch, which saves most of the second read.
+
+  Measure on the camera before choosing.
+- **Budget:** 5.7 s on the heavy scene (9.7 % of blocks: scan 2.44 s + blocks 3.26 s); 1.85 s at 5 %. With the scan
+  folded in, about 0.37 s per 1 % of blocks. Memory is about 0.3 MB plus the block map.
+- **`struct wf_frame` gets an optional aux plane**: `aux_fmt` (none / RAW14 packed / SSRAW layer 0), `aux`,
+  `aux_pitch`, `aux_x0`, `aux_y0`, `aux_black`, `aux_white`, `aux_cfa`. In Hybrid the main `fmt` stays `WF_FMT_UYVY8`;
+  the aux plane is a side input, so the UYVY8 kernels, the menu rows and the UI do not change. `WF_FMT_RAW14` as the
+  main format stays reserved for B.
+- **Config:** `input=jpeg|hybrid`. The menu gets a "Highlights: 8-bit / RAW" row once H works on the camera.
+- **5D2:** the ROM analysis covered the EOS M only. The 5D2 gets A1; H on the 5D2 needs its own ROM work first.
+
+**B. Full develop (later, optional "slow" mode):** 35-45 s per shot, only if the owner accepts the wait. It uses
+`WF_FMT_RAW14` as the main format and a LOG16 look path, as laid out in 3.1.
 
 ## 4. Interfaces
 

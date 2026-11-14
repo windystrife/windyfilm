@@ -126,9 +126,26 @@ Deny input: the old module's binary (path assembled inside the script, read only
   | Strength ..% [| Light ..] [| Grain ..] [| Halation ..] [| Mist ..] [| EV..]`, verified by read-back; never a non-empty
   field, never a rewrite.
 
-## 7. RAW develop stage: how it plugs in (DESIGN 3.1)
+## 7. RAW develop stage: how it plugs in (DESIGN 3.1, 3.2)
 
-Nothing RAW is implemented. The places a RAW path touches:
+Nothing RAW is implemented yet. The owner chose **Hybrid + Canon curve inversion** (2026-11-14); DESIGN 3.2 has the
+plan, the numbers and the traps. Exact touch points per step:
+
+- **A1** (waits for `luts/canon_curve/<STYLE>.csv` from the owner's RAW+L pairs):
+  - read the CSV in `tools/mk_logtab.py` (`wf_dec`) and `tools/mk_loglut_tab.py` (`wf_ll_dec`), in place of
+    `srgb_eotf`. Keep `--curve srgb` as the default, so the build stays reproducible without the CSV;
+  - fold K into both decode and encode tables (DESIGN 3.2, Headroom). `mk_logasm_tab.py` then follows, and its
+    asserts (`wf_dec <= 16384`, `max(wf_lenc) <= 65279`) must still pass;
+  - rerun `logchk`, the LOG / LOGCHK host tests and the gate, and write the curve name into the boot log line.
+- **P0** (EOS M only): `wf_cam_eosm.c` takes the snapshot in the NN hook before the gate (a static struct, no calls
+  except the optional `ff234680`). `wf_main.c` `wf_task` writes the lines and `ML/LOGS/WFPROBE.BIN`. A menu toggle
+  goes under a debug entry, default off; nothing is written to the config. Add a host test with a fake parameter block
+  and fake EDMAC words, and assert that the frame stays byte-identical.
+- **H**: the aux-plane fields in `src/wf_frame.h`; `wf_cam_eosm.c` fills them from what P0 found. A new stage goes in
+  `wf_shot.c` `wf_dispatch()` for (UYVY8 + aux, Log + LUT); it works on bands or after a scan pass (DESIGN 3.2). The
+  reconstruction is a new file `src/wf_hl.c`, with a host test on a synthetic raw plane.
+
+General places a RAW path touches:
 
 1. Camera layer (`wf_cam_*.c`): a hook where ML's raw buffer is valid fills `struct wf_frame` with `fmt =
    WF_FMT_RAW14`, `data` = the raw buffer, `dst` = Canon's UYVY buffer of the same shot (or a LOG16 work buffer),
