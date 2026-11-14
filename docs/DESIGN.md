@@ -158,12 +158,17 @@ read for ideas.
     2.07.
 
   Because the curve fits that one style only, it is a menu choice, not a replacement:
-  - menu "Input curve" = sRGB (default) / Canon Film 1, config key `incurve=srgb|film1`;
-  - `build.sh` passes the CSV to `tools/mk_loglut_tab.py`, which emits `wf_ll_dec_c[1022]` (Q24) and
-    `WF_LL_HAVE_CANON 1`. Without the CSV the build has no table, and the entry is greyed and reads sRGB;
+  - menu "Input curve" = sRGB (default) / Canon Film 1 / Canon Neutral, config key `incurve=srgb|film1|neutral`;
+  - curve slots: slot 1 = Film 1 (`luts/canon_curve/EOSM_Film1.csv`), slot 2 = Neutral
+    (`luts/canon_curve/EOSM_Neutral.csv`, prepared 14 Nov; it waits for raw-film-engine's measured curve);
+  - `build.sh` passes one CSV per slot (or `-`) to `tools/mk_loglut_tab.py`, which emits `wf_ll_dec_c<k>[1022]` (Q24)
+    and `WF_LL_HAVE_C<k> 1`. The env vars `CURVE_FILM1` / `CURVE_NEUTRAL` point a slot at another CSV (tests). A slot
+    without a CSV has no table: the menu skips it, and a config that names it reads sRGB. Without any CSV the entry
+    is greyed;
   - only the load-time Log + LUT builder (`wf_loglut.c`) reads it, so the cost per shot is 0. Flat Log (the ARM kernel,
     `wf_dec`), the preview exposure tables and the catalogue film tables keep the sRGB EOTF;
-  - the shot's EXIF comment says `| In Canon Film 1`, and the `lut` log line says `in-film1`.
+  - the shot's EXIF comment says `| In Canon Film 1` (or `| In Canon Neutral`), and the `lut` log line says `in-film1`
+    (`in-neutral`).
 - **Headroom without a K fold.** The Log + LUT builder already handles linear above 1.0 for the LUT EI. Above white
   each curve is `a log10(x + b) + c`, so the builder shifts x down by 2^up and adds `up a log10 2` in the encode
   domain, which is exact. The Canon decode (max 2.07 -> 34.7 M in Q24, below 2^31) goes through that same path:
@@ -177,13 +182,25 @@ read for ideas.
   - encode is generated as `enc(i) = curve(i / 4096 * K)`;
   - then check `logchk` and the host LOG tests.
 - **Auto exposure of the Film LUT cubes.** The grey reference is 0.18 with the curve; sRGB keeps `lin(118)`.
-- **Table cache.** Bit 17 of the `.FRT` key is the curve. Old caches have 0 there, so sRGB caches stay valid.
-- **Picture Style check.** Film 1 is used only while `lens_info.raw_picstyle` (ML's `PROP_PICTURE_STYLE` handler)
-  is User Def. 1 (0x21), or 0 (not reported yet). Under any other style:
+- **Table cache.** Bits 17-18 of the `.FRT` key hold the curve slot (Film 1 = bit 17, as in the first version;
+  Neutral = bit 18). Old caches have 0 there, so sRGB caches stay valid.
+- **Picture Style check.** Each curve is used only under the Picture Style and Contrast it was measured at
+  (raw-film-engine read them from the makernote PSInfo):
+  - Film 1: `lens_info.raw_picstyle` = User Def. 1 (0x21), User Def. 1 holds a loaded style file
+    (`PROP_PICSTYLE_OF_USERDEF1` below 0x80, as ML's picstyle.c tells them apart; the pairs had PC 1 = 0x41), and
+    Contrast -2. The slot alone is not enough: on 14 Nov the owner's EOS M had User Def. 1 based on Auto;
+  - Neutral: `raw_picstyle` = Neutral (0x84) and Contrast 0;
+  - the base comes from the module's own `prop_add_handler(PROP_PICSTYLE_OF_USERDEF1)` (0x0206000a on DIGIC 4 / 5),
+    the Contrast from ML's `picstyle_get_current_contrast()`. Not reported yet (style 0, base -1, Contrast -10)
+    counts as fitting.
+
+  Under anything else:
   - the JPEG is read as sRGB;
   - `wf_ll_poll` reloads the tables;
-  - the menu warns `Picture Style is <name>, not User Def. 1`;
-  - the `lut` log line says `srgb(style <hex>)`.
+  - the menu says what differs: `Picture Style is <name>, not User Def. 1` (or `not Neutral`), `User Def. 1 is a
+    built-in style, not the Film 1 file`, or `Style contrast is <n>, measured at <m>`;
+  - the `lut` log line says `srgb(style <hex>)`, `srgb(base <hex>)` or `srgb(contrast <n>)`. With a curve in use it
+    says `in-film1 b<base> c<contrast>` (`bff` / `c-10`: not reported).
 
   The slot is checked, not the style file it holds. A table per style comes later, and only if the owner shoots
   several styles. The 5D2 gets the same table, but the curve was measured on the EOS M only.

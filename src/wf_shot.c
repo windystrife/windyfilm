@@ -251,7 +251,7 @@ static void wf_ll_poll(void)
     wf_ll_loading = want;
     wf_ll_ei = ei;
     wf_ll_auto = lut != 0;                       /* Film LUT cubes: exposed for 18 % grey -> 118 (Technical: as is) */
-    wf_ll_incurve = inc;                         /* the Canon curve instead of sRGB (cache key bit 17) */
+    wf_ll_incurve = inc;                         /* a Canon curve slot instead of sRGB (cache key bits 17-18) */
     if (wf_ll_tabs && cp)
         rc = wf_loglut_load_cached(cp, wf_loglut_name(fn, want, lut, 1), want, wf_ll_tabs, in);
     else
@@ -260,12 +260,19 @@ static void wf_ll_poll(void)
     wf_ll_rc[want - 1] = rc;
     wf_ll_loading = 0;
     if (rc == WF_LL_OK) {
-        char eis[40] = "";
+        char eis[48] = "";
         int n = 0, av = (int8_t)wf_ll_tabs->pad[0];
-        if (inc == WF_INC_FILM1)
-            n = snprintf(eis, sizeof eis, " in-film1");
-        else if (wf_incurve == WF_INC_FILM1 && wf_ll_canon_have())
-            n = snprintf(eis, sizeof eis, " srgb(style %02x)", wf_style_raw());   /* Film 1 chosen, not User Def. 1 */
+        int ch = wf_incurve > WF_INC_SRGB && wf_incurve < WF_INC_N && wf_ll_curve_have(wf_incurve) ? wf_incurve : 0;
+        int why = wf_style_why(ch);
+        if (inc)                                 /* the curve, with what the camera reported (base ff / c-10: not yet) */
+            n = snprintf(eis, sizeof eis, " in-%s b%02x c%d", inc == WF_INC_FILM1 ? "film1" : "neutral",
+                         wf_style_base() & 0xff, wf_style_con());
+        else if (ch && why == WF_PSW_BASE)       /* a curve chosen, the camera's style does not fit it */
+            n = snprintf(eis, sizeof eis, " srgb(base %02x)", wf_style_base());
+        else if (ch && why == WF_PSW_CONTRAST)
+            n = snprintf(eis, sizeof eis, " srgb(contrast %d)", wf_style_con());
+        else if (ch)
+            n = snprintf(eis, sizeof eis, " srgb(style %02x)", wf_style_raw());
         if (ei)
             n += snprintf(eis + n, sizeof eis - n, " ei%+d/3", ei);
         if (wf_ll_tabs->pad[1] == WF_LL_AUTO_MARK) {

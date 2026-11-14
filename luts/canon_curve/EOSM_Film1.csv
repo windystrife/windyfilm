@@ -1,9 +1,9 @@
 # WindyStrife A1: Canon JPEG/YUV code -> scene-linear, measured from RAW+JPEG pairs (2026-11-14)
 # camera: Canon EOS M; lens EF-M15-45mm f/3.5-6.3 IS STM
 # picture style: User Def. 1 = "HungltMed - Film 1" (custom file film1.pf3, third party, 2022) - NOT Standard;
-#   makernote PictureStyleUserDef=PC 1/PC 2/PC 3 PictureStylePC=Standard/Faithful/Standard (base style not confirmed); Sharpness 3; contrast/saturation tweaks not decoded
+#   style settings (makernote PSInfo): contrast -2, sharpness 3, saturation 0, color tone 0; User Def. 1 base = PC 1 (loaded file)
 # settings in all pairs: ALO Off, HTP Off, WB Kelvin 4600/4900, ISO 100/160/200/320, f/5-13, 15-45 mm
-#   lens peripheral-illumination gain is visible in the JPEG (0.1-0.7 EV at the corners) and was removed in the fit
+#   lens peripheral-illumination correction ON (makernote 0x4015 byte 4 = 1); its 0.1-0.7 EV corner gain was removed in the fit
 # source pairs: IMG_0206..IMG_0239 (34 x CR2+JPG L, 2024-03-06, owner folder 5D2_FilmRoll_A14/Day09, shot on EOS M)
 # linear: scene-linear Rec.709 on the neutral axis; 18% grey = 0.18 ASSUMING metered grey = ISO-100 raw clip - 3.3 EV
 #   (no grey card yet: a single exposure scale, maybe +-0.3 EV; one grey-card RAW+JPEG pins it). code for 0.18 = 139.4

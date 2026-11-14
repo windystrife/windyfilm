@@ -39,8 +39,9 @@ enum { WF_OUT_FILM = 0, WF_OUT_LOG, WF_OUT_LLUT, WF_OUT_OFF, WF_NOUT };
 #define WF_NCURVE 5                               /* log curves 1..5 (wf_loglut.h WF_LL_SLOG3 .. WF_LL_CLOG3) */
 #define WF_CURVE_VLOG 2                           /* a Film LUT can's Load sets V-Log + LUT */
 enum { WF_LIGHT_AUTO = 0, WF_LIGHT_DAY, WF_LIGHT_CLOUDY, WF_LIGHT_TUNGSTEN, WF_NLIGHT };
-/* Log + LUT input curve (DESIGN 3.2 A1): the JPEG as sRGB, or through the measured Canon Picture Style "Film 1" curve */
-enum { WF_INC_SRGB = 0, WF_INC_FILM1, WF_INC_N };
+/* Log + LUT input curve (DESIGN 3.2 A1): the JPEG as sRGB, or through a measured Canon Picture Style curve ("Film 1"
+   in User Def. 1, "Neutral"). The values are the wf_loglut.h input curve slots (wf_ll_incurve, WF_LL_NINC). */
+enum { WF_INC_SRGB = 0, WF_INC_FILM1, WF_INC_NEUTRAL, WF_INC_N };
 #define WF_NSTRENGTH 3                            /* Strength 30 / 100 / 125 % (level 0..2) */
 
 /* effect post codes (wf_fx.c): which effect sets a shot uses. WF_POST_FILM + catalogue index for a film (its grain /
@@ -145,9 +146,14 @@ void wf_menu_deinit(void);                        /* unload: WB back, menu remov
 void wf_menu_poll(void);                          /* wf_task: config save, EXIF writer, Light */
 void wf_cfg_load(void);
 int  wf_lut_ei_t(void);                           /* LUT EI in 1/3 EV */
-int  wf_incurve_t(void);                          /* WF_INC_* in use: FILM1 only with the Canon curve table built in
-                                                     and the camera on Picture Style User Def. 1 (or not known yet) */
-int  wf_style_ok(void);                           /* Picture Style is User Def. 1, or not reported yet */
+int  wf_incurve_t(void);                          /* WF_INC_* in use: a Canon curve only when its table is built in
+                                                     and the camera is on its Picture Style (or not known yet) */
+int  wf_style_ok(int inc);                        /* Picture Style fits input curve `inc` (sRGB: any), or unknown */
+enum { WF_PSW_OK = 0, WF_PSW_STYLE, WF_PSW_BASE, WF_PSW_CONTRAST };
+int  wf_style_why(int inc);                       /* WF_PSW_*: what of the Picture Style differs from the measurement */
+int  wf_style_base(void);                         /* User Def. 1 base (PROP_PICSTYLE_OF_USERDEF1), -1 = not known */
+int  wf_style_con(void);                          /* the active style's Contrast, -10 = not known */
+int  wf_style_con_of(int inc);                    /* the Contrast input curve `inc` was measured at */
 int  wf_style_raw(void);                          /* PROP_PICTURE_STYLE value, 0 = not reported yet */
 int  wf_strength_pct(int level);
 void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev);   /* a shot of ours: its text (ring) */

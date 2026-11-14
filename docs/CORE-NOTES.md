@@ -131,22 +131,34 @@ Deny input: the old module's binary (path assembled inside the script, read only
 Nothing RAW is implemented yet. The owner chose **Hybrid + Canon curve inversion** (2026-11-14); DESIGN 3.2 has the
 plan, the numbers and the traps. Exact touch points per step:
 
-- **A1** (done for Log + LUT and the cans; curve `luts/canon_curve/EOSM_Film1.csv`, Picture Style Film 1):
-  - `tools/mk_loglut_tab.py <out> [csv]`: `read_curve()` checks codes 0..255, strictly increasing, 0 <= v <= 4.0;
-    `wf_ll_dec_c[1022]` interpolates per quarter code. `build.sh` passes the CSV when it exists;
+- **A1** (done for Log + LUT and the cans; curve `luts/canon_curve/EOSM_Film1.csv`, Picture Style Film 1; slot 2
+  Canon Neutral is wired and waits for `EOSM_Neutral.csv`):
+  - `tools/mk_loglut_tab.py <out> [film1.csv|-] [neutral.csv|-]`: `read_curve()` checks codes 0..255, strictly
+    increasing, 0 <= v <= 4.0; `wf_ll_dec_c<k>[1022]` interpolates per quarter code, with `WF_LL_HAVE_C<k>` and
+    `WF_LL_C<k>_SRC`. `build.sh` passes each slot's CSV when it exists (env `CURVE_FILM1` / `CURVE_NEUTRAL` override);
+  - slots (`WF_LL_NINC` = 3 = `WF_INC_N`): 0 sRGB, 1 Film 1 (Picture Style 0x21), 2 Neutral (0x84, CSV pending).
+    `wf_ll_curve_have(k)` / `wf_ll_curve_src(k)`; a slot without a CSV decodes as sRGB (`wf_ll_inc()` = 0);
   - `wf_loglut.c`:
     - `struct wf_ll_b.dec` picks the table;
     - in `wf_ll_coords` the gain multiply (`eik`) and the log-segment up-shift (`eib && x > 1.0`) are separate steps.
       `wf_ll_build` sets `eib` / `eid` for the curve even at gain 1;
     - `wf_ll_lin8` follows the table, and the auto grey reference is `WF_LL_GREY18` (0.18 Q24);
-    - the cache key gets `| incurve << 17`;
+    - the cache key gets `| slot << 17` (bits 17-18; Film 1 keeps bit 17);
   - state: `wf_incurve` / `wf_incurve_t()` (wf_menu.c, cfg `incurve`), `wf_look.incurve`. `wf_ll_poll` reloads on a
     change (`wf_ll_tried_inc`), and `wf_dispatch` stamps the tables' value on the look;
-  - host tests (SHOT): at Film 1, code 139 comes out within 2 codes of sRGB code 118, and code 250 comes out at least
-    8 codes above sRGB white; going back to sRGB gives the same tables; plus a CFG round trip;
-  - Picture Style: `wf_incurve_t()` also needs `wf_style_ok()`, i.e. `lens_info.raw_picstyle` is 0x21 (User Def. 1)
-    or 0 (not reported yet). This needs no new import. The host test sets it through `h_li_set("picstyle", ..)`:
-    Standard reloads the sRGB tables, and User Def. 1 brings the Film 1 tables back;
+  - host tests (SHOT), per slot built in: the curve's first code at 0.18 comes out within 2 codes of sRGB code 118;
+    if code 250 is above 1.25 it comes out at least 8 codes above sRGB white; the slots' tables differ from sRGB and
+    from each other; going back to sRGB gives the same tables; a slot without a CSV reads sRGB; CFG round trip plus
+    `incurve=Neutral`. `wf_test.c` includes the generated `wf_loglut_tab.h` for the decode tables (`t_dec`);
+  - Picture Style: `wf_incurve_t()` also needs `wf_style_ok(k)` = `wf_style_why(k) == WF_PSW_OK`:
+    `lens_info.raw_picstyle` is the slot's style (`wf_inc_ps[]` in wf_menu.c), for Film 1 the User Def. 1 base
+    (`wf_ps_base`, own `prop_add_handler(PROP_PICSTYLE_OF_USERDEF1)` in `wf_menu_init`) is below 0x80 (a style file),
+    and `picstyle_get_current_contrast()` equals `wf_inc_con[]` (Film 1 -2, Neutral 0). Unknown values pass. New
+    imports: `picstyle_get_current_contrast` (both), `prop_add_handler` (5D2; EOS M had it). The host test uses
+    `h_li_set("picstyle", ..)`, `h_ps_contrast` and `h_prop_send(0x0206000a, ..)`: the other curve's style, another
+    Contrast and base Auto (0x87) each reload the sRGB tables; the right values bring the curve's tables back;
+  - a synthetic slot-2 CSV (scratch, never committed) checks the Neutral path before the measured curve exists:
+    `CURVE_NEUTRAL=<csv> OUT=<scratch dir>` for both build.sh and test.sh;
   - still open: flat Log (`wf_dec`, K fold).
 - **P0** (EOS M only; done in a675c8a, 33 host checks in mode `PROBE`). `wf_cam_eosm.c` takes the snapshot in the NN
   hook (r2 == 0 calls), before the gate:

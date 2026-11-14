@@ -295,6 +295,8 @@ void *get_shooting_card(void) { return h_card; }
 void h_set_file_number(int n) { memcpy(h_card + wf_t_card_fn, &n, 4); }
 const char *get_dcim_dir(void) { return "B:/DCIM/100CANON"; }
 const char *picstyle_get_current_name(void) { return "(host style)"; }
+int h_ps_contrast = -10;                                     /* -10 = not known, as ML without the style's settings */
+int picstyle_get_current_contrast(void) { return h_ps_contrast; }
 char *get_file_prefix(void) { return "IMG_"; }
 
 /* ------------------------------------------------------------------ lens_info, properties, white balance */

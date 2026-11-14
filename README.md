@@ -11,7 +11,7 @@ WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Bản c�
 > **Trạng thái 14/11/2026: đã có thẻ thử `F:\MagicLatern\EOSM_WindyFilm` và `F:\MagicLatern\5D2_WindyFilm`, nhưng
 > module chưa chạy trên máy thật.**
 >
-> - Test host: EOS M 432 phép kiểm tra (có probe RAW P0 và đường cong Film 1), 5D2 386 phép, đều 0 lỗi.
+> - Test host: EOS M 449 phép kiểm tra (có probe RAW P0 và hai đường cong Film 1, Neutral), 5D2 403 phép, đều 0 lỗi.
 > - Cổng kiểm tra nguồn gốc: PASS.
 >
 > Tình trạng mới nhất ở `docs/HANDOFF-QWEN.md`.
@@ -36,11 +36,12 @@ WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Bản c�
   - Mist (chỉ EOS M);
   - Strength 30 / 100 / 125 %.
 - **Đầu ra log:** S-Log3, V-Log, LogC3, Canon Log 2, Canon Log 3, dạng phẳng hoặc **+ LUT** (cube trên thẻ). Có LUT EI.
-- **Input curve** (cho Log + LUT và các lon Film LUT): sRGB (mặc định) hoặc **Canon Film 1**.
-  - Canon Film 1 đảo đúng đường cong Picture Style "Film 1" (User Def. 1) đo trên EOS M từ các cặp RAW+L của chủ dự
-    án, thay cho sRGB. Xám 18 % ra đúng chỗ, và phần sáng trên trắng (tới 2,07) đi vào đoạn log của đường cong.
-  - Chỉ đúng khi máy để Picture Style Film 1 (User Def. 1). Ở style khác, module tự đọc sRGB và menu báo. Log phẳng
-    và phim trong danh mục vẫn đọc sRGB.
+- **Input curve** (cho Log + LUT và các lon Film LUT): sRGB (mặc định), **Canon Film 1** hoặc **Canon Neutral**.
+  - Mỗi lựa chọn Canon đảo đúng đường cong Picture Style đo trên EOS M từ các cặp RAW+L của chủ dự án, thay cho sRGB.
+    Xám 18 % ra đúng chỗ, và phần sáng trên trắng (Film 1 tới 2,07, Neutral tới 1,70) đi vào đoạn log của đường cong.
+  - Canon Film 1 cần file style Film 1 nạp trong User Def. 1, Contrast −2. Canon Neutral cần style Neutral có sẵn,
+    Contrast 0. Sai style, User Def. 1 dựa trên style có sẵn, hay Contrast khác: module tự đọc sRGB và menu báo lý
+    do. Log phẳng và phim trong danh mục vẫn đọc sRGB.
 - **Film LUT can:** chọn một lon là đặt luôn V-Log + LUT với cube của lon đó.
 - **Xem trước trên LiveView** bằng cùng nhân màu, kèm xem trước độ phơi sáng.
 - **EXIF:** UserComment ghi phim, kiểu in, Light, hiệu ứng và EV của từng ảnh.

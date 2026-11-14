@@ -37,6 +37,18 @@
 #include "wf_fx.h"
 #include "wf_expsim.h"
 #include "host_ml.h"
+/* this build's input curve decode tables (generated header, static copies for the checks) */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-const-variable"
+#include "wf_loglut_tab.h"
+#pragma GCC diagnostic pop
+#if !WF_LL_HAVE_C1
+#define wf_ll_dec_c1 wf_ll_dec
+#endif
+#if !WF_LL_HAVE_C2
+#define wf_ll_dec_c2 wf_ll_dec
+#endif
+static const uint32_t *const t_dec[WF_LL_NINC] = { wf_ll_dec, wf_ll_dec_c1, wf_ll_dec_c2 };
 
 #ifndef MAP_FIXED_NOREPLACE
 #define MAP_FIXED_NOREPLACE 0x100000
@@ -77,6 +89,7 @@
 #define FRAME_B 0x4C000000u
 #define SENT 0xD15EA5EDu
 #define PROP_ASPECT 0x80040059u
+#define PROP_PSU1 0x0206000au                        /* PROP_PICSTYLE_OF_USERDEF1 (DIGIC 4 / 5) */
 #define NW (FW * FH / 2)
 
 struct t_modinfo { uint8_t magic, major, minor, patch; const char *name, *long_name; unsigned (*init)(void); unsigned (*deinit)(void); };
@@ -706,51 +719,102 @@ static void t_shot(const char *cs)
         enum { GN = 64 };
         static const uint8_t gy[4] = { 118, 255, 139, 250 };
         uint32_t gs[GN], gc[GN];
-        for (int i = 0; i < GN; i++) gs[i] = gc[i] = word(0, gy[i & 3], 0, gy[i & 3]);
+        for (int i = 0; i < GN; i++) gs[i] = word(0, gy[i & 3], 0, gy[i & 3]);
         wf_ll_words_c(gs, GN, (int)(uintptr_t)&ll);
-        if (wf_ll_canon_have()) {
-            static struct wf_lltabs lc;
+        int y18s = WY0(gs[0]), yws = WY0(gs[1]);
+        /* every curve slot of this build (1 Film 1 in User Def. 1, 2 Neutral): the same checks; a slot without a CSV
+         * reads as sRGB. The cross style (Film 1 under Neutral, Neutral under User Def. 1) must read sRGB. */
+        static const char *const inkey[WF_INC_N] = { "srgb", "film1", "neutral" };
+        static const int inps[WF_INC_N] = { 0, 0x21, 0x84 };   /* each curve's Picture Style (wf_menu.c wf_inc_ps) */
+        static struct wf_lltabs lc[WF_INC_N];
+        int ncurve = 0;
+        for (int k = 1; k < WF_INC_N; k++) {
+            if (!wf_ll_curve_have(k)) {
+                wf_incurve = k;
+                chk(wf_incurve_t() == WF_INC_SRGB, "no %s curve in this build: it reads as sRGB", inkey[k]);
+                wf_incurve = WF_INC_SRGB;
+                continue;
+            }
+            ncurve++;
+            char inl[16], sl[24];
+            snprintf(inl, sizeof inl, " in-%s", inkey[k]);
             log_mark();
-            wf_incurve = WF_INC_FILM1;
-            chk(LOGW(" in-film1", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000),
-                "Input curve Film 1 loaded: %s", log_line("lut "));
-            wf_ll_incurve = 1;
-            rc = wf_loglut_load("ML/DATA/VLOG.CUB", WF_CURVE_VLOG, &lc, &inf);
-            chk(rc == WF_LL_OK && ll_same(&lc, wf_ll_tables()) && !ll_same(&ll, &lc),
-                "Film 1 tables = wf_loglut_load with the curve, not the sRGB ones (rc %d)", rc);
+            wf_incurve = k;
+            chk(LOGW(inl, 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000),
+                "Input curve %s loaded: %s", inkey[k], log_line("lut "));
+            wf_ll_incurve = k;
+            rc = wf_loglut_load("ML/DATA/VLOG.CUB", WF_CURVE_VLOG, &lc[k], &inf);
+            chk(rc == WF_LL_OK && ll_same(&lc[k], wf_ll_tables()) && !ll_same(&ll, &lc[k]),
+                "%s tables = wf_loglut_load with the curve, not the sRGB ones (rc %d)", inkey[k], rc);
+            for (int j = 1; j < k; j++)
+                if (wf_ll_curve_have(j))
+                    chk(!ll_same(&lc[j], &lc[k]), "%s tables differ from the %s ones (own .FRT key)", inkey[k], inkey[j]);
             sb = shot(in, out, FW, FH);
             memcpy(ref, in, NW * 4);
-            ref_fn(ref, NW, wf_ll_words, (int)(uintptr_t)&lc);
-            chk(ndiff(out, ref, NW) == 0 && sb == 0, "Film 1 shot: bit-exact vs wf_ll_words on its tables");
-            wf_ll_words_c(gc, GN, (int)(uintptr_t)&lc);
-            int y18s = WY0(gs[0]), yws = WY0(gs[1]), y18c = WY0(gc[2]), ywc = WY0(gc[3]);
-            chk(abs(y18c - y18s) <= 2 && WY1(gc[2]) == y18c, "18 %% grey: Film 1 code 139 -> %d, sRGB code 118 -> %d", y18c,
-                y18s);
-            chk(ywc >= yws + 8, "headroom: Film 1 code 250 -> %d, sRGB white -> %d", ywc, yws);
+            ref_fn(ref, NW, wf_ll_words, (int)(uintptr_t)&lc[k]);
+            chk(ndiff(out, ref, NW) == 0 && sb == 0, "%s shot: bit-exact vs wf_ll_words on its tables", inkey[k]);
+            /* the curve's 18 % grey (its first code at 0.18) comes out where sRGB's (118) does; light above 1.0 at code
+             * 250 comes out above sRGB white through the log segment */
+            const uint32_t *dk = t_dec[k];
+            int g = 0;
+            while (g < 255 && dk[4 * g] < 3019899) g++;
+            for (int i = 0; i < GN; i++) gc[i] = i & 1 ? word(0, 250, 0, 250) : word(0, g, 0, g);
+            wf_ll_words_c(gc, GN, (int)(uintptr_t)&lc[k]);
+            int y18c = WY0(gc[0]), ywc = WY0(gc[1]);
+            chk(abs(y18c - y18s) <= 2 && WY1(gc[0]) == y18c, "18 %% grey: %s code %d -> %d, sRGB code 118 -> %d", inkey[k], g,
+                y18c, y18s);
+            if (dk[1000] > 20971520)
+                chk(ywc >= yws + 8, "headroom: %s code 250 (%.2f) -> %d, sRGB white -> %d", inkey[k], dk[1000] / 16777216.0, ywc,
+                    yws);
             struct wf_look lk;
             wf_look_now(&lk);
-            chk(lk.output == WF_OUT_LLUT && lk.incurve == WF_INC_FILM1, "the look carries the input curve");
-            /* the curve is for Picture Style User Def. 1: another style reads sRGB (tables reloaded), back on UD1 */
+            chk(lk.output == WF_OUT_LLUT && lk.incurve == k, "the look carries the input curve %s", inkey[k]);
+            int bad = k == WF_INC_FILM1 ? 0x84 : 0x21;
+            snprintf(sl, sizeof sl, "srgb(style %02x)", bad);
             log_mark();
-            h_li_set("picstyle", 0x81);
-            chk(LOGW("srgb(style 81)", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
-                && ll_same(&ll, wf_ll_tables()) && wf_incurve == WF_INC_FILM1 && wf_incurve_t() == WF_INC_SRGB,
-                "Picture Style Standard: Film 1 chosen, sRGB tables: %s", log_line("lut "));
+            h_li_set("picstyle", bad);
+            chk(LOGW(sl, 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+                && ll_same(&ll, wf_ll_tables()) && wf_incurve == k && wf_incurve_t() == WF_INC_SRGB,
+                "Picture Style %02x: %s chosen, sRGB tables: %s", bad, inkey[k], log_line("lut "));
             wf_look_now(&lk);
-            chk(lk.incurve == WF_INC_SRGB, "the look says sRGB under Standard");
+            chk(lk.incurve == WF_INC_SRGB, "the look says sRGB under style %02x", bad);
             log_mark();
-            h_li_set("picstyle", 0x21);
-            chk(LOGW(" in-film1", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&lc, wf_ll_tables()),
-                "Picture Style User Def. 1 again: Film 1 tables: %s", log_line("lut "));
+            h_li_set("picstyle", inps[k]);
+            chk(LOGW(inl, 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&lc[k], wf_ll_tables()),
+                "Picture Style %02x again: %s tables (.FRT): %s", inps[k], inkey[k], log_line("lut "));
+            /* the Contrast of the measurement (Film 1 -2, Neutral 0): another one reads sRGB; back, and the log says it */
+            int con = k == WF_INC_FILM1 ? -2 : 0;
+            log_mark();
+            h_ps_contrast = con + 1;
+            snprintf(sl, sizeof sl, "srgb(contrast %d)", con + 1);
+            chk(LOGW(sl, 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&ll, wf_ll_tables())
+                && wf_style_why(k) == WF_PSW_CONTRAST && wf_incurve_t() == WF_INC_SRGB,
+                "Contrast %d: %s chosen, sRGB tables: %s", con + 1, inkey[k], log_line("lut "));
+            log_mark();
+            h_ps_contrast = con;
+            snprintf(sl, sizeof sl, "%s b%02x c%d", inl, wf_style_base() & 0xff, con);
+            chk(LOGW(sl, 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&lc[k], wf_ll_tables()),
+                "Contrast %d again: %s tables, log '%s': %s", con, inkey[k], sl, log_line("lut "));
+            if (k == WF_INC_FILM1) {             /* User Def. 1 based on a built-in style (Auto) is not the Film 1 file */
+                log_mark();
+                h_prop_send(PROP_PSU1, 0x87);
+                chk(LOGW("srgb(base 87)", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+                    && ll_same(&ll, wf_ll_tables()) && wf_style_why(k) == WF_PSW_BASE,
+                    "User Def. 1 base Auto: sRGB tables: %s", log_line("lut "));
+                log_mark();
+                h_prop_send(PROP_PSU1, 0x41);
+                chk(LOGW(" in-film1 b41 c-2", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+                    && ll_same(&lc[k], wf_ll_tables()), "User Def. 1 base PC 1 (a style file): Film 1 tables: %s",
+                    log_line("lut "));
+            }
+            h_ps_contrast = -10;
             h_li_set("picstyle", 0);
+        }
+        if (ncurve) {
             log_mark();
             wf_incurve = WF_INC_SRGB;
             chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&ll, wf_ll_tables())
-                && !strstr(log_line("lut "), "in-film1"), "back to sRGB: the same tables as before: %s", log_line("lut "));
-        } else {
-            wf_incurve = WF_INC_FILM1;
-            chk(wf_incurve_t() == WF_INC_SRGB, "no Canon curve table in this build: Film 1 reads as sRGB");
-            wf_incurve = WF_INC_SRGB;
+                && !strstr(log_line("lut "), " in-"), "back to sRGB: the same tables as before: %s", log_line("lut "));
         }
     }
 
@@ -1155,7 +1219,7 @@ static void t_cfg(void)
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
-    chk(wf_incurve == WF_INC_FILM1 && wf_incurve_t() == (wf_ll_canon_have() ? WF_INC_FILM1 : WF_INC_SRGB),
+    chk(wf_incurve == WF_INC_FILM1 && wf_incurve_t() == (wf_ll_curve_have(WF_INC_FILM1) ? WF_INC_FILM1 : WF_INC_SRGB),
         "incurve %d (in use %d)", wf_incurve, wf_incurve_t());
     chk(wf_print == 1 && wf_light == 3 && wf_strength == 2 && wf_grain == 1 && wf_halo == 4 && wf_mist == 7 && wf_pv_mode == 2,
         "print %d light %d strength %d grain %d halation %d mist %d preview %d", wf_print, wf_light, wf_strength, wf_grain, wf_halo,
@@ -1178,6 +1242,12 @@ static void t_cfg(void)
     wf_cfg_load();
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_lut_ei == -2 && wf_exp_trim == -5 && wf_curve == 4,
         "garbage values ignored");
+    int inc0 = wf_incurve;
+    put_cfg("incurve=Neutral\n");
+    wf_cfg_load();
+    chk(wf_incurve == WF_INC_NEUTRAL && wf_incurve_t() == (wf_ll_curve_have(WF_INC_NEUTRAL) ? WF_INC_NEUTRAL : WF_INC_SRGB),
+        "incurve=Neutral read: %d (in use %d)", wf_incurve, wf_incurve_t());
+    wf_incurve = inc0;
     char big[700];
     memset(big, '#', sizeof big);
     memcpy(big, "film=0\n", 7);

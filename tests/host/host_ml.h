@@ -23,6 +23,7 @@ h_hook_fn *h_hook_at(uint32_t addr);
 /* property handlers / changes */
 typedef void h_prop_fn(unsigned property, void *priv, uint32_t *buf, unsigned len);
 void h_prop_send(uint32_t property, uint32_t value);     /* call the module's handler of `property` */
+extern int h_ps_contrast;                                /* picstyle_get_current_contrast(), -10 = not known */
 extern volatile int h_nchanges;                  /* prop_request_change calls */
 extern uint32_t h_change_prop[256];
 extern int h_change_val[256];
