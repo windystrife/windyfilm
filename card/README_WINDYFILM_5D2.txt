@@ -36,12 +36,20 @@ Grain và Halation mặc định tắt trên 5D2 (mỗi nửa ảnh tốn vài g
 - Trong trình chọn phim:
     Đổi phim ............. joystick trái / phải
     Chọn hàng ............ joystick lên / xuống
-    Đổi giá trị hàng ..... bánh xe trên hoặc bánh xe sau
-    Nạp phim ............. SET hoặc nhấn joystick
+    Đổi giá trị hàng ..... bánh xe trên hoặc bánh xe sau (cả khi có LiveView)
+    Sửa hàng bằng joystick nhấn joystick, rồi trái / phải đổi giá trị;
+                           nhấn joystick lần nữa để thôi (thanh phím dưới
+                           cùng ghi "JOY Edit" / "JOY Done")
+    Nạp phim ............. SET
     Nhóm kế tiếp ......... Picture Style
     Trang chi tiết ....... INFO
     Đóng ................. MENU hoặc TRASH
   Bấm nửa nút chụp: giao diện đóng, chụp như thường.
+- SET nạp phim: hiện hoạt cảnh nạp phim khoảng 1 giây, rồi giao diện tự đóng
+  và về LiveView. Mở từ kính ngắm (không LiveView) thì máy tự bật LiveView sau
+  khi nạp. Bấm phím bất kỳ trong lúc hoạt cảnh để đóng ngay; bấm nửa nút chụp
+  thì đóng và không bật LiveView. Phim đã nạp rồi hoặc lỗi thì giao diện vẫn
+  mở như cũ, kèm dòng báo.
 - Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
   WB của bạn được trả lại khi về Auto hoặc khi tắt module.
 - Hàng Print: Scan / Cine print / Paper (chỉ với phim có mô hình in).

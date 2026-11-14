@@ -94,5 +94,6 @@ void wfui_task_begin(void);             /* the UI task's set-up: resources, scre
 int  wfui_task_tick(void);              /* one loop pass: keys, state, redraw; 0 = keep going */
 void wfui_task_end(void);               /* give the screen and palette back, free everything */
 void wfui_render(void);                 /* draw the whole browser into the idle buffer */
+void wfui_render_anim(int t, int first);/* the load animation at t ms over it (first: dim the browser once) */
 
 #endif

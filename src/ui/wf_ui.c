@@ -8,12 +8,22 @@
  *     full redraw every HEAL_MS (Canon / ML may scribble over the bitmap), palette keep-alive. On close: transparent
  *     front buffer, Canon's palette entries back, front buffer back to Canon, everything freed.
  * Memory: nothing is allocated before wf_ui_open (wf_ui_init only clears state); the film list, the font pack and the
- * can pack index / cache are malloc'ed by the UI task and freed when it ends. */
+ * can pack index / cache are malloc'ed by the UI task and freed when it ends.
+ *
+ * Never a dead camera (owner 11-14, EOS M: "sometimes neither the film menu nor the ML menu opens"). While the browser is
+ * up it takes every key, so a UI task that does not run would leave both menus dead: the film worker (film_yuv, prio
+ * 0x1C) develops a shot for seconds (RAW develop 35-45 s) and starved the old prio-0x1E UI task, which a TRASH had just
+ * started. Now the UI task runs above the worker, and it beats (hb, phase) at every step; a key that finds no beat for
+ * STALE_MS goes to Canon / ML and asks the task to close when it runs again (the EOS M two-finger tap then opens the ML
+ * menu: no module took MENU). The task is never declared dead from outside: it may still run and give the screen back.
+ * Phases in the log: 1 created, 2 ML menu away, 3 film list, 4 fonts, 5 cans, 6 Canon dialog, 7 screen, 8 palette,
+ * 9 tick, 10 drawing, 11 copy, 12 palette check, 13 load animation, 14 closing, 15 starting LiveView. */
 #include "wf_ui_int.h"
 #include "wf_icons.h"
 
-#define UI_PRIO         0x1E
+#define UI_PRIO         0x1B            /* above the film worker (0x1C), below ML's menu_task (0x1A) and Canon's GUI */
 #define UI_STACK        0x2000
+#define STALE_MS        2000
 #define TICK_MS         20
 #define PAL_PROBE_MS    100
 #define PAL_FORCE_MS    2000
@@ -23,25 +33,49 @@
 #define STRIP_SLOTS     11
 #define STRIP_VIS       10              /* slots the scrollbar thumb stands for */
 
-enum { ST_CLOSED = 0, ST_OPENING, ST_OPEN };
+/* CLOSING: the screen is Canon's again (keys pass on), the task still starts LiveView after a load (5D2) */
+enum { ST_CLOSED = 0, ST_OPENING, ST_OPEN, ST_CLOSING };
+enum { PH_CREATED = 1, PH_MENU, PH_LIST, PH_FONTS, PH_CANS, PH_DIALOG, PH_SCREEN, PH_PAL, PH_TICK, PH_DRAW, PH_COPY,
+       PH_PALCHK, PH_ANIM, PH_END, PH_LV };
 
 static volatile int st;
 static volatile int close_req;
 static volatile uint8_t kq[KQ_N];
 static volatile int kq_w, kq_r;
 static int took;                        /* we hold the screen (front buffer disabled) and the palette */
+static volatile int hb, phase;          /* the UI task's last sign of life (ms clock) and where it was */
+static volatile int stale_said;
+static inline void beat(int p) { phase = p; hb = get_ms_clock(); }
 
-/* 5D2 without LiveView (the viewfinder; owner 11-14: the browser came up only with LV on). Canon then shows nothing of
- * its own on the LCD (often the display is off), so a bitmap drawn there is never seen. ML's own menu goes on screen
- * there by asking Canon for its MENU GUI mode (menu.c piggyback_canon_menu, GUIMODE_ML_MENU = lv ? 38 : 2 on the 5D2):
- * that turns the display on and keeps it on, and the disabled front buffer hides Canon's menu. The browser does the
- * same, in ML's order: mode, then the front buffer; on close mode 0 first (close_canon_menu), then the front buffer. */
-#define VF_GUIMODE      2
-static int vf_mode;                     /* we asked Canon for VF_GUIMODE */
-static int vf_seen;                     /* the screen came up: losing the mode or the display then closes us */
-static void vf_take(void);
-static int vf_lost(void);
-static void vf_give(void);
+/* 5D2: a Canon dialog under the browser, as ML's own menu does (menu.c piggyback_canon_menu, GUIMODE_ML_MENU =
+ * lv ? 38 : 2 on the 5D2; mode 0 while recording).
+ *  - Without LiveView (owner 11-14: the browser came up only with LV on) Canon shows nothing of its own on the LCD (often
+ *    the display is off); its MENU mode 2 turns the display on and keeps it on.
+ *  - In LiveView (owner 11-14: "the settings cannot be changed from the UI on the 5D2") Canon's plain LV (mode 0) turns
+ *    the dials into exposure changes itself and sends the module no WHEEL codes; ML's menu asks for mode 38 there,
+ *    "a gui mode which lets you use the wheel and all other keys" (consts.h), with the bitmap muted while Canon's dialog
+ *    comes up.
+ * The disabled front buffer hides Canon's dialog. ML's order: mode, then the front buffer; on close mode 0 first
+ * (close_canon_menu), then the front buffer. A joystick press (edit) also changes the rows, in case a dial still
+ * sends nothing. */
+#define DLG_NOLV        2
+#define DLG_LV          38
+static int dlg_want;                    /* the mode for this open (0 = none) */
+static int dlg_mode;                    /* we asked Canon for dlg_want */
+static int dlg_mask;                    /* bmp_off() is ours to undo */
+static int dlg_seen;                    /* the screen came up: losing the mode or the display then closes us */
+static void dlg_take(void);
+static int dlg_lost(void);
+static int dlg_give(void);
+
+/* SET loads a film: a short load animation of our own (the can's film leader winds out to a gate), then the browser
+ * closes and LiveView shows (owner 11-14: on the EOS M the browser is open only in LV; the 5D2 starts LV when the
+ * browser was opened without it). A key skips the rest of the animation. */
+#define ANIM_WIND_MS    800
+#define ANIM_MS         1150
+static int anim_on, anim_t0, anim_drawn;
+static int lv_after;                    /* a film was loaded: LiveView after the close */
+static int edit;                        /* 5D2: joystick press, LEFT / RIGHT change the focused row */
 
 static uint8_t *list;                   /* wf_films index of each ready film: by group, then order */
 static int nlist;
@@ -162,7 +196,17 @@ static void load_sel(void)
     if (!f) return;
     if (wf_loaded() == f->id) { say("Already loaded"); return; }
     int r = wf_load(f->id);
-    if (r == WF_LOAD_OK) { dirty = 1; return; }
+    if (r == WF_LOAD_OK)
+    {
+        anim_on = 1;                                        /* the animation, then close and LiveView */
+        anim_t0 = get_ms_clock();
+        anim_drawn = 0;
+        lv_after = 1;
+        edit = info = 0;
+        msg = 0;
+        dirty = 1;
+        return;
+    }
     say(r == WF_LOAD_NOTABLE ? "Film table not on the card" : r == WF_LOAD_NOCUBE ? "LUT cube not on the card"
         : r == WF_LOAD_BUSY ? "Busy, press SET again" : "Unknown film");
     wf_log("ui: load %d -> %d", f->id, r);
@@ -176,21 +220,29 @@ static void step_row(int d)
 
 static void act(int k)
 {
+    if (anim_on)
+    {
+        close_req = 1;                                      /* any key: skip the rest of the load animation */
+        return;
+    }
     switch (k)
     {
-    case MODULE_KEY_PRESS_LEFT:   select_film(sel - 1); break;
-    case MODULE_KEY_PRESS_RIGHT:  select_film(sel + 1); break;
+    case MODULE_KEY_PRESS_LEFT:   if (edit) step_row(-1); else select_film(sel - 1); break;
+    case MODULE_KEY_PRESS_RIGHT:  if (edit) step_row(1); else select_film(sel + 1); break;
     case MODULE_KEY_PRESS_UP:     focus_to(focus - 1); break;
     case MODULE_KEY_PRESS_DOWN:   focus_to(focus + 1); break;
     case MODULE_KEY_WHEEL_LEFT:
     case MODULE_KEY_WHEEL_UP:     step_row(-1); break;
     case MODULE_KEY_WHEEL_RIGHT:
     case MODULE_KEY_WHEEL_DOWN:   step_row(1); break;
-    case MODULE_KEY_PRESS_SET:
-    case MODULE_KEY_JOY_CENTER:   load_sel(); break;
+    case MODULE_KEY_JOY_CENTER:
+        if (is5d2()) { edit = !edit; dirty = 1; break; }   /* 5D2: the joystick press edits the focused row */
+        load_sel();
+        break;
+    case MODULE_KEY_PRESS_SET:    edit = 0; load_sel(); break;
     case MODULE_KEY_Q:
     case MODULE_KEY_PICSTYLE:
-    case MODULE_KEY_TOUCH_1_FINGER: next_group(); break;
+    case MODULE_KEY_TOUCH_1_FINGER: edit = 0; next_group(); break;
     case MODULE_KEY_INFO:         info = !info; dirty = 1; break;
     case MODULE_KEY_MENU:
     case MODULE_KEY_TRASH:
@@ -305,7 +357,7 @@ static void draw_info_column(const struct wf_film *f, int g)
         int foc = r == focus, av = wf_row_avail(r);
         if (foc)
         {
-            wfg_rrect(258, y - 1, 708, y + 18, 6, AD, -1, 0);
+            wfg_rrect(258, y - 1, 708, y + 18, 6, AD, edit ? A : -1, 1);  /* 5D2 edit: outlined, LEFT / RIGHT step */
             wfg_rrect(258, y - 1, 261, y + 18, 2, A, -1, 0);
         }
         wfg_bits16(wf_icons[r], 270, y + 1, !av ? (foc ? C_TXT3 : C_BAROFF) : foc ? A : C_TXT3);
@@ -417,9 +469,11 @@ static void draw_footer(void)
 {
     static const char *const k_eosm[] = { "SET", "Load", "L/R", "Film", "UP/DN", "Row", "RING", "Value",
                                           "TAP", "Group", "INFO", "Info", "MENU", "Exit", 0 };
-    static const char *const k_5d2[] = { "SET", "Load", "L/R", "Film", "UP/DN", "Row", "WHEEL", "Value",
-                                         "PICT", "Group", "INFO", "Info", "MENU", "Exit", 0 };
-    const char *const *k = is5d2() ? k_5d2 : k_eosm;
+    static const char *const k_5d2[] = { "SET", "Load", "L/R", "Film", "UP/DN", "Row", "DIAL", "Value",
+                                         "JOY", "Edit", "PICT", "Group", "INFO", "Info", "MENU", "Exit", 0 };
+    static const char *const k_5d2e[] = { "L/R", "Value", "DIAL", "Value", "UP/DN", "Row", "JOY", "Done",
+                                          "SET", "Load", "MENU", "Exit", 0 };
+    const char *const *k = !is5d2() ? k_eosm : edit ? k_5d2e : k_5d2;
     int x = 14;
     for (; *k; k += 2)
     {
@@ -438,8 +492,9 @@ static void draw_info(const struct wf_film *f, int g)
         "Rear ring", "change the row", "SET", "load the film", "1-finger tap", "next group",
         "INFO", "this page", "MENU, 2-finger tap", "close", "Half-shutter", "close, shoot", 0 };
     static const char *const h_5d2[] = { "Joystick left / right", "previous / next film", "Joystick up / down",
-        "choose a row", "Wheel or dial", "change the row", "SET, joystick press", "load the film",
-        "Pict.Style", "next group", "INFO", "this page", "MENU, TRASH", "close", "Half-shutter", "close, shoot", 0 };
+        "choose a row", "Main or rear dial", "change the row", "Joystick press", "edit row: L / R",
+        "SET", "load the film", "Pict.Style", "next group", "INFO", "this page", "MENU, TRASH", "close",
+        "Half-shutter", "close, shoot", 0 };
     int A = acc(g);
     int x0 = 104, y0 = 44, x1 = 616, y1 = 440;
     char b[48];
@@ -529,14 +584,76 @@ void wfui_render(void)
     if (info) draw_info(f, g);
 }
 
+/* the load animation at t ms (own design, own can art): a panel over the dimmed browser; the film's leader winds out of
+ * its can (WFCANS.DAT, CAN_SEL) to a gate on the right, sprocket holes riding with the film, then the gate lights and
+ * "Loaded" shows. first = the browser under it was just drawn: dim it once. Only the panel is drawn again per frame. */
+#define AX0 150
+#define AY0 112
+#define AX1 570
+#define AY1 368
+void wfui_render_anim(int t, int first)
+{
+    const struct wf_film *f = film_at(sel);
+    if (!f) return;
+    int g = group_of_sel(), A = acc(g), AD = accd(g);
+    if (first) wfg_scrim(AX0, AY0, AX1, AY1);
+    int done = t >= ANIM_WIND_MS;
+    int p = t >= ANIM_WIND_MS ? 1024 : t < 0 ? 0 : t * 1024 / ANIM_WIND_MS;
+    int e = 1024 - (1024 - p) * (1024 - p) / 1024;                  /* ease out: fast pull, slows into the gate */
+    char b[24];
+
+    wfg_rrect(AX0, AY0, AX1, AY1, 10, C_SEP, C_LINE, 1);
+    ui_text(F_15, AX0 + 20, AY0 + 12, done ? "Loaded" : "Loading", done ? C_GRN : C_TXT3);
+    ui_text_clip(F_ML23, AX0 + 20, AY0 + 30, f->name, C_TXT, AX1 - 20);
+    int cx = chip_s(AX0 + 22, AY0 + 62, f->kind, A, AX1 - 20);
+    snprintf(b, sizeof(b), "ISO %d", f->iso);
+    chip_s(cx, AY0 + 62, b, C_TXT2, AX1 - 20);
+
+    /* can, leader, gate */
+    int canx = AX0 + 24, cany = AY0 + 96;
+    int ys0 = cany + 23, ys1 = cany + 59;                           /* the film band across the can's middle */
+    int xs = canx + wfc_size[CAN_SEL][0] - 6;                       /* leaves the can's right side */
+    int gx0 = AX1 - 78, gx1 = AX1 - 24;                             /* the gate */
+    int lead = xs + (gx1 - 6 - xs) * e / 1024;
+    wfg_rrect(gx0, ys0 - 10, gx1, ys1 + 10, 6, done ? AD : -1, done ? A : C_LINE, done ? 2 : 1);
+    if (lead > xs)
+    {
+        wfg_rect(xs, ys0, lead, ys1, C_STRIP);
+        for (int hx = lead - 10; hx >= xs; hx -= 16)                /* holes ride with the film */
+        {
+            wfg_rrect(hx - 7, ys0 + 3, hx, ys0 + 7, 1, C_HOLE, -1, 0);
+            wfg_rrect(hx - 7, ys1 - 7, hx, ys1 - 3, 1, C_HOLE, -1, 0);
+        }
+        for (int fx = lead - 64; fx - 40 >= xs; fx -= 52)            /* frames behind the leader */
+            wfg_rect(fx - 40, ys0 + 11, fx, ys1 - 11, C_FRAME);
+        wfg_tri(lead - 13, ys0, lead + 1, ys0, lead + 1, ys0 + 14, C_SEP);   /* the leader's cut tip */
+    }
+    wfc_draw(f, CAN_SEL, canx, cany, C_SEP);
+    if (done)
+    {
+        snprintf(b, sizeof(b), "%d", 1);
+        text_c(F_15, (gx0 + gx1) / 2, ys0 + 9, b, A, gx1 - gx0 - 8);   /* frame 1 in the gate */
+    }
+
+    /* progress */
+    int bx0 = AX0 + 20, bx1 = AX1 - 20, by = AY1 - 34;
+    wfg_rrect(bx0, by, bx1, by + 4, 2, C_TRACK, -1, 0);
+    wfg_rrect(bx0, by - 1, bx0 + (bx1 - bx0) * e / 1024, by + 5, 3, done ? C_GRN : A, -1, 0);
+}
+
 /* ------------------------------------------------------------------ the UI task */
 void wfui_task_begin(void)
 {
+    beat(PH_MENU);
+    anim_on = lv_after = edit = 0;
+    if (close_req) return;                                  /* a key found no beat before this task first ran */
     for (int i = 0; i < 50 && gui_menu_shown(); i++)
     {
         if (!i) gui_stop_menu();
         msleep(20);
+        beat(PH_MENU);
     }
+    beat(PH_LIST);
     if (build_list()) { close_req = 1; return; }
     for (int g = 0; g < WF_NGROUPS; g++) { gsel[g] = gstart[g]; gfirst[g] = FIRST_UNSET; }
     int i = index_of_id(wf_loaded());
@@ -550,14 +667,24 @@ void wfui_task_begin(void)
     msg = 0;
     glow_id = -1;
 
+    beat(PH_FONTS);
     int fs = wff_open();
     wfp_init_fixed();
+    beat(PH_CANS);
     int cs = wfc_open();
     if (close_req) return;
-    vf_take();
+    beat(PH_DIALOG);
+    dlg_take();
     if (close_req) return;
+    beat(PH_SCREEN);
     canon_gui_disable_front_buffer();
     took = 1;
+    if (dlg_mask)                                           /* Canon's dialog is behind the disabled front buffer now */
+    {
+        bmp_on();
+        dlg_mask = 0;
+    }
+    beat(PH_PAL);
     wfp_take();
     char fw[96];                                /* wff_open / wfc_open return codes in words (0 = loaded) */
     snprintf(fw, sizeof fw, "%s%s%s", fs & 1 ? wff_why() : "ok", fs & 2 ? ", no argnor23" : "",
@@ -568,11 +695,36 @@ void wfui_task_begin(void)
     int now = get_ms_clock();
     t_probe = t_force = t_heal = now;
     dirty = 1;
+    beat(PH_TICK);
     st = ST_OPEN;
+}
+
+/* the load animation, one frame; 1 = it has run its time */
+static int anim_tick(int now)
+{
+    int t = now - anim_t0;
+    if (t >= ANIM_MS) return 1;
+    beat(PH_ANIM);
+    if (!wfg_begin())
+    {
+        if (!anim_drawn) wfui_render();                     /* the browser once, dimmed around the panel */
+        wfui_render_anim(t, !anim_drawn);
+        anim_drawn = 1;
+        beat(PH_COPY);
+        wfg_present();
+    }
+    if (now - t_probe >= PAL_PROBE_MS)
+    {
+        t_probe = now;
+        beat(PH_PALCHK);
+        wfp_keepalive(0);
+    }
+    return 0;
 }
 
 int wfui_task_tick(void)
 {
+    beat(PH_TICK);
     if (close_req) return 1;
     while (kq_r != kq_w)
     {
@@ -582,8 +734,9 @@ int wfui_task_tick(void)
         if (close_req) return 1;
     }
     if (gui_menu_shown()) return 1;                         /* the ML menu took the screen */
-    if (vf_lost()) return 1;
+    if (dlg_lost()) return 1;
     int now = get_ms_clock();
+    if (anim_on) return anim_tick(now);
     uint32_t gen = wf_gen();
     if (gen != drawn_gen) dirty = 1;
     if (msg && now - msg_until >= 0) { msg = 0; dirty = 1; }
@@ -593,7 +746,9 @@ int wfui_task_tick(void)
         drawn_gen = gen;
         if (!wfg_begin())
         {
+            beat(PH_DRAW);
             wfui_render();
+            beat(PH_COPY);
             wfg_present();
         }
         t_heal = t_probe = now;
@@ -603,6 +758,7 @@ int wfui_task_tick(void)
         int force = now - t_force >= PAL_FORCE_MS;
         if (force) t_force = now;
         t_probe = now;
+        beat(PH_PALCHK);
         wfp_keepalive(force);
     }
     return 0;
@@ -610,16 +766,18 @@ int wfui_task_tick(void)
 
 void wfui_task_end(void)
 {
+    beat(PH_END);
     if (took)
     {
         wfg_clear_front();
         wfp_restore();
-        vf_give();
+        int masked = dlg_give();                            /* mode 0 while the front buffer is still ours */
         canon_gui_enable_front_buffer(1);
+        if (masked) bmp_on();
         took = 0;
     }
-    else
-        vf_give();
+    else if (dlg_give())
+        bmp_on();
     const struct wf_film *f = film_at(sel);
     if (f) last_id = f->id;
     wfc_close();
@@ -627,7 +785,17 @@ void wfui_task_end(void)
     if (list) free(list);
     list = 0;
     nlist = 0;
+    anim_on = edit = 0;
+    st = ST_CLOSING;                                        /* the screen is Canon's: keys pass on */
     wf_log("ui: closed");
+    int go_lv = lv_after && is5d2() && !lv && !RECORDING;
+    lv_after = 0;
+    if (go_lv)                                              /* loaded from the viewfinder: show the film in LiveView */
+    {
+        beat(PH_LV);
+        force_liveview();
+        wf_log("ui: LiveView after the load: %s", lv ? "on" : "still off");
+    }
     st = ST_CLOSED;
 }
 
@@ -645,62 +813,84 @@ int wfui_host_group(void) { return group_of_sel(); }
 int wfui_host_focus(void) { return focus; }
 int wfui_host_rtop(void) { return rtop; }
 int wfui_host_info(void) { return info; }
+int wfui_host_anim(void) { return anim_on; }
+int wfui_host_edit(void) { return edit; }
+int wfui_host_phase(void) { return phase; }
 #endif
 
-/* ------------------------------------------------------------------ 5D2 without LiveView */
-static int vf_wait(int ms, int want_mode)
+/* ------------------------------------------------------------------ 5D2: Canon's dialog under the browser */
+static int dlg_wait(int ms, int want_mode)
 {
     for (int t = 0; t < ms; t += 20)
     {
         if (get_gui_mode() == want_mode && (!want_mode || display_is_on())) return 1;
         msleep(20);
+        beat(PH_DIALOG);
     }
     return get_gui_mode() == want_mode && (!want_mode || display_is_on());
 }
 
-static void vf_take(void)
+static void dlg_take(void)
 {
-    vf_mode = vf_seen = 0;
-    if (wf_cam() != WF_CAM_5D2 || lv) return;
+    dlg_mode = dlg_seen = dlg_mask = dlg_want = 0;
+    if (wf_cam() != WF_CAM_5D2 || RECORDING) return;
+    dlg_want = lv ? DLG_LV : DLG_NOLV;
     int t0 = get_ms_clock(), gm0 = get_gui_mode(), d0 = display_is_on();
-    vf_wait(1000, 0);                       /* opened from the ML menu: its own mode 0 comes first .. */
+    dlg_wait(1000, 0);                      /* opened from the ML menu: its own mode 0 comes first .. */
     msleep(150);                            /* .. then its front buffer and redraw (menu_close) */
+    beat(PH_DIALOG);
     if (close_req) return;
     if (get_gui_mode() == 0)
     {
-        SetGUIRequestMode(VF_GUIMODE);
-        vf_mode = 1;
+        if (lv)                             /* piggyback_canon_menu: Canon's dialog never shows over LiveView */
+        {
+            bmp_off();
+            dlg_mask = 1;
+        }
+        SetGUIRequestMode(dlg_want);
+        dlg_mode = 1;
         msleep(200);
-        vf_wait(800, VF_GUIMODE);
+        dlg_wait(800, dlg_want);
     }
     if (!display_is_on())
     {
         display_on();
-        for (int t = 0; t < 1000 && !display_is_on(); t += 20) msleep(20);
+        for (int t = 0; t < 1000 && !display_is_on(); t += 20)
+        {
+            msleep(20);
+            beat(PH_DIALOG);
+        }
     }
-    vf_seen = display_is_on() && (!vf_mode || get_gui_mode() == VF_GUIMODE);
-    wf_log("ui: 5D2 without LV: gui mode %d -> %d%s, display %d -> %d, %d ms", gm0, get_gui_mode(),
-           vf_mode ? " (asked 2)" : "", d0, display_is_on(), get_ms_clock() - t0);
+    dlg_seen = display_is_on() && (!dlg_mode || get_gui_mode() == dlg_want);
+    wf_log("ui: 5D2 %s: gui mode %d -> %d%s, display %d -> %d, %d ms", lv ? "LV" : "without LV", gm0, get_gui_mode(),
+           dlg_mode ? (dlg_want == DLG_LV ? " (asked 38)" : " (asked 2)") : "", d0, display_is_on(), get_ms_clock() - t0);
 }
 
 /* 1 = Canon left the mode we asked for, or the display went off: close (else the next TRASH would open nothing) */
-static int vf_lost(void)
+static int dlg_lost(void)
 {
-    if (!vf_seen) return 0;
-    if (display_is_on() && (!vf_mode || get_gui_mode() == VF_GUIMODE)) return 0;
-    wf_log("ui: 5D2 without LV: gui mode %d, display %d: closing", get_gui_mode(), display_is_on());
+    if (!dlg_seen) return 0;
+    if (display_is_on() && (!dlg_mode || get_gui_mode() == dlg_want)) return 0;
+    wf_log("ui: 5D2: gui mode %d, display %d: closing", get_gui_mode(), display_is_on());
     return 1;
 }
 
-static void vf_give(void)
+/* mode 0 again (close_canon_menu); 1 = the bitmap is muted, the caller unmutes it once the front buffer is Canon's */
+static int dlg_give(void)
 {
-    int gm = get_gui_mode();
-    if (vf_mode && (gm == VF_GUIMODE || gm == 0))  /* 0: our request may still be queued; 0 replaces it */
+    int gm = get_gui_mode(), masked = dlg_mask;
+    if (dlg_mode && (gm == dlg_want || gm == 0))    /* 0: our request may still be queued; 0 replaces it */
     {
+        if (lv && !masked)
+        {
+            bmp_off();
+            masked = 1;
+        }
         SetGUIRequestMode(0);
         msleep(100);
     }
-    vf_mode = vf_seen = 0;
+    dlg_mode = dlg_seen = dlg_mask = dlg_want = 0;
+    return masked;
 }
 
 /* ------------------------------------------------------------------ wf_api.h */
@@ -712,21 +902,33 @@ void wf_ui_init(void)
     list = 0;
     nlist = 0;
     took = 0;
+    anim_on = lv_after = edit = 0;
 }
 
 int wf_ui_open(void)
 {
-    if (st != ST_CLOSED) return close_req ? -1 : 0;
-    close_req = 0;
-    kq_r = kq_w = 0;
-    st = ST_OPENING;
-#ifdef WF_HOST
-    (void)ui_task;
-    return 0;                                               /* the harness runs begin / tick / end itself */
-#else
-    task_create("wf_ui", UI_PRIO, UI_STACK, (void *)ui_task, 0);
-    return 0;
-#endif
+    int now = get_ms_clock(), was;
+    uint32_t old = cli();                   /* TRASH (GUI task) and the ML menu entry (wf_task) may race here */
+    was = st;
+    if (was == ST_CLOSED)
+    {
+        hb = now;
+        phase = PH_CREATED;
+        close_req = 0;
+        kq_r = kq_w = 0;
+        st = ST_OPENING;
+    }
+    sei(old);
+    if (was != ST_CLOSED) return close_req || was == ST_CLOSING ? -1 : 0;
+    stale_said = 0;
+    uint32_t tid = task_create("wf_ui", UI_PRIO, UI_STACK, (void *)ui_task, 0);
+    if (tid & 1)                            /* DryOS: handles even, errors odd */
+    {
+        st = ST_CLOSED;
+        wf_log("ui: no UI task (%x)", (unsigned)tid);
+        return -1;
+    }
+    return 0;                               /* host: task_create runs nothing, the harness calls begin / tick / end */
 }
 
 /* from a task that may sleep (module deinit): waits until the UI task has given the screen back */
@@ -743,13 +945,25 @@ int wf_ui_is_open(void) { return st != ST_CLOSED; }
 
 unsigned int wf_ui_key(unsigned int key)
 {
-    if (st == ST_CLOSED) return 1;
+    if (st == ST_CLOSED || st == ST_CLOSING) return 1;
+    int idle = get_ms_clock() - hb;
+    if (idle > STALE_MS)                    /* the UI task has not run: Canon / ML get the keys, it closes later */
+    {
+        close_req = 1;
+        if (!stale_said)
+        {
+            stale_said = 1;
+            wf_log("ui: no beat for %d ms (state %d, phase %d): keys go to Canon / ML, closing", idle, st, phase);
+        }
+        return 1;
+    }
     switch (key)
     {
     case MODULE_KEY_PRESS_HALFSHUTTER:
     case MODULE_KEY_PRESS_FULLSHUTTER:
     case MODULE_KEY_REC:
         close_req = 1;                                      /* shooting wins: close, and Canon gets the key */
+        lv_after = 0;                                       /* (through the viewfinder, too: no LiveView then) */
         return 1;
     case MODULE_KEY_UNPRESS_HALFSHUTTER:
     case MODULE_KEY_UNPRESS_FULLSHUTTER:
