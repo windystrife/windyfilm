@@ -113,7 +113,7 @@ def stage(outdir):
         print("tab   %-8s %8d B  %s" % (STAGE[name], os.path.getsize(out), out))
 
 
-# the 46 negative stocks and 16 print stocks of the chain, in its own index order (genesis_re/stocks/manifest.txt)
+# the 46 negative stocks and 16 print stocks of the chain, in its own index order (the dumped stock manifest)
 NEG_N, PRINT_N = 46, 16
 PRINT_NAMES = ("2302", "2383", "2393", "2395", "5380", "5381_50", "5381_72", "5382", "5384_82", "5384_92",
                "5385_93", "5385_62", "5386", "5383", "3513D", "3523XD")

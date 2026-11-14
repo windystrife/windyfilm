@@ -22,7 +22,8 @@ import importlib.util, os, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GROUPS = ("colour", "cine", "bw", "lut")
-PRINTS = ("scan", "cine", "paper")
+PRINTS = ("scan", "cine", "paper") + tuple("p%02d" % i for i in range(16))
+# bits 3..18: the chain films' print stocks (src/wf_api.h WF_PRINT_STOCK0 / WF_NPRINTS 19)
 FLUT_N = 24                       # src/wf_loglut.h WF_FLUT_N (asserted against the catalogue's FLUT_N when it has one)
 MAXROWS = 128                     # src/wf_shot.c WF_WS_MAXROW
 LIM = {"name": 24, "short": 11, "line1": 44, "line2": 44, "kind": 15, "fmt": 8, "code": 8}

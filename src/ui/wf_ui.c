@@ -542,11 +542,13 @@ static void draw_info(const struct wf_film *f, int g)
     y += 8;
 
     int lut = f->flags & WF_F_LUTCAN, av = wf_avail(f->id);
-    static const char *const pn[WF_NPRINTS] = { "Scan", "Cine", "Paper" };
-    char pr[32];
+    static const char *const pn[WF_NPRINTS] = { "Scan", "Cine", "Paper",
+        "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72", "5382", "5384/82", "5384/92", "5385/93",
+        "5385/62", "5386", "5383", "3513D", "3523XD" };
+    char pr[96];
     pr[0] = 0;
     for (int v = 0; v < WF_NPRINTS; v++)
-        if (f->prints & (1 << v))
+        if (f->prints & (1u << v))
         {
             int n = strlen(pr);
             snprintf(pr + n, sizeof(pr) - n, "%s%s", n ? ", " : "", pn[v]);

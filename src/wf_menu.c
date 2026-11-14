@@ -160,8 +160,11 @@ const struct wf_film *wf_film_by_id(int id)
 static const char *const wf_out_key[WF_NOUT] = { "film", "log", "lut", "off" };
 static const char *const wf_curve_key[WF_NCURVE] = { "slog3", "vlog", "logc3", "clog2", "clog3" };
 static const char *wf_curve_name[WF_NCURVE] = { "S-Log3", "V-Log", "LogC3", "Canon Log 2", "Canon Log 3" };
-static const char *wf_print_name[WF_NPRINTS] = { "Scan", "Cine", "Paper" };
-static const char *const wf_print_key[WF_NPRINTS] = { "scan", "cine", "paper" };
+static const char *wf_print_name[WF_NPRINTS] = { "Scan", "Cine", "Paper",
+    "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72", "5382", "5384/82", "5384/92", "5385/93", "5385/62",
+    "5386", "5383", "3513D", "3523XD" };
+static const char *const wf_print_key[WF_NPRINTS] = { "scan", "cine", "paper",
+    "p00", "p01", "p02", "p03", "p04", "p05", "p06", "p07", "p08", "p09", "p10", "p11", "p12", "p13", "p14", "p15" };
 static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Tungsten" };
 static const char *const wf_light_key[WF_NLIGHT] = { "auto", "day", "cloudy", "tungsten" };
 static const char *wf_strength_name[WF_NSTRENGTH] = { "30%", "100%", "125%" };
@@ -322,14 +325,24 @@ static const char *const wf_rname[WF_NROWS] = { "Light", "Print", "Grain", "Hala
 
 const char *wf_row_name(int row) { return row >= 0 && row < WF_NROWS ? wf_rname[row] : ""; }
 
-/* the print a film shoots for wf_print (a missing variant: Scan) */
+/* the print a film shoots for wf_print: its own variant when it has it, else its FIRST available one (the chain films
+ * have no Scan/Cine/Paper at all: their variants start at WF_PRINT_STOCK0) */
+static int wf_print_first(int k)
+{
+    if (k < 0)
+        return WF_PRINT_SCAN;
+    for (int v = 0; v < WF_NPRINTS; v++)
+        if (wf_films[k].prints & (1u << v))
+            return v;
+    return WF_PRINT_SCAN;
+}
 static int wf_print_eff(int k)
 {
     int v = wf_print;
     if (k < 0 || v < 0 || v >= WF_NPRINTS || !(wf_films[k].prints & (1u << v)))
-        return WF_PRINT_SCAN;
-    if (v && wf_ws_state() == 1 && !wf_ws_has(k, v))
-        return WF_PRINT_SCAN;
+        return wf_print_first(k);
+    if (wf_ws_state() == 1 && !wf_ws_has(k, v))
+        return wf_print_first(k);
     return v;
 }
 static int wf_print_ok(int k, int v)

@@ -20,7 +20,11 @@ enum { WF_GRP_COLOUR = 0, WF_GRP_CINE, WF_GRP_BW, WF_GRP_LUT, WF_NGROUPS };
 #define WF_PRINT_SCAN   0                 /* print variants = table variants in WFFILMS.DAT */
 #define WF_PRINT_CINE   1
 #define WF_PRINT_PAPER  2
-#define WF_NPRINTS      3
+/* 3..18: the chain films' sixteen print stocks, in the order of the dumped stock manifest (the catalogue's
+ * "p00".."p15"). Kept AFTER the three catalogue variants so a shipped film keeps bits 0..2 and its pack entries do not
+ * change. A chain film sets 3..18 and wf_print_eff falls back to its first available variant. */
+#define WF_PRINT_STOCK0 3
+#define WF_NPRINTS      19
 
 struct wf_film {
     uint8_t  id;                          /* stable id (the old catalogue numbering 26..127 is kept; the config stores it) */
@@ -30,8 +34,7 @@ struct wf_film {
     uint16_t iso;                         /* box speed shown on the chip */
     uint16_t kelvin;                      /* Light "Day" white balance for this stock */
     uint16_t order;                       /* strip order inside its group, ascending */
-    uint8_t  prints;                      /* bit v set = print variant v exists (bit 0 for every ready film) */
-    uint8_t  pad;
+    uint32_t prints;                      /* bit v set = print variant v exists (see WF_NPRINTS, 19 variants) */
     const char *code;                     /* <= 8 chars: table code (films/tables/<code>.T17) */
     const char *name;                     /* <= 24 chars: full name (title line) */
     const char *shortname;                /* <= 11 chars: strip label */
