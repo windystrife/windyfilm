@@ -522,7 +522,7 @@ void NotifyBox(int timeout, const char *fmt, ...)
     h_notify_n++;
 }
 
-/* ------------------------------------------------------------------ Roll + Darkroom (src/wf_dark.c, DESIGN 3.5)
+/* ------------------------------------------------------------------ Roll + Darkroom (src/wf_dark.c, DESIGN 3.6)
  * Linked so the module links as on the camera; these modes never load a roll or start the darkroom (no SRM suite on the
  * host: srm_malloc_suite gives none). tools/dr_check.sh and tools/dr_dark_check.sh test the roll and the develop. */
 int image_review_time = 2, battery_level_bars = 3;

@@ -1,4 +1,4 @@
-/* wf_roll.c - WindyFilm roll state, roll file text and names (wf_roll.h, docs/DESIGN.md 3.5). WindyStrife's own code.
+/* wf_roll.c - WindyFilm roll state, roll file text and names (wf_roll.h, docs/DESIGN.md 3.6). WindyStrife's own code.
  * Pure: no ML call, no file, no allocation (the card glue is wf_dark.c). Module rules: formats only %d %x %X %s, no
  * 64-bit division. */
 #include <stdint.h>

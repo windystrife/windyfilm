@@ -1,4 +1,4 @@
-/* wf_dark_test.c - Roll + Darkroom, the per-frame chain on the host (docs/DESIGN.md 3.5), WindyStrife's own code: the
+/* wf_dark_test.c - Roll + Darkroom, the per-frame chain on the host (docs/DESIGN.md 3.6), WindyStrife's own code: the
  * module objects (wf_cr2.o, wf_dev.o, wf_jpe.o, wf_darkp.o, module flags) linked into a static ARM Linux program run by
  * qemu-arm-static, doing what the darkroom task does with one frame of a roll:
  *   CR2 head -> wf_cr2_parse / parse_ljpeg -> wf_cr2_dec_step in bands (rd() reads 256 KB) -> wf_dev_levels ->

@@ -29,7 +29,7 @@ struct wf_frame {
     uint8_t  part;                /* WF_PART_*: a whole frame, or the top / bottom half of a frame developed in two halves */
     int8_t   aspect;              /* JPEG aspect as the camera reported it (EOS M PROP_IMAGE_ASPECT_RATIO, -1 = unknown) */
     uint8_t  devd;                /* 1 = the Darkroom's frame (wf_dark.c): UYVY8 already developed from a CR2 by B; the
-                                     worker runs only the look's stage after B (docs/DESIGN.md 3.5) and keeps it out of
+                                     worker runs only the look's stage after B (docs/DESIGN.md 3.6) and keeps it out of
                                      the shot log's EXIF ring */
     int      w, h;                /* this request's pixels (a half: h = full height / 2) */
     int      fw, fh;              /* the whole frame (fh = 2 * h for a half) */

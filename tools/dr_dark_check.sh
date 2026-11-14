@@ -1,5 +1,5 @@
 #!/bin/bash
-# dr_dark_check.sh - Roll + Darkroom, the per-frame chain on real EOS M RAW+L pairs (docs/DESIGN.md 3.5), WindyStrife.
+# dr_dark_check.sh - Roll + Darkroom, the per-frame chain on real EOS M RAW+L pairs (docs/DESIGN.md 3.6), WindyStrife.
 # WSL. Module objects with build.sh's flags (wf_cr2.o, wf_dev.o, wf_jpe.o, wf_darkp.o + the Log + LUT objects wf_dev needs)
 # + their object checks, tests/host/wf_dark_test.c (qemu-arm-static): units, then per pair
 #   CR2 -> decode -> levels -> as-shot WB + scene scale + ISO trim -> sRGB base develop -> q95 print with Canon's APP1,

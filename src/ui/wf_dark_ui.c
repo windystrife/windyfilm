@@ -1,4 +1,4 @@
-/* wf_dark_ui.c - WindyFilm Roll + Darkroom screens (docs/DESIGN.md 3.5), WindyStrife's own code and art.
+/* wf_dark_ui.c - WindyFilm Roll + Darkroom screens (docs/DESIGN.md 3.6), WindyStrife's own code and art.
  *
  * Three pieces, all drawn with the browser's own toolkit (wf_gfx.c primitives, wf_font.c fonts, wf_cans.c can pack):
  *   Roll picker  shelf tabs Colour / Slide / B&W / Cine / LUT, a carousel of cans (the centre one big, the others

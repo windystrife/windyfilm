@@ -324,7 +324,7 @@ static unsigned int wf_keypress(unsigned int key)
         return 1;
     if (wf_ui_is_open())
         return wf_ui_key(key);
-    if (key == WF_KEY_PLAY && !gui_menu_shown() && wf_roll_blocks_play()) {   /* blind roll (docs/DESIGN.md 3.5) */
+    if (key == WF_KEY_PLAY && !gui_menu_shown() && wf_roll_blocks_play()) {   /* blind roll (docs/DESIGN.md 3.6) */
         NotifyBox(2000, "Roll in camera: develop it in the Darkroom");
         return 0;
     }

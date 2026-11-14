@@ -574,14 +574,17 @@ static void draw_info(const struct wf_film *f, int g)
             int n = strlen(pr);
             snprintf(pr + n, sizeof(pr) - n, "%s%s", n ? ", " : "", pn[v]);
         }
-    char kel[16];
+    char kel[16], outp[40];
     snprintf(kel, sizeof(kel), "%d K", f->kelvin);
+    /* a can's chip 3 names the curve its Load sets ("V-Log", "C-Log2" for the CinePrint looks), "Standard" a display look */
+    if (f->format && !strcmp(f->format, "Standard")) snprintf(outp, sizeof outp, "Look on the Standard picture");
+    else snprintf(outp, sizeof outp, "%s + the can's LUT",
+                  f->format && !strcmp(f->format, "C-Log2") ? "Canon Log 2" : "V-Log");
     const char *kv[] = {
         "Table", f->code ? f->code : "",
         "Daylight", kel,
         "Prints", lut ? "-" : pr,
-        "Output", lut ? (f->format && !strcmp(f->format, "Standard") ? "Look on the Standard picture" : "V-Log + the can's LUT")
-                      : "Film look",
+        "Output", lut ? outp : "Film look",
         "On the card", av ? (lut ? "LUT cube found" : "Film table found") : (lut ? "LUT cube missing" : "Film table missing"),
         "State", wf_loaded() == f->id ? "Loaded" : "Not loaded",
         0 };

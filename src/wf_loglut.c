@@ -1108,6 +1108,11 @@ const char *wf_flut_name[WF_FLUT_N] = { "Technical", "Vision3 250D", "Vision3 50
                                        "Windy EKTA P", "Windy 250D P", "Windy 250D M", "Windy 500T P", "Windy 500T M", "Windy EKTA M",
                                        "Windy EKTAa P", "Windy EKTAa M", "Windy EXR P", "Windy EXR M", "Windy EXRa P", "Windy EXRa M",
                                        "Leica Vivid" };
+const uint8_t wf_flut_curve[WF_FLUT_N] = { 0, WF_LL_VLOG, WF_LL_VLOG, WF_LL_VLOG, WF_LL_VLOG,
+                                          WF_LL_VLOG, WF_LL_VLOG, WF_LL_VLOG, WF_LL_VLOG, WF_LL_VLOG, WF_LL_VLOG,
+                                          WF_LL_CLOG2, WF_LL_CLOG2, WF_LL_CLOG2, WF_LL_CLOG2, WF_LL_CLOG2, WF_LL_CLOG2,
+                                          WF_LL_CLOG2, WF_LL_CLOG2, WF_LL_CLOG2, WF_LL_CLOG2, WF_LL_CLOG2, WF_LL_CLOG2,
+                                          WF_LL_VLOG };
 const char *const wf_flut_code[WF_FLUT_N] = { "", "V250D", "V500T", "PRT400", "FP400H",
                                              "FJ3513", "KD83V3", "KD83V5", "EKTAR5", "TUNGNT", "LBONO", "EKTAP",
                                              "T250DP", "T250DM", "T500TP", "T500TM", "TEKTAM", "TEKAAP", "TEKAAM", "TEXRP", "TEXRM",

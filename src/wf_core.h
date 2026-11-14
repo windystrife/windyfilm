@@ -94,7 +94,7 @@ void wf_status_set(const char *s);                /* wf_status() text ("" = fine
 void wf_gen_bump(void);                           /* wf_gen() + 1 (UI redraw) */
 void wf_log_flush(void);                          /* wf_task: append the log ring to ML/LOGS/WINDYFLM.LOG */
 int wf_job_state(void);
-/* Roll + Darkroom (wf_dark.c, docs/DESIGN.md 3.5; the UI's part is wf_dark.h) */
+/* Roll + Darkroom (wf_dark.c, docs/DESIGN.md 3.6; the UI's part is wf_dark.h) */
 void wf_dark_init(void);                          /* module init: the view, no allocation */
 void wf_roll_poll(void);                          /* wf_task: roll file, requests, frames, RAW+L / review, HUD */
 void wf_dark_end(void);                           /* wf_task at unload: stop a run, Canon's values back */

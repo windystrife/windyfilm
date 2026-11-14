@@ -1,4 +1,4 @@
-/* dr_ui_test.c - host harness for the Roll + Darkroom screens (src/ui/wf_dark_ui.c, docs/DESIGN.md 3.5): scripted
+/* dr_ui_test.c - host harness for the Roll + Darkroom screens (src/ui/wf_dark_ui.c, docs/DESIGN.md 3.6): scripted
  * keys against the fake core + fake roll / darkroom (fake_dark.c), checks of what the keys must reach, screenshots.
  *
  *   dr_ui_test OUTDIR CARD_DIR RBF_DIR THUMB_DIR

@@ -23,9 +23,9 @@ S=$R/src
 H=$R/tests/host
 case $CAM in
   EOSM) ML=/root/ml/expsim/mls; PLAT=EOSM.202; CAMDEF=; CAMSRC=wf_cam_eosm.c
-        ALL="SHOT SHOT:nocam SHOT:busy FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA PROBE PROBE:boot RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA CLOG2 CUBE65 PROBE PROBE:boot RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
   5D2)  ML=/root/ml/q5d2/ml; PLAT=5D2.212; CAMDEF=-DWF_BUILD_5D2; CAMSRC=wf_cam_5d2.c
-        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA CLOG2 CUBE65 RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
   *) echo "CAM must be EOSM or 5D2"; exit 2 ;;
 esac
 MODES=${MODES:-$ALL}
@@ -62,7 +62,7 @@ MOD="wf_main.o wf_menu.o wf_shot.o wf_pv.o wf_probe.o wf_loglut.o wf_llk.o wf_ll
  wf_fx.o wf_expsim.o wf_catalog.o wf_logout.o wf_rawb.o wf_roll.o wf_dark.o"
 [ -f $O/wf_expk.o ] && MOD="$MOD wf_expk.o"
 MOD="$MOD wf_dev.o wf_rsrc.o"                                     # RAW develop "B": the develop and the buffer check
-[ $CAM = EOSM ] && MOD="$MOD wf_darkp.o wf_cr2.o wf_jpe.o"        # Roll + Darkroom (DESIGN 3.5): linked, idle here
+[ $CAM = EOSM ] && MOD="$MOD wf_darkp.o wf_cr2.o wf_jpe.o"        # Roll + Darkroom (DESIGN 3.6): linked, idle here
 arm-linux-gnueabi-gcc -static -pthread -o $T/wf_test $T/obj/wf_test.o $T/obj/host_ml.o $(for o in $MOD; do echo $O/$o; done) \
   $T/obj/wf_cam_host.o $T/obj/wf_ui_stub.o $T/obj/wf_expoff.o -lm -Wl,--no-enum-size-warning -Wl,--no-wchar-size-warning -Wl,--no-warn-execstack
 set +e

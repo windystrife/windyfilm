@@ -13,9 +13,17 @@
 # CUBES (env, optional): the owner's cubes the source card does not hold, as a space-separated list of files named
 # <NAME>.CUB (no spaces in the path); each is copied unchanged to ML/DATA/<NAME>.CUB and listed in MD5SUMS.txt. Leica
 # Vivid's display cube (fb6bf1d): CUBES=/mnt/f/MagicLatern/LeicaLUT_SR/LEICAVSR.CUB. Never from the repo.
+# CINEPRINT_C2 (env, optional): a folder of the CinePrint looks' Canon Log 2 cubes (spaces allowed). The twelve
+# CinePrint cans load Canon Log 2 cubes since 11-14 (films/catalog.py FLUT_CURVE); `catalog.py cubes` names each look
+# and its card name (EKTAP_C2.CUB, T250DPC2.CUB, ...). Per look the folder gives, first found (any letter case): the
+# card name itself, "C-Log2 <look> 65.cube" or "C-Log2 <look> YRGB.cube" (65^3 exports of the PowerGrade "YRGB -
+# Canon Log2/C-Log2 <look> YRGB.drx", the cards' cubes since 11-14, share Anh/CinePrint_CLog2_65 on .3) or
+# "C-Log2 <look> OSM.cube" (the pack's flatter 33^3 "OSM - Canon Log2" folder). All twelve must be there; each replaces a
+# same-named cube of the source card (the Film Roll cards hold the owner's "Tung EKTA P C-Log2" export as
+# EKTAP_C2.CUB: the owner chose the CinePrint one). The loader takes 2..65^3 under the same name, no code change.
 # Run in WSL: bash tools/mk_card.sh EOSM <the EOS M ML card folder> /mnt/f/MagicLatern/EOSM_WindyFilm
 set -eu
-CUBES=${CUBES:-}
+CUBES=${CUBES:-} CINEPRINT_C2=${CINEPRINT_C2:-}
 CAM=$1 SRC=$2 DST=$3
 R=$(cd "$(dirname "$0")/.." && pwd)
 case $CAM in
@@ -30,6 +38,24 @@ for c in $CUBES; do
   case ${c##*/} in *.CUB) ;; *) echo "$c: a cube must be named <NAME>.CUB"; exit 2 ;; esac
   [ -s "$c" ] || { echo "$c missing"; exit 2; }
 done
+CPMAP=() CPSRC=()
+if [ -n "$CINEPRINT_C2" ]; then
+  [ -d "$CINEPRINT_C2" ] || { echo "CINEPRINT_C2=$CINEPRINT_C2 is no folder"; exit 2; }
+  mapfile -t CPMAP < <(python3 -I -B "$R/films/catalog.py" cubes)
+  [ ${#CPMAP[@]} -gt 0 ] || { echo "films/catalog.py cubes gave nothing"; exit 2; }
+  for l in "${CPMAP[@]}"; do
+    n=${l%%$'\t'*} b=${l#*$'\t'} f=
+    for c in "$n" "$b 65.cube" "$b YRGB.cube" "$b OSM.cube"; do
+      f=$(find "$CINEPRINT_C2" -maxdepth 1 -type f -iname "$c" -size +0 -print -quit)
+      [ -n "$f" ] && break
+    done
+    [ -n "$f" ] || { echo "$CINEPRINT_C2: no $n, \"$b 65.cube\", \"$b YRGB.cube\" or \"$b OSM.cube\" (all ${#CPMAP[@]} looks needed)"; exit 2; }
+    s=$(grep -a -m1 "^LUT_3D_SIZE" "$f" | awk '{print $2}' | tr -dc 0-9)
+    [ -n "$s" ] && [ "$s" -ge 2 ] && [ "$s" -le 65 ] || { echo "$f: no LUT_3D_SIZE 2..65, not a cube the module loads"; exit 2; }
+    for c in $CUBES; do [ "${c##*/}" = "$n" ] && { echo "$n is in CUBES and from CINEPRINT_C2: give it once"; exit 2; }; done
+    CPSRC+=("$f")
+  done
+fi
 [ "$(md5sum < "$SRC/autoexec.bin" | cut -c1-32)" = $AX ] || { echo "autoexec.bin is not the known $CAM core"; exit 2; }
 [ "$(md5sum < "$SRC/ML/modules/$SYM" | cut -c1-32)" = $SX ] || { echo "$SYM is not the known $CAM core"; exit 2; }
 
@@ -51,6 +77,14 @@ for c in $CUBES; do
   for f in "$D"/${c##*/}; do [ -e "$f" ] && { echo "${f#$DST/} already on the source card: refusing to replace it"; exit 1; }; done
   cp -p "$c" "$D/"
   echo "cube: ${c##*/} ($(md5sum < "$c" | cut -c1-32))"
+done
+for i in "${!CPMAP[@]}"; do
+  n=${CPMAP[$i]%%$'\t'*} f=${CPSRC[$i]}
+  for o in "$D"/$n; do
+    [ -e "$o" ] && { echo "cube: ${o#$DST/} of the source card replaced ($(head -c 200 "$o" | grep -a -m1 '^TITLE' || echo no TITLE))"; rm -f "$o"; }
+  done
+  cp "$f" "$D/$n"
+  echo "cube: $n <- ${f##*/} ($(grep -a -m1 '^LUT_3D_SIZE' "$f" | awk '{print $2}' | tr -dc 0-9)^3, $(md5sum < "$f" | cut -c1-32))"
 done
 cp "$R/card/README_WINDYFILM_$CAM.txt" "$DST/README_WINDYFILM.txt"
 for f in "$R"/card/HUONGDAN_*_$CAM.txt; do cp "$f" "$DST/"; done   # the owner's step lists (Vietnamese), when there are any

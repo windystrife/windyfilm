@@ -1,4 +1,4 @@
-/* wf_dark.c - Roll + Darkroom core (docs/DESIGN.md 3.5), WindyStrife's own code, written from scratch for WindyFilm.
+/* wf_dark.c - Roll + Darkroom core (docs/DESIGN.md 3.6), WindyStrife's own code, written from scratch for WindyFilm.
  *
  * The roll (wf_task, wf_roll_poll): the roll file through wf_fio.h, the requests of the UI / menu, frame detection from
  * Canon's file number while Canon is idle, RAW+L and image review while a roll is in the camera, the HUD over LiveView.
@@ -222,7 +222,7 @@ static void roll_props(int idle)
     }
 }
 
-/* the HUD over LiveView (DESIGN 3.5, owner 11-14): the roll + film chip, the big counter and the ladder show for
+/* the HUD over LiveView (DESIGN 3.6, owner 11-14): the roll + film chip, the big counter and the ladder show for
  * HUD_INFO_MS, fade for HUD_FADE_MS, then only a small dim counter stays. They show again when LiveView comes back
  * (or the menu / UI / PLAY goes), after a shot, after a frame counts, and when the roll, its film or its state changes. */
 #define HUD_INFO_MS 2500
@@ -289,7 +289,7 @@ static void roll_req(void)
         } else if (wf_roll_load(&roll, req_film, req_exp, D, F) == 0) {
             int rc = wf_loaded() == req_film ? WF_LOAD_OK : wf_load(req_film);
             wf_log("roll: %03d loaded, %s x%d at %d/%04d (film load %d)", roll.num, f ? f->name : "?", roll.exp, D, F, rc);
-            if (WF_RAWB_CAN && wf_rawb)          /* both modes at once (DESIGN 3.5): B at shot time, the print later */
+            if (WF_RAWB_CAN && wf_rawb)          /* both modes at once (DESIGN 3.6): B at shot time, the print later */
                 wf_log("roll: RAW develop stays on (frames get B now, a print later)");
             poll_F = F;
             poll_D = D;

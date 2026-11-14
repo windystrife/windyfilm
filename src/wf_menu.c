@@ -16,7 +16,7 @@
  *   hl=<-5..5>  sh=<-5..5>   Highlights / Shadows (films and Log + LUT; 0 = the curve as it was)
  *   grain=off|fine|normal|strong   halation=off|halation|bloom|spk|spkbloom   mist=off|w8|w4|w2|w1|b8|b4|b2|b1
  *   preview=off|on|fast   exposure=camera|smooth   exptrim=<1/8 EV>   exif=on|off
- *   blind=on|off     Roll + Darkroom: no image review / PLAY while a roll is in the camera (docs/DESIGN.md 3.5)
+ *   blind=on|off     Roll + Darkroom: no image review / PLAY while a roll is in the camera (docs/DESIGN.md 3.6)
  *   userwb=<mode>,<kelvin>,<gm>,<ba>   the user's white balance while Light holds it (restored on Auto / unload, also
  *                    after a power cycle in between) */
 #include <dryos.h>
@@ -222,7 +222,11 @@ const char *wf_look_title(const struct wf_look *lk, char *b, int n)
 }
 
 /* ------------------------------------------------------------------ Film LUT cubes on the card (wf_task) */
-static volatile uint32_t wf_cube_have;            /* bit l: ML/DATA/<cube l>VL.CUB is on the card (V-Log, the cans') */
+static volatile uint32_t wf_cube_have;            /* bit l: the cans' cube l on its own curve (WF_FLUT_CURVE: <code>VL.CUB,
+                                                     <code>C2.CUB for the CinePrint looks) is on the card */
+static volatile uint32_t wf_cube_vl;              /* bit l: a one-log cube (WF_FLUT_VLONLY) whose own curve is not V-Log (the
+                                                     CinePrint looks since 11-14) also has its old <code>VL.CUB on the card:
+                                                     Log curve V-Log set by hand uses it, so no "set Log curve" advice */
 static volatile int wf_cube_scan_req = 1;
 
 static int wf_cube_on_card(int curve, int l)
@@ -235,10 +239,14 @@ static int wf_cube_on_card(int curve, int l)
 
 static void wf_cube_scan(void)
 {
-    uint32_t m = 0;
-    for (int l = 1; l < WF_FLUT_N; l++)
-        if (wf_cube_on_card(WF_CURVE_VLOG, l))
+    uint32_t m = 0, v = 0;
+    for (int l = 1; l < WF_FLUT_N; l++) {
+        if (wf_cube_on_card(WF_FLUT_CURVE(l), l))
             m |= 1u << l;
+        if (WF_FLUT_VLONLY(l) && WF_FLUT_CURVE(l) != WF_CURVE_VLOG && wf_cube_on_card(WF_CURVE_VLOG, l))
+            v |= 1u << l;
+    }
+    wf_cube_vl = v;
     if (m != wf_cube_have) {
         wf_cube_have = m;
         wf_gen_bump();
@@ -276,13 +284,13 @@ int wf_load(int id)
         return WF_LOAD_BUSY;
     if (f->flags & WF_F_LUTCAN) {
         int l = wf_cat_lut[k];
-        if (l <= 0 || l >= WF_FLUT_N || !wf_cube_on_card(WF_CURVE_VLOG, l))
+        if (l <= 0 || l >= WF_FLUT_N || !wf_cube_on_card(WF_FLUT_CURVE(l), l))
             return WF_LOAD_NOCUBE;
         if (wf_out != WF_OUT_LLUT)
             wf_out_prev = wf_out;
         wf_film_id = id;
-        wf_out = WF_OUT_LLUT;                     /* a can: V-Log + LUT with its cube */
-        wf_curve = WF_CURVE_VLOG;
+        wf_out = WF_OUT_LLUT;                     /* a can: its cube's own curve + LUT (V-Log, CinePrint looks C-Log2) */
+        wf_curve = WF_FLUT_CURVE(l);
         wf_flut = l;
         wf_flut_style(l);
     } else {
@@ -305,7 +313,7 @@ int wf_loaded(void)
     const struct wf_film *f = &wf_films[k];
     if (wf_out == WF_OUT_FILM && (f->flags & (WF_F_READY | WF_F_LUTCAN)) == WF_F_READY)
         return f->id;
-    if (wf_out == WF_OUT_LLUT && (f->flags & WF_F_LUTCAN) && wf_cur() == WF_CURVE_VLOG && wf_flut == wf_cat_lut[k])
+    if (wf_out == WF_OUT_LLUT && (f->flags & WF_F_LUTCAN) && wf_cur() == WF_FLUT_CURVE(wf_cat_lut[k]) && wf_flut == wf_cat_lut[k])
         return f->id;
     return 0;
 }
@@ -377,22 +385,29 @@ int wf_row_avail(int row)
 
 static int wf_wrap(int v, int d, int n) { v = (v >= 0 && v < n ? v : 0) + (d < 0 ? -1 : 1); return v < 0 ? n - 1 : v >= n ? 0 : v; }
 
-/* Film LUT row: Off -> the cubes on the card for the curve in use (V-Log from Off) -> Off. From Off: Log + LUT on V-Log
- * (the output before is kept for Off); with Log + LUT set only the cube changes. Order: the film cubes, the V-Log-only
- * cubes, EKTA P, Technical. */
+/* Film LUT row: Off -> the cubes on the card -> Off. From Off: Log + LUT (the output before is kept for Off). Each cube
+ * comes on its own curve (WF_FLUT_CURVE: V-Log, the CinePrint looks Canon Log 2) while the curve in use is the current
+ * cube's own one; a Log curve the user set by hand that is not the cube's own (S-Log3 on Vision3 250D, V-Log on a
+ * CinePrint look) stays, and only the cubes on the card for it come. Technical keeps the curve in use. Order: the film
+ * cubes, the V-Log-only cubes, EKTA P, Technical. */
 static const uint8_t wf_flut_cyc[WF_FLUT_N] = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 14, 15, 11, 16, 17, 18, 19, 20, 21, 22, 23,
                                                 0 };
 static int wf_flut_step(int d)
 {
-    int set = wf_out == WF_OUT_LLUT, curve = set ? wf_cur() : WF_CURVE_VLOG, pos = 0, n = WF_FLUT_N + 1;
+    int set = wf_out == WF_OUT_LLUT, cur = set ? wf_cur() : WF_CURVE_VLOG, pos = 0, n = WF_FLUT_N + 1;
+    int own = set && wf_flut > 0 && wf_flut < WF_FLUT_N && cur != WF_FLUT_CURVE(wf_flut);   /* a curve set by hand */
     if (set)
         for (int i = 0; i < WF_FLUT_N; i++)
             if (wf_flut_cyc[i] == wf_flut)
                 pos = i + 1;
-    int p0 = pos;
+    int p0 = pos, curve = cur;
     for (int i = 0; i < n; i++) {
         pos = (pos + (d < 0 ? n - 1 : 1)) % n;
-        if (pos == 0 || wf_cube_on_card(curve, wf_flut_cyc[pos - 1]))
+        if (pos == 0)
+            break;
+        int l = wf_flut_cyc[pos - 1];
+        curve = own || !l ? cur : WF_FLUT_CURVE(l);
+        if (wf_cube_on_card(curve, l))
             break;
     }
     if (pos == p0)
@@ -403,8 +418,8 @@ static int wf_flut_step(int d)
         if (!set) {
             wf_out_prev = wf_out;
             wf_out = WF_OUT_LLUT;
-            wf_curve = WF_CURVE_VLOG;
         }
+        wf_curve = curve;
         wf_flut = wf_flut_cyc[pos - 1];
         wf_flut_style(wf_flut);
     }
@@ -1141,8 +1156,10 @@ static MENU_UPDATE_FUNC(wf_lut_update)
         WF_NOT_ACTIVE();
     else if (wf_out != WF_OUT_LLUT)
         MENU_SET_WARNING(MENU_WARN_INFO, "Used by the Log + LUT output (and the Film LUT cans).");
-    else if (WF_FLUT_VLONLY(wf_flut) && wf_cur() != WF_CURVE_VLOG)
-        MENU_SET_WARNING(MENU_WARN_ADVICE, "%s is a V-Log cube: set Log curve to V-Log.", wf_flut_name[wf_flut]);
+    else if (WF_FLUT_VLONLY(wf_flut) && wf_cur() != WF_FLUT_CURVE(wf_flut)
+             && !(wf_cur() == WF_CURVE_VLOG && ((wf_cube_vl >> wf_flut) & 1)))
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "%s is a %s cube: set Log curve to %s.", wf_flut_name[wf_flut],
+                         wf_curve_name[WF_FLUT_CURVE(wf_flut) - 1], wf_curve_name[WF_FLUT_CURVE(wf_flut) - 1]);
     else if (WF_FLUT_DISP(wf_flut))
         MENU_SET_WARNING(lens_info.raw_picstyle == WF_PS_STANDARD || lens_info.raw_picstyle == WF_PS_NEUTRAL ? MENU_WARN_INFO
                          : MENU_WARN_ADVICE, "%s: Picture Style Standard (Neutral is paler), sRGB in, no auto exposure.",
@@ -1307,7 +1324,7 @@ static MENU_UPDATE_FUNC(wf_rawb_update)
     else
         MENU_SET_WARNING(MENU_WARN_INFO, "About 30 s per shot. Hold half-shutter to stop.");
 }
-/* both modes at once (owner 11-14 evening, docs/DESIGN.md 3.5): with a roll loaded each frame gets B at shot time and
+/* both modes at once (owner 11-14 evening, docs/DESIGN.md 3.6): with a roll loaded each frame gets B at shot time and
  * still counts for the Darkroom, so this is a plain toggle again */
 #define WF_RAWB_ENTRY { .name = "RAW develop", .priv = (void *)&wf_rawb, .max = 1, .choices = wf_rawb_name, \
                         .update = wf_rawb_update, \
@@ -1316,7 +1333,7 @@ static MENU_UPDATE_FUNC(wf_rawb_update)
 #define WF_RAWB_ENTRY
 #endif
 
-/* ------------------------------------------------------------------ Roll + Darkroom (wf_dark.c, docs/DESIGN.md 3.5) */
+/* ------------------------------------------------------------------ Roll + Darkroom (wf_dark.c, docs/DESIGN.md 3.6) */
 int wf_card_nums(int *folder, int *file)
 {
     struct card_info *c = get_shooting_card();

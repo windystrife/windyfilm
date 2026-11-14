@@ -1,4 +1,4 @@
-/* wf_roll.h - WindyFilm "Roll + Darkroom" (docs/DESIGN.md 3.5), WindyStrife's own code.
+/* wf_roll.h - WindyFilm "Roll + Darkroom" (docs/DESIGN.md 3.6), WindyStrife's own code.
  *
  * A roll: one film, 12 / 24 / 36 exposures, shot RAW + L with no image review; afterwards the in-camera Darkroom
  * develops each frame's CR2 from the card with the roll's film (src/wf_dark.c: own CR2 decoder wf_cr2.c -> RAW develop
