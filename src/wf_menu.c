@@ -169,10 +169,12 @@ static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Tungst
 static const char *const wf_light_key[WF_NLIGHT] = { "auto", "day", "cloudy", "tungsten" };
 static const char *wf_strength_name[WF_NSTRENGTH] = { "30%", "100%", "125%" };
 static const char *const wf_strength_key[WF_NSTRENGTH] = { "subtle", "normal", "strong" };
-static const char *wf_grain_name[WF_GRAIN_MAX + 1] = { "Off", "Fine", "Normal", "Strong" };
-static const char *const wf_grain_key[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong" };
-static const char *wf_halo_name[WF_HALO_MAX + 1] = { "Off", "Film", "Film + bloom", "Spektra", "Spektra + bloom" };
-static const char *const wf_halo_key[WF_HALO_MAX + 1] = { "off", "halation", "bloom", "spk", "spkbloom" };
+static const char *wf_grain_name[WF_GRAIN_MAX + 1] = { "Off", "Fine", "Normal", "Strong", "Gen Fine", "Gen Normal",
+                                                       "Gen Strong" };
+static const char *const wf_grain_key[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "genfine", "gennormal",
+                                                            "genstrong" };
+static const char *wf_halo_name[WF_HALO_MAX + 1] = { "Off", "Film", "Film + bloom", "Spektra", "Spektra + bloom", "Genesis" };
+static const char *const wf_halo_key[WF_HALO_MAX + 1] = { "off", "halation", "bloom", "spk", "spkbloom", "gen" };
 static const char *wf_mist_name[WF_MIST_MAX + 1] = { "Off", "1/8", "1/4", "1/2", "1", "Black 1/8", "Black 1/4", "Black 1/2",
                                                      "Black 1" };
 static const char *const wf_mist_key[WF_MIST_MAX + 1] = { "off", "w8", "w4", "w2", "w1", "b8", "b4", "b2", "b1" };
@@ -333,7 +335,9 @@ int wf_loaded(void)
 }
 
 /* ------------------------------------------------------------------ rows (wf_api.h) */
-static const char *const wf_rname[WF_NROWS] = { "Light", "Print stock", "Grain", "Halation", "Mist", "Strength",
+/* the two effect rows are named after this module's stages: their last choices are the Genesis Pro 1.6.6 model
+ * (DESIGN 1a), the ones before it are the module's own Yedlin grain / 3-bounce halation */
+static const char *const wf_rname[WF_NROWS] = { "Light", "Print stock", "WindyGrain", "WindyHalation", "Mist", "Strength",
                                                 "Highlights", "Shadows", "Film LUT" };
 
 const char *wf_row_name(int row) { return row >= 0 && row < WF_NROWS ? wf_rname[row] : ""; }
@@ -1366,8 +1370,8 @@ static struct menu_entry wf_menu[] = {
               .help = "How Log + LUT reads the JPEG: sRGB, or a Canon style undone (Film 1, Neutral)." },
             WF_ROWE("Light", WF_ROW_LIGHT, wf_light_select, "White balance: Auto (yours), the stock's Day, Cloudy, Tungsten."),
             WF_ROWE("Print", WF_ROW_PRINT, wf_print_select, "Scan, cine print or paper print of the loaded film."),
-            WF_ROWE("Grain", WF_ROW_GRAIN, wf_grain_select, "Film grain at the shot (films and Log + LUT)."),
-            WF_ROWE("Halation", WF_ROW_HALO, wf_halo_select, "Red glow around highlights (3:2)."),
+            WF_ROWE("WindyGrain", WF_ROW_GRAIN, wf_grain_select, "Film grain at the shot: Fine / Normal / Strong are ours (Yedlin), Gen ... is the grain of Genesis."),
+            WF_ROWE("WindyHalation", WF_ROW_HALO, wf_halo_select, "Red glow around highlights (3:2); Genesis is the light wrap of Genesis."),
             WF_ROWE("Mist", WF_ROW_MIST, wf_mist_select, "Diffusion filter: glow on lights, veil on shadows."),
             { .name = "Strength", .priv = (void *)&wf_strength, .max = WF_NSTRENGTH - 1, .choices = wf_strength_name,
               .select = wf_strength_select, .help = "How strongly the film look is applied." },

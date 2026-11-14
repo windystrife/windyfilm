@@ -67,6 +67,34 @@ What this branch adds on top (14 Nov 2026, same day):
   films/tables` when they are missing, and `mk_wfpack.py` leaves a film off the card when its table is not there. A
   tree that never had the port tree builds the other 53 films and says so.
 
+**What branch `grain-halation` adds on top (15 Nov 2026, cut from `film-stage`) — the plugin's numbers in the CODE.**
+The owner asked for the plugin's grain and halation in the module as two named stages, **WindyGrain** and
+**WindyHalation** (the browser rows that used to read `Grain` and `Halation`). This is a bigger step than the four
+tables: the *module* now carries constants of the plugin, not only sampled card data.
+
+- **WindyGrain** (`src/yg_grain.c`, `yg_gen_*`): the plugin's three 64-point amplitude tables (`grainTable_r/g/b`,
+  `CreateFilmGrain` at `kernel_source.cl:2745`, dumped in `genesis_re/halation_performance_grain_head.cl.txt`),
+  converted once to Q8 display levels and kept as `int16_t[64]`; its `prng(x, y, seed, channel)`, its straight line
+  into the tail for the lowest 1/64 of the rank, its `saturation` mix, its `amplitude`, and the bilinear upsample of a
+  grain buffer smaller than the frame (`ApplyFilmGrain`:2804) as the gauge / size mapping. The code that reads them is
+  ours (integer, no divide, no float per pixel); the amplitude does not depend on the level, as in the plugin.
+- **WindyHalation** (`src/yh_halo.c`, `yh_gen_*`): the light wrap of `LightWrapHalationStepOne` /
+  `LightWrapStepTwo` (`halation_step1_step2.cl.txt`, `kernel_source.cl:1723 / :2340`): the arctan highlight mask with
+  its 0.94 threshold, the difference of blur, the per-channel arctan gate `1 - clamp(0.491 - 0.507*atan(...))`, the
+  radius `max(1, maxDim * light_wrap_radius / (2048 * gauge))`, and `halation_strength` as the final scale. The blur
+  is two box passes on the 1/8 grid the module's own halation already uses (a Gaussian, as the plugin's Performance
+  kernel). Two domain differences are declared where the code is: our frame is display-referred, so the arctan's own
+  `0.58..0.95` window is laid onto codes 240..255, and the delta is added in code units rather than in LogC3.
+- **What is NOT taken**: no shader text, no plugin binary, no `.ofx`; nothing is linked, patched or called. The
+  `light_wrap_color` default is the one constant we could not read exactly (0.40 / 0.50 / 0.45, the third a GUESS
+  from the hand-off note).
+- **The plugin's stages are options, not replacements.** `Fine / Normal / Strong` (grain) and `Film / Film + bloom /
+  Spektra …` (halation) are unchanged; `Gen Fine / Gen Normal / Gen Strong` and `Genesis` are appended to the two
+  rows. Every other film, table, stage and setting behaves exactly as before (the `FXAB` host test measures both).
+- `tools/provenance_gate.py` allows this branch the same exception as `film-stage` (`NOT_CLEAN` lists both) and still
+  prints `gate: this tree is NOT clean-room` on every build. **Do not publish this branch, do not merge it into
+  `main` without this section, and never describe a card made from it as clean-room.**
+
 
 ## 2. Repo layout and who owns what
 

@@ -89,9 +89,12 @@ volatile int wf_fx_retry_ms = 10000;             /* "no memory": next attempt af
                                                     bit 7 spektrafilm (the set's spk profile and strength) */
 #define FX_KEY_BLOOM 64
 #define FX_KEY_SPK 128
-static const char *const fx_hname[YH_NSTOCK] = { "neg", "800T", "slide", "bw", "spk-s", "spk-w", "spk-c", "spk-n", "spk-bw", "spk-bww" };
-static const float fx_amount[WF_GRAIN_MAX + 1] = { 0.0f, 0.6f, 1.0f, 1.5f };
-static const char *const fx_aname[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong" };
+#define FX_KEY_GEN 256                           /* halation / grain: the Genesis model (WindyHalation / WindyGrain) */
+#define FX_KEY_GGEN 256
+static const char *const fx_hname[YH_NSTOCK] = { "neg", "800T", "slide", "bw", "spk-s", "spk-w", "spk-c", "spk-n", "spk-bw", "spk-bww",
+                                                 "gen" };
+static const float fx_amount[WF_GRAIN_MAX + 1] = { 0.0f, 0.6f, 1.0f, 1.5f, 0.6f, 1.0f, 1.5f };
+static const char *const fx_aname[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "gen fine", "gen normal", "gen strong" };
 
 /* one block: p = cacheable address; from a shoot memory suite (suite != 0) or Canon's heap (raw) */
 typedef struct { void *p, *raw, *suite; } fx_blk;
@@ -184,9 +187,10 @@ int wf_fx_keys(int post, int *hk, int *gk)
     if (!fx_sets(post, &gs, &hs))
         return 0;
     if (WF_HALO_CAN && h >= 1 && h <= WF_HALO_MAX)
-        *hk = (hs + 1) | (WF_HALO_BLOOM(h) ? FX_KEY_BLOOM : 0) | (WF_HALO_SPK(h) ? FX_KEY_SPK : 0);
+        *hk = (hs + 1) | (WF_HALO_BLOOM(h) ? FX_KEY_BLOOM : 0) | (WF_HALO_SPK(h) ? FX_KEY_SPK : 0)
+              | (WF_HALO_GEN(h) ? FX_KEY_GEN : 0);
     if (WF_GRAIN_CAN && g >= 1 && g <= WF_GRAIN_MAX)
-        *gk = (gs + 1) | g << 6;
+        *gk = (gs + 1) | ((WF_GRAIN_GEN(g) ? g - WF_GRAIN_GEN0 + 1 : g) << 6) | (WF_GRAIN_GEN(g) ? FX_KEY_GGEN : 0);
     return *hk | *gk;
 }
 
@@ -235,6 +239,8 @@ const char *wf_fx_gstock_name(void)
     int gs, hs;
     if (!fx_sets(wf_fx_mode(), &gs, &hs))
         return "-";
+    if (wf_grain >= WF_GRAIN_GEN0)
+        return "Genesis";                        /* WindyGrain: the plugin's grain is not a stock of ours */
     const char *s = yg_stocks[wf_cat_gsets[gs].row].name, *x = fx_xname(wf_cat_gsets[gs].scale_q8, xb);
     int i = 0;
     while (s[i] && i < 20) { nm[i] = s[i]; i++; }
@@ -305,11 +311,12 @@ static int fx_retry_due(int want, int nomem, int at)
  * faint, as it should be), x2.5 B&W, bloom x2 (bloom_frac 0.06 -> 0.12 effective). GUESSES like the profiles.
  * yh_init limits hal_q8 / bloom_q8 to 1024 (x4); clamped here too so the log names what is used. */
 #define FX_BLOOM_Q8 512
-typedef char fx_gain_rows[YH_NSTOCK == 10 ? 1 : -1];                 /* a new profile needs its gain below (0 = no halation) */
+typedef char fx_gain_rows[YH_NSTOCK == 11 ? 1 : -1];                 /* a new profile needs its gain below (0 = no halation) */
 static int fx_hal_gain(int prof, int hq)
 {
-    /* YH_NEG, YH_C800T, YH_SLIDE, YH_BW; YH_SPK_* x1: spektrafilm's own strengths by anti-halation class (Q8) */
-    static const uint16_t g[YH_NSTOCK] = { 768, 384, 1024, 640, 256, 256, 256, 256, 256, 256 };
+    /* YH_NEG, YH_C800T, YH_SLIDE, YH_BW; YH_SPK_* x1: spektrafilm's own strengths by anti-halation class (Q8);
+     * YH_GEN x1: Genesis's halation_strength 1.0, the plugin's own default */
+    static const uint16_t g[YH_NSTOCK] = { 768, 384, 1024, 640, 256, 256, 256, 256, 256, 256, 256 };
     int v = prof >= 0 && prof < YH_NSTOCK ? (hq * g[prof]) >> 8 : hq;
     return v > 1024 ? 1024 : v;
 }
@@ -344,8 +351,10 @@ static void fx_h_sync(int want)
         return;
     }
     yh_params p;
-    int s = (want & FX_KEY_SET) - 1, spk = (want & FX_KEY_SPK) != 0;
-    int prof = spk ? wf_cat_hsets[s].sprof : wf_cat_hsets[s].prof, hq = spk ? wf_cat_hsets[s].shal_q8 : wf_cat_hsets[s].hal_q8;
+    int s = (want & FX_KEY_SET) - 1, gen = (want & FX_KEY_GEN) != 0;
+    int spk = !gen && (want & FX_KEY_SPK) != 0;
+    int prof = gen ? YH_GEN : spk ? wf_cat_hsets[s].sprof : wf_cat_hsets[s].prof;
+    int hq = spk ? wf_cat_hsets[s].shal_q8 : wf_cat_hsets[s].hal_q8;
     char xb[8];
     yh_default_params(&p, prof);                 /* hal_q8 256 = the profile's strength */
     p.bloom_q8 = (want & FX_KEY_BLOOM) ? FX_BLOOM_Q8 : 0;
@@ -382,11 +391,14 @@ static void fx_g_sync(int want)
     }
     int t0 = get_ms_clock();
     fx_blk scr = { 0, 0, 0 };
+    int s = (want & FX_KEY_SET) - 1, a = (want >> 6) & 3, row = wf_cat_gsets[s].row, sc = wf_cat_gsets[s].scale_q8;
+    int gen = (want & FX_KEY_GGEN) != 0;
+    char xb[8];
     if (!fx_gb.p)
         fx_heap_alloc(&fx_gb, FX_GBYTES);
-    if (fx_gb.p)
-        fx_shoot_alloc(&scr, yg_scratch_bytes());   /* yg_init's scratch: shoot memory, ~1 s */
-    if (!scr.p) {
+    if (fx_gb.p && !gen)
+        fx_shoot_alloc(&scr, yg_scratch_bytes());   /* yg_init's scratch: shoot memory, ~1 s (the Genesis model has none) */
+    if (!scr.p && !gen) {
         fx_free(&fx_gb);                         /* nothing usable: no RAM held */
         fx_g_nomem = 1;
         fx_g_retry = get_ms_clock() + wf_fx_retry_ms;
@@ -396,8 +408,34 @@ static void fx_g_sync(int want)
         fx_g_logged = 0;
         return;
     }
-    int s = (want & FX_KEY_SET) - 1, a = (want >> 6) & 3, row = wf_cat_gsets[s].row, sc = wf_cat_gsets[s].scale_q8;
-    char xb[8];
+    if (!fx_gb.p) {
+        fx_g_nomem = 1;
+        fx_g_retry = get_ms_clock() + wf_fx_retry_ms;
+        if (!fx_g_errlog)
+            wf_log("fx grain: no memory for %d KB, grain off", (int)(FX_GBYTES >> 10));
+        fx_g_errlog = 1;
+        fx_g_logged = 0;
+        return;
+    }
+    if (gen) {
+        /* WindyGrain: Genesis's own model - its amplitude tables, its saturation, its gauge; no templates, no
+         * density chain, no init cost (yg_gen_init only fills five numbers) */
+        yg_gen_params gp;
+        gp.amp_q8 = (int)(fx_amount[a] * sc / 256.0f * 256.0f + 0.5f);
+        gp.sat_q8 = 256;                         /* film_grain_saturation 1.0: each channel its own table */
+        gp.gauge_q8 = 256;                       /* grain_film_gauge 35 mm */
+        gp.size_q8 = 256;                        /* film_grain_size 1.0 */
+        gp.seed = 0x67656E31u;                   /* film_grain_random_seed ("gen1"); yg_set_shot mixes the file number in */
+        yg_gen_init(fx_yg, &gp, 0);
+        if (want != fx_g_logged)
+            wf_log("fx grain genesis %s %s ready %dms %dKB%s", yg_stocks[row].name, fx_aname[a], get_ms_clock() - t0,
+                   (int)(sizeof(yg_ctx) >> 10), fx_gb.suite ? " shoot" : "");
+        fx_g_logged = want;
+        fx_g_errlog = 0;
+        __asm__ __volatile__("" ::: "memory");
+        wf_fx_gk = want;                         /* published last */
+        return;
+    }
     fx_gst = yg_stocks[row];
     fx_gst.amount *= fx_amount[a];
     if (sc != 256)

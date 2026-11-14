@@ -64,6 +64,10 @@ typedef struct {
     int       qs;                  /* fractional bits of M */
     int       cs;                  /* chroma shift */
     int       tier, mode, nlayers, seam;
+    int       gen;                 /* 1 = the Genesis model below (no templates, no tables of yg_init) */
+    int       gamp_q8, gsat_q8, gshift;   /* Genesis: amplitude, saturation, lattice shift (cell 1 << shift px) */
+    uint32_t  gseed0;              /* Genesis: film_grain_random_seed, the base of the per-shot seed */
+    uint32_t  gseed;               /* Genesis: the shot's seed (base mixed with the file number) */
     uint32_t  seed;                /* shot seed (block placement) */
     uint32_t  tseed;               /* template seed */
     /* diagnostics filled by yg_init */
@@ -81,6 +85,30 @@ unsigned yg_scratch_bytes(void);
 /* integer-only template (re)synthesis, e.g. per shot in wf_task; needs init done once */
 int  yg_build_templates(yg_ctx *g, const yg_stock *s, uint32_t tseed, float pitch_um, void *scratch);
 void yg_set_shot(yg_ctx *g, uint32_t shot);   /* per-shot seed: hash(file number) */
+
+/* ---------------------------------------------------------------- Genesis grain ("WindyGrain")
+ * A second model, not a Yedlin stock: the plugin (Genesis Pro 1.6.6) draws every pixel's amplitude from a fixed
+ * 64-point quantile table per channel (`CreateFilmGrain`, kernel_source.cl:2745 - the three tables are dumped in
+ * halation_performance_grain_head.cl.txt), interpolates linearly on the fraction of the rank, replaces the lowest
+ * 1/64 of the rank with a straight line to the table's own tail, mixes the three channels by `saturation`, scales
+ * by `amplitude` and - when the grain buffer is smaller than the frame - upsamples it bilinearly with a jitter
+ * (`ApplyFilmGrain`, kernel_source.cl:2804). The amplitude does not depend on the level: Genesis adds the same
+ * amplitude in the dark and in the lights. The numbers are the plugin's (data, declared in docs/DESIGN.md 1a);
+ * the code below is ours, integer only, no divide.
+ * The grain lattice step (cell = 1 << gshift px) is our mapping of grain_film_gauge: Genesis renders the grain on
+ * a buffer of `grainWidth` px and upsamples it when the frame is bigger, and sizes that buffer from the gauge
+ * (16 mm 0.5 / 35 mm 1.0 / 65 mm 1.85: the host code is not in our sources). One sample per pixel at 35 mm and
+ * size 1.0, one per 2 px from 16 mm (size / gauge >= 2), capped at 4 px. GUESS. */
+typedef struct {
+    int      amp_q8;     /* film_grain_amplitude: 256 = the tables as dumped */
+    int      sat_q8;     /* film_grain_saturation: 256 = each channel its own table, 0 = the green table for all */
+    int      gauge_q8;   /* grain_film_gauge: 16 mm 128, 35 mm 256, 65 mm 474 */
+    int      size_q8;    /* film_grain_size: 256 = 1.0 */
+    uint32_t seed;       /* film_grain_random_seed; the shot's file number is mixed in (yg_set_shot) */
+} yg_gen_params;
+int  yg_gen_init(yg_ctx *g, const yg_gen_params *p, uint32_t shot);
+void yg_gen_uyvy_row(const yg_ctx *g, uint32_t *w, int npix, int x0, int y);
+void yg_gen_rgb_strip(const yg_ctx *g, uint8_t *rgb, int w, int nrows, int y0);
 
 /* YUV hook: one row segment, Canon UYVY words {U s8, Y0, V s8, Y1}, x0 even, npix even */
 void yg_uyvy_row(const yg_ctx *g, uint32_t *words, int npix, int x0, int y);

@@ -66,11 +66,14 @@ def branch():
 
 
 BRANCH = branch()
-NOT_CLEAN = BRANCH == "film-stage"
+# `grain-halation` is cut from `film-stage` and carries the same declared exception plus the plugin's *code*
+# constants (the grain amplitude tables and the halation formula, DESIGN 1a "what this branch adds on top"):
+# it is not clean-room either, and it must not be published or merged into `main` without that paragraph.
+NOT_CLEAN = BRANCH in ("film-stage", "grain-halation")
 DENY += list(BRANCH_EXCEPTIONS)                       # the derived generator's names are denied by default ...
 if NOT_CLEAN:                                         # ... and allowed only under the declared exception
     DENY = [w for w in DENY if w not in BRANCH_EXCEPTIONS]
-    print("gate: this tree is NOT clean-room (Genesis-derived tables, DESIGN 1a, branch %s)" % BRANCH)
+    print("gate: this tree is NOT clean-room (Genesis-derived tables and effect constants, DESIGN 1a, branch %s)" % BRANCH)
 SCAN_DIRS = ("src", "tools", "films", "cans", "tests")
 SCAN_FILES = ("build.sh", "test.sh")
 EQUAL_DIRS = ("src", "tools", "films", "cans")

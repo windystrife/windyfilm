@@ -9,12 +9,20 @@
 #define WF_FX_GRN 2
 #define WF_FX_MST 4                  /* Mist (wf_mist.c): diffusion filter on the camera's words, before our colour pass */
 
-/* menu choices (wf_menu.c, WINDYFLM.CFG "grain" / "halation"); the browser rows show and change the same values */
-#define WF_GRAIN_MAX 3               /* 0 off, 1 fine (amount 0.6), 2 normal (1.0, default), 3 strong (1.5) */
-#define WF_HALO_MAX  4               /* 0 off, 1 halation, 2 halation + bloom (default), 3 spektrafilm halation (the
-                                        film's catalogue spk profile), 4 spektrafilm + bloom */
-#define WF_HALO_SPK(h) ((h) >= 3)
+/* menu choices (wf_menu.c, WINDYFLM.CFG "grain" / "halation"); the browser rows show and change the same values.
+ * The last choices of each row are the Genesis Pro 1.6.6 model (DESIGN 1a), shown as "WindyGrain" / "WindyHalation":
+ * Genesis's own grain (its amplitude tables, yg_gen_* in yg_grain.c) and the plugin's light wrap (yh_gen_* in
+ * yh_halo.c). The Yedlin grain and the 3-bounce halation before them stay exactly as they were. */
+#define WF_GRAIN_MAX 6               /* 0 off, 1 fine (0.6), 2 normal (1.0, default), 3 strong (1.5) - Yedlin;
+                                        4..6 the same three amounts of the Genesis grain (WindyGrain) */
+#define WF_GRAIN_GEN0 4              /* first Genesis choice */
+#define WF_GRAIN_GEN(g) ((g) >= WF_GRAIN_GEN0)
+#define WF_HALO_MAX  5               /* 0 off, 1 halation, 2 halation + bloom (default), 3 spektrafilm halation (the
+                                        film's catalogue spk profile), 4 spektrafilm + bloom, 5 WindyHalation
+                                        (the Genesis light wrap) */
+#define WF_HALO_SPK(h) ((h) >= 3 && (h) <= 4)
 #define WF_HALO_BLOOM(h) ((h) == 2 || (h) == 4)
+#define WF_HALO_GEN(h) ((h) == 5)
 #define WF_GRAIN_DEF WF_GRAIN_DEF_CAM   /* wf_cam.h (included by wf_core.h before any use): EOS M normal, 5D2 off */
 #define WF_HALO_DEF  WF_HALO_DEF_CAM    /* wf_cam.h: EOS M halation + bloom, 5D2 off */
 #define WF_MIST_MAX 8                /* Mist: 0 Off, 1..4 white 1/8 1/4 1/2 1, 5..8 black 1/8 .. 1 (WINDYFLM.CFG "mist") */
