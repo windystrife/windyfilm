@@ -21,6 +21,10 @@
  *   WF_DEV_SRGB  base develop: Rec.709 primaries, sRGB OETF, clipped at 1.0 = a Canon-like 8-bit frame for the
  *                display-referred film tables (wf_film_words then runs unchanged on the developed frame). The grid is
  *                the sRGB code itself with identity nodes (exact between nodes).
+ *   WF_DEV_DISP  a display-referred look cube on the rendered picture (Leica Vivid, WF_FLUT_DISP): the SRGB base
+ *                develop's grid and enc (sRGB code, shoulder), nodes = the card cube sampled at those sRGB codes
+ *                (exact for 2, 3, 5, 9, 17, 33 and 65 point cubes): no log curve, no V-Log step. LUT EI scales the
+ *                linear light; Highlights / Shadows bend each output channel with wf_hs_bend's curve (build time).
  *
  * Per shot (wf_dev_prepare, worker, before the first row; once per shot, a Diana BOT half reuses its TOP's):
  *   - WB + exposure: per-channel scales fitted against Canon's own UYVY frame of the same shot (dst before it is
@@ -57,7 +61,7 @@
                                                     blue (2304 = 9 << 8) is an ARM immediate */
 #define WF_DEV_BLK    32                         /* highlight map block, px */
 
-enum { WF_DEV_CUBE = 1, WF_DEV_LOG = 2, WF_DEV_SRGB = 3 };
+enum { WF_DEV_CUBE = 1, WF_DEV_LOG = 2, WF_DEV_SRGB = 3, WF_DEV_DISP = 4 };
 enum { WF_DEV_EOSM = 0, WF_DEV_5D2 = 1, WF_DEV_NCAM };
 
 /* load-time tables (wf_task builds, the worker reads). Layout fixed for a later asm kernel: node first. */
@@ -96,6 +100,8 @@ struct wf_dev_job {
                                                     input curve of Log + LUT: wf_ll_dec_c<k> on main's A1), 0 = sRGB */
     int      roll;                               /* 1 = film shoulder: the sensor's white lands on the look's white (CUBE,
                                                     SRGB; see wf_dev.c wf_dv_roll), 0 = the look's curve as is */
+    int      canon_pw;                           /* words per row of canon, 0 = w / 2 (a 5D2 half: the 5616 px row while
+                                                    the develop covers 5600 px of it, w must be a multiple of 32) */
 };
 
 /* per-shot results (log line, tests) */
@@ -116,6 +122,9 @@ struct wf_dev_stat {
 /* Build the tables for node source src (WF_DEV_*), log curve 1..5, camera WF_DEV_EOSM / WF_DEV_5D2. CUBE: cube = card path
  * of the .cube (wf_ll_parse rules and results, WF_LL_*), ei = LUT EI 1/3 EV, autoexp = 1 for the Film LUT cubes (18 %
  * grey -> 118 as wf_loglut.c). LOG / SRGB: cube ignored (0). Returns WF_LL_OK or a WF_LL_E_* code (t is then unusable). */
+/* WF_DEV_DISP with Highlights / Shadows h, s (-5 .. 5, wf_hs_bend) on the cube's output channels; wf_dev_build with
+ * src WF_DEV_DISP is the same with h = s = 0 (curve, autoexp ignored) */
+int wf_dev_build_disp(struct wf_dev_tabs *t, int cam, const char *cube, int ei, int h, int s, struct wf_ll_info *info);
 int wf_dev_build(struct wf_dev_tabs *t, int src, int curve, int cam, const char *cube, int ei, int autoexp,
                  struct wf_ll_info *info);
 

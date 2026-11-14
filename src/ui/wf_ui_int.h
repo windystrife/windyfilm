@@ -99,8 +99,9 @@ void wfui_task_begin(void);             /* the UI task's set-up: resources, scre
 int  wfui_task_tick(void);              /* one loop pass: keys, state, redraw; 0 = keep going */
 void wfui_task_end(void);               /* give the screen and palette back, free everything */
 void wfui_render(void);                 /* draw the whole browser into the idle buffer */
+void wfui_render_anim(int t, int first);/* the load animation at t ms over it (first: dim the browser once) */
 
-/* ------------------------------------------------------------------ wf_dark_ui.c: Roll + Darkroom screens (DESIGN 3.4) */
+/* ------------------------------------------------------------------ wf_dark_ui.c: Roll + Darkroom screens (DESIGN 3.5) */
 enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_ROLL, WFUI_SCR_DARK, WFUI_SCR_N };
 void wfdr_enter(int scr);               /* the screen becomes active: palette theme, its state */
 void wfdr_render(int scr, int now);     /* draw it into the idle buffer */

@@ -1,4 +1,4 @@
-/* wf_dark.c - Roll + Darkroom core (docs/DESIGN.md 3.4), WindyStrife's own code, written from scratch for WindyFilm.
+/* wf_dark.c - Roll + Darkroom core (docs/DESIGN.md 3.5), WindyStrife's own code, written from scratch for WindyFilm.
  *
  * The roll (wf_task, wf_roll_poll): the roll file through wf_fio.h, the requests of the UI / menu, frame detection from
  * Canon's file number while Canon is idle, RAW+L and image review while a roll is in the camera, the HUD over LiveView.
@@ -255,7 +255,7 @@ static void roll_req(void)
         } else if (wf_roll_load(&roll, req_film, req_exp, D, F) == 0) {
             int rc = wf_loaded() == req_film ? WF_LOAD_OK : wf_load(req_film);
             wf_log("roll: %03d loaded, %s x%d at %d/%04d (film load %d)", roll.num, f ? f->name : "?", roll.exp, D, F, rc);
-            if (WF_RAWB_CAN && wf_rawb) {        /* one mode at a time (DESIGN 3.4): a roll or RAW develop B */
+            if (WF_RAWB_CAN && wf_rawb) {        /* one mode at a time (DESIGN 3.5): a roll or RAW develop B */
                 wf_rawb = 0;
                 wf_log("roll: RAW develop off (one mode at a time)");
             }

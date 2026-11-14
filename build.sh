@@ -93,7 +93,7 @@ cc wf_catalog.o  $MODFLAGS $B/wf_catalog.c
 # RAW develop "B" (wf_rawb.c; EOS M: the develop wf_dev.c at -O2 + its span kernel in ARMv5TE asm as one object like
 # wf_logout.o, and the buffer check wf_rsrc.c; 5D2: wf_rawb.c's stubs only, WF_RAWB_CAN 0)
 cc wf_rawb.o     $MODFLAGS $S/wf_rawb.c
-if [ $CAM = EOSM ]; then
+if true; then                                   # RAW develop "B": the develop + the buffer check (both cameras)
   $PY $R/tools/mk_devmat.py --check $S/wf_dev.c
   $CC $MODFLAGS -O2 -c -o $O/wf_dev_c.o $S/wf_dev.c
   $CC -mcpu=arm946e-s -marm -c -o $O/wf_dev_arm.o $S/wf_dev_arm.S

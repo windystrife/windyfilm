@@ -43,21 +43,21 @@ MODE_MAX = 16                     # fr_modes.h FR_MODE_MAX: 13..16 Canon Log (ow
 NAME_CH, SHORT_CH, SHORT_PX, LINE_CH, LINE_PX = 24, 11, 66, 44, 440
 FONT_UBUNTU = os.environ.get("WF_FONT", "/usr/share/fonts/truetype/ubuntu/UbuntuSans[wdth,wght].ttf")
 KINDS = ("COLOUR NEG", "SLIDE", "B&W NEG", "CINE NEG", "FILM LUT")
-FMTS = ("35mm", "120", "V-Log")
+FMTS = ("35mm", "120", "V-Log", "Standard")
 GROUPS = ("colour", "cine", "bw", "lut")
 PRINTS = ("scan", "cine", "paper")
 PSUFFIX = {"scan": "", "cine": "_C", "paper": "_P"}
 MAKER = "WindyStrife"
 PSTYLE_NEUTRAL = 0x84
-FLUT_N = 23                       # fr_loglut.h FR_FLUT_N: Technical + 4 film cubes + the owner's 6 (V11) + EKTA P (V13) + 11 Tung (V14T); a LUT can's `lut` is 1..FLUT_N - 1
-FLUT_NAME = ("Technical", "Vision3 250D", "Vision3 500T", "Portra 400", "Pro 400H",          # fr_plus.c fr_flut_name (docs)
-             "Fuji 3513", "Kodak 2383 v3", "Kodak 2383 v5", "Kodak Ektar", "Tung Neutral", "Luca Bono", "Tung EKTA P",
-             "Tung 250D P", "Tung 250D M", "Tung 500T P", "Tung 500T M", "Tung EKTA M", "Tung EKTAa P", "Tung EKTAa M",
-             "Tung EXR P", "Tung EXR M", "Tung EXRa P", "Tung EXRa M")
+FLUT_N = 24                       # src/wf_loglut.h WF_FLUT_N: Technical + 4 film cubes + the owner's 6 (V11) + EKTA P (V13) + 11 Windy (V14T, named Windy 11-14) + Leica Vivid (11-14); a LUT can's `lut` is 1..FLUT_N - 1
+FLUT_NAME = ("Technical", "Vision3 250D", "Vision3 500T", "Portra 400", "Pro 400H",          # src/wf_loglut.c wf_flut_name
+             "Fuji 3513", "Kodak 2383 v3", "Kodak 2383 v5", "Kodak Ektar", "Windy Neutral", "Luca Bono", "Windy EKTA P",
+             "Windy 250D P", "Windy 250D M", "Windy 500T P", "Windy 500T M", "Windy EKTA M", "Windy EKTAa P", "Windy EKTAa M",
+             "Windy EXR P", "Windy EXR M", "Windy EXRa P", "Windy EXRa M", "Leica Vivid")
 FLUT_VL = (None, "V250D_VL.CUB", "V500T_VL.CUB", "PRT400VL.CUB", "FP400HVL.CUB",             # fr_loglut.c fr_loglut_name(b, 2, l, 0)
            "FJ3513VL.CUB", "KD83V3VL.CUB", "KD83V5VL.CUB", "EKTAR5VL.CUB", "TUNGNTVL.CUB", "LBONO_VL.CUB", "EKTAP_VL.CUB",
            "T250DPVL.CUB", "T250DMVL.CUB", "T500TPVL.CUB", "T500TMVL.CUB", "TEKTAMVL.CUB", "TEKAAPVL.CUB", "TEKAAMVL.CUB",
-           "TEXRP_VL.CUB", "TEXRM_VL.CUB", "TEXRAPVL.CUB", "TEXRAMVL.CUB")
+           "TEXRP_VL.CUB", "TEXRM_VL.CUB", "TEXRAPVL.CUB", "TEXRAMVL.CUB", "LEICAVSR.CUB")   # Leica Vivid: sRGB in, any Log curve
 TYPES = {"neg": 0, "slide": 1, "bw": 2}
 # yg_stocks.c rows and yh_halo.h profiles that exist in this build (a row of a film that is not ready may name a
 # row that a later batch adds; check() asserts the rows of ready films exist)
@@ -88,7 +88,7 @@ FAMILY = {
 LUT_GRAIN, LUT_HALO, LUT_SPK = ("Neg 400", 256), ("neg", 256), ("spk_s", 256)
 
 # strip labels (the text under a can on the browser strip), by id
-SHORT = {26: 'Chrome', 27: 'Classic Neg', 28: 'Pro Neg Std', 29: 'Eterna', 30: 'Chungking', 31: 'Cine 250D', 32: 'Portra 160', 33: 'Portra 400', 34: 'Gold 200', 35: 'Cine 800T', 37: 'Tri-X 400', 38: 'Superia 400', 39: 'Ektar 100', 40: 'UltraMax', 41: 'HP5 Plus', 43: 'Portra 800', 44: 'Pro 400H', 45: 'T-Max 100', 46: 'P3200', 47: 'XP2 Super', 48: 'ColorPlus', 50: 'Cine 50D', 53: 'Delta 100', 54: 'Pan F 50', 55: 'Acros 100', 56: 'Foma 100', 57: 'Lomo 800', 59: 'Azure', 60: 'Pan 200', 61: 'FP4 Plus', 62: 'V3 250D', 63: 'V3 500T', 64: 'Portra LUT', 65: '400H LUT', 66: 'EKTA P', 67: '3513 LUT', 68: '2383 v3', 69: '2383 v5', 70: 'Ektar LUT', 71: 'Neutral', 72: 'Luca Bono', 73: 'Tung 250D P', 74: 'Tung 250D M', 75: 'Tung 500T P', 76: 'Tung 500T M', 77: 'EKTA M', 78: 'EKTAa P', 79: 'EKTAa M', 80: 'EXR P', 81: 'EXR M', 82: 'EXRa P', 83: 'EXRa M'}
+SHORT = {26: 'Chrome', 27: 'Classic Neg', 28: 'Pro Neg Std', 29: 'Eterna', 30: 'Chungking', 31: 'Cine 250D', 32: 'Portra 160', 33: 'Portra 400', 34: 'Gold 200', 35: 'Cine 800T', 37: 'Tri-X 400', 38: 'Superia 400', 39: 'Ektar 100', 40: 'UltraMax', 41: 'HP5 Plus', 43: 'Portra 800', 44: 'Pro 400H', 45: 'T-Max 100', 46: 'P3200', 47: 'XP2 Super', 48: 'ColorPlus', 50: 'Cine 50D', 53: 'Delta 100', 54: 'Pan F 50', 55: 'Acros 100', 56: 'Foma 100', 57: 'Lomo 800', 59: 'Azure', 60: 'Pan 200', 61: 'FP4 Plus', 62: 'V3 250D', 63: 'V3 500T', 64: 'Portra LUT', 65: '400H LUT', 66: 'EKTA P', 67: '3513 LUT', 68: '2383 v3', 69: '2383 v5', 70: 'Ektar LUT', 71: 'Neutral', 72: 'Luca Bono', 73: '250D P', 74: '250D M', 75: '500T P', 76: '500T M', 77: 'EKTA M', 78: 'EKTAa P', 79: 'EKTAa M', 80: 'EXR P', 81: 'EXR M', 82: 'EXRa P', 83: 'EXRa M', 84: 'Leica Vivid'}
 # table variants made per table code (luts/film/src/mk_wfprints.py: Cine = negative -> 2383 print, Paper = negative -> the
 # colour paper of its spektrafilm profile). Films without an entry have the scan look only (no spektrafilm negative:
 # slide, B&W, Fuji / Kodak looks without a profile, effect looks). Film LUT cans have none.
@@ -256,8 +256,8 @@ FILMS = [
            "V9 cube FP400HS3.CUB (spektrafilm profiles, CC BY-SA 4.0)"),
     # the owner's own Resolve power grade "V-Log EKTA P YRGB" (2026-11-13): his 65^3 V-Log export as EKTAP_VL.CUB, the
     # other logs from it (luts_film/src/mk_usercube.py); not shipped, the can shows once his cube is on the card
-    # V14T: "Tung EKTA P", the EKTA P look of the owner's film pack (its V-Log 33^3 cube, or his own 65^3 Resolve export)
-    LUTCAN(66, "LEKTAP", "Tung EKTA P", 100, 72, 5500, 15, 11, "Slide-film look with a cinema print", "finish, applied as a V-Log LUT.",
+    # V14T: "Windy EKTA P" (named Tung until 11-14), the EKTA P look of the owner's film pack (its V-Log 33^3 cube, or his own 65^3 Resolve export)
+    LUTCAN(66, "LEKTAP", "Windy EKTA P", 100, 72, 5500, 15, 11, "Slide-film look with a cinema print", "finish, applied as a V-Log LUT.",
            "owner's film pack V-Log cube EKTAP_VL.CUB (Resolve 33^3 or his 65^3 export), not in the repo"),
     # ---- V12 (owner 2026-11-13 "make cans"): the owner's six V-Log cubes of V11 (Resolve 33^3 from his VlogCube folder,
     # licence unknown: on the cards only, never in the repo) as cans after the four; id 66 is the EKTA P can (V13,
@@ -270,35 +270,41 @@ FILMS = [
            "owner's V-Log cube KD83V5VL.CUB (Resolve 33^3), not in the repo"),
     LUTCAN(70, "LEKTR5", "Kodak Ektar LUT", 100, 72, 5200, 8, 8, "Vivid negative look: punchy colour,", "strong reds, as a V-Log LUT.",
            "owner's V-Log cube EKTAR5VL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(71, "LTUNGN", "Tung Neutral", 400, 88, 5200, 10, 9, "Neutral film look: restrained colour", "and gentle contrast, as a V-Log LUT.",
+    LUTCAN(71, "LTUNGN", "Windy Neutral", 400, 88, 5200, 10, 9, "Neutral film look: restrained colour", "and gentle contrast, as a V-Log LUT.",
            "owner's V-Log cube TUNGNTVL.CUB (Resolve 33^3), not in the repo"),
     LUTCAN(72, "LLBONO", "Luca Bono LUT", 400, 88, 5200, 9, 10, "Graded film look with warm, rich tones,", "applied as a V-Log LUT.",
            "owner's V-Log cube LBONO_VL.CUB (Resolve 33^3), not in the repo"),
-    # ---- V14T (owner 2026-11-13 "make films of these, names starting with Tung"): the eleven other looks of the owner's
+    # ---- V14T (owner 2026-11-13 "make films of these, names starting with Tung"; named "Windy" 11-14 as Film Roll V14U): the eleven other looks of the owner's
     # purchased film pack (its V-Log 33^3 monitoring cubes, the same looks as its Resolve power grades with a flatter
     # curve; on the cards only, never in the repo); id 66 above is their EKTA P. P = 2383 print output, M = simple DI curve.
-    LUTCAN(73, "LT25DP", "Tung 250D P", 250, 83, 5500, 11, 12, "Daylight cine negative with a cinema", "print finish, as a V-Log LUT.",
+    LUTCAN(73, "LT25DP", "Windy 250D P", 250, 83, 5500, 11, 12, "Daylight cine negative with a cinema", "print finish, as a V-Log LUT.",
            "owner's film pack V-Log cube T250DPVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(74, "LT25DM", "Tung 250D M", 250, 83, 5500, 12, 13, "Daylight cine negative with a plain", "intermediate curve, as a V-Log LUT.",
+    LUTCAN(74, "LT25DM", "Windy 250D M", 250, 83, 5500, 12, 13, "Daylight cine negative with a plain", "intermediate curve, as a V-Log LUT.",
            "owner's film pack V-Log cube T250DMVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(75, "LT50TP", "Tung 500T P", 500, 91, 3200, 13, 14, "Tungsten cine negative with a cinema", "print finish, as a V-Log LUT.",
+    LUTCAN(75, "LT50TP", "Windy 500T P", 500, 91, 3200, 13, 14, "Tungsten cine negative with a cinema", "print finish, as a V-Log LUT.",
            "owner's film pack V-Log cube T500TPVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(76, "LT50TM", "Tung 500T M", 500, 91, 3200, 14, 15, "Tungsten cine negative with a plain", "intermediate curve, as a V-Log LUT.",
+    LUTCAN(76, "LT50TM", "Windy 500T M", 500, 91, 3200, 14, 15, "Tungsten cine negative with a plain", "intermediate curve, as a V-Log LUT.",
            "owner's film pack V-Log cube T500TMVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(77, "LTEKTM", "Tung EKTA M", 100, 72, 5500, 16, 16, "Slide-film look with a plain", "intermediate curve, as a V-Log LUT.",
+    LUTCAN(77, "LTEKTM", "Windy EKTA M", 100, 72, 5500, 16, 16, "Slide-film look with a plain", "intermediate curve, as a V-Log LUT.",
            "owner's film pack V-Log cube TEKTAMVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(78, "LTEKAP", "Tung EKTAa P", 100, 72, 5500, 17, 17, "Alternate slide-film look with a cinema", "print finish, as a V-Log LUT.",
+    LUTCAN(78, "LTEKAP", "Windy EKTAa P", 100, 72, 5500, 17, 17, "Alternate slide-film look with a cinema", "print finish, as a V-Log LUT.",
            "owner's film pack V-Log cube TEKAAPVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(79, "LTEKAM", "Tung EKTAa M", 100, 72, 5500, 18, 18, "Alternate slide-film look with a plain", "intermediate curve, as a V-Log LUT.",
+    LUTCAN(79, "LTEKAM", "Windy EKTAa M", 100, 72, 5500, 18, 18, "Alternate slide-film look with a plain", "intermediate curve, as a V-Log LUT.",
            "owner's film pack V-Log cube TEKAAMVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(80, "LTEXRP", "Tung EXR P", 500, 91, 3200, 19, 19, "Classic 500T negative look with a cinema", "print finish, as a V-Log LUT.",
+    LUTCAN(80, "LTEXRP", "Windy EXR P", 500, 91, 3200, 19, 19, "Classic 500T negative look with a cinema", "print finish, as a V-Log LUT.",
            "owner's film pack V-Log cube TEXRP_VL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(81, "LTEXRM", "Tung EXR M", 500, 91, 3200, 20, 20, "Classic 500T negative look with a plain", "intermediate curve, as a V-Log LUT.",
+    LUTCAN(81, "LTEXRM", "Windy EXR M", 500, 91, 3200, 20, 20, "Classic 500T negative look with a plain", "intermediate curve, as a V-Log LUT.",
            "owner's film pack V-Log cube TEXRM_VL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(82, "LTEXAP", "Tung EXRa P", 500, 91, 3200, 21, 21, "Alternate 500T negative look with a cinema", "print finish, as a V-Log LUT.",
+    LUTCAN(82, "LTEXAP", "Windy EXRa P", 500, 91, 3200, 21, 21, "Alternate 500T negative look with a cinema", "print finish, as a V-Log LUT.",
            "owner's film pack V-Log cube TEXRAPVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(83, "LTEXAM", "Tung EXRa M", 500, 91, 3200, 22, 22, "Alternate 500T negative look with a plain", "intermediate curve, as a V-Log LUT.",
+    LUTCAN(83, "LTEXAM", "Windy EXRa M", 500, 91, 3200, 22, 22, "Alternate 500T negative look with a plain", "intermediate curve, as a V-Log LUT.",
            "owner's film pack V-Log cube TEXRAMVL.CUB (Resolve 33^3), not in the repo"),
+    # ---- 11-14: "Leica Vivid", the owner's Lumix "L Leica 2" look, a display cube made on Picture Style Standard (sRGB in,
+    # sRGB out; the S9's Real Time LUT puts it on Standard). Owner 11-14: "grade tren srgb luon ko ra vlog dau": the cube
+    # reads the Standard JPEG's sRGB codes directly, no V-Log on the way (wf_loglut.h WF_FLUT_DISP, wf_ll_disp), no auto
+    # exposure, and its load sets Picture Style Standard. Name only: no logo, mark or house colour of the camera maker.
+    dict(LUTCAN(84, "LLEICV", "Leica Vivid", 100, 72, 5200, 23, 23, "A look on the camera's Standard picture,", "not a log or film look.",
+           "owner's Lumix L Leica 2 display cube (sRGB in, sRGB out, 33^3) as LEICAVSR.CUB, not in the repo"), fmt="Standard"),
 ]
 # the author's codes (no own code may equal one; generic notations only, PLAN 5.1)
 AUTHOR_CODE_RULE = "no code equal to one of the author's (P160 .. XP2): checked against tools/brandscan.py's list"

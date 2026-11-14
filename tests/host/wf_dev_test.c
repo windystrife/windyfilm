@@ -21,6 +21,8 @@
  *                                 the develop vs Log + LUT of Canon's JPEG on flat blocks (with A1's curve when
  *                                 dev_a1ref made ref_a1.uyvy + dec.bin: raw-unclipped blocks checked, clipped blocks
  *                                 reported); the sRGB base develop vs the JPEG
+ *   wf_dev_test leica DIR CUBE [H S]  a dev_cr2.sh KEEP=1 pair through Leica Vivid on B (WF_DEV_DISP: the sRGB develop,
+ *                                 then the display cube on the sRGB codes): DIR/dev_srgbr.uyvy, DIR/dev_leica.uyvy
  * Cubes are written by the test itself (synthetic "film" cubes) into the current directory. Last line:
  *   RESULT dev <mode>: N pass, M fail */
 #include <math.h>
@@ -695,6 +697,64 @@ static void mode_cr2(const char *dir, int x0, int y0)
     free(raw); free(jpg); free(dev); free(ref); free(ref_a1); free(scr);
 }
 
+/* leica DIR CUBE [H S]: one real EOS M shot (dev_cr2.sh KEEP=1 files, dec.bin when A1 made it) through the Leica Vivid
+   path of RAW develop B: the sRGB develop with the film shoulder (j.roll 1, as wf_rawb.c), then the display cube on the
+   sRGB codes (WF_DEV_DISP, no log step). Writes dev_srgbr.uyvy (the develop alone) and dev_leica.uyvy. */
+static void mode_leica(const char *dir, const char *cube, int hl, int sh)
+{
+    char path[512];
+    int W = 0, H = 0, pitch = 0, iso = 0, wb[4], dx = 99, dy = 99, jw = 0, jh = 0, wmeas = 0;
+    double blk = 0, pk = 0;
+    FILE *f;
+    snprintf(path, sizeof path, "%s/meta.txt", dir);
+    if ((f = fopen(path, "r"))) {
+        int n = fscanf(f, "%d %d %d %d %lf %d %d %d %d %d", &W, &H, &pitch, &iso, &blk, &wb[0], &wb[1], &wb[2], &wb[3],
+                       &wmeas);
+        CHECK(n == 9 || n == 10, "meta.txt");
+        fclose(f);
+    }
+    snprintf(path, sizeof path, "%s/align.txt", dir);
+    if ((f = fopen(path, "r"))) {
+        CHECK(fscanf(f, "%d %d %lf %d %d", &dx, &dy, &pk, &jw, &jh) == 5, "align.txt");
+        fclose(f);
+    }
+    CHECK(W > 0 && jw > 0 && dx == 0 && dy == 0, "%s: meta.txt / align.txt", dir);
+    if (W <= 0 || jw <= 0) return;
+    uint8_t *raw = malloc((size_t)H * pitch + 16);
+    uint32_t *jpg = malloc((size_t)jw * jh * 2), *dev = malloc((size_t)jw * jh * 2);
+    CHECK(read_all(dir, "raw.r14", raw, (size_t)H * pitch) == 0 && read_all(dir, "jpeg.uyvy", jpg, (size_t)jw * jh * 2) == 0,
+          "%s: raw.r14 / jpeg.uyvy", dir);
+    struct wf_dev_job j;
+    memset(&j, 0, sizeof j);
+    j.raw = raw; j.pitch = pitch;
+    j.ax0 = 72; j.ay0 = 52; j.ax1 = W; j.ay1 = H;
+    j.x0 = 84; j.y0 = 64; j.w = jw; j.h = jh;
+    int wtab = iso == 100 ? 13582 : iso == 160 || iso == 320 ? 12636 : iso == 200 ? 15303 : 15200;
+    j.black = (int)(blk + 0.5); j.white = wmeas > j.black + 4096 ? wmeas : wtab; j.cfa = 0;
+    j.canon = jpg; j.canon_y0 = 0; j.canon_h = jh;
+    j.roll = 1;
+    static uint32_t dec[1022];
+    if (read_all(dir, "dec.bin", dec, sizeof dec) == 0)
+        j.dec = dec;                                 /* Canon's frame decoded with its own curve for the WB fit */
+    void *scr = malloc(wf_dev_scratch_bytes(jw, jh));
+    struct wf_dev_stat st;
+    struct wf_ll_info inf;
+    for (int pass = 0; pass < 2; pass++) {
+        int rc = pass ? wf_dev_build_disp(D, WF_DEV_EOSM, cube, 0, hl, sh, &inf)
+                      : wf_dev_build(D, WF_DEV_SRGB, 0, WF_DEV_EOSM, 0, 0, 0, &inf);
+        CHECK(rc == 0, "%s: build %s rc %d line %d", dir, pass ? "disp" : "srgb", rc, inf.line);
+        if (rc) break;
+        rc = wf_dev_prepare(scr, D, &j, &st);
+        CHECK(rc == 0, "%s: prepare %d", dir, rc);
+        if (rc) break;
+        wf_dev_rows(scr, 0, jh, dev, jw * 2);
+        write_all(dir, pass ? "dev_leica.uyvy" : "dev_srgbr.uyvy", dev, (size_t)jw * jh * 2);
+        printf("leica %s: %s, ISO %d, black %d white %d, roll %d, wb src %d, h %d s %d\n", dir, pass ? "disp" : "srgb",
+               iso, j.black, j.white, st.roll, st.wb_src, hl, sh);
+    }
+    free(raw); free(jpg); free(dev); free(scr);
+}
+
 static void mode_bad(void)
 {
     struct sc_shot s;
@@ -1027,6 +1087,8 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "roll")) mode_roll();
     else if (!strcmp(mode, "rsrc")) mode_rsrc();
     else if (!strcmp(mode, "pick") && argc > 3) mode_pick(argc - 2, argv + 2);
+    else if (!strcmp(mode, "leica") && argc > 3)
+        mode_leica(argv[2], argv[3], argc > 5 ? atoi(argv[4]) : 0, argc > 5 ? atoi(argv[5]) : 0);
     else if (!strcmp(mode, "cr2") && argc > 2) mode_cr2(argv[2], argc > 4 ? atoi(argv[3]) : 84, argc > 4 ? atoi(argv[4]) : 64);
     else if (!strcmp(mode, "look") && argc > 4)
         mode_look(argv[2], argv[3], atoi(argv[4]), argc > 5 ? atoi(argv[5]) : 128, argc > 6 ? atoi(argv[6]) : 0,

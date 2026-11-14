@@ -93,14 +93,22 @@ Final screenshots: notes folder `windyfilm-ui/`.
   - ML's `bmp_on()` writes Canon's 256 values back, and `bmp_off()` makes them all transparent.
 
 **UI task.**
-- `wf_ui_open()` (from the GUI task on the open key, or from wf_task after the menu entry) only starts the task
-  "wf_ui" (prio 0x1E, 8 KB stack).
+- `wf_ui_open()` (from the GUI task on the open key, or from wf_task after the menu entry) claims the open under `cli`
+  and only starts the task "wf_ui" (prio 0x1B: above the film worker 0x1C, which starved the old 0x1E task for the
+  seconds of a shot's develop; 8 KB stack). A failed `task_create` leaves it closed.
+- The task beats (`hb`, `phase`) at every step. `wf_ui_key()` passes a key on and asks the task to close when there was
+  no beat for 2 s (log `ui: no beat for N ms (state S, phase P)`, phases at the top of wf_ui.c); the task is never
+  declared closed from outside, it gives the screen back when it runs.
 - On start, the task:
   - stops the ML menu if it is shown;
   - builds the list (ready films, by group then `order`);
   - opens both packs;
+  - 5D2: asks Canon for a dialog under the browser (mode 2 without LV, 38 in LV with the bitmap muted; none while
+    recording; DESIGN 5);
   - calls `canon_gui_disable_front_buffer()`, which is the EOS M patch 0003 screen take and may sleep up to about 480 ms;
   - takes the palette.
+- SET that loads a film: the load animation (`wfui_render_anim`, ~1.15 s, only its panel is drawn again per frame),
+  then close; 5D2 opened without LV: `force_liveview()` after the screen is Canon's (state CLOSING: keys pass on).
 - Every 20 ms it:
   - handles the queued keys;
   - checks `wf_gen()`;
@@ -118,11 +126,12 @@ Final screenshots: notes folder `windyfilm-ui/`.
 
 | key | action | EOS M | 5D2 |
 |---|---|---|---|
-| PRESS_LEFT / RIGHT | film, across groups | arrows | joystick |
+| PRESS_LEFT / RIGHT | film, across groups (5D2 editing: row value) | arrows | joystick |
 | PRESS_UP / DOWN | row (wraps) | arrows | joystick |
-| WHEEL_LEFT / RIGHT | focused row value -1 / +1 | rear ring | top dial |
-| WHEEL_UP / DOWN | focused row value -1 / +1 | - | rear wheel |
-| PRESS_SET / JOY_CENTER | load (`wf_load`) | ring centre (patch 0002) | SET, joystick press |
+| WHEEL_LEFT / RIGHT | focused row value -1 / +1 | rear ring | top dial (in LV only under mode 38) |
+| WHEEL_UP / DOWN | focused row value -1 / +1 | - | rear wheel (in LV only under mode 38) |
+| PRESS_SET | load (`wf_load`), then the animation and close | ring centre (patch 0002) | SET |
+| JOY_CENTER | EOS M: load; 5D2: edit the focused row on / off | | joystick press |
 | Q / PICSTYLE / TOUCH_1_FINGER | next group (selection kept per group) | 1-finger tap | Pict.Style |
 | INFO | overlay on / off | INFO | INFO |
 | MENU / TRASH / PLAY / LV | close (consumed) | MENU, 2-finger tap (patch: MENU) | MENU, TRASH |
@@ -133,7 +142,9 @@ Final screenshots: notes folder `windyfilm-ui/`.
   - fires on MODULE_KEY_TRASH, with no ML menu and gui_state IDLE;
   - on EOS M, long DOWN arrives as TRASH (patch 0002), and it also needs stills LiveView (Canon's LV Set dialog only
     comes up there);
-  - on 5D2, it fires on TRASH anywhere outside playback.
+  - on 5D2, it fires on TRASH anywhere outside playback; the browser first asks Canon for GUI mode 2 without LiveView
+    (display on) or 38 in LiveView (dials), as ML's menu (DESIGN 5), mode 0 again on close.
+- Every key passes on while no beat came for 2 s, and while the task starts LiveView after a load (CLOSING).
 
 **Strip.**
 - 11 slots, `x = -20 + 72 i`.

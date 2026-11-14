@@ -43,6 +43,11 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
     Trang chi tiết ....... INFO
     Đóng ................. MENU hoặc chạm 2 ngón
   Bấm nửa nút chụp: giao diện đóng, chụp như thường.
+- SET nạp phim: hiện hoạt cảnh nạp phim khoảng 1 giây, rồi giao diện tự đóng
+  và về LiveView. Bấm phím bất kỳ trong lúc hoạt cảnh để đóng ngay. Phim đã
+  nạp rồi hoặc lỗi thì giao diện vẫn mở như cũ, kèm dòng báo.
+- Nếu giao diện không lên được ngay (ví dụ máy đang xử lý ảnh vừa chụp), sau
+  2 giây các phím lại về Canon / menu ML: chạm 2 ngón vẫn mở menu ML.
 - Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
   WB của bạn được trả lại khi về Auto hoặc khi tắt module.
 - Hàng Print: Scan / Cine print / Paper (chỉ với phim có mô hình in).
@@ -52,6 +57,17 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
   danh sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.
+- Lon Leica Vivid (nhóm Film LUT, cần ML/data/LEICAVSR.CUB): look "L Leica 2"
+  của Lumix đặt lên ảnh Picture Style Standard, như preset Real Time LUT của
+  S9 (Standard + LUT). Đây KHÔNG phải look cho log: cube áp thẳng lên màu sRGB
+  của JPEG Standard, không qua V-Log hay log nào. Menu ghi "Leica Vivid (look
+  on Standard)". Nạp lon thì module chuyển Picture Style sang Standard
+  (Neutral cũng chạy, màu nhạt hơn). Lon này luôn đọc JPEG như sRGB, bất kể
+  Input curve và Log curve, và không tự bù sáng (LUT EI vẫn chỉnh tay được).
+  Lần đầu nạp cube mất vài giây, sau đó dùng cache .FRT.
+- 13 lon "Tung" cũ giờ tên "Windy ...": Windy Neutral, Windy EKTA P,
+  Windy 250D P / M, Windy 500T P / M, Windy EKTA M, Windy EKTAa P / M,
+  Windy EXR P / M, Windy EXRa P / M. Tên file cube trên thẻ giữ nguyên.
 - Input curve (cho Log + LUT và lon Film LUT): sRGB, Canon Film 1 hoặc Canon
   Neutral. Module đảo đúng đường cong của style đó, đo từ ảnh RAW+L của bạn:
     Canon Film 1:  nạp file Film 1 vào User Def. 1, Contrast -2, rồi chọn
@@ -118,6 +134,10 @@ Bật:
   có màu phim thường (8-bit), log ghi lý do.
 - Highlights / Shadows có tác dụng với phim. Với Log + LUT khi RAW develop
   đang bật thì chưa có tác dụng (bản thử này).
+- Lon Leica Vivid (mới từ thẻ RAWB3): RAW develop cũng develop Leica từ RAW:
+  RAW ra sRGB rồi áp thẳng cube gốc "L Leica 2" 33^3 lên mã sRGB, không qua
+  V-Log. Cần file ML/DATA/LEICAVSR.CUB (cube gốc, đã có trên thẻ).
+  Highlights / Shadows có tác dụng; grain / halation như phim.
 - Khi RAW develop Off, thẻ này chạy giống thẻ EOSM_WindyFilm (cùng bản main,
   có RAW probe v2 và Highlights / Shadows).
 - Dòng menu báo trạng thái: đang nạp bảng, sẵn sàng ("About 30 s per shot"),
@@ -142,6 +162,7 @@ Cần thử và gửi lại:
 2. 1-2 tấm với Output Log và Log + LUT.
 3. Một lần dừng bằng nửa nút chụp, và (nếu dám) một lần tắt máy giữa chừng.
 4. Một loạt chụp liên tục 3 tấm khi RAW develop On (phải ra màu phim thường).
+5. 1-2 tấm lon Leica Vivid với RAW develop On, kèm cùng cảnh với RAW develop Off.
 Gửi: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG của những tấm đó (cả tấm Off).
 Mỗi tấm có các dòng "rawb: ..." trong log: bộ đệm RAW đã chọn, điểm khớp,
 mức đen / trắng và thời gian từng bước.

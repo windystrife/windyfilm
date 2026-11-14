@@ -30,16 +30,26 @@ Grain và Halation mặc định tắt trên 5D2 (mỗi nửa ảnh tốn vài g
 2. DÙNG
 -------
 - Menu ML: Shoot > WindyFilm. Mở trình chọn phim bằng "Open film browser",
-  hoặc bấm TRASH (không mở trong chế độ xem ảnh, nơi TRASH là xoá).
+  hoặc bấm TRASH (không mở trong chế độ xem ảnh, nơi TRASH là xoá). Có
+  LiveView hay ngắm qua kính đều mở được. Ngắm qua kính thì màn hình tự bật
+  lên như khi mở menu ML (có thể thấy menu Canon loé lên một chút).
 - Trong trình chọn phim:
     Đổi phim ............. joystick trái / phải
     Chọn hàng ............ joystick lên / xuống
-    Đổi giá trị hàng ..... bánh xe trên hoặc bánh xe sau
-    Nạp phim ............. SET hoặc nhấn joystick
+    Đổi giá trị hàng ..... bánh xe trên hoặc bánh xe sau (cả khi có LiveView)
+    Sửa hàng bằng joystick nhấn joystick, rồi trái / phải đổi giá trị;
+                           nhấn joystick lần nữa để thôi (thanh phím dưới
+                           cùng ghi "JOY Edit" / "JOY Done")
+    Nạp phim ............. SET
     Nhóm kế tiếp ......... Picture Style
     Trang chi tiết ....... INFO
     Đóng ................. MENU hoặc TRASH
   Bấm nửa nút chụp: giao diện đóng, chụp như thường.
+- SET nạp phim: hiện hoạt cảnh nạp phim khoảng 1 giây, rồi giao diện tự đóng
+  và về LiveView. Mở từ kính ngắm (không LiveView) thì máy tự bật LiveView sau
+  khi nạp. Bấm phím bất kỳ trong lúc hoạt cảnh để đóng ngay; bấm nửa nút chụp
+  thì đóng và không bật LiveView. Phim đã nạp rồi hoặc lỗi thì giao diện vẫn
+  mở như cũ, kèm dòng báo.
 - Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
   WB của bạn được trả lại khi về Auto hoặc khi tắt module.
 - Hàng Print: Scan / Cine print / Paper (chỉ với phim có mô hình in).
@@ -49,6 +59,17 @@ Grain và Halation mặc định tắt trên 5D2 (mỗi nửa ảnh tốn vài g
   danh sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.
+- Lon Leica Vivid (nhóm Film LUT, cần ML/data/LEICAVSR.CUB): look "L Leica 2"
+  của Lumix đặt lên ảnh Picture Style Standard, như preset Real Time LUT của
+  S9 (Standard + LUT). Đây KHÔNG phải look cho log: cube áp thẳng lên màu sRGB
+  của JPEG Standard, không qua V-Log hay log nào. Menu ghi "Leica Vivid (look
+  on Standard)". Nạp lon thì module chuyển Picture Style sang Standard
+  (Neutral cũng chạy, màu nhạt hơn). Lon này luôn đọc JPEG như sRGB, bất kể
+  Input curve và Log curve, và không tự bù sáng (LUT EI vẫn chỉnh tay được).
+  Lần đầu nạp cube mất vài giây, sau đó dùng cache .FRT.
+- 13 lon "Tung" cũ giờ tên "Windy ...": Windy Neutral, Windy EKTA P,
+  Windy 250D P / M, Windy 500T P / M, Windy EKTA M, Windy EKTAa P / M,
+  Windy EXR P / M, Windy EXRa P / M. Tên file cube trên thẻ giữ nguyên.
 - Input curve (cho Log + LUT và lon Film LUT): sRGB, Canon Film 1 hoặc Canon
   Neutral. Hai đường cong đo trên EOS M (Film 1: file trong User Def. 1,
   Contrast -2; Neutral: Contrast 0); trên 5D2 chưa kiểm, cứ để sRGB nếu không
@@ -94,7 +115,51 @@ còn nguyên trong RAM hay không, và mỗi nửa ảnh nằm ở đâu trong R
 - Probe tự tắt mỗi lần bật máy (không lưu vào cấu hình).
 
 
-5. FILE TRÊN THẺ
+5. RAW DEVELOP "B" (CHẬM): BẢN THỬ, ĐÃ PROBE, CHƯA THỬ DEVELOP TRÊN MÁY
+------------------------------------------------------------------------
+Mục đích: màu phim làm từ chính file RAW 14-bit của Canon thay cho JPEG 8-bit.
+Mỗi ảnh khoảng 35-45 giây (nửa trên rồi nửa dưới). Develop chưa chạy trên máy
+thật.
+
+RAW probe trên máy (14/11, thư mục 5D2_probe_ketqua): ở cả nửa trên và nửa
+dưới, RAM có đúng RAW của tấm vừa chụp. Địa chỉ cũ lệch một hàng (đọc từ hàng
+1 của CR2); thẻ RAWB3 đọc từ hàng 0 nên đã đúng. RAW develop trên thẻ này thử
+được, nhưng chưa ai thử trên máy. Thẻ 5D2_WindyFilm_RAWB2 còn địa chỉ cũ:
+dùng thẻ đó thì để RAW develop Off.
+Mỗi ảnh module vẫn so RAW với JPEG của Canon trước khi develop; không khớp thì
+ảnh ra màu phim thường (8-bit) và log ghi "rawb: 8-bit (buffer nomatch ...)"
+kèm điểm số.
+
+Trình chọn phim (mới từ thẻ RAWB3): mở được cả khi ngắm qua kính, không cần
+LiveView (mục 2). Bấm TRASH mà không mở thì log ghi "ui: TRASH not taken: ...".
+
+Bật:
+- Shoot > WindyFilm > RAW develop: "On (slow)". Mỗi lần bật máy nó tự về Off.
+- Chất lượng ảnh RAW + L (JPEG L Fine). Drive: chụp đơn hoặc hẹn giờ. Chụp liên
+  tục, M / S RAW, chỉ JPEG: màu phim thường như cũ.
+
+Chụp:
+- Chụp từng tấm, chờ hết thông báo "RAW develop NN%" (hiện hai lần: nửa trên,
+  nửa dưới). Trong lúc đó máy bận, chưa chụp tấm sau được: bình thường.
+- 8 điểm ảnh sát mép trái và phải mỗi ảnh vẫn là ảnh của Canon (màu phim
+  thường); phần còn lại là RAW develop.
+- Dừng: giữ nửa nút chụp khoảng 2 giây. Nửa trên dừng giữa chừng thì cả ảnh
+  không có màu phim (phần đã develop + phần JPEG gốc). CR2 không bao giờ bị đổi.
+- Tắt máy giữa chừng: module dừng trong khoảng 1 giây. CHƯA thử trên máy thật;
+  nếu máy treo thì tháo pin, và ghi lại lúc đó đang ở bao nhiêu %.
+- Highlights / Shadows có tác dụng với phim; với Log + LUT khi bật RAW develop
+  thì chưa.
+- Lon Leica Vivid (mới từ thẻ RAWB3): RAW develop cũng develop Leica từ RAW:
+  RAW ra sRGB rồi áp thẳng cube gốc "L Leica 2" 33^3 lên mã sRGB, không qua
+  V-Log. Cần file ML/DATA/LEICAVSR.CUB (cube gốc, đã có trên thẻ).
+  Highlights / Shadows có tác dụng; grain / halation như phim.
+
+Gửi lại: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG (kèm 1 tấm cùng cảnh với
+RAW develop Off). Log có các dòng "rawb: ..." cho từng nửa ảnh: địa chỉ RAW,
+điểm khớp, mức đen / trắng, thời gian từng bước.
+
+
+6. FILE TRÊN THẺ
 ----------------
 ML/modules/windyflm.mo    module
 ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper)

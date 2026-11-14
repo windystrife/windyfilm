@@ -1,4 +1,4 @@
-/* wf_darkp.h - Roll + Darkroom (docs/DESIGN.md 3.4): the pure parts of the darkroom's per-frame work, WindyStrife's own
+/* wf_darkp.h - Roll + Darkroom (docs/DESIGN.md 3.5): the pure parts of the darkroom's per-frame work, WindyStrife's own
  * code. No allocation, no file access, no log, integer only (armv5t, no 64-bit division), so the host test
  * (tests/host/wf_dark_test.c) runs exactly what the camera runs. wf_dark.c (the darkroom task) does the I/O around them.
  *

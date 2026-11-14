@@ -10,8 +10,12 @@
 # ML/LOGS contents). Only WINDYFLM.EN is written to ML/SETTINGS: ML's default config keeps Global Draw on, which the
 # LiveView preview needs. Then: windyflm.mo, the three packs, the readmes and licences, MD5SUMS.txt, and the checks
 # (core pair md5, checksyms, md5sum -c, nothing of EXCLUDE.txt left).
+# CUBES (env, optional): the owner's cubes the source card does not hold, as a space-separated list of files named
+# <NAME>.CUB (no spaces in the path); each is copied unchanged to ML/DATA/<NAME>.CUB and listed in MD5SUMS.txt. Leica
+# Vivid's display cube (fb6bf1d): CUBES=/mnt/f/MagicLatern/LeicaLUT_SR/LEICAVSR.CUB. Never from the repo.
 # Run in WSL: bash tools/mk_card.sh EOSM <the EOS M ML card folder> /mnt/f/MagicLatern/EOSM_WindyFilm
 set -eu
+CUBES=${CUBES:-}
 CAM=$1 SRC=$2 DST=$3
 R=$(cd "$(dirname "$0")/.." && pwd)
 case $CAM in
@@ -22,6 +26,10 @@ esac
 [ -e "$DST" ] && { echo "$DST exists: refusing to overwrite"; exit 2; }
 for f in autoexec.bin ML-SETUP.FIR ML/modules/$SYM; do [ -f "$SRC/$f" ] || { echo "$SRC/$f missing"; exit 2; }; done
 for f in windyflm.mo WFFILMS.DAT WFCANS.DAT WFFONTS.DAT; do [ -s "$B/$f" ] || { echo "$B/$f missing: build first"; exit 2; }; done
+for c in $CUBES; do
+  case ${c##*/} in *.CUB) ;; *) echo "$c: a cube must be named <NAME>.CUB"; exit 2 ;; esac
+  [ -s "$c" ] || { echo "$c missing"; exit 2; }
+done
 [ "$(md5sum < "$SRC/autoexec.bin" | cut -c1-32)" = $AX ] || { echo "autoexec.bin is not the known $CAM core"; exit 2; }
 [ "$(md5sum < "$SRC/ML/modules/$SYM" | cut -c1-32)" = $SX ] || { echo "$SYM is not the known $CAM core"; exit 2; }
 
@@ -39,6 +47,11 @@ printf 1 > "$DST/ML/SETTINGS/WINDYFLM.EN"
 
 cp "$B/windyflm.mo" "$DST/ML/modules/"
 cp "$B/WFFILMS.DAT" "$B/WFCANS.DAT" "$B/WFFONTS.DAT" "$D/"
+for c in $CUBES; do
+  for f in "$D"/${c##*/}; do [ -e "$f" ] && { echo "${f#$DST/} already on the source card: refusing to replace it"; exit 1; }; done
+  cp -p "$c" "$D/"
+  echo "cube: ${c##*/} ($(md5sum < "$c" | cut -c1-32))"
+done
 cp "$R/card/README_WINDYFILM_$CAM.txt" "$DST/README_WINDYFILM.txt"
 for f in "$R"/card/HUONGDAN_*_$CAM.txt; do cp "$f" "$DST/"; done   # the owner's step lists (Vietnamese), when there are any
 cp "$R/card/README_FILMLUT.txt" "$R/card/CHANGELOG_FILMLUT.txt" "$R/licenses/SPEKTRAFILM_LICENSE.txt" \

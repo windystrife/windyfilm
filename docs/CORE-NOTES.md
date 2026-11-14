@@ -91,6 +91,7 @@ Each mode runs in `build/<cam>/test/run/<mode>` (a fresh card), log `build/<cam>
 | LIGHT | Day (film kelvin), Cloudy, Tungsten, Auto restores mode + shift, config keeps userwb, film change follows its kelvin, kelvin changed behind Light's back is set again, unload restores |
 | PRINT | Scan / Cine / Paper rows and shots, wrap, scan-only film greyed, pack without the print = scan, kept across films, greyed for log |
 | HS | Highlights / Shadows: `wf_hs_bend` vs the formula for all 121 pairs (identity and a film's N), never down, `WF_FT_HS` packing; 0 / 0 film sets bit-identical to the builder of 7f9e294 (FNV), h / s change N only; rows (no wrap), film shot + shot / yuv log + EXIF + preview (rebuilt on a change); Log + LUT bent after the load, `.FRT` unbent, grey at the bent N, an h / s change bends again without a load, a new EI loads and bends; flat Log / Off ignore it; `hl` / `sh` saved and read |
+| LEICA | Leica Vivid can 84 / Film LUT 23: catalogue names (no "Tung" left), cube names LEICAVSR.CUB / .FRT for every Log curve, not V-Log only; hidden without LEICAVSR.CUB (the old LEICAVVL.CUB does not count); identity cube on the sRGB codes gives Y' back (<= 1 code), the V-Log path would not; S-Log3 and auto give the same tables; LUT EI +1 EV = light x2 re-encoded (100 -> 138); the .FRT key keeps the two paths apart (bit 19); its load asks for Picture Style Standard once (none when already Standard, none for a Windy can), reads sRGB with Film 1 chosen, no auto exposure (tables = sRGB, auto off), Film LUT row reaches it and asks too, `flut=leicav` |
 | LOGCHK | `wf_log_words` asm vs C reference on all 2^24 (U, V, Y) x 2 sets + random + small + n <= 0, qemu `-cpu arm946` |
 
 Results 2026-11-14: see section 9.
@@ -613,3 +614,57 @@ in rows (10.3), so plan on 32-40 s per shot.
 - Halation on Log + LUT B frames reads graded words, whose highlights sit below 255.
 - IMG_0206: a magenta patch from the highlight rebuild.
 - `wf_dev_levels` can false-trigger on sparse synthetic histograms; real raws gave the right pile-up.
+
+### 10.8 5D2 (2026-11-14, from raw-path P0_5D2_SPEC.md; not probed on the camera)
+
+**Leica Vivid on B** (owner 11-14: "van trang tu raw ay, co ma ko convert qua vlog dau"): `WF_DEV_DISP` in wf_dev.c.
+The SRGB base develop's grid and enc (sRGB code, the film shoulder `j.roll`), nodes = the owner's display cube itself
+(`ML/DATA/LEICAVSR.CUB` = "L Leica 2.cube", 33^3, md5 9740c77f, sRGB in / sRGB out) sampled at those codes: no log curve,
+no V-Log wrapper. LUT EI scales the linear light, no auto exposure; Highlights / Shadows bend each cube output channel with
+wf_hs_bend's curve at build time (key bits 24-31). Grain / halation / mist as every Log + LUT output (wf_colour_fx).
+The JPEG path (8-bit fallback) still uses main's LEICAVVL.CUB.
+
+**5D2 raw base** (probe 11-14, 8 records, TOP and BOT, IMG_4467..4476): MEM1 + 0x76C8 is CR2 row 1 (byte-exact or NCC 1.0000,
+0..1 LSB). B now reads CR2 row 0 at MEM1 + 0x76C8 - pitch; before that its CFA rows were swapped (GBRG read as RGGB).
+
+**Camera layer** (`wf_cam_5d2.c rawb_fill`, at both hooks while the menu is on):
+- gates: RAW + L fine, drive single / self-timer;
+- job handle H: TOP `[0x369C + 0x3C]`, BOT `[0x3630 + 0x2C]`;
+- `H[0] == 0xFFCD0761`, P = H[1], MEM1 = `[P + 0xC68]`;
+- raw = MEM1 + 0x76C8, 5792 x 3804, pitch 10136, GBRG, black 1024. It must sit inside the RscMgr pool below
+  0x5C000000;
+- every pointer is read only where `prb_ok` says it cannot fault;
+- white per ISO is a fallback only: 13300 for the 1/3-stop-down ISOs (ISO 640 measured 13318), 15600 otherwise. The
+  measured pile-up wins.
+
+**Halves** (`wf_rawb.c`):
+- The TOP does the whole of the EOS M stage on its half:
+  - pick: NCC of YUV rows 0..1871 against raw rows 56..;
+  - levels;
+  - prepare, with the WB fit on the TOP half;
+  - rows 0..1871.
+- The BOT continues it only when all of these hold:
+  - same tables generation and key;
+  - same raw address;
+  - raw hash unchanged (`rb_top_*`).
+  It then writes rows 1872..3743 with the TOP's scratch.
+- Otherwise the BOT gets the 8-bit look, with the reason "TOP half not developed" or "raw changed since the TOP half".
+- A stopped TOP is not `WF_ST_TOUCHED`, so the camera layer leaves the BOT plain: no look anywhere on that shot.
+
+**Width:**
+- `wf_dev` needs w as a multiple of 32, and 5616 is not one. So the develop covers columns 8..5607: x0 176, w 5600.
+- `wf_dev_job.canon_pw` (new, 0 = w / 2) lets the WB fit read the 5616-wide half.
+- The 8 edge columns on each side keep Canon's pixels under the 8-bit look.
+
+**Host test** (5D2 RAWB):
+- TOP + BOT bit-exact against the direct develop;
+- no match → 8-bit;
+- raw changed between the hooks → BOT 8-bit;
+- no live job, and MEM1 past 0x5C000000 → not read;
+- gates;
+- half-shutter stop in the TOP.
+
+**Not known until the camera runs:**
+- whether raw0 really holds this shot at both hooks: the P0 probe run answers it;
+- the RearDevelop task's patience while the TOP holds FrontDevelop about 20 s;
+- white levels per ISO.

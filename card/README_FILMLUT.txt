@@ -12,7 +12,9 @@ spektrafilm (GPLv3).
 
 Các cube còn lại trên thẻ (EKTAP, EKTAR5, FJ3513, KD83, LBONO, LEICAV, T250D,
 T500T, TEKAA, TEKTA, TEXRA, TEXRM, TEXRP, TUNGNT) là grade riêng của chủ máy,
-chỉ để dùng trên thẻ này.
+chỉ để dùng trên thẻ này. Các lon TUNGNT / EKTAP / T... giờ tên "Windy ..."
+(Windy Neutral, Windy EKTA P, Windy 250D P, ...); tên file không đổi. LEICAV là
+lon "Leica Vivid": cube hiển thị, xem mục 2.
 
 
 1. TÊN FILE
@@ -41,5 +43,9 @@ thuật "Technical": log -> Rec.709.
   ML/data/<tên>.FRT; các lần sau nạp từ cache. Đợi menu Film LUT hết báo
   "Loading" rồi hãy chụp. Chép đè cube mới thì .FRT tự tạo lại.
 - Cài đặt máy: Picture Style Neutral, Color space sRGB, JPEG L.
+- Riêng Leica Vivid (LEICAVSR.CUB): cube hiển thị làm trên ảnh Picture Style
+  Standard (sRGB vào, sRGB ra). Module áp nó thẳng lên mã sRGB của JPEG, không
+  qua V-Log, nên dùng được với mọi Log curve. Nạp lon thì module tự chuyển
+  sang Standard, bỏ qua Input curve và không tự bù sáng (LUT EI chỉnh tay).
 - Cube không có grain hay halation. Muốn có thì bật Grain / Halation của
   WindyFilm: chúng chạy sau LUT.

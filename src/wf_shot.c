@@ -272,7 +272,8 @@ static void wf_ll_poll(void)
         wf_ll_tabs = __mem_malloc(sizeof *wf_ll_tabs, 0, "wf_shot.c", __LINE__);
     wf_ll_loading = want;
     wf_ll_ei = ei;
-    wf_ll_auto = lut != 0;                       /* Film LUT cubes: exposed for 18 % grey -> 118 (Technical: as is) */
+    wf_ll_auto = lut != 0 && !WF_FLUT_DISP(lut); /* Film LUT cubes: exposed for 18 % grey -> 118 (Technical, Leica Vivid: as is) */
+    wf_ll_disp = WF_FLUT_DISP(lut);              /* Leica Vivid: the cube reads the JPEG's sRGB codes, no log */
     wf_ll_incurve = inc;                         /* a Canon curve slot instead of sRGB (cache key bits 17-18) */
     if (wf_ll_tabs && cp)
         rc = wf_loglut_load_cached(cp, wf_loglut_name(fn, want, lut, 1), want, wf_ll_tabs, in);

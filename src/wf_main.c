@@ -320,7 +320,7 @@ static unsigned int wf_keypress(unsigned int key)
         return 1;
     if (wf_ui_is_open())
         return wf_ui_key(key);
-    if (key == WF_KEY_PLAY && !gui_menu_shown() && wf_roll_blocks_play()) {   /* blind roll (docs/DESIGN.md 3.4) */
+    if (key == WF_KEY_PLAY && !gui_menu_shown() && wf_roll_blocks_play()) {   /* blind roll (docs/DESIGN.md 3.5) */
         NotifyBox(2000, "Roll in camera: develop it in the Darkroom");
         return 0;
     }
@@ -328,6 +328,8 @@ static unsigned int wf_keypress(unsigned int key)
         wf_ui_open();
         return 0;
     }
+    if (key == MODULE_KEY_TRASH)                 /* the next log says why the browser did not come up */
+        wf_ui_open_refused(key, is_play_mode());
     return 1;
 }
 

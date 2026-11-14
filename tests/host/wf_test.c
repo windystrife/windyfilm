@@ -14,6 +14,9 @@
  *   CFG                WINDYFLM.CFG load (every key), save, garbage, oversize, userwb restore at unload
  *   PACK CASE          ok | missing | magic | index | top | fnv | code | dup | flags | real FILE
  *   LIGHT              Day / Cloudy / Tungsten / Auto, film kelvin, user WB back
+ *   LEICA              Leica Vivid can (its cube on the JPEG's sRGB codes, no V-Log; no auto exposure, its load asks
+ *                      for Picture Style Standard),
+ *                      hidden without its cube, Film LUT row, flut=leicav; the Windy names (no Tung left)
  *   PRINT              Scan / Cine / Paper rows and shots, missing variants
  *   5D2                (5D2 build) TOP / BOT pairing: BOT alone, owed BOT, pairing timeout, r1 / RAW gates, Log halves
  *   PROBE [boot]       RAW probe P0. EOS M: off at boot, record + log + WFPROBE.BIN, uncached alias, out-of-pool,
@@ -28,12 +31,13 @@
  *                      right, at the previous shot, 0 -> EDMAC WR0, no match -> the 8-bit look); the gates (JPEG only,
  *                      MRAW, burst, 1:1, no address); stops (power off, half-shutter, time limit: the rest stays
  *                      Canon's); Log and Log + LUT tables; playback / no memory / off give the memory back.
- *                      5D2: the switch changes nothing.
+ *                      5D2: TOP + BOT halves from MEM1 + 0x76C8 (job handles), bit-exact; no match, raw changed between
+ *                      the hooks, no live job, MEM1 past the pool, gates, half-shutter stop in the TOP.
  *   HS                 Highlights / Shadows: wf_hs_bend vs the formula (121 pairs), never down, 0 / 0 bit-identical to the
  *                      film builder before the feature (FNV), only N changes; rows, film shot + log + EXIF + preview; Log +
  *                      LUT bent after the load (.FRT unbent), an h / s change bends again without a load; flat Log / Off
  *                      ignore it; hl / sh in the file
- *   ROLL               Roll + Darkroom in the module (DESIGN 3.4): one mode at a time with RAW develop (a load turns it
+ *   ROLL               Roll + Darkroom in the module (DESIGN 3.5): one mode at a time with RAW develop (a load turns it
  *                      off, RAW develop on closes an empty roll / rewinds one with frames), frames from file number +
  *                      CR2, PLAY blocked while a roll is in the camera, the roll file; 5D2: load refused
  *   LOG [big]         the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
@@ -61,9 +65,7 @@
 #include "wf_probe.h"
 #include "wf_rawb.h"
 #include "wf_dark.h"
-#ifndef WF_BUILD_5D2
 #include "wf_dev.h"
-#endif
 /* this build's input curve decode tables (generated header, static copies for the checks) */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-const-variable"
@@ -289,6 +291,20 @@ static void cube_write(const char *path, int n)
         for (int g = 0; g < n; g++)
             for (int r = 0; r < n; r++)
                 fprintf(f, "%.6f %.6f %.6f\n", r / (double)(n - 1), g / (double)(n - 1), b / (double)(n - 1));
+    fclose(f);
+}
+
+/* a display-referred look cube at size n (sRGB in, sRGB out), not the identity: R a little G, G^1.15, B down and lifted */
+static void dcube_write(const char *path, int n)
+{
+    FILE *f = fopen(path, "w");
+    fprintf(f, "TITLE \"display look %d\"\nLUT_3D_SIZE %d\n", n, n);
+    for (int b = 0; b < n; b++)
+        for (int g = 0; g < n; g++)
+            for (int r = 0; r < n; r++) {
+                double R = r / (double)(n - 1), G = g / (double)(n - 1), B = b / (double)(n - 1);
+                fprintf(f, "%.6f %.6f %.6f\n", 0.92 * R + 0.08 * G, pow(G, 1.15), 0.85 * B + 0.1);
+            }
     fclose(f);
 }
 
@@ -2164,11 +2180,13 @@ static void rb_raw(uint8_t *raw, const uint32_t *src)
     }
 }
 /* the develop of RB_A called directly, the way wf_rawb_stage does it (levels, then prepare on Canon's frame, rows) */
+static int rb_ref_hl, rb_ref_sh;                 /* WF_DEV_DISP: Highlights / Shadows of the reference */
 static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
 {
     static struct wf_dev_tabs T;
     struct wf_ll_info inf;
-    int rc = wf_dev_build(&T, src, 0, WF_DEV_EOSM, 0, 0, 0, &inf);
+    int rc = src == WF_DEV_DISP ? wf_dev_build_disp(&T, WF_DEV_EOSM, "ML/DATA/LEICAVSR.CUB", 0, rb_ref_hl, rb_ref_sh, &inf)
+                                : wf_dev_build(&T, src, 0, WF_DEV_EOSM, 0, 0, 0, &inf);
     void *scr = memalign(32, wf_dev_scratch_bytes(FW, FH));
     struct wf_dev_job j;
     memset(&j, 0, sizeof j);
@@ -2342,6 +2360,35 @@ static void t_rawb(void)
     chk(LOGW("rawb: tables cube c2 VLOG.CUB", 60000), "Log + LUT: '%s'", log_line("rawb: tables"));
     rb_stopped("Log + LUT", "buf 0 52000000 of 3,");
     chk(strstr(log_line("rawb: black"), "roll 1") != 0, "Log + LUT: shoulder on ('%s')", log_line("rawb: black"));
+    /* Leica Vivid (WF_FLUT_DISP): raw -> the sRGB develop -> the owner's display cube on the sRGB codes, no log step */
+    {
+        char nb[WF_LL_NAME];
+        cube_write(wf_loglut_name(nb, WF_CURVE_VLOG, WF_FLUT_LEICAV, 0), 5);   /* the JPEG path's cube */
+        dcube_write("ML/DATA/LEICAVSR.CUB", 33);
+        uint32_t *l0 = malloc(NW * 4);
+        log_mark();
+        wf_flut = WF_FLUT_LEICAV;
+        chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 30000), "Leica Vivid: '%s'", log_line("rawb: tables"));
+        rb_ref_hl = rb_ref_sh = 0;
+        rb_ref(ref, in, WF_DEV_DISP, 1);
+        log_mark();
+        sb = shot(in, out, FW, FH);
+        chk(sb == 0 && LOGW("rawb: done", 3000) && ndiff(out, ref, NW) == 0,
+            "Leica Vivid shot: bit-exact vs the sRGB develop + display cube (%d words differ)", ndiff(out, ref, NW));
+        memcpy(l0, out, NW * 4);
+        log_mark();
+        wf_hl = 2; wf_sh = -2;
+        chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 30000), "Leica Vivid +2 / -2: tables again");
+        rb_ref_hl = 2; rb_ref_sh = -2;
+        rb_ref(ref, in, WF_DEV_DISP, 1);
+        log_mark();
+        sb = shot(in, out, FW, FH);
+        chk(sb == 0 && LOGW("rawb: done", 3000) && ndiff(out, ref, NW) == 0 && ndiff(out, l0, NW) > NW / 4,
+            "Leica Vivid +2 / -2: bit-exact (%d words differ), bent (%d words moved)", ndiff(out, ref, NW), ndiff(out, l0, NW));
+        wf_hl = wf_sh = 0; rb_ref_hl = rb_ref_sh = 0;
+        wf_flut = 0;
+        free(l0);
+    }
     log_mark();
     wf_out = WF_OUT_FILM;
     chk(LOGW("rawb: tables srgb", 10000), "back to the film: base tables again");
@@ -2376,27 +2423,247 @@ static void t_rawb(void)
     free(alt); free(rb_dev);
 }
 #else
-/* 5D2: no RAW develop (WF_RAWB_CAN 0): the switch is there in the state only and changes nothing */
+/* 5D2: RAW develop "B" over Canon's TOP + BOT halves. CR2 row 0 sits at MEM1 + 0x76C8 - pitch (MEM1 = R5_M1, named by the job
+ * handles of p5_job as wf_cam_5d2.c reads them), 5792 x 3804, pitch 10136, GBRG, black 1024. */
+#define R5_M1     0x54000000u
+#define R5_RAW    (R5_M1 + 0x76C8u - R5_PITCH)   /* CR2 row 0: MEM1 + 0x76C8 is row 1 (probe 11-14) */
+#define R5_PITCH  10136
+#define R5_RW     5792
+#define R5_RH     3804
+#define R5_MAPN   0x2500000u
+#define R5_ROWW   (FW / 2)
+static uint32_t *r5_map;                         /* mapped in main() first (before the frame mallocs) */
+static void r5_pack14(const uint16_t *v, uint8_t *dst, int npx)   /* ML raw_pixblock: 8 px in 14 bytes */
+{
+    uint16_t *d = (uint16_t *)dst;
+    for (int i = 0; i < npx; i += 8, v += 8, d += 7) {
+        uint32_t a = v[0], b = v[1], c = v[2], e3 = v[3], e = v[4], f = v[5], g = v[6], h = v[7];
+        d[0] = (uint16_t)(a << 2 | b >> 12);
+        d[1] = (uint16_t)((b & 4095) << 4 | c >> 10);
+        d[2] = (uint16_t)((c & 1023) << 6 | e3 >> 8);
+        d[3] = (uint16_t)((e3 & 255) << 8 | e >> 6);
+        d[4] = (uint16_t)((e & 63) << 10 | f >> 4);
+        d[5] = (uint16_t)((f & 15) << 12 | g >> 2);
+        d[6] = (uint16_t)((g & 3) << 14 | h);
+    }
+}
+/* a neutral raw of Canon's frame src: photosite (168 + x, 56 + y) = sRGB decode of Y x 15000 DN x the channel gain
+ * (GBRG: G at even x of even rows), noise +-8, clipped at 14600; masked columns (x < 160) / rows < 52 at black */
+static void r5_raw(uint8_t *raw, const uint32_t *src)   /* the same noise every call (a raw can be made again) */
+{
+    rs = 0x2468ACE1u;
+    static uint16_t lin[256], row[R5_RW];
+    static const int gq8[3] = { 141, 256, 179 };
+    for (int i = 0; i < 256; i++) {
+        double c = i / 255.0;
+        lin[i] = (uint16_t)(15000.0 * (c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)) + 0.5);
+    }
+    for (int y = 0; y < R5_RH; y++) {
+        int jy = clampi(y - 56, 0, FH - 1);
+        const uint32_t *r = src + (size_t)jy * R5_ROWW;
+        for (int x = 0; x < R5_RW; x++) {
+            int v = 1024 + (int)(rnd() % 17) - 8;
+            if (x >= 160 && y >= 52) {
+                int jx = clampi(x - 168, 0, FW - 1), ch = (x & 1) == (y & 1) ? 1 : (x & 1) ? 2 : 0;
+                uint32_t w = r[jx / 2];
+                v += lin[jx & 1 ? WY1(w) : WY0(w)] * gq8[ch] >> 8;
+            }
+            row[x] = (uint16_t)(v > 14600 ? 14600 : v);
+        }
+        r5_pack14(row, raw + (size_t)y * R5_PITCH, R5_RW);
+    }
+}
+/* the develop called directly as wf_rawb_stage does over the two halves: levels, prepare on the TOP half, all rows */
+static int r5_disp;                              /* the reference with the Leica display cube (WF_DEV_DISP) */
+static void r5_ref(uint32_t *dst, const uint32_t *canon)
+{
+    static struct wf_dev_tabs T;
+    struct wf_ll_info inf;
+    int rc = r5_disp ? wf_dev_build_disp(&T, WF_DEV_5D2, "ML/DATA/LEICAVSR.CUB", 0, 0, 0, &inf)
+                     : wf_dev_build(&T, WF_DEV_SRGB, 0, WF_DEV_5D2, 0, 0, 0, &inf);
+    void *scr = memalign(32, wf_dev_scratch_bytes(FW, FH));
+    struct wf_dev_job j;
+    memset(&j, 0, sizeof j);
+    j.raw = (const uint8_t *)(uintptr_t)R5_RAW; j.pitch = R5_PITCH;
+    j.ax0 = 160; j.ay0 = 52; j.ax1 = R5_RW; j.ay1 = R5_RH;
+    int lb = 0, lw = 0;
+    wf_dev_levels(scr, &j, 16, 144, &lb, &lw);
+    j.black = lb ? lb : 1024;
+    j.white = lw ? lw : 15600;
+    j.x0 = 176; j.y0 = 56; j.w = 5600; j.h = FH; j.cfa = 2;     /* columns 8 .. 5607 (w a multiple of 32) */
+    memcpy(dst, canon, NW * 4);
+    j.canon = dst + 4; j.canon_pw = FW / 2; j.canon_y0 = 0; j.canon_h = FH / 2;
+    j.roll = 1;
+    struct wf_dev_stat st;
+    int rp = wf_dev_prepare(scr, &T, &j, &st);
+    wf_dev_rows(scr, 0, FH, dst + 4, FW * 2);
+    printf("reference develop: build %d, levels %d / %d, prepare %d, wb %d, clip %d, roll %d\n", rc, lb, lw, rp, st.wb_src,
+           st.clip_quads, st.roll);
+    free(scr);
+}
+static int r5_count(const char *s)               /* lines after the mark that contain s */
+{
+    long n;
+    char *b = get_file(LOG_PATH, &n), *p = b ? b + (n > log_at ? log_at : n) : 0;
+    int c = 0;
+    while (p && (p = strstr(p, s)) != 0) {
+        c++;
+        p += strlen(s);
+    }
+    free(b);
+    return c;
+}
+/* the TOP hook, then `between` (may change the raw), then the BOT hook */
+static void r5_shot_mid(const uint32_t *src, uint32_t *dst, const uint32_t *between)
+{
+    int nh = NW / 2;
+    memcpy(fa, src, nh * 4);
+    memcpy(fb, src + nh, (NW - nh) * 4);
+    memset(regs, 0, sizeof regs); regs[R_TOP] = FRAME_A; call_hook(S_TOP);
+    if (between)
+        r5_raw((uint8_t *)(uintptr_t)R5_RAW, between);
+    memset(regs, 0, sizeof regs); regs[R_BOT] = FRAME_B; call_hook(S_BOT);
+    memcpy(dst, fa, nh * 4);
+    memcpy(dst + nh, fb, (NW - nh) * 4);
+}
+
 static void t_rawb(void)
 {
+    if (!r5_map)
+        r5_map = map_at(R5_M1, R5_MAPN);
+    uint32_t *alt = malloc(NW * 4), *dev = malloc(NW * 4);
+    int nh = NW / 2;
+    gen_frame(in, FW, FH, 0);
+    for (int y = 0; y < FH; y++)                 /* another picture: waves in the mid-tones */
+        for (int x = 0; x < R5_ROWW; x++) {
+            int Y = 125 + (int)(80 * sin(x / 23.0 + y / 41.0) * cos(y / 71.0));
+            alt[y * R5_ROWW + x] = word(0, Y, 0, Y);
+        }
+    r5_raw((uint8_t *)(uintptr_t)R5_RAW, in);
     std_pack();
     put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\n", wf_films[fA].id);
     mod_init(1);
     chk(WAIT(look_table_ready(), 10000), "film table published");
-    chk(wf_rawb_can() == 0 && wf_rawb_state() == WF_RB_OFF, "no RAW develop on this camera");
-    wf_rawb = 1;
+    chk(wf_rawb_can() == 1 && wf_rawb == 0 && wf_rawb_state() == WF_RB_OFF, "RAW develop built in, off at boot");
     pic_quality = 0x3070000;
-    chk(wf_rawb_state() == WF_RB_NOCAM, "switched on: state 'not on this camera'");
-    gen_frame(in, FW, FH, 0);
-    memcpy(ref, in, NW * 4);
-    ref_film(ref, NW, tabs[fA][0], flags_of(fA, 1));
+    drive_mode = 0;
+    p5_job(0xFFCD0761u, R5_M1, P5_SH);
+    memcpy(out2, in, NW * 4);
+    ref_film(out2, NW, tabs[fA][0], flags_of(fA, 1));   /* the 8-bit film look */
+    usleep(300000);
+    int live0 = h_arena_live;
     log_mark();
     int sb = shot(in, out, FW, FH);
-    chk(sb == 0 && ndiff(out, ref, NW) == 0, "switched on: the film shot as always (bit-exact)");
+    usleep(300000);
+    chk(sb == 0 && ndiff(out, out2, NW) == 0 && !log_has("rawb"), "off: the 8-bit film look, no rawb line");
+
+    /* on: tables, then a developed TOP + BOT */
+    log_mark();
+    wf_rawb = 1;
+    chk(LOGW("rawb: tables srgb", 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 2000) && h_arena_live == live0 + 1,
+        "on: base tables in one shoot-memory block ('%s')", log_line("rawb: tables"));
+    log_mark();
+    int n0 = h_notify_n;
+    sb = shot(in, out, FW, FH);
+    r5_ref(dev, in);
+    memcpy(ref, dev, NW * 4);
+    ref_film(ref, NW, tabs[fA][0], flags_of(fA, 1));
+    chk(sb == 0 && ndiff(out, ref, NW) == 0, "TOP + BOT developed: bit-exact vs wf_dev levels + prepare (TOP half) + rows + "
+        "wf_film_words (%d words differ)", ndiff(out, ref, NW));
+    chk(ndiff(out, out2, NW) > NW / 4, "and not the 8-bit look");
     usleep(500000);
-    chk(!log_has("rawb"), "no rawb line");
+    chk(LOGW("rawb: buf 0 54004f30 of 1,", 3000) && r5_count("rawb: done rows 1872,") == 2 && !log_has("rawb: 8-bit"),
+        "log: buffer MEM1 + 0x76C8 - pitch (CR2 row 0), both halves done ('%s')", log_line("rawb: buf"));
+    chk(log_has("rawb: black 1024 white 14600,") && log_has("rawb: BOT half continues the TOP"), "TOP levels measured (black 1024, white 14600), BOT continues ('%s')", log_line("rawb: black"));
+    chk(LOGW(": film ", 3000) && strstr(log_line(": film "), " raw"), "shot line marks the develop: '%s'",
+        log_line(": film "));
+    chk(h_notify_n > n0, "progress box shown (%d)", h_notify_n - n0);
+
+    /* the raw is another picture: no develop, both halves the 8-bit look */
+    r5_raw((uint8_t *)(uintptr_t)R5_RAW, alt);
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    usleep(500000);
+    chk(sb == 0 && ndiff(out, out2, NW) == 0, "no match: the 8-bit film look, bit-exact");
+    chk(LOGW("rawb: 8-bit (buffer nomatch", 3000) && log_has("rawb: 8-bit (TOP half not developed)"),
+        "no match logged: '%s' / BOT '%s'", log_line("rawb: 8-bit (buffer"), log_line("rawb: 8-bit (TOP"));
+    r5_raw((uint8_t *)(uintptr_t)R5_RAW, in);
+
+    /* the raw changes between the hooks: the BOT is not continued */
+    log_mark();
+    r5_shot_mid(in, out, alt);
+    usleep(500000);
+    chk(ndiff(out, ref, nh) == 0 && ndiff(out + nh, out2 + nh, NW - nh) == 0,
+        "raw changed after the TOP: TOP developed, BOT the 8-bit look");
+    chk(LOGW("rawb: 8-bit (raw changed since the TOP half)", 3000), "logged: '%s'", log_line("rawb: 8-bit (raw"));
+    r5_raw((uint8_t *)(uintptr_t)R5_RAW, in);
+
+    /* no live job / MEM1 past the pool end / gates: nothing read, the 8-bit look */
+    static const struct { uint32_t magic, m1; int picq, drive; const char *want, *what; } G[] = {
+        { 0,           R5_M1,       0x3070000, 0, "rawb: 8-bit (noaddr ",          "no live job (H[0] != magic)" },
+        { 0xFFCD0761u, 0x5B000000u, 0x3070000, 0, "rawb: 8-bit (noaddr 5b000000)", "MEM1 raw past 0x5C000000" },
+        { 0xFFCD0761u, R5_M1,       0x3070001, 0, "rawb: 8-bit (quality 3070001)", "MRAW + L" },
+        { 0xFFCD0761u, R5_M1,       0x3010000, 0, "rawb: 8-bit (quality 3010000)", "JPEG only" },
+        { 0xFFCD0761u, R5_M1,       0x3070000, 1, "rawb: 8-bit (drive 1)",         "burst" },
+    };
+    for (int i = 0; i < (int)(sizeof G / sizeof G[0]); i++) {
+        p5_job(G[i].magic, G[i].m1, P5_SH);
+        pic_quality = G[i].picq;
+        drive_mode = G[i].drive;
+        log_mark();
+        sb = shot(in, out, FW, FH);
+        usleep(400000);
+        chk(sb == 0 && ndiff(out, out2, NW) == 0 && LOGW(G[i].want, 3000) && !log_has("rawb: buf"),
+            "%s: the 8-bit look, '%s'", G[i].what, log_line("rawb: 8-bit"));
+    }
+    p5_job(0xFFCD0761u, R5_M1, P5_SH);
+    pic_quality = 0x3070000;
+    drive_mode = 0;
+
+    /* half-shutter held during the TOP: it stops, the BOT gets the 8-bit look */
+    h_half = 1;
+    h_half_step_ms = 1000;
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    h_half = 0;
+    h_half_step_ms = 0;
+    usleep(500000);
+    chk(LOGW("rawb: STOPPED", 3000) && strstr(log_line("rawb: STOPPED"), "(half-shutter)") &&
+        ndiff(out + nh, in + nh, NW - nh) == 0,
+        "half-shutter: TOP stopped ('%s'), BOT stays Canon's (no look under a stopped TOP)", log_line("rawb: STOPPED"));
+
+    /* again a full developed shot (the stop leaves nothing behind) */
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    chk(sb == 0 && ndiff(out, ref, NW) == 0, "after the stop: developed again, bit-exact");
+
+    /* Leica Vivid (WF_FLUT_DISP): both halves developed through the display cube on the sRGB codes */
+    int out0 = wf_out, fl0 = wf_flut;
+    {
+        char nb[WF_LL_NAME];
+        cube_write(wf_loglut_name(nb, WF_CURVE_VLOG, WF_FLUT_LEICAV, 0), 5);
+        dcube_write("ML/DATA/LEICAVSR.CUB", 33);
+    }
+    log_mark();
+    wf_out = WF_OUT_LLUT;
+    wf_flut = WF_FLUT_LEICAV;
+    chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 30000), "Leica Vivid: '%s'", log_line("rawb: tables"));
+    r5_disp = 1;
+    r5_ref(ref, in);
+    r5_disp = 0;
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    usleep(500000);
+    chk(sb == 0 && LOGW("BOT half continues", 3000) && ndiff(out, ref, NW) == 0,
+        "Leica Vivid shot: TOP + BOT bit-exact vs the sRGB develop + display cube (%d words differ)", ndiff(out, ref, NW));
+    wf_out = out0;
+    wf_flut = fl0;
+
+    /* off: the memory goes back */
     wf_rawb = 0;
+    chk(WAIT(h_arena_live == live0, 3000), "off: shoot memory given back");
     mod_deinit();
+    free(alt); free(dev);
 }
 #endif
 /* ------------------------------------------------------------------ HS: Highlights / Shadows */
@@ -2443,7 +2710,7 @@ static int hs_pv_diff(int k, int flags)
     return d;
 }
 
-/* ------------------------------------------------------------------ ROLL: Roll + Darkroom in the module (DESIGN 3.4)
+/* ------------------------------------------------------------------ ROLL: Roll + Darkroom in the module (DESIGN 3.5)
  * One mode at a time: loading a roll turns RAW develop off; RAW develop on ends a loaded roll (closed when empty,
  * rewound with its frames). Frames count from the card's file number + CR2; PLAY is blocked while a roll is in the
  * camera (Blind roll). The darkroom run itself is tools/dr_dark_check.sh (the chain) and a camera run (memory). */
@@ -2479,7 +2746,7 @@ static void t_roll(void)
     chk(wf_roll_now()->state == WF_RS_EMPTY && cbr_key(WF_KEY_PLAY) == 1, "no roll: PLAY passes");
 #ifdef WF_BUILD_5D2
     chk(wf_roll_req_load(wf_films[fA].id, 12) == -4, "5D2: a roll load is refused (the darkroom comes to the EOS M first)");
-    chk(!menu_named("RAW develop"), "5D2: no RAW develop entry");
+    chk(menu_named("RAW develop") != 0, "5D2: the RAW develop entry is there (B on the 5D2, raw-develop 6b51b75)");
 #else
     const int film = wf_films[fA].id;
     log_mark();
@@ -2737,6 +3004,139 @@ static void t_hs(void)
     mod_deinit();
 }
 
+/* ------------------------------------------------------------------ LEICA: the display-look can and the Windy names */
+static int ps_changes(int from, int val)
+{
+    int n = 0;
+    for (int i = from; i < h_nchanges && i < 256; i++)
+        n += h_change_prop[i] == 0x80000028u && (val < 0 || h_change_val[i] == val);
+    return n;
+}
+static void t_leica(void)
+{
+    int kL = wf_cat_index(84), kW = wf_cat_index(71);
+    chk(kL >= 0 && kW >= 0 && !strcmp(wf_films[kL].name, "Leica Vivid") && (wf_films[kL].flags & WF_F_LUTCAN)
+        && wf_cat_lut[kL] == WF_FLUT_LEICAV && !strcmp(wf_films[kW].name, "Windy Neutral"),
+        "catalogue: Leica Vivid can (Film LUT %d), Windy Neutral", kL >= 0 ? wf_cat_lut[kL] : -1);
+    int nt = 0;
+    for (int k = 0; k < wf_nfilms; k++)
+        nt += !strncmp(wf_films[k].name, "Tung", 4);
+    for (int l = 0; l < WF_FLUT_N; l++)
+        nt += !strncmp(wf_flut_name[l], "Tung", 4);
+    chk(nt == 0 && !strcmp(wf_flut_name[9], "Windy Neutral") && !strcmp(wf_flut_name[12], "Windy 250D P")
+        && !strcmp(wf_flut_name[22], "Windy EXRa M") && !strcmp(wf_flut_name[WF_FLUT_LEICAV], "Leica Vivid"),
+        "no Tung name left (%d), Windy names, Leica Vivid last", nt);
+    char nb[WF_LL_NAME];
+    chk(!strcmp(wf_loglut_name(nb, WF_CURVE_VLOG, WF_FLUT_LEICAV, 0), "ML/DATA/LEICAVSR.CUB")
+        && !strcmp(wf_loglut_name(nb, 1, WF_FLUT_LEICAV, 0), "ML/DATA/LEICAVSR.CUB")
+        && !strcmp(wf_loglut_name(nb, WF_CURVE_VLOG, WF_FLUT_LEICAV, 1), "ML/DATA/LEICAVSR.FRT")
+        && !strcmp(wf_loglut_name(nb, WF_CURVE_VLOG, 9, 0), "ML/DATA/TUNGNTVL.CUB"),
+        "cube names: LEICAVSR.CUB / .FRT for every Log curve, the Windy cubes keep their file names");
+    chk(WF_FLUT_DISP(WF_FLUT_LEICAV) && !WF_FLUT_DISP(9) && !WF_FLUT_DISP(0) && !WF_FLUT_VLONLY(WF_FLUT_LEICAV)
+        && WF_FLUT_VLONLY(9),
+        "Leica Vivid: a display look on sRGB codes, not a V-Log cube");
+
+    /* hidden without its cube (the module scans the cubes at start and when the browser opens) */
+    std_pack();
+    put_cfg("output=off\nincurve=film1\n");
+    cube_write("ML/DATA/TUNGNTVL.CUB", 9);
+    cube_write("ML/DATA/LEICAVVL.CUB", 9);      /* the old V-Log file name: not Leica Vivid's cube any more */
+    h_li_set("picstyle", 0x84);                  /* Neutral */
+    mod_init(1);
+    chk(WAIT(wf_avail(71), 5000) && !wf_avail(84) && wf_load(84) == WF_LOAD_NOCUBE,
+        "TUNGNTVL.CUB and the old LEICAVVL.CUB on the card: Windy Neutral shown, Leica Vivid hidden and does not load");
+    cube_write("ML/DATA/LEICAVSR.CUB", 9);
+
+    /* load: Picture Style Standard asked for, sRGB in whatever the Input curve, no auto exposure */
+    int inc = wf_ll_curve_have(WF_INC_FILM1) ? WF_INC_FILM1 : WF_INC_SRGB;
+    wf_incurve = inc;
+    h_li_set("picstyle", 0);                     /* not reported: Film 1 counts as usable */
+    chk(wf_incurve_t() == inc, "before: the Input curve in use is %d", inc);
+    int n0 = h_nchanges;
+    log_mark();
+    chk(wf_load(84) == WF_LOAD_OK && wf_out == WF_OUT_LLUT && wf_flut == WF_FLUT_LEICAV && wf_curve == WF_CURVE_VLOG,
+        "load Leica Vivid: Log + LUT, V-Log, its cube");
+    chk(ps_changes(n0, 0x81) == 1 && LOGW("style: Standard for Leica Vivid", 3000),
+        "loading it asks for Picture Style Standard (0x81): %d request(s), log '%s'", ps_changes(n0, -1),
+        log_line("style:"));
+    chk(wf_incurve == inc && wf_incurve_t() == WF_INC_SRGB, "Input curve %d chosen, Leica Vivid reads sRGB", inc);
+    chk(LOGW("lut LEICAVSR.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && wf_ll_auto == 0
+        && wf_ll_disp == 1 && wf_ll_incurve == WF_INC_SRGB && !strstr(log_line("lut LEICAVSR.CUB"), " in-"),
+        "loaded on the sRGB codes, no auto exposure: '%s'", log_line("lut LEICAVSR.CUB"));
+
+    /* the colour path: the identity cube on the sRGB codes gives the JPEG back (no log on the way) */
+    static struct wf_lltabs la, lb, lc, ld, le;
+    struct wf_ll_info inf;
+    wf_ll_incurve = WF_INC_SRGB; wf_ll_ei = 0; wf_ll_auto = 0; wf_ll_disp = 1;
+    int rc = wf_loglut_load("ML/DATA/LEICAVSR.CUB", WF_CURVE_VLOG, &la, &inf);
+    wf_ll_auto = 1;                              /* ignored for a display look */
+    int rc3 = wf_loglut_load("ML/DATA/LEICAVSR.CUB", 1, &lc, &inf);
+    wf_ll_auto = 0;
+    wf_ll_ei = 3;                                /* +1 EV by hand */
+    int rc4 = wf_loglut_load("ML/DATA/LEICAVSR.CUB", WF_CURVE_VLOG, &ld, &inf);
+    wf_ll_ei = 0; wf_ll_disp = 0;
+    int rc2 = wf_loglut_load("ML/DATA/LEICAVSR.CUB", WF_CURVE_VLOG, &lb, &inf);   /* the old path: sRGB -> V-Log -> cube */
+    int dn = 0, dv = 0;
+    for (int y = 0; y < 256; y++) {
+        int d = abs(la.N[y] - y), e = abs(lb.N[y] - y);
+        dn = d > dn ? d : dn;
+        dv = e > dv ? e : dv;
+    }
+    chk(rc == WF_LL_OK && rc2 == WF_LL_OK && rc3 == WF_LL_OK && rc4 == WF_LL_OK && ll_same(&la, wf_ll_tables())
+        && ll_same(&la, &lc) && !ll_same(&lb, wf_ll_tables()),
+        "published tables = the cube on the sRGB codes (S-Log3 + auto the same), not the V-Log path");
+    chk(dn <= 1 && dv > 20, "identity cube: neutral Y' out = in (max %d codes off); through V-Log it moved %d", dn, dv);
+    chk(ld.N[100] >= 135 && ld.N[100] <= 141 && ld.N[0] <= 1 && ld.N[255] == 255 && ld.N[200] == 255,
+        "LUT EI +1 EV: light x2 then sRGB again: 100 -> %d (138), 0 -> %d, 200 -> %d", ld.N[100], ld.N[0], ld.N[200]);
+    wf_ll_disp = 1;
+    log_mark();
+    chk(wf_loglut_load_cached("ML/DATA/LEICAVSR.CUB", "ML/DATA/LEICAVSR.FRT", WF_CURVE_VLOG, &le, &inf) == WF_LL_OK
+        && inf.cached && ll_same(&la, &le), "the .FRT the module wrote is read back for the display look");
+    wf_ll_disp = 0;
+    chk(wf_loglut_load_cached("ML/DATA/LEICAVSR.CUB", "ML/DATA/LEICAVSR.FRT", WF_CURVE_VLOG, &le, &inf) == WF_LL_OK
+        && !inf.cached && ll_same(&lb, &le), "the same .FRT is not taken for the V-Log path (key bit 19)");
+    wf_ll_disp = 1;
+    chk(wf_loglut_load_cached("ML/DATA/LEICAVSR.CUB", "ML/DATA/LEICAVSR.FRT", WF_CURVE_VLOG, &le, &inf) == WF_LL_OK
+        && !inf.cached && ll_same(&la, &le), "and back: rebuilt for the display look");
+    wf_ll_disp = 0;
+    struct wf_look lk;
+    wf_look_now(&lk);
+    chk(lk.output == WF_OUT_LLUT && lk.flut == WF_FLUT_LEICAV && lk.incurve == WF_INC_SRGB, "the look: Leica Vivid, sRGB");
+    chk(!strcmp(wf_row_text(WF_ROW_FLUT), "Leica Vivid"), "Film LUT row: '%s'", wf_row_text(WF_ROW_FLUT));
+
+    /* Picture Style already Standard: nothing asked */
+    h_li_set("picstyle", 0x81);
+    n0 = h_nchanges;
+    chk(wf_load(84) == WF_LOAD_OK && ps_changes(n0, -1) == 0, "style already Standard: no request");
+
+    /* another can: the Input curve and auto exposure are back, no style request */
+    h_li_set("picstyle", 0);
+    n0 = h_nchanges;
+    log_mark();
+    chk(wf_load(71) == WF_LOAD_OK && wf_flut == 9 && wf_incurve_t() == inc && ps_changes(n0, -1) == 0,
+        "Windy Neutral: Input curve %d again, no style request", inc);
+    chk(LOGW("lut TUNGNTVL.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && wf_ll_auto == 1
+        && wf_ll_disp == 0, "Windy Neutral loaded with auto exposure, through V-Log: '%s'", log_line("lut TUNGNTVL.CUB"));
+    chk(!strcmp(wf_row_text(WF_ROW_FLUT), "Windy Neutral"), "Film LUT row: '%s'", wf_row_text(WF_ROW_FLUT));
+
+    /* the Film LUT row reaches it (last cube before Off) and asks for the style too */
+    n0 = h_nchanges;
+    int steps = 0;
+    while (wf_flut != WF_FLUT_LEICAV && steps++ < WF_FLUT_N + 2)
+        wf_row_step(WF_ROW_FLUT, 1);
+    chk(wf_flut == WF_FLUT_LEICAV && ps_changes(n0, 0x81) == 1, "Film LUT row: Leica Vivid after %d steps, style asked", steps);
+    wf_row_step(WF_ROW_FLUT, 1);
+    chk(wf_out != WF_OUT_LLUT, "one more step: Off");
+
+    /* config: flut=leicav */
+    put_cfg("output=lut\ncurve=vlog\nflut=leicav\n");
+    wf_cfg_load();
+    chk(wf_flut == WF_FLUT_LEICAV && wf_out == WF_OUT_LLUT, "flut=leicav read (Film LUT %d)", wf_flut);
+    wf_incurve = WF_INC_SRGB;
+    wf_out = WF_OUT_OFF;
+    mod_deinit();
+}
+
 /* ------------------------------------------------------------------ main */
 int main(int argc, char **argv)
 {
@@ -2748,6 +3148,9 @@ int main(int argc, char **argv)
 #ifndef WF_BUILD_5D2
     if (argc > 1 && !strcmp(argv[1], "RAWB"))
         rb_map = map_at(RB_Z, 0x8000000u - 4096);  /* RAWB: before the frame mallocs can land in 0x50000000.. */
+#else
+    if (argc > 1 && !strcmp(argv[1], "RAWB"))
+        r5_map = map_at(R5_M1, R5_MAPN);         /* RAWB: MEM1 before the frame mallocs */
 #endif
     if (argc < 2) { fprintf(stderr, "usage: wf_test MODE [CASE [FILE]]\n"); return 2; }
     const char *mode = argv[1], *cs = argc > 2 ? argv[2] : "";
@@ -2774,6 +3177,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();
     else if (!strcmp(mode, "ROLL")) t_roll();
+    else if (!strcmp(mode, "LEICA")) t_leica();
 #ifdef WF_BUILD_5D2
     else if (!strcmp(mode, "5D2")) t_5d2();
     else if (!strcmp(mode, "PROBE")) t_probe_5d2();

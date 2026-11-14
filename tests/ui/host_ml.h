@@ -68,6 +68,16 @@ extern int gui_state;
 extern int lv;
 int is_movie_mode(void);
 int display_is_on(void);
+void display_on(void);
+int get_gui_mode(void);
+void SetGUIRequestMode(int mode);
+void bmp_off(void);
+void bmp_on(void);
+void force_liveview(void);
+extern int host_recording;
+#define RECORDING (host_recording)
+static inline uint32_t cli(void) { return 0x80; }
+static inline void sei(uint32_t old) { (void)old; }
 
 /* module.h portable key codes */
 #define MODULE_KEY_PRESS_HALFSHUTTER       ( 1)
@@ -101,6 +111,20 @@ int display_is_on(void);
 void host_init(const char *rbf_dir, uint32_t canon_white, uint32_t canon_black);
 int  host_dump(const char *ppm_path);           /* front buffer through the hardware palette -> PPM; returns stray px */
 int  host_front_disabled(void);
+/* Canon's GUI mode and display (5D2 without LiveView): a request is applied 60 ms later; a mode other than 0 turns the
+ * display on when `lights` (Canon's menu does), display_on() always does */
+void host_gui_set(int mode, int display, int lights);
+void host_gui_later(int mode, int after_ms);
+int  host_gui_mode(void);
+int  host_gui_requests(void);
+int  host_gui_req0_front(void);         /* front buffer state at the last SetGUIRequestMode(0): 1 = still disabled */
+int  host_display_ons(void);
+int  host_bmp_muted(void);              /* bmp_off() in force (Canon's bitmap hidden) */
+int  host_bmp_offs(void);               /* bmp_off() calls since host_gui_set */
+int  host_bmp_muted_at_req(void);       /* muted at the last SetGUIRequestMode(non-zero): 1 = Canon's dialog hidden */
+int  host_lv_starts(void);              /* force_liveview() calls since host_gui_set */
+int  host_tasks(void);                  /* task_create() calls */
+void host_task_fail(int fail);          /* task_create returns an odd (error) handle */
 int  host_palette_is_canon(void);               /* every entry 0x50..0xFE back to Canon's value */
 int  host_front_is_clear(void);
 long host_live_allocs(void);

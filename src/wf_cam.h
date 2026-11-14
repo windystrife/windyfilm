@@ -23,7 +23,7 @@
 #define WF_GRAIN_W              5616     /* image width of the grain pitch: 36000 / 5616 = 6.41 um */
 #define WF_EXP_CAN              0        /* Preview exposure: EOS M only (property 0x80000034, frame parameters at 0x404C8) */
 #define WF_PRB_CAN              1        /* RAW probe P0 at the TOP + BOT hooks (wf_cam_5d2.c + wf_probe.c) */
-#define WF_RAWB_CAN             0        /* RAW develop "B": not on the 5D2 yet (halves, GBRG, unprobed raw) */
+#define WF_RAWB_CAN             1        /* RAW develop "B": TOP + BOT halves, MEM1 raw (not probed on the camera yet) */
 #else
 #define WF_PV_CAN               1
 #define WF_GRAIN_CAN            1

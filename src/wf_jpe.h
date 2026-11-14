@@ -1,7 +1,7 @@
 /* wf_jpe.h - WindyFilm baseline JPEG encoder (WindyStrife's own code, written from ITU-T T.81: baseline sequential
  * DCT, Huffman coding; the Annex K example quantisation and Huffman tables).
  *
- * The Darkroom (docs/DESIGN.md 3.4) develops a CR2 outside Canon's pipeline, so Canon's JPEG encoder is not in the path:
+ * The Darkroom (docs/DESIGN.md 3.5) develops a CR2 outside Canon's pipeline, so Canon's JPEG encoder is not in the path:
  * this encoder writes the print. Input = WindyFilm UYVY words exactly as wf_dev_rows() writes them (and as Canon's YUV
  * frame holds them): little-endian word = byte 0 U (int8, Cb - 128), byte 1 Y0 (0..255), byte 2 V (int8, Cr - 128),
  * byte 3 Y1; full-range BT.601 Y'CbCr (JFIF). Output = one baseline JFIF / Exif JPEG, 4:2:2 like Canon's JPEG L

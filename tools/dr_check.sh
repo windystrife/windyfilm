@@ -1,5 +1,5 @@
 #!/bin/bash
-# dr_check.sh - host checks of the Roll + Darkroom parts (docs/DESIGN.md 3.4), WindyStrife. Run in WSL:
+# dr_check.sh - host checks of the Roll + Darkroom parts (docs/DESIGN.md 3.5), WindyStrife. Run in WSL:
 #   bash tools/dr_check.sh            roll state machine (native + ARM module object under qemu), format check
 # Env: W (default /root/ml/wf_darkroom), the work dir; nothing is written into the repository.
 set -e

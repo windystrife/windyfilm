@@ -1,5 +1,5 @@
 /* wf_dark.h - WindyFilm Roll + Darkroom: what the core (src/wf_dark.c) offers the UI (src/ui/wf_dark_ui.c) and the
- * menu. docs/DESIGN.md 3.4. WindyStrife's own code.
+ * menu. docs/DESIGN.md 3.5. WindyStrife's own code.
  *
  * Threads: wf_task owns the roll (frame detection, the roll file); the darkroom task "wf_dark" (own, started by
  * wf_dark_start, ends when the roll is developed or stopped) owns the darkroom; the UI task only reads the snapshots
