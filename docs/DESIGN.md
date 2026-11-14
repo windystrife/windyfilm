@@ -411,7 +411,7 @@ The layout, 720x480 (the ML bitmap):
 | tabs | Colour / Cine / B&W / Film LUT with counts at y 276, underline on the active one; counter "n / N" |
 | strip | 35 mm band y 300-436 with sprocket holes; cans 52x73 with short names (13 px condensed) under them; selected can 58x82 framed in the accent colour; edge fades and arrows |
 | scrollbar | y 441-446 |
-| footer | key hints 13 px: SET Load, L/R Film, UP/DN Row, Q Group, INFO Info, MENU Exit |
+| footer | key hints 13 px: SET Load, L/R Film, UP/DN Row, RING Value, TAP Group, INFO Info, MENU Exit (5D2: DIAL Value, JOY Edit, PICT Group; while editing L/R Value, JOY Done) |
 
 - **Colours:** accent amber (244, 166, 52), teal (38, 168, 158) for the Film LUT group, background gradient
   (24, 27, 33) -> (10, 11, 14).
@@ -429,6 +429,25 @@ The layout, 720x480 (the ML bitmap):
     mode turns the display on and keeps it on. If it does not, `display_on()`. On close it asks for mode 0 while the front
     buffer is still ours. Canon leaving the mode or the display going off closes the browser. Opened from the ML menu,
     it first waits for the menu's own mode 0. A TRASH that does not open the browser logs why (`ui: TRASH not taken`).
+  - 5D2 in LiveView (owner 11-14: "the settings cannot be changed from the UI on the 5D2"): Canon's plain LV (mode 0)
+    turns the dials into exposure changes and sends the module no WHEEL codes. The browser asks for mode 38 there, ML's
+    LV menu mode (consts.h: "a gui mode which lets you use the wheel and all other keys"), with Canon's bitmap muted
+    (`bmp_off`) until the front buffer is ours, as `piggyback_canon_menu` / `close_canon_menu` do. No mode while
+    recording (ML: 0). Fallback if a dial still sends nothing: the joystick press toggles edit on the focused row, then
+    LEFT / RIGHT step its value (outlined row, footer "JOY Edit" / "JOY Done"); SET only loads on the 5D2.
+- **Load (owner 11-14, "like Film Roll: a load animation, then LiveView"):** SET on a film that loads plays our own
+  animation (about 1.15 s: the film's leader winds out of its can, drawn from WFCANS.DAT, to a gate that lights with
+  frame 1, over the dimmed browser), then the browser closes. EOS M: the browser is open only in stills LV, so LiveView
+  is back. 5D2: opened without LV, `force_liveview()` once the screen is Canon's again. A key skips the rest; a
+  half-press closes without LiveView. "Already loaded" and the errors keep the browser open with their message.
+- **Never a dead camera (owner 11-14, EOS M: sometimes neither the film menu nor the ML menu opened):** the browser
+  takes every key, so a UI task that does not run left both menus dead. The film worker (prio 0x1C) develops a shot for
+  seconds (RAW develop 35-45 s) and starved the prio-0x1E UI task a TRASH had just started. The UI task now runs at
+  0x1B, above the worker and below ML's menu_task (0x1A) and Canon's GUI. It beats at every step; a key that finds no
+  beat for 2 s goes to Canon / ML and asks the task to close when it runs (log `ui: no beat for N ms (state, phase)`;
+  phases listed at the top of `src/ui/wf_ui.c`). The EOS M two-finger tap then opens the ML menu (no module took MENU).
+  The open is claimed under `cli` (TRASH in the GUI task and the menu entry in wf_task cannot start two tasks), a failed
+  `task_create` leaves the browser closed, and keys pass on while the task starts LiveView after a load.
 - **INFO** toggles a details overlay: full description, ISO, kelvin, prints, table source.
 
 ## 6. Build and tests

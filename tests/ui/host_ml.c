@@ -105,11 +105,15 @@ static int front_disabled, clock_ms = 1000;
 int gui_state, lv = 1;
 void canon_gui_disable_front_buffer(void) { front_disabled = 1; }
 void canon_gui_enable_front_buffer(int also_redraw) { (void)also_redraw; front_disabled = 0; }
+static int ntasks, task_fail;
 uint32_t task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg)
 {
     (void)name; (void)prio; (void)stack; (void)entry; (void)arg;
-    return 1;
+    ntasks++;
+    return task_fail ? 0x13u : 0x2000u;     /* DryOS: handles even, errors odd; the harness runs the task's steps */
 }
+int host_tasks(void) { return ntasks; }
+void host_task_fail(int f) { task_fail = f; }
 void msleep(int ms) { clock_ms += ms; }
 int get_ms_clock(void) { return clock_ms; }
 int gui_menu_shown(void) { return 0; }
@@ -125,6 +129,8 @@ static void gui_step(void)
         if (gui_mode && gui_lights) disp = 1;
     }
 }
+static int muted, bmp_offs, muted_at_req = -1, lv_starts;
+int host_recording;
 int display_is_on(void) { gui_step(); return disp; }
 void display_on(void) { disp_ons++; disp = 1; }
 int get_gui_mode(void) { gui_step(); return gui_mode; }
@@ -132,13 +138,28 @@ void SetGUIRequestMode(int mode)
 {
     gui_nreq++;
     if (!mode) gui_req0_front = front_disabled;
+    else muted_at_req = muted;
     gui_next = mode;
     gui_at = clock_ms + 60;
+}
+void bmp_off(void) { bmp_offs++; muted = 1; }
+void bmp_on(void) { muted = 0; }
+void force_liveview(void)                   /* ML: mode 0, then the LV button; LiveView is on 1.5 s later */
+{
+    lv_starts++;
+    if (gui_mode) { gui_mode = 0; clock_ms += 1000; }
+    clock_ms += 1500;
+    lv = 1;
 }
 void host_gui_set(int mode, int display, int lights)
 {
     gui_mode = mode; gui_next = -1; disp = display; gui_lights = lights; gui_nreq = 0; gui_req0_front = -1; disp_ons = 0;
+    muted = 0; bmp_offs = 0; muted_at_req = -1; lv_starts = 0;
 }
+int host_bmp_muted(void) { return muted; }
+int host_bmp_offs(void) { return bmp_offs; }
+int host_bmp_muted_at_req(void) { return muted_at_req; }
+int host_lv_starts(void) { return lv_starts; }
 void host_gui_later(int mode, int after_ms) { gui_next = mode; gui_at = clock_ms + after_ms; }
 int host_gui_mode(void) { gui_step(); return gui_mode; }
 int host_gui_requests(void) { return gui_nreq; }

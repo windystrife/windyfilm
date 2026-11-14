@@ -12,6 +12,9 @@ int wfui_host_group(void);
 int wfui_host_focus(void);
 int wfui_host_rtop(void);
 int wfui_host_info(void);
+int wfui_host_anim(void);
+int wfui_host_edit(void);
+int wfui_host_phase(void);
 
 static const char *outdir;
 static int fails, closed;
@@ -76,12 +79,9 @@ static void open_ui(void)
     tick(1);
 }
 
-static void close_ui(int k, unsigned want)
+/* the task closed (tick returned 1): end it and check that everything is given back */
+static void end_checks(void)
 {
-    unsigned r = wf_ui_key(k);
-    CHECK(r == want, "key %d returned %u, want %u", k, r, want);
-    tick(2);
-    CHECK(closed, "key %d did not close", k);
     wfui_task_end();
     CHECK(!wf_ui_is_open(), "still open after close");
     CHECK(!host_front_disabled(), "front buffer not given back");
@@ -89,6 +89,29 @@ static void close_ui(int k, unsigned want)
     CHECK(host_front_is_clear(), "front buffer not transparent after close");
     CHECK(host_live_allocs() == 0, "%ld allocations left after close", host_live_allocs());
     CHECK(host_lock_depth() == 0, "BMP lock depth %d", host_lock_depth());
+    CHECK(!host_bmp_muted(), "Canon's bitmap left muted after close");
+}
+
+static void close_ui(int k, unsigned want)
+{
+    unsigned r = wf_ui_key(k);
+    CHECK(r == want, "key %d returned %u, want %u", k, r, want);
+    tick(2);
+    CHECK(closed, "key %d did not close", k);
+    end_checks();
+}
+
+/* SET on the selected film: the load animation runs, then the browser closes by itself */
+static void load_and_close(int want_id)
+{
+    CHECK(key(MODULE_KEY_PRESS_SET) == 0, "SET not consumed");
+    CHECK(wf_loaded() == want_id, "SET did not load %d (loaded %d)", want_id, wf_loaded());
+    CHECK(wfui_host_anim() && !closed, "no load animation after SET");
+    tick(40);
+    CHECK(!closed, "closed before the animation ended");
+    tick(40);
+    CHECK(closed, "not closed after the load animation");
+    end_checks();
 }
 
 static void shot(const char *name)
@@ -140,9 +163,14 @@ int main(int argc, char **argv)
     key(MODULE_KEY_Q);
     CHECK(wfui_host_group() == g0, "4 group keys did not come back to the group");
     CHECK(wfui_host_sel_id() == id_of("SUN200"), "group selection not remembered");
-    CHECK(key(MODULE_KEY_PRESS_SET) == 0, "SET not consumed");
-    CHECK(wf_loaded() == id_of("SUN200"), "SET did not load SUN200");
+    host_gui_set(0, 1, 1);
+    load_and_close(id_of("SUN200"));                                /* EOS M: back to LiveView, nothing else */
+    CHECK(host_lv_starts() == 0 && host_gui_requests() == 0, "EOS M load: %d LV starts, %d gui requests",
+          host_lv_starts(), host_gui_requests());
+    open_ui();
+    CHECK(wfui_host_sel_id() == id_of("SUN200"), "reopen not on the loaded film");
     shot("b2s_loaded");
+    CHECK(key(MODULE_KEY_PRESS_SET) == 0 && !wfui_host_anim() && !closed, "SET on the loaded film: no animation, stays open");
     close_ui(MODULE_KEY_MENU, 0);
 
     /* 2. Film LUT group, LV500T, focus on Film LUT (mockup_B2s_strip_lut) */
@@ -167,13 +195,35 @@ int main(int argc, char **argv)
     open_ui();
     go_to("LLEICV");
     CHECK(wfui_host_sel_id() == id_of("LLEICV"), "Leica Vivid not selected");
-    CHECK(key(MODULE_KEY_PRESS_SET) == 0 && wf_loaded() == id_of("LLEICV"), "SET did not load Leica Vivid");
+    load_and_close(id_of("LLEICV"));
+    open_ui();
     shot("b2s_leica");
     go_to("LT25DP");
     fake_set_row(WF_ROW_FLUT, 5);
     CHECK(key(MODULE_KEY_PRESS_SET) == 0 && wf_loaded() == id_of("LT25DP"), "SET did not load Windy 250D P");
+    tick(18);
+    shot("b2s_anim_wind");                                          /* the leader on its way (~400 ms) */
+    tick(26);
+    shot("b2s_anim_done");                                          /* in the gate, "Loaded" (~950 ms) */
+    CHECK(!closed, "closed during the animation");
+    tick(20);
+    CHECK(closed, "not closed after the animation");
+    end_checks();
+    open_ui();
     shot("b2s_windy");
     close_ui(MODULE_KEY_MENU, 0);
+
+    /* 2d. a key during the load animation closes at once (the film stays loaded) */
+    fake_reset();
+    fake_set_card(card);
+    open_ui();
+    go_to("SUN200");
+    CHECK(key(MODULE_KEY_PRESS_SET) == 0 && wfui_host_anim(), "SET: no animation");
+    tick(5);
+    CHECK(key(MODULE_KEY_INFO) == 0, "INFO in the animation not consumed");
+    tick(1);
+    CHECK(closed && wf_loaded() == id_of("SUN200"), "a key did not skip the animation");
+    end_checks();
 
     /* 2b. Highlights / Shadows: 9 rows, 7 shown, the list scrolls with the focus (the font keeps its size) */
     fake_reset();
@@ -316,20 +366,135 @@ int main(int argc, char **argv)
           host_gui_mode(), host_gui_requests());
     close_ui(MODULE_KEY_MENU, 0);
 
-    fake_reset();                                                   /* with LiveView, and on the EOS M: no mode asked */
+    fake_reset();                                                   /* the EOS M asks for no mode here */
+    fake_set_card(card);
+    host_gui_set(0, 1, 1);
+    lv = 0;
+    open_ui();
+    close_ui(MODULE_KEY_MENU, 0);
+    CHECK(host_gui_requests() == 0, "EOS M: %d gui mode requests", host_gui_requests());
+    lv = 1;
+
+    /* 5d. 5D2 in LiveView (owner 11-14: the rows could not be changed): ML's LV menu mode 38 under the browser, Canon's
+     * bitmap muted while that dialog comes up and unmuted once the front buffer is ours; on close mode 0, then Canon's
+     * front buffer and bitmap. The dials step the rows; a joystick press edits the focused row with LEFT / RIGHT. */
+    fake_reset();
     fake_set_cam(WF_CAM_5D2);
     fake_set_card(card);
     lv = 1;
     host_gui_set(0, 1, 1);
     open_ui();
-    close_ui(MODULE_KEY_MENU, 0);
-    fake_reset();
+    CHECK(host_gui_mode() == 38 && host_gui_requests() == 1 && host_bmp_muted_at_req() == 1 && !host_bmp_muted(),
+          "5D2 LV: gui mode %d, %d requests, muted at the request %d, muted now %d", host_gui_mode(), host_gui_requests(),
+          host_bmp_muted_at_req(), host_bmp_muted());
+    go_to("SUN200");
+    int l0 = fake_row_value(WF_ROW_LIGHT);
+    key(MODULE_KEY_WHEEL_RIGHT);                                    /* main dial */
+    key(MODULE_KEY_WHEEL_DOWN);                                     /* rear dial */
+    CHECK(fake_row_value(WF_ROW_LIGHT) == l0 + 2, "5D2 LV: the dials did not step Light (%d -> %d)", l0,
+          fake_row_value(WF_ROW_LIGHT));
+    key(MODULE_KEY_JOY_CENTER);
+    CHECK(wfui_host_edit() && wf_loaded() == 0, "5D2: joystick press did not start editing (edit %d, loaded %d)",
+          wfui_host_edit(), wf_loaded());
+    key(MODULE_KEY_PRESS_LEFT);
+    CHECK(fake_row_value(WF_ROW_LIGHT) == l0 + 1 && wfui_host_sel_id() == id_of("SUN200"),
+          "5D2 edit: LEFT did not step Light back, or changed the film");
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfui_host_focus() == WF_ROW_GRAIN && fake_row_value(WF_ROW_GRAIN) == 3, "5D2 edit: DOWN x2 + RIGHT: focus %d grain %d",
+          wfui_host_focus(), fake_row_value(WF_ROW_GRAIN));
+    shot("b2s_5d2_edit");
+    key(MODULE_KEY_JOY_CENTER);
+    CHECK(!wfui_host_edit(), "5D2: second joystick press did not end editing");
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfui_host_sel_id() != id_of("SUN200"), "5D2: RIGHT after editing did not change the film");
+    shot("b2s_5d2_lv");
+    load_and_close(wfui_host_sel_id());
+    CHECK(host_gui_mode() == 0 && host_gui_requests() == 2 && host_gui_req0_front() == 1 && host_bmp_offs() == 2 &&
+          host_lv_starts() == 0 && lv, "5D2 LV load: mode %d, %d requests, front at 0: %d, %d bmp_off, %d LV starts",
+          host_gui_mode(), host_gui_requests(), host_gui_req0_front(), host_bmp_offs(), host_lv_starts());
+
+    fake_reset();                                                   /* recording: no Canon dialog (ML: mode 0) */
+    fake_set_cam(WF_CAM_5D2);
     fake_set_card(card);
-    lv = 0;
+    host_gui_set(0, 1, 1);
+    host_recording = 1;
     open_ui();
     close_ui(MODULE_KEY_MENU, 0);
-    CHECK(host_gui_requests() == 0, "LV / EOS M: %d gui mode requests", host_gui_requests());
+    CHECK(host_gui_requests() == 0 && host_bmp_offs() == 0, "5D2 recording: %d gui requests, %d bmp_off",
+          host_gui_requests(), host_bmp_offs());
+    host_recording = 0;
+
+    /* 5e. 5D2 without LiveView: SET loads, the animation runs, then LiveView starts (owner 11-14: "LiveView on the 5D2
+     * too"); a half-press during the animation shoots through the viewfinder instead: no LiveView */
+    fake_reset();
+    fake_set_cam(WF_CAM_5D2);
+    fake_set_card(card);
+    lv = 0;
+    host_gui_set(0, 0, 1);
+    open_ui();
+    go_to("LV250D");
+    load_and_close(id_of("LV250D"));
+    CHECK(host_lv_starts() == 1 && lv == 1 && host_gui_mode() == 0, "5D2 no LV load: %d LV starts, lv %d, gui mode %d",
+          host_lv_starts(), lv, host_gui_mode());
+
+    fake_reset();
+    fake_set_cam(WF_CAM_5D2);
+    fake_set_card(card);
+    lv = 0;
+    host_gui_set(0, 0, 1);
+    open_ui();
+    go_to("SUN200");
+    CHECK(key(MODULE_KEY_PRESS_SET) == 0 && wfui_host_anim(), "5D2 no LV: SET, no animation");
+    CHECK(wf_ui_key(MODULE_KEY_PRESS_HALFSHUTTER) == 1, "half-shutter in the animation not passed on");
+    tick(2);
+    CHECK(closed, "half-shutter did not close the animation");
+    end_checks();
+    CHECK(host_lv_starts() == 0 && lv == 0, "half-shutter in the animation: LiveView started (%d)", host_lv_starts());
     lv = 1;
+
+    /* 5f. never a dead camera (owner 11-14, EOS M: neither the film browser nor the ML menu opened): a UI task that has
+     * not run for STALE_MS lets keys through and closes when it runs again */
+    fake_reset();
+    fake_set_card(card);
+    host_gui_set(0, 1, 1);
+    open_ui();
+    CHECK(wf_ui_key(MODULE_KEY_PRESS_LEFT) == 0, "a key was not consumed while the task beats");
+    tick(1);
+    msleep(2100);                                                   /* the task is starved: no tick */
+    CHECK(wf_ui_key(MODULE_KEY_MENU) == 1 && wf_ui_key(MODULE_KEY_PRESS_DOWN) == 1,
+          "keys still eaten with no beat for 2.1 s");
+    CHECK(wf_ui_is_open(), "the browser declared closed from outside");
+    tick(1);
+    CHECK(closed, "the task did not close when it ran again");
+    end_checks();
+
+    fake_reset();                                                   /* the task never ran after TRASH */
+    fake_set_card(card);
+    closed = 0;
+    CHECK(wf_ui_open() == 0, "open");
+    msleep(2500);
+    CHECK(wf_ui_key(MODULE_KEY_TRASH) == 1 && wf_ui_key(MODULE_KEY_MENU) == 1, "keys eaten before the task ran");
+    wfui_task_begin();
+    CHECK(!host_front_disabled(), "a late task took the screen after the keys went on");
+    tick(1);
+    CHECK(closed, "a late task did not close");
+    end_checks();
+
+    {                                                               /* a second open while one is under way: one task */
+        fake_reset();
+        fake_set_card(card);
+        int t0 = host_tasks();
+        closed = 0;
+        CHECK(wf_ui_open() == 0 && wf_ui_open() == 0 && host_tasks() == t0 + 1, "two opens made %d tasks", host_tasks() - t0);
+        wfui_task_begin();
+        tick(1);
+        close_ui(MODULE_KEY_MENU, 0);
+        host_task_fail(1);                                          /* no task: not open, keys pass on */
+        CHECK(wf_ui_open() == -1 && !wf_ui_is_open() && wf_ui_key(MODULE_KEY_PRESS_LEFT) == 1, "task_create failure");
+        host_task_fail(0);
+    }
 
     /* 6. keys while closed pass on; the open key */
     CHECK(wf_ui_key(MODULE_KEY_PRESS_LEFT) == 1, "a key was eaten while closed");

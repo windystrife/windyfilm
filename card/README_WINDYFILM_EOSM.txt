@@ -43,6 +43,11 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
     Trang chi tiết ....... INFO
     Đóng ................. MENU hoặc chạm 2 ngón
   Bấm nửa nút chụp: giao diện đóng, chụp như thường.
+- SET nạp phim: hiện hoạt cảnh nạp phim khoảng 1 giây, rồi giao diện tự đóng
+  và về LiveView. Bấm phím bất kỳ trong lúc hoạt cảnh để đóng ngay. Phim đã
+  nạp rồi hoặc lỗi thì giao diện vẫn mở như cũ, kèm dòng báo.
+- Nếu giao diện không lên được ngay (ví dụ máy đang xử lý ảnh vừa chụp), sau
+  2 giây các phím lại về Canon / menu ML: chạm 2 ngón vẫn mở menu ML.
 - Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
   WB của bạn được trả lại khi về Auto hoặc khi tắt module.
 - Hàng Print: Scan / Cine print / Paper (chỉ với phim có mô hình in).
