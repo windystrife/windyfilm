@@ -11,6 +11,7 @@
  * can pack index / cache are malloc'ed by the UI task and freed when it ends. */
 #include "wf_ui_int.h"
 #include "wf_icons.h"
+#include "../wf_dark.h"
 
 #define UI_PRIO         0x1E
 #define UI_STACK        0x2000
@@ -30,6 +31,8 @@ static volatile int close_req;
 static volatile uint8_t kq[KQ_N];
 static volatile int kq_w, kq_r;
 static int took;                        /* we hold the screen (front buffer disabled) and the palette */
+static volatile int scr;                /* WFUI_SCR_*: the browser, or a Roll + Darkroom screen (wf_dark_ui.c) */
+static volatile int scr_req = -1;       /* a switch asked for while open (the UI task makes it) */
 
 static uint8_t *list;                   /* wf_films index of each ready film: by group, then order */
 static int nlist;
@@ -149,6 +152,8 @@ static void load_sel(void)
     const struct wf_film *f = film_at(sel);
     if (!f) return;
     if (wf_loaded() == f->id) { say("Already loaded"); return; }
+    const struct wf_roll *ro = wf_roll_now();
+    if (wf_roll_open(ro) && ro->nshot > 0) { say("A roll is in the camera: its film stays until the darkroom"); return; }
     int r = wf_load(f->id);
     if (r == WF_LOAD_OK) { dirty = 1; return; }
     say(r == WF_LOAD_NOTABLE ? "Film table not on the card" : r == WF_LOAD_NOCUBE ? "LUT cube not on the card"
@@ -164,6 +169,12 @@ static void step_row(int d)
 
 static void act(int k)
 {
+    if (scr != WFUI_SCR_BROWSER)
+    {
+        if (wfdr_key(scr, k)) close_req = 1;
+        dirty = 1;
+        return;
+    }
     switch (k)
     {
     case MODULE_KEY_PRESS_LEFT:   select_film(sel - 1); break;
@@ -490,6 +501,11 @@ static void draw_info(const struct wf_film *f, int g)
 void wfui_render(void)
 {
     int now = get_ms_clock();
+    if (scr != WFUI_SCR_BROWSER)
+    {
+        wfdr_render(scr, now);
+        return;
+    }
     const struct wf_film *f = film_at(sel);
     int g = group_of_sel();
     if (f && f->id != glow_id)
@@ -540,6 +556,7 @@ void wfui_task_begin(void)
     int fs = wff_open();
     wfp_init_fixed();
     int cs = wfc_open();
+    if (scr != WFUI_SCR_BROWSER) wfdr_enter(scr);
     if (close_req) return;
     canon_gui_disable_front_buffer();
     took = 1;
@@ -571,6 +588,20 @@ int wfui_task_tick(void)
     uint32_t gen = wf_gen();
     if (gen != drawn_gen) dirty = 1;
     if (msg && now - msg_until >= 0) { msg = 0; dirty = 1; }
+    if (scr_req >= 0)
+    {
+        int s = scr_req;
+        scr_req = -1;
+        if (s != scr)
+        {
+            if (scr != WFUI_SCR_BROWSER) wfdr_leave(scr);
+            scr = s;
+            if (s == WFUI_SCR_BROWSER) { wfp_init_fixed(); glow_id = -1; }
+            else wfdr_enter(s);
+            dirty = 1;
+        }
+    }
+    if (scr != WFUI_SCR_BROWSER && wfdr_tick(scr, now)) dirty = 1;
     if (dirty || now - t_heal >= HEAL_MS)
     {
         dirty = 0;
@@ -603,6 +634,8 @@ void wfui_task_end(void)
     }
     const struct wf_film *f = film_at(sel);
     if (f) last_id = f->id;
+    if (scr != WFUI_SCR_BROWSER) wfdr_leave(scr);
+    scr = WFUI_SCR_BROWSER;
     wfc_close();
     wff_close();
     if (list) free(list);
@@ -631,6 +664,7 @@ int wfui_host_info(void) { return info; }
 /* ------------------------------------------------------------------ wf_api.h */
 void wf_ui_init(void)
 {
+    scr = WFUI_SCR_BROWSER;
     st = ST_CLOSED;
     close_req = 0;
     kq_r = kq_w = 0;
@@ -666,6 +700,19 @@ void wf_ui_close(void)
 
 int wf_ui_is_open(void) { return st != ST_CLOSED; }
 
+/* the Roll picker / Darkroom (wf_dark.h): opens the UI on that screen, or switches an open UI to it */
+void wf_ui_open_scr(int s)
+{
+    if (s < 0 || s >= WFUI_SCR_N) s = WFUI_SCR_BROWSER;
+    if (st == ST_OPEN)
+    {
+        scr_req = s;                                        /* the UI task makes the switch on its next tick */
+        return;
+    }
+    if (st == ST_CLOSED) scr = s;
+    wf_ui_open();
+}
+
 unsigned int wf_ui_key(unsigned int key)
 {
     if (st == ST_CLOSED) return 1;
@@ -687,7 +734,9 @@ unsigned int wf_ui_key(unsigned int key)
     {
         int w = kq_w, nw = (w + 1) % KQ_N;
         if (nw != kq_r) { kq[w] = key; kq_w = nw; }
-        if (key == MODULE_KEY_MENU) close_req = 1;          /* EOS M 2-finger tap: the ML menu opens in 3 s */
+        if (key == MODULE_KEY_MENU && scr == WFUI_SCR_BROWSER)
+            close_req = 1;                                  /* EOS M 2-finger tap: the ML menu opens in 3 s (the Roll /
+                                                               Darkroom screens decide on MENU themselves) */
         return 0;
     }
     }

@@ -16,6 +16,7 @@
  *   hl=<-5..5>  sh=<-5..5>   Highlights / Shadows (films and Log + LUT; 0 = the curve as it was)
  *   grain=off|fine|normal|strong   halation=off|halation|bloom|spk|spkbloom   mist=off|w8|w4|w2|w1|b8|b4|b2|b1
  *   preview=off|on|fast   exposure=camera|smooth   exptrim=<1/8 EV>   exif=on|off
+ *   blind=on|off     Roll + Darkroom: no image review / PLAY while a roll is in the camera (docs/DESIGN.md 3.4)
  *   userwb=<mode>,<kelvin>,<gm>,<ba>   the user's white balance while Light holds it (restored on Auto / unload, also
  *                    after a power cycle in between) */
 #include <dryos.h>
@@ -29,6 +30,7 @@
 #include "wf_film.h"
 #include "wf_fx.h"
 #include "wf_expsim.h"
+#include "wf_dark.h"
 #include "wf_rawb.h"
 
 extern int shooting_mode;                         /* Canon mode dial: 3 = M */
@@ -642,6 +644,8 @@ void wf_cfg_load(void)
                 wf_exp_trim = x;
         } else if ((v = wf_cfg_val(l, "exif"))) {
             wf_exif_off = wf_cfg_word(v, (const char *const[]){ "on", "off" }, 2, 0);
+        } else if ((v = wf_cfg_val(l, "blind"))) {
+            wf_blind = !wf_cfg_word(v, (const char *const[]){ "on", "off" }, 2, 0);
         } else if ((v = wf_cfg_val(l, "input"))) {
             ;                                     /* reserved: "jpeg" is the only input path */
         } else if ((v = wf_cfg_val(l, "userwb"))) {
@@ -673,7 +677,8 @@ static int wf_cfg_save(void)
     int lei = wf_lut_ei_t(), fl = wf_flut > 0 && wf_flut < WF_FLUT_N ? wf_flut : 0;
     int n = snprintf(b, sizeof b,
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
-                     "strength=%s\nhl=%d\nsh=%d\ngrain=%s\nhalation=%s\nmist=%s\npreview=%s\nexposure=%s\nexptrim=%d\nexif=%s\n",
+                     "strength=%s\nhl=%d\nsh=%d\ngrain=%s\nhalation=%s\nmist=%s\npreview=%s\nexposure=%s\nexptrim=%d\nexif=%s\n"
+                     "blind=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
@@ -681,7 +686,7 @@ static int wf_cfg_save(void)
                      wf_hl_t(), wf_sh_t(), wf_pick(wf_grain_key, WF_GRAIN_MAX + 1, wf_grain), wf_pick(wf_halo_key, WF_HALO_MAX + 1, wf_halo),
                      wf_pick(wf_mist_key, WF_MIST_MAX + 1, wf_mist), wf_pick(wf_pv_key, 3, wf_pv_mode),
                      wf_pick(wf_exp_key, 2, wf_exp_mode), wf_exp_trim >= -16 && wf_exp_trim <= 16 ? (int)wf_exp_trim : 0,
-                     wf_exif_off ? "off" : "on");
+                     wf_exif_off ? "off" : "on", wf_blind ? "on" : "off");
     if (wf_wb_saved && n > 0 && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, "userwb=%d,%d,%d,%d\n", wf_wb_mode, wf_wb_kelvin, wf_wb_gm, wf_wb_ba);
     if (n <= 0 || n >= (int)sizeof b)
@@ -757,34 +762,42 @@ void wf_exif_none(void) { wf_ex_push(""); }
 
 /* "WindyFilm: Portra 400 | Print Cine | Light Day | Strength 100% | Grain Normal | Halation Film + bloom | Mist 1/8 | EV12"
  * g / h / m: the grain / halation / mist setting when it ran on this shot, 0 = it did not */
+const char *wf_exif_text(const struct wf_look *lk, int g, int h, int m, int ev, char *b, int bn);
 void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev)
 {
-    char b[WF_EX_T], t[48];
-    int n = snprintf(b, sizeof b, "WindyFilm: %s", wf_look_title(lk, t, sizeof t));
-    if (lk->output == WF_OUT_FILM && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, " | Print %s | Strength %d%%", wf_print_name[lk->variant < WF_NPRINTS ? lk->variant : 0],
+    char b[WF_EX_T];
+    wf_ex_push(wf_exif_text(lk, g, h, m, ev, b, sizeof b));
+}
+
+/* the text itself (the Darkroom's print comment too, wf_dark.c) */
+const char *wf_exif_text(const struct wf_look *lk, int g, int h, int m, int ev, char *b, int bn)
+{
+    char t[48];
+    int n = snprintf(b, bn, "WindyFilm: %s", wf_look_title(lk, t, sizeof t));
+    if (lk->output == WF_OUT_FILM && n < bn)
+        n += snprintf(b + n, bn - n, " | Print %s | Strength %d%%", wf_print_name[lk->variant < WF_NPRINTS ? lk->variant : 0],
                       wf_strength_pct(lk->strength));
-    if (lk->output == WF_OUT_LLUT && lk->row >= 0 && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, " | %s", wf_out_name(WF_OUT_LLUT, lk->curve));
-    if (lk->output == WF_OUT_LLUT && lk->lei && lk->lei >= WF_LL_EI_MIN && lk->lei <= WF_LL_EI_MAX && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, " | LUT EI %s", wf_lei_name[lk->lei - WF_LL_EI_MIN]);
-    if (lk->output == WF_OUT_LLUT && lk->incurve > WF_INC_SRGB && lk->incurve < WF_INC_N && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, " | In %s", wf_inc_name[lk->incurve]);
-    if (lk->hl && (lk->output == WF_OUT_FILM || lk->output == WF_OUT_LLUT) && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, " | Highlights %s", wf_hs_text(lk->hl));
-    if (lk->sh && (lk->output == WF_OUT_FILM || lk->output == WF_OUT_LLUT) && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, " | Shadows %s", wf_hs_text(lk->sh));
-    if (lk->light && lk->light < WF_NLIGHT && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, " | Light %s", wf_light_name[lk->light]);
-    if (g > 0 && g <= WF_GRAIN_MAX && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, " | Grain %s", wf_grain_name[g]);
-    if (h > 0 && h <= WF_HALO_MAX && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, " | Halation %s", wf_halo_name[h]);
-    if (m > 0 && m <= WF_MIST_MAX && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, m > 4 ? " | Black Mist %s" : " | Mist %s", wf_mist_name[m] + (m > 4 ? 6 : 0));
-    if (ev != WF_EV_NONE && n < (int)sizeof b)
-        snprintf(b + n, sizeof b - n, " | EV%d", ev);
-    wf_ex_push(b);
+    if (lk->output == WF_OUT_LLUT && lk->row >= 0 && n < bn)
+        n += snprintf(b + n, bn - n, " | %s", wf_out_name(WF_OUT_LLUT, lk->curve));
+    if (lk->output == WF_OUT_LLUT && lk->lei && lk->lei >= WF_LL_EI_MIN && lk->lei <= WF_LL_EI_MAX && n < bn)
+        n += snprintf(b + n, bn - n, " | LUT EI %s", wf_lei_name[lk->lei - WF_LL_EI_MIN]);
+    if (lk->output == WF_OUT_LLUT && lk->incurve > WF_INC_SRGB && lk->incurve < WF_INC_N && n < bn)
+        n += snprintf(b + n, bn - n, " | In %s", wf_inc_name[lk->incurve]);
+    if (lk->hl && (lk->output == WF_OUT_FILM || lk->output == WF_OUT_LLUT) && n < bn)
+        n += snprintf(b + n, bn - n, " | Highlights %s", wf_hs_text(lk->hl));
+    if (lk->sh && (lk->output == WF_OUT_FILM || lk->output == WF_OUT_LLUT) && n < bn)
+        n += snprintf(b + n, bn - n, " | Shadows %s", wf_hs_text(lk->sh));
+    if (lk->light && lk->light < WF_NLIGHT && n < bn)
+        n += snprintf(b + n, bn - n, " | Light %s", wf_light_name[lk->light]);
+    if (g > 0 && g <= WF_GRAIN_MAX && n < bn)
+        n += snprintf(b + n, bn - n, " | Grain %s", wf_grain_name[g]);
+    if (h > 0 && h <= WF_HALO_MAX && n < bn)
+        n += snprintf(b + n, bn - n, " | Halation %s", wf_halo_name[h]);
+    if (m > 0 && m <= WF_MIST_MAX && n < bn)
+        n += snprintf(b + n, bn - n, m > 4 ? " | Black Mist %s" : " | Mist %s", wf_mist_name[m] + (m > 4 ? 6 : 0));
+    if (ev != WF_EV_NONE && n < bn)
+        snprintf(b + n, bn - n, " | EV%d", ev);
+    return b;
 }
 
 static int wf_ex_rd(FILE *f, uint32_t off, void *b, int n)
@@ -1246,7 +1259,9 @@ static const char *wf_rawb_name[2] = { "Off", "On (slow)" };
 static MENU_UPDATE_FUNC(wf_rawb_update)
 {
     int st = wf_rawb_state(), dm = drive_mode;
-    if (!wf_rawb)
+    if (!wf_rawb && wf_roll_shooting())
+        MENU_SET_WARNING(MENU_WARN_INFO, "A roll is loaded: turning this on ends the roll (Darkroom develops it).");
+    else if (!wf_rawb)
         MENU_SET_WARNING(MENU_WARN_INFO, "Develops the RAW of a RAW+L shot: about 30 s each. Off at boot.");
     else if (!wf_yuv_active())
         WF_NOT_ACTIVE();
@@ -1265,11 +1280,91 @@ static MENU_UPDATE_FUNC(wf_rawb_update)
     else
         MENU_SET_WARNING(MENU_WARN_INFO, "About 30 s per shot. Hold half-shutter to stop.");
 }
+/* one mode at a time (docs/DESIGN.md 3.4): RAW develop on ends a loaded roll (rewound when it has frames, so the
+ * Darkroom still develops them; closed when empty), and loading a roll turns RAW develop off (wf_dark.c) */
+static MENU_SELECT_FUNC(wf_rawb_select)
+{
+    (void)priv; (void)delta;
+    if (wf_rawb) {
+        wf_rawb = 0;
+        return;
+    }
+    const struct wf_roll *r = wf_roll_now();
+    if (r->state == WF_RS_LOADED) {
+        int had = r->nshot;
+        if ((had > 0 ? wf_roll_req_rewind() : wf_roll_req_close()) != 0) {
+            NotifyBox(2000, "Busy: try again");
+            return;
+        }
+        NotifyBox(3000, had > 0 ? "Roll ended: develop it in the Darkroom" : "Empty roll closed");
+        wf_log("menu: RAW develop on, roll %03d ended (%d frame(s))", r->num, had);
+    }
+    wf_rawb = 1;
+}
 #define WF_RAWB_ENTRY { .name = "RAW develop", .priv = (void *)&wf_rawb, .max = 1, .choices = wf_rawb_name, \
-                        .update = wf_rawb_update, .help = "Slow: the look from Canon's RAW (RAW+L single shots)." },
+                        .select = wf_rawb_select, .update = wf_rawb_update, \
+                        .help = "Slow: the look from Canon's RAW (RAW+L single shots). Off while a roll shoots." },
 #else
 #define WF_RAWB_ENTRY
 #endif
+
+/* ------------------------------------------------------------------ Roll + Darkroom (wf_dark.c, docs/DESIGN.md 3.4) */
+int wf_card_nums(int *folder, int *file)
+{
+    struct card_info *c = get_shooting_card();
+    if (!c || c->file_number < 0 || c->folder_number < 100)
+        return -1;
+    *folder = c->folder_number;
+    *file = c->file_number;
+    return 0;
+}
+const char *wf_dcim_dir(void) { return get_dcim_dir(); }
+const char *wf_file_prefix(void) { return get_file_prefix(); }
+
+static const char *const wf_rs_text[WF_RS_N] = { "No roll", "Loaded", "Full", "Rewound", "Developed" };
+static MENU_SELECT_FUNC(wf_roll_select) { (void)priv; (void)delta; wf_ui_open_scr(WF_UI_SCR_ROLL); gui_stop_menu(); }
+static MENU_UPDATE_FUNC(wf_roll_update)
+{
+    const struct wf_roll *r = wf_roll_now();
+    const struct wf_film *f = wf_film_by_id(r->film);
+    if (wf_roll_open(r))
+        MENU_SET_VALUE("%03d %d/%d", r->num, r->nshot, r->exp);
+    else
+        MENU_SET_VALUE("%s", wf_rs_text[r->state < WF_RS_N ? r->state : 0]);
+    if (wf_roll_open(r) && f)
+        MENU_SET_WARNING(MENU_WARN_INFO, "%s, %s. RAW+L is set while the roll shoots.", f->name, wf_rs_text[r->state]);
+#if WF_RAWB_CAN
+    else if (wf_rawb)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Loading a roll turns RAW develop off (one mode at a time).");
+#endif
+}
+static MENU_SELECT_FUNC(wf_blind_select) { (void)priv; (void)delta; wf_blind = !wf_blind; wf_dirty(); }
+static MENU_SELECT_FUNC(wf_dark_select) { (void)priv; (void)delta; wf_ui_open_scr(WF_UI_SCR_DARK); gui_stop_menu(); }
+static MENU_UPDATE_FUNC(wf_dark_update)
+{
+    const struct wf_roll *r = wf_roll_now();
+    const struct wf_dark_view *v = wf_dark_view();
+    int left = r->state == WF_RS_LOADED ? r->nshot : wf_roll_left(r);
+    if (v->state == WF_DR_RUN || v->state == WF_DR_STOPPING)
+        MENU_SET_VALUE("%d left", v->left);
+    else
+        MENU_SET_VALUE(left ? "%d to develop" : "Nothing", left);
+    if (wf_cam() != WF_CAM_EOSM)
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "The Darkroom runs on the EOS M first.");
+    else if (left)
+        MENU_SET_WARNING(MENU_WARN_INFO, "About %d min. Prints go to ROLLS/ROLL%03d.", (left * 55 + 59) / 60, r->num);
+}
+static MENU_SELECT_FUNC(wf_rewind_select)
+{
+    (void)priv; (void)delta;
+    int rc = wf_roll_req_rewind();
+    if (rc == -1) NotifyBox(2000, "Nothing to rewind");
+}
+static MENU_SELECT_FUNC(wf_close_select)
+{
+    (void)priv; (void)delta;
+    if (wf_roll_req_close() == -1) NotifyBox(2000, "No roll in the camera");
+}
 
 #define WF_ROWE(nm, row, sel, hlp) { .name = nm, .priv = (void *)(intptr_t)((row) + 1), .select = sel, \
                                      .update = wf_row_update, .help = hlp, .icon_type = IT_DICE }
@@ -1282,6 +1377,16 @@ static struct menu_entry wf_menu[] = {
         .children = (struct menu_entry[]) {
             { .name = "Open film browser", .select = wf_open_select, .icon_type = IT_ACTION,
               .help = "The film strip: pick a film or Film LUT can, Light, Print, effects." },
+            { .name = "Film roll", .select = wf_roll_select, .update = wf_roll_update, .icon_type = IT_ACTION,
+              .help = "Load a roll: one film, 12 / 24 / 36 RAW+L frames, developed later in the Darkroom." },
+            { .name = "Blind roll", .priv = (void *)&wf_blind, .max = 1, .select = wf_blind_select,
+              .help = "On: no image review and no PLAY while a roll is in the camera." },
+            { .name = "Darkroom", .select = wf_dark_select, .update = wf_dark_update, .icon_type = IT_ACTION,
+              .help = "Develop the roll's RAW files with its film into ROLLS/ROLLnnn (about 1 min each)." },
+            { .name = "End roll now", .select = wf_rewind_select, .icon_type = IT_ACTION,
+              .help = "End the roll early: the Darkroom develops the frames shot so far." },
+            { .name = "Close roll", .select = wf_close_select, .icon_type = IT_ACTION,
+              .help = "Give up the frames not developed yet (their RAW files stay on the card)." },
             { .name = "Output", .priv = (void *)&wf_out, .max = WF_NOUT - 1, .choices = wf_out_menu,
               .select = wf_out_select, .update = wf_out_update,
               .help = "Film: the loaded film. Log: flat log. Log + LUT: log through a cube." },

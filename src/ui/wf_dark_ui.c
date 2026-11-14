@@ -1,0 +1,801 @@
+/* wf_dark_ui.c - WindyFilm Roll + Darkroom screens (docs/DESIGN.md 3.4), WindyStrife's own code and art.
+ *
+ * Three pieces, all drawn with the browser's own toolkit (wf_gfx.c primitives, wf_font.c fonts, wf_cans.c can pack):
+ *   Roll picker  shelf tabs Colour / Slide / B&W / Cine / LUT, a carousel of cans (the centre one big, the others
+ *                smaller and dimmed further back), the film's kind, name, one-line description and chips ISO / PROCESS /
+ *                EXP 12-24-36; SET loads the roll. Top bar: the roll on the camera, its count and the clock.
+ *   Darkroom     a red safelight theme (the same palette entries recoloured): the print window on the easel at the left,
+ *                the picture fading in on the paper as the develop exposes it (palette ramp only, no pixel redraw), the
+ *                roll / film / "Frame n of N", a timer dial, the phase ("Exposing the paper"), "n to go - about m min";
+ *                developed prints slide up to the wire along the top and hang there to dry. MENU stops.
+ *   HUD          the frame counter drawn over LiveView while a roll shoots, in ML's own colour indices (the UI's palette
+ *                entries are not ours outside the UI): wfdr_hud (wf_dark.c calls it from wf_task).
+ * Threads: UI task only (wf_ui.c calls wfdr_*); the darkroom state comes from wf_dark_view() (wf_dark.h). */
+#include "wf_ui_int.h"
+#include "../wf_dark.h"
+
+typedef char scr_ids_match[WF_UI_SCR_ROLL == WFUI_SCR_ROLL && WF_UI_SCR_DARK == WFUI_SCR_DARK ? 1 : -1];
+
+#define MSG_MS 2600
+static const char *msg;
+static int msg_until;
+static void say(const char *s, int now) { msg = s; msg_until = now + MSG_MS; }
+
+static inline int is5d2(void) { return wf_cam() == WF_CAM_5D2; }
+
+static int text_r(int font, int xr, int y, const char *s, int c)
+{
+    int w = ui_textw(font, s);
+    ui_text(font, xr - w, y, s, c);
+    return w;
+}
+
+static void text_c(int font, int cx, int y, const char *s, int c)
+{
+    ui_text(font, cx - ui_textw(font, s) / 2, y, s, c);
+}
+
+/* letter-spaced caps (13 px): "ROLL 021", "DARKROOM", the kind line */
+static int spaced_w(int font, const char *s, int sp)
+{
+    char b[2] = { 0, 0 };
+    int w = 0;
+    for (; *s; s++) { b[0] = *s; w += ui_textw(font, b) + sp; }
+    return w ? w - sp : 0;
+}
+static void spaced(int font, int x, int y, const char *s, int c, int sp)
+{
+    char b[2] = { 0, 0 };
+    for (; *s; s++) { b[0] = *s; x += ui_text(font, x, y, b, c) + sp; }
+}
+static void spaced_c(int font, int cx, int y, const char *s, int c, int sp)
+{
+    spaced(font, cx - spaced_w(font, s, sp) / 2, y, s, c, sp);
+}
+
+/* key hint "[KEY] word" pairs from x; returns the end */
+static int hints(const char *const *k, int x, int y, int kc, int tc)
+{
+    for (; *k; k += 2)
+    {
+        int kw = ui_textw(F_13, k[0]) + 10;
+        wfg_rrect(x, y - 1, x + kw, y + 16, 4, -1, C_KEYO, 1);
+        ui_text(F_13, x + 5, y, k[0], kc);
+        x += kw + 5;
+        x += ui_text(F_13, x, y, k[1], tc) + 12;
+    }
+    return x;
+}
+
+static void clock_text(char *b, int n)
+{
+    int hm = wf_clock_hm();
+    if (hm < 0) { b[0] = 0; return; }
+    snprintf(b, n, "%02d:%02d", hm / 100, hm % 100);
+}
+
+static void mark(int x, int y, int bg)                     /* own mark: a frame with sprockets + hill (as the browser) */
+{
+    wfg_rrect(x, y, x + 22, y + 22, 6, C_AMBER, -1, 0);
+    for (int i = 0; i < 3; i++)
+    {
+        wfg_rect(x + 3 + i * 6, y + 3, x + 6 + i * 6, y + 5, bg);
+        wfg_rect(x + 3 + i * 6, y + 17, x + 6 + i * 6, y + 19, bg);
+    }
+    wfg_tri(x + 4, y + 15, x + 11, y + 8, x + 18, y + 15, bg);
+}
+
+/* =================================================================== roll picker */
+enum { RT_COLOUR = 0, RT_SLIDE, RT_BW, RT_CINE, RT_LUT, RT_N };
+static const char *const rt_name[RT_N] = { "COLOUR", "SLIDE", "B&W", "CINE", "LUT" };
+static const char *const rt_process[RT_N] = { "C-41", "E-6", "B&W", "ECN-2", "LOG" };
+static const int exps[3] = { 12, 24, 36 };
+
+static uint8_t rl[RT_N][64];                               /* wf_films index per tab, by catalogue order */
+static int rn[RT_N];
+static int rtab, rsel[RT_N], rexp = 1, rbuilt, rglow = -1;
+
+static int tab_of(const struct wf_film *f)
+{
+    if (f->flags & WF_F_LUTCAN || f->group == WF_GRP_LUT) return RT_LUT;
+    if (f->group == WF_GRP_BW || (f->flags & WF_F_BW)) return RT_BW;
+    if (f->group == WF_GRP_CINE) return RT_CINE;
+    if ((f->flags & WF_F_SLIDE) || (f->kind && !strcmp(f->kind, "SLIDE"))) return RT_SLIDE;
+    return RT_COLOUR;
+}
+
+static void roll_build(void)
+{
+    for (int t = 0; t < RT_N; t++) rn[t] = 0;
+    for (int i = 0; i < wf_nfilms && i < 255; i++)
+    {
+        const struct wf_film *f = &wf_films[i];
+        if (!(f->flags & WF_F_READY)) continue;
+        int t = tab_of(f);
+        if (rn[t] >= 64) continue;
+        int k = rn[t]++;
+        while (k > 0 && wf_films[rl[t][k - 1]].order > f->order) { rl[t][k] = rl[t][k - 1]; k--; }
+        rl[t][k] = (uint8_t)i;
+    }
+    rbuilt = 1;
+}
+
+static const struct wf_film *rfilm(int t, int i)
+{
+    return i >= 0 && i < rn[t] ? &wf_films[rl[t][i]] : 0;
+}
+
+static void roll_select_id(int id)
+{
+    for (int t = 0; t < RT_N; t++)
+        for (int i = 0; i < rn[t]; i++)
+            if (wf_films[rl[t][i]].id == id) { rtab = t; rsel[t] = i; return; }
+}
+
+static void roll_enter(void)
+{
+    if (!rbuilt) roll_build();
+    const struct wf_roll *r = wf_roll_now();
+    int id = wf_roll_open(r) ? r->film : wf_loaded();
+    if (id) roll_select_id(id);
+    if (!rn[rtab])
+        for (int t = 0; t < RT_N; t++) if (rn[t]) { rtab = t; break; }
+    if (wf_roll_open(r)) for (int k = 0; k < 3; k++) if (exps[k] == r->exp) rexp = k;
+    wfg_glow_centre(360, 168, 360, 290);
+    rglow = -1;                                            /* the glow ramp again (the palette may be the darkroom's) */
+    msg = 0;
+}
+
+static void roll_next_tab(int d)
+{
+    for (int k = 1; k <= RT_N; k++)
+    {
+        int t = (rtab + d * k + RT_N * 4) % RT_N;
+        if (rn[t]) { rtab = t; return; }
+    }
+}
+
+static int roll_key(int key, int now)
+{
+    const struct wf_film *f = rfilm(rtab, rsel[rtab]);
+    switch (key)
+    {
+    case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_UP:
+        if (rsel[rtab] > 0) rsel[rtab]--;
+        break;
+    case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_DOWN:
+        if (rsel[rtab] < rn[rtab] - 1) rsel[rtab]++;
+        break;
+    case MODULE_KEY_Q: case MODULE_KEY_PICSTYLE: case MODULE_KEY_TOUCH_1_FINGER:
+        roll_next_tab(1);
+        break;
+    case MODULE_KEY_PRESS_UP: case MODULE_KEY_INFO:
+        rexp = (rexp + 1) % 3;
+        break;
+    case MODULE_KEY_PRESS_DOWN:
+        rexp = (rexp + 2) % 3;
+        break;
+    case MODULE_KEY_PRESS_SET: case MODULE_KEY_JOY_CENTER:
+    {
+        if (!f) break;
+        const struct wf_roll *r = wf_roll_now();
+        if (wf_roll_open(r) && r->nshot > 0) { say("This roll has frames: develop it first (Darkroom)", now); break; }
+        if (!wf_avail(f->id)) { say(f->flags & WF_F_LUTCAN ? "LUT cube not on the card" : "Film table not on the card", now); break; }
+        int rc = wf_roll_req_load(f->id, exps[rexp]);
+        say(rc == 0 ? "Roll loaded: shoot away" : rc == 1 ? "Roll loaded: RAW develop is off now"
+            : rc == -3 ? "Busy, press SET again"
+            : rc == -4 ? "Rolls come to this camera later (EOS M first)" : "Cannot load this roll", now);
+        if (rc >= 0) return 0;
+        break;
+    }
+    case MODULE_KEY_MENU: case MODULE_KEY_TRASH: case MODULE_KEY_PLAY: case MODULE_KEY_LV:
+        return 1;
+    }
+    return 0;
+}
+
+static void roll_topbar(int now)
+{
+    mark(14, 6, C_BGLAST);
+    int x = 44 + ui_text(F_ML23, 44, 4, "WindyFilm", C_TXT);
+    spaced(F_13, x + 10, 11, "ROLL", C_TXT3, 2);
+
+    char ck[8], b[64];
+    clock_text(ck, sizeof ck);
+    int xr = WFUI_W - 14;
+    if (ck[0]) xr -= text_r(F_15, xr, 8, ck, C_TXT2) + 12;
+    const struct wf_roll *r = wf_roll_now();
+    const char *s;
+    int fill = C_SEP, out = C_LINE, dot = C_BAROFF, tc = C_TXT2;
+    if (msg && now - msg_until < 0) { s = msg; out = C_WARN; dot = C_WARN; tc = C_TXT; }
+    else if (wf_roll_open(r))
+    {
+        const struct wf_film *lf = wf_film_by_id(r->film);
+        const char *st = r->state == WF_RS_FULL ? "  END OF ROLL" : r->state == WF_RS_REWOUND ? "  REWOUND" : "";
+        snprintf(b, sizeof b, "ROLL %03d  %s  %d/%d%s", r->num, lf ? lf->name : "?", r->nshot, r->exp, st);
+        s = b;
+        fill = C_CHIPF; out = C_CHIPO; dot = C_GRN; tc = C_TXT;
+    }
+    else s = "No roll on the camera";
+    int lw = ui_textw(F_15, s);
+    if (lw > 420) lw = 420;
+    wfg_rrect(xr - lw - 36, 7, xr, 27, 10, fill, out, 1);
+    wfg_ellipse(xr - lw - 28, 13, xr - lw - 20, 21, dot);
+    ui_text_clip(F_15, xr - lw - 12, 8, s, tc, xr - 8);
+    wfg_rect(12, 33, WFUI_W - 13, 33, C_LINE);
+}
+
+static void roll_tabs(void)
+{
+    int tw = 0;
+    for (int t = 0; t < RT_N; t++) tw += spaced_w(F_13, rt_name[t], 2) + (t ? 34 : 0);
+    int x = (WFUI_W - tw) / 2;
+    for (int t = 0; t < RT_N; t++)
+    {
+        int w = spaced_w(F_13, rt_name[t], 2);
+        int c = !rn[t] ? C_LINE : t == rtab ? C_TXT : C_TXT3;
+        spaced(F_13, x, 42, rt_name[t], c, 2);
+        if (t == rtab) wfg_rrect(x - 2, 60, x + w + 2, 62, 1, t == RT_LUT ? C_TEAL : C_AMBER, -1, 0);
+        x += w + 34;
+    }
+}
+
+/* the carousel: slot d = -3..3 around the selection; scale num / 8 of the big can, dim further back */
+static void roll_carousel(void)
+{
+    static const int8_t sc[4] = { 8, 4, 3, 2 };            /* /8 */
+    static const int16_t cx[4] = { 0, 152, 250, 322 };
+    static const int16_t bot[4] = { 286, 268, 256, 246 };
+    static const int8_t dim[4] = { 0, 0, 0, 1 };
+    int bw = wfc_size[CAN_BIG][0], bh = wfc_size[CAN_BIG][1];
+    for (int a = 3; a >= 0; a--)
+        for (int side = -1; side <= 1; side += 2)
+        {
+            if (!a && side > 0) continue;
+            int d = a * side;
+            const struct wf_film *f = rfilm(rtab, rsel[rtab] + d);
+            if (!f) continue;
+            int w = bw * sc[a] / 8, h = bh * sc[a] / 8;
+            int x = 360 + (a ? side * cx[a] : 0) - w / 2, y = bot[a] - h;
+            if (!a) wfc_draw(f, CAN_BIG, x, y, C_BG0);
+            else wfc_draw_scaled(f, CAN_BIG, x, y, sc[a], 8, dim[a]);
+        }
+    int n = rn[rtab], i = rsel[rtab];
+    wfg_tri(20, 176, 30, 166, 30, 186, i > 0 ? C_TXT2 : C_BAROFF);
+    wfg_tri(699, 176, 689, 166, 689, 186, i < n - 1 ? C_TXT2 : C_BAROFF);
+}
+
+static int chip_kv(int x, int y, const char *k, const char *v, int kc, int vc, int oc, int fill, int extra)
+{
+    int kw = ui_textw(F_13, k), vw = ui_textw(F_15, v);
+    int w = kw + vw + 22 + extra;
+    wfg_rrect(x, y, x + w, y + 22, 11, fill, oc, 1);
+    ui_text(F_13, x + 9, y + 4, k, kc);
+    ui_text(F_15, x + 14 + kw, y + 2, v, vc);
+    return w;
+}
+
+static void roll_info(void)
+{
+    const struct wf_film *f = rfilm(rtab, rsel[rtab]);
+    if (!f) { text_c(F_15, 360, 330, "No films on this shelf", C_TXT2); return; }
+    int A = rtab == RT_LUT ? C_TEAL : C_AMBER, AD = rtab == RT_LUT ? C_TEALD : C_AMBERD;
+    spaced_c(F_13, 360, 296, f->kind ? f->kind : "", A, 3);
+    text_c(F_ML28, 360, 312, f->name, C_TXT);
+    if (f->line1) text_c(F_15, 360, 344, f->line1, C_TXT2);
+    if (f->line2) text_c(F_15, 360, 361, f->line2, C_TXT2);
+    char iso[12], ex[8];
+    snprintf(iso, sizeof iso, "%d", f->iso);
+    snprintf(ex, sizeof ex, "%d", exps[rexp]);
+    int w1 = ui_textw(F_13, "ISO") + ui_textw(F_15, iso) + 22;
+    int w2 = ui_textw(F_13, "PROCESS") + ui_textw(F_15, rt_process[rtab]) + 22;
+    int w3 = ui_textw(F_13, "EXP") + ui_textw(F_15, ex) + 22 + 14;
+    int x = 360 - (w1 + w2 + w3 + 20) / 2, cy = 386;
+    x += chip_kv(x, cy, "ISO", iso, C_TXT3, C_TXT, C_LINE, C_SEP, 0) + 10;
+    x += chip_kv(x, cy, "PROCESS", rt_process[rtab], C_TXT3, C_TXT, C_LINE, C_SEP, 0) + 10;
+    int ew = chip_kv(x, cy, "EXP", ex, C_TXT2, C_TXT, A, AD, 14);
+    wfg_tri(x + ew - 17, cy + 9, x + ew - 13, cy + 5, x + ew - 9, cy + 9, A);   /* up / down: the count changes */
+    wfg_tri(x + ew - 17, cy + 13, x + ew - 13, cy + 17, x + ew - 9, cy + 13, A);
+    if (!wf_avail(f->id))
+        text_c(F_13, 360, 416, f->flags & WF_F_LUTCAN ? "LUT cube not on the card" : "Film table not on the card", C_WARN);
+    else
+    {
+        const struct wf_roll *r = wf_roll_now();
+        if (wf_roll_open(r) && r->film == f->id)
+            text_c(F_13, 360, 416, r->nshot ? "On the camera now" : "On the camera now, no frame yet", C_GRN);
+    }
+}
+
+static void roll_footer(void)
+{
+    static const char *const k_eosm[] = { "L/R", "Film", "TAP", "Shelf", "UP/DN", "Exposures", "SET", "Load",
+                                          "MENU", "Back", 0 };
+    static const char *const k_5d2[] = { "L/R", "Film", "PICT", "Shelf", "UP/DN", "Exposures", "SET", "Load",
+                                         "MENU", "Back", 0 };
+    const struct wf_roll *r = wf_roll_now();
+    static const char *const k_open[] = { "L/R", "Film", "TAP", "Shelf", "MENU", "Back", 0 };
+    const char *const *k = wf_roll_open(r) && r->nshot ? k_open : is5d2() ? k_5d2 : k_eosm;
+    int w = hints(k, 2000, 455, C_TXT2, C_TXT3) - 2000 - 12;   /* measure off screen */
+    hints(k, (WFUI_W - w) / 2, 455, C_TXT2, C_TXT3);
+}
+
+static void roll_render(int now)
+{
+    const struct wf_film *f = rfilm(rtab, rsel[rtab]);
+    if (f && f->id != rglow)
+    {
+        uint8_t rgb[3];
+        wfc_glow(f, rgb);
+        wfp_set_glow(rgb);
+        rglow = f->id;
+    }
+    wfg_background(0, WFUI_H);
+    roll_topbar(now);
+    roll_tabs();
+    roll_carousel();
+    roll_info();
+    wfg_rect(12, 440, WFUI_W - 13, 440, C_SEP);
+    roll_footer();
+}
+
+/* =================================================================== darkroom */
+/* palette: the fixed entries recoloured to the safelight theme; the can range holds the print ramps */
+#define DR_NDEV   48                                       /* the print in the window: fades with the exposure */
+#define DR_NDRY   32                                       /* prints on the wire */
+#define C_DEV0    (C_CAN0)
+#define C_DRY0    (C_CAN0 + DR_NDEV)
+typedef char dr_pal_fits[C_DRY0 + DR_NDRY <= WFUI_NPAL ? 1 : -1];
+
+static const uint8_t red_fixed[C_NFIXED][3] = {
+    { 255, 120, 112 },   /* C_TXT */
+    { 214,  76,  74 },   /* C_TXT2 */
+    { 150,  44,  46 },   /* C_TXT3 */
+    { 255,  58,  58 },   /* C_AMBER: the accent is the safelight */
+    {  92,  14,  16 },   /* C_AMBERD */
+    { 255,  58,  58 },   /* C_TEAL */
+    {  92,  14,  16 },   /* C_TEALD */
+    { 255, 150,  96 },   /* C_GRN: "done" in a warm tone */
+    {  40,   8,  10 },   /* C_CHIPF */
+    { 120,  30,  30 },   /* C_CHIPO */
+    {  74,  16,  18 },   /* C_LINE */
+    {  44,   9,  11 },   /* C_SEP */
+    {  66,  15,  17 },   /* C_BAROFF */
+    {   9,   1,   2 },   /* C_STRIP: the easel */
+    {  60,  14,  16 },   /* C_HOLE: pegs */
+    {  24,   5,   6 },   /* C_FRAME */
+    {  18,   3,   4 },   /* C_FADE1 */
+    {  13,   2,   3 },   /* C_FADE2 */
+    {  36,   8,   9 },   /* C_TRACK */
+    {  98,  24,  26 },   /* C_KEYO */
+    { 255, 200,  60 },   /* C_WARN */
+};
+static const uint8_t RED_TOP[3] = { 38, 6, 8 }, RED_BOT[3] = { 11, 1, 2 };
+static const uint8_t PAPER[3] = { 236, 66, 74 };           /* unexposed paper under the safelight */
+
+static int dr_expose_shown = -1, dr_pready = -1;
+static uint32_t dr_gen = 0xFFFFFFFFu;
+static int dr_confirm;                                     /* MENU once while running: "MENU again to stop" */
+
+/* developed tone of level v (0..1000): shadows to a near black red, highlights to the paper */
+static void tone(int v, int out[3])
+{
+    static const uint8_t DARK[3] = { 16, 1, 4 };
+    int v2 = v * v / 1000;
+    int w = (v * 3 + v2 * 7) / 10;                         /* a gentle toe */
+    for (int c = 0; c < 3; c++) out[c] = DARK[c] + (PAPER[c] - DARK[c]) * w / 1000;
+}
+
+static void dr_pal_dev(int expose)
+{
+    /* e = how far the picture has come up: 0 blank paper .. 1000 full contrast (ease out) */
+    int e = expose < 0 ? 0 : expose > 1000 ? 1000 : expose;
+    int s = 1000 - (1000 - e) * (1000 - e) / 1000;
+    for (int i = 0; i < DR_NDEV; i++)
+    {
+        int t[3];
+        tone(i * 1000 / (DR_NDEV - 1), t);
+        wfp_set_rgb(C_DEV0 + i, PAPER[0] + (t[0] - PAPER[0]) * s / 1000, PAPER[1] + (t[1] - PAPER[1]) * s / 1000,
+                    PAPER[2] + (t[2] - PAPER[2]) * s / 1000);
+    }
+    dr_expose_shown = expose;
+}
+
+static void dark_enter(void)
+{
+    for (int i = 0; i < C_NFIXED; i++) wfp_set_rgb(i, red_fixed[i][0], red_fixed[i][1], red_fixed[i][2]);
+    for (int i = 0; i < WFUI_NBG; i++)
+        wfp_set_rgb(C_BG0 + i, RED_TOP[0] + (RED_BOT[0] - RED_TOP[0]) * i / (WFUI_NBG - 1),
+                    RED_TOP[1] + (RED_BOT[1] - RED_TOP[1]) * i / (WFUI_NBG - 1),
+                    RED_TOP[2] + (RED_BOT[2] - RED_TOP[2]) * i / (WFUI_NBG - 1));
+    for (int i = 0; i < DR_NDRY; i++)
+    {
+        int t[3];
+        tone(i * 1000 / (DR_NDRY - 1), t);
+        wfp_set_rgb(C_DRY0 + i, t[0], t[1], t[2]);
+    }
+    wfg_glow_centre(184, 248, -1000, -1000);               /* the safelight's glow round the easel, no floor shadow */
+    static const uint8_t lamp[3] = { 200, 24, 24 };
+    wfp_set_glow(lamp);
+    dr_pal_dev(0);
+    dr_pready = -1;
+    dr_gen = 0xFFFFFFFFu;
+    dr_confirm = 0;
+    msg = 0;
+}
+
+/* a luma image (lw x lh) drawn into (x, y, w, h) with ramp base / n levels, nearest sampling */
+static void luma_blit(const uint8_t *l, int lw, int lh, int x, int y, int w, int h, int base, int n)
+{
+    if (!l || w <= 0 || h <= 0) return;
+    for (int oy = 0; oy < h; oy++)
+    {
+        int yy = y + oy;
+        if (yy < 0 || yy >= WFUI_H) continue;
+        const uint8_t *src = l + (oy * lh / h) * lw;
+        uint8_t *row = wfg_cv + yy * wfg_pitch;
+        const uint8_t *bay = wfg_bayer[yy & 3];
+        for (int ox = 0; ox < w; ox++)
+        {
+            int xx = x + ox;
+            if (xx < 0 || xx >= WFUI_W) continue;
+            int v = src[ox * lw / w] * (n - 1) * 16 / 255 + bay[xx & 3];   /* ordered dither between levels */
+            int k = v >> 4;
+            row[xx] = PX(base + (k > n - 1 ? n - 1 : k));
+        }
+    }
+}
+
+/* the print window: easel frame, paper, the print */
+#define PR_X 40
+#define PR_Y 146
+static void dr_easel(const struct wf_dark_view *v, int now)
+{
+    wfg_rrect(18, 120, 350, 374, 8, C_STRIP, C_LINE, 1);                 /* easel */
+    wfg_rect(30, 134, 338, 362, C_DEV0 + DR_NDEV - 1);                  /* paper (the brightest ramp step = paper) */
+    wfg_rect(24, 126, 344, 128, C_FRAME);                                /* easel blades */
+    wfg_rect(24, 368, 344, 370, C_FRAME);
+    if (v->print_ready && v->print)
+        luma_blit(v->print, WF_DR_PW, WF_DR_PH, PR_X, PR_Y, WF_DR_PW, WF_DR_PH, C_DEV0, DR_NDEV);
+}
+
+/* the wire with the hung prints; the newest one slides up from the easel for 700 ms */
+static void dr_wire(const struct wf_dark_view *v, int now)
+{
+    wfg_rect(14, 46, WFUI_W - 15, 46, C_LINE);
+    for (int px = 20; px < WFUI_W - 16; px += 4) wfg_rect(px, 47, px + 1, 47, C_SEP);   /* the wire's shadow */
+    int n = v->nwire > WF_DR_NWIRE ? WF_DR_NWIRE : v->nwire;
+    int t = now - v->hung_ms;
+    int sliding = n && t >= 0 && t < 700;
+    for (int i = 0; i < n; i++)
+    {
+        int sx = 18 + i * 86, sy = 54;
+        int last = i == n - 1;
+        if (last && sliding) continue;
+        luma_blit(v->wire[i], WF_DR_TW, WF_DR_TH, sx, sy, WF_DR_TW, WF_DR_TH, C_DRY0, DR_NDRY);
+        wfg_rrect(sx + WF_DR_TW / 2 - 4, 42, sx + WF_DR_TW / 2 + 4, 57, 2, C_HOLE, C_LINE, 1);   /* the peg */
+        char b[8];
+        snprintf(b, sizeof b, "%d", v->wire_frame[i] + 1);
+        text_c(F_13, sx + WF_DR_TW / 2, sy + WF_DR_TH + 2, b, C_TXT3);
+    }
+}
+
+static void dr_slide(const struct wf_dark_view *v, int now)
+{
+    int n = v->nwire > WF_DR_NWIRE ? WF_DR_NWIRE : v->nwire;
+    int t = now - v->hung_ms;
+    if (n && t >= 0 && t < 700)
+    {
+        int k = t * 1000 / 700;
+        k = 1000 - (1000 - k) * (1000 - k) / 1000;         /* ease out */
+        int i = n - 1;
+        int x0 = PR_X, y0 = PR_Y, w0 = WF_DR_PW, h0 = WF_DR_PH;
+        int x1 = 18 + i * 86, y1 = 54, w1 = WF_DR_TW, h1 = WF_DR_TH;
+        int x = x0 + (x1 - x0) * k / 1000, y = y0 + (y1 - y0) * k / 1000;
+        int w = w0 + (w1 - w0) * k / 1000, h = h0 + (h1 - h0) * k / 1000;
+        luma_blit(v->wire[i], WF_DR_TW, WF_DR_TH, x, y, w, h, C_DRY0, DR_NDRY);
+    }
+}
+
+/* 60-step sine, Q12 */
+static const int16_t sin60[60] = {
+       0,  428,  852, 1266, 1666, 2048, 2408, 2741, 3044, 3314, 3547, 3741, 3896, 4006, 4074, 4096, 4074, 4006,
+    3896, 3741, 3547, 3314, 3044, 2741, 2408, 2048, 1666, 1266,  852,  428,    0, -428, -852,-1266,-1666,-2048,
+   -2408,-2741,-3044,-3314,-3547,-3741,-3896,-4006,-4074,-4096,-4074,-4006,-3896,-3741,-3547,-3314,-3044,-2741,
+   -2408,-2048,-1666,-1266, -852, -428 };
+static inline int s60(int i) { return sin60[((i % 60) + 60) % 60]; }
+static inline int c60(int i) { return s60(i + 15); }
+
+/* the darkroom timer: 60 s face, a sweep hand for the seconds in this frame, a filled ring for the frame's progress */
+static void dr_dial(int cx, int cy, int r, int ms, int prog, int show_t)
+{
+    wfg_ellipse(cx - r, cy - r, cx + r, cy + r, C_LINE);
+    wfg_ellipse(cx - r + 3, cy - r + 3, cx + r - 3, cy + r - 3, C_STRIP);
+    int lit = prog * 60 / 1000;
+    for (int i = 0; i < 60; i++)
+    {
+        int big = i % 5 == 0, r0 = r - (big ? 13 : 9), r1 = r - 6;
+        int xa = cx + s60(i) * r0 / 4096, ya = cy - c60(i) * r0 / 4096;
+        int xb = cx + s60(i) * r1 / 4096, yb = cy - c60(i) * r1 / 4096;
+        int c = i < lit ? C_AMBER : big ? C_TXT3 : C_LINE;
+        if (big) wfg_tri(xa, ya, xb - 1, yb, xb + 1, yb, c);
+        int16_t q[8] = { (int16_t)xa, (int16_t)ya, (int16_t)xb, (int16_t)yb, (int16_t)(xb + 1), (int16_t)yb,
+                         (int16_t)(xa + 1), (int16_t)ya };
+        wfg_poly(q, 4, c);
+    }
+    int sec = ms / 1000, sub = (ms % 1000) * 60 / 1000;     /* the hand moves in 1/60 s steps of its own 60 marks */
+    (void)sub;
+    int a = sec % 60, rh = r - 16;
+    int tx = cx + s60(a) * rh / 4096, ty = cy - c60(a) * rh / 4096;
+    int bx = cx - s60(a) * 10 / 4096, by = cy + c60(a) * 10 / 4096;
+    int nx = c60(a) * 2 / 4096, ny = s60(a) * 2 / 4096;      /* a 2 px half-width across the hand */
+    int16_t hand[8] = { (int16_t)(bx - nx), (int16_t)(by - ny), (int16_t)(tx - nx / 2), (int16_t)(ty - ny / 2),
+                        (int16_t)(tx + nx / 2), (int16_t)(ty + ny / 2), (int16_t)(bx + nx), (int16_t)(by + ny) };
+    wfg_poly(hand, 4, C_TXT);
+    wfg_ellipse(cx - 4, cy - 4, cx + 4, cy + 4, C_AMBER);
+    if (show_t)
+    {
+        char b[12];
+        snprintf(b, sizeof b, "%d:%02d", sec / 60, sec % 60);
+        text_c(F_13, cx, cy + r / 2 - 4, b, C_TXT2);
+    }
+}
+
+static const char *phase_text(int ph)
+{
+    switch (ph)
+    {
+    case WF_DP_LOAD:   return "Loading the negative";
+    case WF_DP_EXPOSE: return "Exposing the paper";
+    case WF_DP_FIX:    return "In the fixer";
+    case WF_DP_DRY:    return "Washing and drying";
+    }
+    return "";
+}
+
+static void dr_right(const struct wf_dark_view *v, int now)
+{
+    const struct wf_roll *r = wf_roll_now();
+    const struct wf_film *f = wf_film_by_id(r->film);
+    int cx = 540;
+    char b[64];
+    snprintf(b, sizeof b, "ROLL %03d", r->num);
+    spaced_c(F_13, cx, 122, b, C_TXT3, 3);
+    text_c(F_ML28, cx, 138, f ? f->name : "?", C_TXT);
+    int left = v->state == WF_DR_IDLE ? wf_roll_left(r) : v->left;
+    int eta = wf_dark_eta_s(v);
+    if (v->state == WF_DR_RUN || v->state == WF_DR_STOPPING)
+    {
+        snprintf(b, sizeof b, "Frame %d of %d", v->frame + 1, r->nshot);
+        text_c(F_15, cx, 172, b, C_AMBER);
+        dr_dial(cx, 250, 58, v->t_frame, v->prog, 1);
+        text_c(F_15, cx, 318, v->state == WF_DR_STOPPING ? "Stopping after this step" : phase_text(v->phase), C_TXT);
+        int m = (eta + 59) / 60;
+        if (left - 1 > 0) snprintf(b, sizeof b, "%d to go - about %d min", left - 1, m < 1 ? 1 : m);
+        else snprintf(b, sizeof b, "Last frame - about %d min", m < 1 ? 1 : m);
+        text_c(F_13, cx, 340, b, C_TXT2);
+        wfg_rrect(cx - 100, 362, cx + 100, 365, 2, C_TRACK, -1, 0);
+        wfg_rrect(cx - 100, 362, cx - 100 + 200 * v->prog / 1000, 365, 2, C_AMBER, -1, 0);
+    }
+    else if (v->state == WF_DR_DONE)
+    {
+        text_c(F_15, cx, 172, "Roll developed", C_GRN);
+        dr_dial(cx, 250, 58, 0, 1000, 0);
+        snprintf(b, sizeof b, "%d prints in ROLLS/ROLL%03d", wf_roll_ndev(r), r->num);
+        text_c(F_15, cx, 318, b, C_TXT);
+        text_c(F_13, cx, 340, "Copy them from the card's ROLLS folder", C_TXT2);
+    }
+    else
+    {
+        int m = (eta + 59) / 60;
+        snprintf(b, sizeof b, "%d frame%s to develop", left, left == 1 ? "" : "s");
+        text_c(F_15, cx, 172, b, C_AMBER);
+        dr_dial(cx, 250, 58, 0, 0, 0);
+        if (v->state == WF_DR_STOPPED || v->state == WF_DR_FAIL)
+            text_c(F_15, cx, 318, v->msg && *v->msg ? v->msg : "Stopped", v->state == WF_DR_FAIL ? C_WARN : C_TXT);
+        else
+            text_c(F_15, cx, 318, "Paper and chemistry ready", C_TXT);
+        snprintf(b, sizeof b, "About %d min for the roll", m < 1 ? 1 : m);
+        text_c(F_13, cx, 340, b, C_TXT2);
+    }
+}
+
+static void dr_top(const struct wf_dark_view *v)
+{
+    wfg_ellipse(16, 9, 30, 23, C_AMBER);                              /* the safelight lamp */
+    wfg_ellipse(19, 12, 27, 20, C_TXT);
+    spaced(F_13, 40, 10, "DARKROOM", C_AMBER, 3);
+    char ck[8], b[24];
+    clock_text(ck, sizeof ck);
+    int xr = WFUI_W - 14;
+    if (ck[0]) xr -= text_r(F_15, xr, 8, ck, C_TXT2) + 14;
+    if (v->battery >= 0)
+    {
+        snprintf(b, sizeof b, "%d%%", v->battery);
+        int bc = v->battery <= 15 ? C_WARN : C_TXT2;
+        int w = text_r(F_13, xr, 10, b, bc);
+        int bx = xr - w - 30;
+        wfg_rrect(bx, 11, bx + 22, 22, 2, -1, bc, 1);
+        wfg_rect(bx + 23, 14, bx + 24, 19, bc);
+        int fw = 18 * (v->battery > 100 ? 100 : v->battery) / 100;
+        if (fw > 0) wfg_rect(bx + 2, 13, bx + 2 + fw - 1, 20, bc);
+    }
+}
+
+static void dr_footer(const struct wf_dark_view *v)
+{
+    static const char *const k_run[] = { "MENU", "Stop", 0 };
+    static const char *const k_conf[] = { "MENU", "Stop now", "SET", "Go on", 0 };
+    static const char *const k_idle[] = { "SET", "Start", "MENU", "Back", 0 };
+    static const char *const k_done[] = { "MENU", "Close", 0 };
+    const char *const *k = v->state == WF_DR_RUN ? (dr_confirm ? k_conf : k_run)
+                         : v->state == WF_DR_DONE ? k_done : k_idle;
+    hints(k, 16, 455, C_TXT2, C_TXT3);
+    const char *h = v->state == WF_DR_RUN || v->state == WF_DR_STOPPING ? "Keep the camera on"
+                  : v->state == WF_DR_DONE ? "" : "The shutter is locked while the darkroom works";
+    text_r(F_13, WFUI_W - 16, 455, h, C_TXT3);
+}
+
+static void dark_render(int now)
+{
+    const struct wf_dark_view *v = wf_dark_view();
+    if (v->expose != dr_expose_shown || v->print_ready != dr_pready)
+    {
+        dr_pal_dev(v->print_ready == 2 || v->state == WF_DR_DONE ? 1000 : v->print_ready ? v->expose : 0);
+        dr_pready = v->print_ready;
+    }
+    wfg_background(0, WFUI_H);
+    dr_top(v);
+    dr_wire(v, now);
+    dr_easel(v, now);
+    dr_slide(v, now);
+    dr_right(v, now);
+    if (msg && now - msg_until < 0) text_c(F_13, 540, 384, msg, C_WARN);
+    wfg_rect(12, 440, WFUI_W - 13, 440, C_SEP);
+    dr_footer(v);
+}
+
+static int dark_key(int key, int now)
+{
+    const struct wf_dark_view *v = wf_dark_view();
+    int run = v->state == WF_DR_RUN || v->state == WF_DR_STOPPING;
+    switch (key)
+    {
+    case MODULE_KEY_PRESS_SET: case MODULE_KEY_JOY_CENTER:
+        if (run) { dr_confirm = 0; break; }
+        if (v->state != WF_DR_DONE)
+        {
+            int rc = wf_dark_start();
+            if (rc == -1) say("Nothing to develop", now);
+            else if (rc == -3) say("Not now: the camera is busy", now);
+        }
+        break;
+    case MODULE_KEY_MENU: case MODULE_KEY_TRASH: case MODULE_KEY_PLAY: case MODULE_KEY_LV:
+        if (!run) return 1;
+        if (v->state == WF_DR_STOPPING) break;
+        if (!dr_confirm) { dr_confirm = 1; say("MENU again to stop (this frame is done again next time)", now); break; }
+        dr_confirm = 0;
+        wf_dark_stop();
+        break;
+    }
+    return 0;
+}
+
+static int dark_tick(int now)
+{
+    const struct wf_dark_view *v = wf_dark_view();
+    int moved = 0;
+    static int last_state = -1;
+    if (v->state != last_state) { last_state = v->state; msg = 0; dr_confirm = 0; moved = 1; }
+    if (v->gen != dr_gen) { dr_gen = v->gen; moved = 1; }
+    if (v->nwire && now - v->hung_ms >= 0 && now - v->hung_ms < 760) moved = 1;          /* sliding print */
+    static int last_sec = -1;
+    if ((v->state == WF_DR_RUN || v->state == WF_DR_STOPPING) && v->t_frame / 1000 != last_sec)
+    {
+        last_sec = v->t_frame / 1000;                      /* the dial's hand */
+        moved = 1;
+    }
+    return moved;
+}
+
+/* =================================================================== HUD (over LiveView, ML colour indices) */
+/* ui_text draws PX(c) = WFUI_PAL_BASE + c: an ML colour index k is c = k - WFUI_PAL_BASE */
+#define MLC(k) ((int)(k) - WFUI_PAL_BASE)
+
+static int hud_fonts;
+int wfdr_hud_fonts(int on)
+{
+    if (on && !hud_fonts) { hud_fonts = 1; return wff_open(); }
+    if (!on && hud_fonts) { hud_fonts = 0; wff_close(); }
+    return 0;
+}
+
+void wfdr_hud(uint8_t *vram, int pitch, int blink)
+{
+    const struct wf_roll *r = wf_roll_now();
+    if (!wf_roll_open(r) || !vram) return;
+    uint8_t *cv = wfg_cv;
+    int cp = wfg_pitch;
+    wfg_cv = vram;
+    wfg_pitch = pitch;
+    const struct wf_film *f = wf_film_by_id(r->film);
+    char b[48];
+    int K = MLC(COLOR_BLACK), W = MLC(COLOR_WHITE), Y = MLC(COLOR_YELLOW), G = MLC(COLOR_GRAY(60)), R = MLC(COLOR_RED);
+    /* top-left chip: roll number and film */
+    snprintf(b, sizeof b, "ROLL %03d  %s", r->num, f ? (f->shortname ? f->shortname : f->name) : "?");
+    int w = ui_textw(F_15, b);
+    wfg_rrect(12, 39, 14 + w + 36, 63, 6, K, -1, 0);
+    wfg_rrect(18, 45, 30, 57, 3, Y, -1, 0);
+    wfg_rect(21, 47, 23, 48, K);
+    wfg_rect(25, 47, 27, 48, K);
+    wfg_rect(21, 54, 23, 55, K);
+    wfg_rect(25, 54, 27, 55, K);
+    ui_text(F_15, 38, 42, b, W);
+    /* bottom-right counter: frames left like a film counter window, plus the exposure ladder up the right edge */
+    int left = r->exp - r->nshot;
+    int full = r->state != WF_RS_LOADED || left <= 0;
+    snprintf(b, sizeof b, "%d", r->nshot);
+    int cw = ui_textw(F_ML28, b);
+    snprintf(b + 16, sizeof b - 16, "/%d", r->exp);
+    int sw = ui_textw(F_15, b + 16);
+    int x1 = 690, x0 = x1 - cw - sw - 20, y0 = 384, y1 = 420;
+    wfg_rrect(x0, y0, x1, y1 + (full || blink ? 18 : 0), 6, K, -1, 0);
+    ui_text(F_ML28, x0 + 8, y0 + 2, b, full ? R : W);
+    ui_text(F_15, x0 + 10 + cw, y0 + 14, b + 16, G);
+    if (full) text_r(F_13, x1 - 6, y1, r->state == WF_RS_REWOUND ? "REWOUND" : "END OF ROLL", R);
+    else if (blink) text_r(F_13, x1 - 6, y1, "WIND ON", Y);
+    int n = r->exp, top = 90, bottom = 370;
+    for (int i = 0; i < n; i++)
+    {
+        int y = bottom - (bottom - top) * i / (n - 1 > 0 ? n - 1 : 1);
+        int c = i < r->nshot ? G : i == r->nshot ? Y : W;
+        int len = i % 6 == 5 ? 10 : 6;
+        wfg_rect(704 - len, y, 704, y + (i == r->nshot ? 2 : 1), c);
+    }
+    wfg_cv = cv;
+    wfg_pitch = cp;
+}
+
+/* =================================================================== dispatch (wf_ui.c) */
+void wfdr_enter(int scr)
+{
+    if (scr == WFUI_SCR_ROLL)
+    {
+        wfp_init_fixed();
+        roll_enter();
+    }
+    else if (scr == WFUI_SCR_DARK) dark_enter();
+}
+
+void wfdr_leave(int scr)
+{
+    if (scr == WFUI_SCR_DARK) wfp_init_fixed();          /* the browser's colours back */
+    wfg_glow_centre(125, 150, 125, 272);
+}
+
+void wfdr_render(int scr, int now)
+{
+    if (scr == WFUI_SCR_ROLL) roll_render(now);
+    else if (scr == WFUI_SCR_DARK) dark_render(now);
+}
+
+int wfdr_key(int scr, int key)
+{
+    int now = get_ms_clock();
+    if (scr == WFUI_SCR_ROLL) return roll_key(key, now);
+    if (scr == WFUI_SCR_DARK) return dark_key(key, now);
+    return 0;
+}
+
+int wfdr_tick(int scr, int now)
+{
+    int moved = msg && now - msg_until >= 0;
+    if (moved) msg = 0;
+    if (scr == WFUI_SCR_DARK) moved |= dark_tick(now);
+    return moved;
+}
+
+#ifdef WF_HOST
+int wfdr_host_tab(void) { return rtab; }
+int wfdr_host_exp(void) { return exps[rexp]; }
+int wfdr_host_sel_id(void) { const struct wf_film *f = rfilm(rtab, rsel[rtab]); return f ? f->id : 0; }
+#endif

@@ -33,7 +33,10 @@
  *                      film builder before the feature (FNV), only N changes; rows, film shot + log + EXIF + preview; Log +
  *                      LUT bent after the load (.FRT unbent), an h / s change bends again without a load; flat Log / Off
  *                      ignore it; hl / sh in the file
- *   LOG [big]          the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
+ *   ROLL               Roll + Darkroom in the module (DESIGN 3.4): one mode at a time with RAW develop (a load turns it
+ *                      off, RAW develop on closes an empty roll / rewinds one with frames), frames from file number +
+ *                      CR2, PLAY blocked while a roll is in the camera, the roll file; 5D2: load refused
+ *   LOG [big]         the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
  *                      the refusal logged), ring full (lines counted), a short write (no line twice); big: a log over
  *                      512 KB becomes WINDYFLM.OLD at boot
  * Output: PASS / FAIL lines, then "RESULT MODE CASE: P pass, F fail"; exit status 1 on any failure. */
@@ -57,6 +60,7 @@
 #include "host_ml.h"
 #include "wf_probe.h"
 #include "wf_rawb.h"
+#include "wf_dark.h"
 #ifndef WF_BUILD_5D2
 #include "wf_dev.h"
 #endif
@@ -1245,7 +1249,7 @@ static void t_cfg(void)
     const char *code1 = wf_flut_code[1];
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
-            "userwb=1,5600,2,-3\n", wf_films[fA].id, code1);
+            "blind=OFF\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
@@ -1257,6 +1261,7 @@ static void t_cfg(void)
     chk(wf_hl == 3 && wf_sh == -2, "hl %d sh %d", wf_hl, wf_sh);
     chk(wf_exp_mode == (WF_EXP_CAN ? WF_EXP_SMOOTH : WF_EXP_CANON) && wf_exp_trim == -5 && wf_exif_off == 1,
         "exposure %d exptrim %d exif off %d", wf_exp_mode, wf_exp_trim, wf_exif_off);
+    chk(wf_blind == 0, "blind=OFF read: Blind roll off (%d)", wf_blind);
     chk(WAIT(h_kelvin_last == 3200, 5000), "Light Tungsten applied at start (%dK)", h_kelvin_last);
     wf_row_step(WF_ROW_GRAIN, 1);
     h_clock_add_ms += 2000;
@@ -1266,7 +1271,7 @@ static void t_cfg(void)
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=%s\nexptrim=-5\nexif=off\n"
-             "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
+             "blind=off\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
     free(b);
     /* Canon busy with a shot: the save waits (a create then could leave two WINDYFLM.CFG entries), then follows */
@@ -2437,6 +2442,80 @@ static int hs_pv_diff(int k, int flags)
     free(src); free(dst); free(pr);
     return d;
 }
+
+/* ------------------------------------------------------------------ ROLL: Roll + Darkroom in the module (DESIGN 3.4)
+ * One mode at a time: loading a roll turns RAW develop off; RAW develop on ends a loaded roll (closed when empty,
+ * rewound with its frames). Frames count from the card's file number + CR2; PLAY is blocked while a roll is in the
+ * camera (Blind roll). The darkroom run itself is tools/dr_dark_check.sh (the chain) and a camera run (memory). */
+extern const int wf_t_me_size, wf_t_me_name, wf_t_me_priv, wf_t_me_select, wf_t_me_children;
+static uint8_t *menu_named(const char *nm)
+{
+    uint8_t *top = h_menu;
+    uint8_t *e = top ? *(uint8_t **)(top + wf_t_me_children) : 0;
+    for (int i = 0; e && i < 64 && *(void **)(e + wf_t_me_priv) != (void *)-1; i++, e += wf_t_me_size) {
+        const char *n = *(const char **)(e + wf_t_me_name);
+        if (n && !strcmp(n, nm))
+            return e;
+    }
+    return 0;
+}
+static int menu_set(const char *nm)                 /* SET on the entry: its select, as ML calls it */
+{
+    uint8_t *e = menu_named(nm);
+    void (*sel)(void *, int) = e ? *(void (**)(void *, int))(e + wf_t_me_select) : 0;
+    if (!sel)
+        return -1;
+    sel(*(void **)(e + wf_t_me_priv), 1);
+    return 0;
+}
+static void t_roll(void)
+{
+    std_pack();
+    h_set_folder_number(100);
+    h_set_file_number(206);
+    mod_init(1);
+    chk(menu_named("Film roll") && menu_named("Blind roll") && menu_named("Darkroom") && menu_named("End roll now")
+        && menu_named("Close roll"), "menu: Film roll, Blind roll, Darkroom, End roll now, Close roll");
+    chk(wf_roll_now()->state == WF_RS_EMPTY && cbr_key(WF_KEY_PLAY) == 1, "no roll: PLAY passes");
+#ifdef WF_BUILD_5D2
+    chk(wf_roll_req_load(wf_films[fA].id, 12) == -4, "5D2: a roll load is refused (the darkroom comes to the EOS M first)");
+    chk(!menu_named("RAW develop"), "5D2: no RAW develop entry");
+#else
+    const int film = wf_films[fA].id;
+    log_mark();
+    wf_rawb = 1;
+    int rc = wf_roll_req_load(film, 12);
+    chk(rc == 1, "RAW develop on: the load is queued and says RAW develop goes off (%d)", rc);
+    chk(WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && WAIT(wf_rawb == 0, 1000) && LOGW("roll: RAW develop off", 3000),
+        "roll loaded, RAW develop off (state %d, rawb %d)", wf_roll_now()->state, wf_rawb);
+    chk(wf_roll_shooting() && wf_blind && cbr_key(WF_KEY_PLAY) == 0, "roll loaded: it shoots, PLAY blocked (Blind roll)");
+    chk(menu_set("RAW develop") == 0 && wf_rawb == 1, "menu RAW develop: On");
+    chk(WAIT(wf_roll_now()->state == WF_RS_DONE, 5000) && !wf_roll_shooting() && cbr_key(WF_KEY_PLAY) == 1,
+        "the empty roll is closed, PLAY passes (state %d)", wf_roll_now()->state);
+    rc = wf_roll_req_load(film, 12);
+    chk(rc == 1 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && WAIT(wf_rawb == 0, 1000),
+        "second roll loaded (%d), RAW develop off again (%d)", rc, wf_rawb);
+    put_file("DCIM/100CANON/IMG_0207.CR2", "II*", 3);
+    h_set_file_number(207);
+    chk(WAIT(wf_roll_now()->nshot == 1, 5000), "a RAW+L frame counts (%d/12)", wf_roll_now()->nshot);
+    h_set_file_number(208);                         /* a JPEG-only shot: no CR2, not a frame */
+    usleep(600000);
+    chk(wf_roll_now()->nshot == 1, "a shot without a CR2 does not count (%d/12)", wf_roll_now()->nshot);
+    chk(menu_set("RAW develop") == 0 && wf_rawb == 1, "menu RAW develop: On again");
+    chk(WAIT(wf_roll_now()->state == WF_RS_REWOUND, 5000) && wf_roll_now()->nshot == 1 && !wf_roll_shooting(),
+        "the roll with a frame is rewound, not closed (state %d, %d frame)", wf_roll_now()->state, wf_roll_now()->nshot);
+    chk(cbr_key(WF_KEY_PLAY) == 0, "rewound roll: PLAY still blocked until it is developed or closed");
+    chk(wf_roll_req_load(film, 24) == -1, "a roll with frames in the camera: a new load is refused");
+    chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000) && wf_rawb == 1,
+        "Close roll: done, RAW develop stays on");
+    long n;
+    char *b = get_file("ML/SETTINGS/WFROLL.TXT", &n);
+    chk(b && n == 1536 && strstr(b, "state=done"), "roll file: 1536 bytes, state=done (%ld)", n);
+    free(b);
+#endif
+    mod_deinit();
+}
+
 static void t_hs(void)
 {
     /* 1. the bend: all 121 pairs against the formula, on the identity and on a film's N; never down; the packing */
@@ -2694,6 +2773,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LOG")) t_log(cs);
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();
+    else if (!strcmp(mode, "ROLL")) t_roll();
 #ifdef WF_BUILD_5D2
     else if (!strcmp(mode, "5D2")) t_5d2();
     else if (!strcmp(mode, "PROBE")) t_probe_5d2();

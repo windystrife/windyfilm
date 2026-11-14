@@ -26,6 +26,8 @@ void *wf_fopen_w(const char *path, int how, uint32_t pos, struct wf_fe *e);
 void *wf_fcreate(const char *path, struct wf_fe *e);
 int   wf_fremove(const char *path, struct wf_fe *e);
 int   wf_frename(const char *src, const char *dst, struct wf_fe *e);
+int   wf_fmkdir(const char *path, struct wf_fe *e);   /* a directory (FIO_CreateDirectory), only while Canon is idle;
+                                                   0 = it is there (made now or before) */
 const char *wf_fe_name(int step);                /* "busy", "remove", "create", "open", "seek", "write", "rename" */
 
 #endif

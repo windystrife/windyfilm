@@ -17,7 +17,7 @@
 
 extern const int wf_t_li_size, wf_t_li_shutter, wf_t_li_aperture, wf_t_li_iso, wf_t_li_iso_auto, wf_t_li_ae,
     wf_t_li_job, wf_t_li_wb_mode, wf_t_li_kelvin, wf_t_li_wbs_gm, wf_t_li_wbs_ba, wf_t_li_picstyle, wf_t_card_fn, wf_t_card_size,
-    wf_t_li_isov, wf_t_li_isoa;
+    wf_t_li_isov, wf_t_li_isoa, wf_t_card_folder;
 
 char __camera_model_short[16] = "EOSM", firmware_version[16] = "2.0.2";
 int pic_quality, shooting_mode = 3, lv = 1;
@@ -380,6 +380,7 @@ void FIO_FindClose(void *d) { closedir(d); }
 static uint8_t h_card[64] __attribute__((aligned(8)));
 void *get_shooting_card(void) { return h_card; }
 void h_set_file_number(int n) { memcpy(h_card + wf_t_card_fn, &n, 4); }
+void h_set_folder_number(int n) { memcpy(h_card + wf_t_card_folder, &n, 4); }
 const char *get_dcim_dir(void) { return "B:/DCIM/100CANON"; }
 const char *picstyle_get_current_name(void) { return "(host style)"; }
 int h_ps_contrast = -10;                                     /* -10 = not known, as ML without the style's settings */
@@ -520,3 +521,20 @@ void NotifyBox(int timeout, const char *fmt, ...)
     va_end(ap);
     h_notify_n++;
 }
+
+/* ------------------------------------------------------------------ Roll + Darkroom (src/wf_dark.c, DESIGN 3.4)
+ * Linked so the module links as on the camera; these modes never load a roll or start the darkroom (no SRM suite on the
+ * host: srm_malloc_suite gives none). tools/dr_check.sh and tools/dr_dark_check.sh test the roll and the develop. */
+int image_review_time = 2, battery_level_bars = 3;
+void *GetNextMemoryChunk(void *s, void *c) { (void)s; (void)c; return 0; }
+void *srm_malloc_suite(int n) { (void)n; return 0; }
+void srm_free_suite(void *s) { (void)s; }
+void LoadCalendarFromRTC(void *tm) { memset(tm, 0, 9 * sizeof(int)); }
+void PauseLiveView(void) { }
+int  ResumeLiveView(void) { return 0; }
+void powersave_prohibit(void) { }
+void powersave_permit(void) { }
+unsigned char *bmp_vram(void) { static unsigned char b[960 * 480]; return b; }
+void redraw(void) { }
+int  FIO_CreateDirectory(const char *d) { return mkdir(h_path(d), 0777) == 0 ? 0 : -1; }
+int  is_dir(const char *p) { struct stat st; return stat(h_path(p), &st) == 0 && S_ISDIR(st.st_mode); }

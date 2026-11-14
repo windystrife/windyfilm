@@ -30,7 +30,10 @@ extern int   FIO_GetFileSize(const char *name, uint32_t *size);
 extern int64_t FIO_SeekSkipFile(void *f, int64_t pos, int whence);
 extern int   FIO_RemoveFile(const char *name);
 extern int   FIO_RenameFile(const char *src, const char *dst);
+extern int   FIO_CreateDirectory(const char *dirname);
+extern int   is_dir(const char *path);
 extern int  gui_menu_shown(void);
+extern void NotifyBox(int timeout, const char *fmt, ...);
 extern void gui_stop_menu(void);
 extern void wf_film_shot_set_mem(void *mem);
 #define WF_TASK_PRIO 0x1E
@@ -98,6 +101,17 @@ int wf_frename(const char *src, const char *dst, struct wf_fe *e)
         return -1;
     int rc = FIO_RenameFile(src, dst);
     return wf_fset(e, wf_fexists(src) || !wf_fexists(dst) ? WF_FE_RENAME : WF_FE_OK, rc);
+}
+
+int wf_fmkdir(const char *path, struct wf_fe *e)
+{
+    if (is_dir(path))
+        return wf_fset(e, WF_FE_OK, 0);
+    int job = wf_job_state();
+    if (job)
+        return wf_fset(e, WF_FE_BUSY, job);
+    int rc = FIO_CreateDirectory(path);
+    return wf_fset(e, is_dir(path) ? WF_FE_OK : WF_FE_CREATE, rc);
 }
 
 void *wf_fopen_w(const char *path, int how, uint32_t pos, struct wf_fe *e)
@@ -306,6 +320,10 @@ static unsigned int wf_keypress(unsigned int key)
         return 1;
     if (wf_ui_is_open())
         return wf_ui_key(key);
+    if (key == WF_KEY_PLAY && !gui_menu_shown() && wf_roll_blocks_play()) {   /* blind roll (docs/DESIGN.md 3.4) */
+        NotifyBox(2000, "Roll in camera: develop it in the Darkroom");
+        return 0;
+    }
     if (!gui_menu_shown() && !is_play_mode() && wf_ui_open_key(key)) {
         wf_ui_open();
         return 0;
@@ -334,6 +352,7 @@ static void wf_task(void *arg)
             wf_fx_poll();                        /* halation / grain / mist state: load / switch / free */
             wf_exp_poll();
             wf_rawb_poll();                      /* RAW develop: tables, memory, progress box, the shot's lines */
+            wf_roll_poll();                      /* Roll + Darkroom: roll file, frames, RAW+L / review, HUD */
         }
         wf_menu_poll();                          /* config save, EXIF writer, Light */
         wf_ui_poll();
@@ -344,8 +363,10 @@ static void wf_task(void *arg)
                 wf_ws_poll();                    /* a parked shot may wait for its film table */
         }
     }
-    if (wf_cam_ok)
+    if (wf_cam_ok) {
         wf_rawb_end();                           /* a develop stops at its next band (wf_unloading); then the memory goes */
+        wf_dark_end();                           /* the darkroom too; Canon's image quality / review back */
+    }
     wf_log("unload");
     wf_log_flush();
     wf_task_up = 0;
@@ -362,6 +383,7 @@ static unsigned int wf_init(void)
     if (!wf_cam_ok)
         wf_status_set("Unsupported firmware");
     wf_ui_init();
+    wf_dark_init();
     wf_menu_init();                              /* config, ML menu */
     task_create("wf_task", WF_TASK_PRIO, 0x2000, (void *)wf_task, 0);
     return 0;

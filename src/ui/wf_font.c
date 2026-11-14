@@ -90,8 +90,10 @@ static int wff_parse(void)
     return 0;
 }
 
+static int wff_refs;                                        /* the UI and the roll HUD share the pack */
 int wff_open(void)
 {
+    if (wff_refs++ > 0 && wff_buf) return 0;
     fstat = 0;
     rbf[0] = rbf_lookup("argnor23");
     rbf[1] = rbf_lookup("argnor28");
@@ -135,6 +137,7 @@ const char *wff_why(void) { return fwhy >= 0 && fwhy < WFF_W_N ? fwhy_names[fwhy
 
 void wff_close(void)
 {
+    if (wff_refs > 0 && --wff_refs > 0) return;
     if (wff_buf) free(wff_buf);
     wff_buf = 0;
     wff_len = 0;

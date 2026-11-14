@@ -126,8 +126,12 @@ int wfc_open(void)
     return P.st;
 }
 
+static uint8_t *unp;                    /* one unpacked image for wfc_draw_scaled (the big size at most), lazily */
+
 void wfc_close(void)
 {
+    if (unp) free(unp);
+    unp = 0;
     for (int i = 0; i < CACHE_N; i++)
     {
         if (cache[i].p) free(cache[i].p);
@@ -302,4 +306,59 @@ void wfc_draw(const struct wf_film *f, int s, int x, int y, int bg)
     struct blob *b = e >= 0 ? fetch(e, s) : 0;
     if (b) rle(b->p, b->n, wfc_size[s][0], wfc_size[s][1], x, y, 1);
     else plain_can(f, s, x, y);
+}
+
+/* the image as screen bytes (0 = transparent) into unp; 0 = ok */
+static int unpack(const struct blob *b, int s)
+{
+    int w = wfc_size[s][0], h = wfc_size[s][1], total = w * h, i = 0;
+    if (!unp) unp = malloc(wfc_size[CAN_BIG][0] * wfc_size[CAN_BIG][1]);
+    if (!unp) return -1;
+    for (uint32_t k = 0; i < total;)
+    {
+        if (k >= b->n) return -1;
+        int c = b->p[k++], run = 1, v;
+        if (c < 0x80) v = c;
+        else if (c == 0xFF) v = 0xFF;
+        else
+        {
+            if (k >= b->n) return -1;
+            run = c - 0x7E;
+            v = b->p[k++];
+        }
+        if (i + run > total) return -1;
+        uint8_t px = v == 0xFF ? 0 : PX(P.remap[v]);
+        while (run--) unp[i++] = px;
+    }
+    return 0;
+}
+
+void wfc_draw_scaled(const struct wf_film *f, int s, int x, int y, int num, int den, int dim)
+{
+    int e = entry_of(f);
+    struct blob *b = e >= 0 ? fetch(e, s) : 0;
+    if (den < 1) den = 1;
+    if (den > 8) den = 8;
+    if (!b || unpack(b, s))
+    {
+        plain_can(f, num * 2 >= den ? CAN_SEL : CAN_STRIP, x, y);
+        return;
+    }
+    int w = wfc_size[s][0], h = wfc_size[s][1];
+    int ow = w * num / den, oh = h * num / den;
+    for (int oy = 0; oy < oh; oy++)
+    {
+        int yy = y + oy;
+        if (yy < 0 || yy >= WFUI_H) continue;
+        const uint8_t *src = unp + (oy * den / num) * w;
+        uint8_t *row = wfg_cv + yy * wfg_pitch;
+        for (int ox = 0; ox < ow; ox++)
+        {
+            int xx = x + ox;
+            if (xx < 0 || xx >= WFUI_W) continue;
+            if (dim && (dim == 1 ? ((ox + oy) & 1) : ((ox & 1) | (oy & 1)))) continue;
+            uint8_t px = src[ox * den / num];
+            if (px) row[xx] = px;
+        }
+    }
 }

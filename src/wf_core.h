@@ -93,7 +93,14 @@ extern volatile int wf_unloading;                 /* module deinit started: hook
 void wf_status_set(const char *s);                /* wf_status() text ("" = fine) */
 void wf_gen_bump(void);                           /* wf_gen() + 1 (UI redraw) */
 void wf_log_flush(void);                          /* wf_task: append the log ring to ML/LOGS/WINDYFLM.LOG */
-int wf_job_state(void);                           /* wf_menu.c: ML lens_info.job_state (Canon busy with a shot when != 0) */
+int wf_job_state(void);
+/* Roll + Darkroom (wf_dark.c, docs/DESIGN.md 3.4; the UI's part is wf_dark.h) */
+void wf_dark_init(void);                          /* module init: the view, no allocation */
+void wf_roll_poll(void);                          /* wf_task: roll file, requests, frames, RAW+L / review, HUD */
+void wf_dark_end(void);                           /* wf_task at unload: stop a run, Canon's values back */
+int  wf_roll_shooting(void);                      /* a roll is loaded (takes frames): RAW develop B stays off at the shot */
+int  wf_roll_blocks_play(void);                   /* blind roll: PLAY is eaten */
+#define WF_KEY_PLAY 24                            /* ML module.h MODULE_KEY_PLAY */                           /* wf_menu.c: ML lens_info.job_state (Canon busy with a shot when != 0) */
 int wf_iso_now(void);                             /* wf_menu.c: the ISO now (lens_info.iso, or iso_auto under Auto ISO) */
 void wf_ui_request(void);                         /* menu: open the browser from wf_task after the ML menu closed */
 

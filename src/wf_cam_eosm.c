@@ -314,7 +314,7 @@ static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
     f.pitch = w * 2;
     f.data = f.dst = (void *)(uintptr_t)buf;
     f.raw = raw;
-    if (k == K_NN && wf_rawb)
+    if (k == K_NN && wf_rawb && !wf_roll_shooting())   /* a roll's frames: the darkroom develops them later */
         rawb_fill(&f, ga);
     f.t_post = get_ms_clock();
     int rc = wf_shot_run(&f, 0);

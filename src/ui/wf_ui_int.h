@@ -56,6 +56,8 @@ void wfg_bits16(const uint8_t *bits, int x, int y, int c);                    /*
 void wfg_background(int y0, int y1);    /* gradient + glow + floor shadow rows y0 .. y1 - 1 */
 void wfg_fade_edges(int y0, int y1);    /* strip edge fades (both sides, 40 px) */
 void wfg_scrim(int x0, int y0, int x1, int y1);   /* checkerboard dim outside a box (INFO overlay) */
+void wfg_glow_centre(int cx, int cy, int shx, int shy);   /* where wfg_background puts the glow and the floor shadow
+                                                             (call before wfp_set_glow) */
 
 /* palette */
 void wfp_init_fixed(void);              /* fixed colours + background refs into the RGB table */
@@ -86,6 +88,9 @@ int  wfc_status(void);                  /* 0 ok, else the reason (WFC_E_*) */
 const char *wfc_why(int st);            /* a WFC_E_* code in words ("ok", "not on the card", ...) */
 int  wfc_glow(const struct wf_film *f, uint8_t rgb[3]);   /* 1 = from the pack, 0 = group colour */
 void wfc_draw(const struct wf_film *f, int size, int x, int y, int bg);   /* pack image or the plain can */
+/* the pack image scaled by num / den (nearest; den <= 8), dim = 0..2: every 2nd / 3 of 4 pixels left out (a can further
+   back in the roll picker's carousel); the plain can when the pack has none */
+void wfc_draw_scaled(const struct wf_film *f, int size, int x, int y, int num, int den, int dim);
 int  wfc_pal_used(void);                /* can colours placed in the palette */
 enum { WFC_OK = 0, WFC_E_NOFILE, WFC_E_HEADER, WFC_E_SIZES, WFC_E_MEM, WFC_E_READ };
 
@@ -94,5 +99,13 @@ void wfui_task_begin(void);             /* the UI task's set-up: resources, scre
 int  wfui_task_tick(void);              /* one loop pass: keys, state, redraw; 0 = keep going */
 void wfui_task_end(void);               /* give the screen and palette back, free everything */
 void wfui_render(void);                 /* draw the whole browser into the idle buffer */
+
+/* ------------------------------------------------------------------ wf_dark_ui.c: Roll + Darkroom screens (DESIGN 3.4) */
+enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_ROLL, WFUI_SCR_DARK, WFUI_SCR_N };
+void wfdr_enter(int scr);               /* the screen becomes active: palette theme, its state */
+void wfdr_render(int scr, int now);     /* draw it into the idle buffer */
+int  wfdr_key(int scr, int key);        /* 1 = close the UI */
+int  wfdr_tick(int scr, int now);       /* 1 = something moved (redraw now) */
+void wfdr_leave(int scr);
 
 #endif

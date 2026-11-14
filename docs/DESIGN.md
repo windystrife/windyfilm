@@ -304,6 +304,133 @@ too), never flat Log. The math is WindyStrife's own (the V14U spec); WindyFilm h
   the tabs (y 136-268), so 7 show and the list scrolls with the focus, with a 2 px scroll bar at x 712. The font keeps
   its size. Icons: a tone disc, upper / lower half lit. Host render: `tests/ui` shots `b2s_hs`, `b2s_hs_top`.
 
+### 3.4 Roll + Darkroom (owner 2026-11-14)
+
+You shoot a roll: one film, 12 / 24 / 36 RAW+L frames, no playback. Afterwards the in-camera Darkroom develops each
+frame's CR2 from the card with the roll's film, through WindyFilm's own full RAW develop B, into a print JPEG. The EOS M
+comes first. The 5D2 follows once the EOS M works (raw 5792 x 3804, pitch 10136, black 1024, GBRG).
+
+**Clean-room.** The Darkroom is a new path, written from scratch for WindyFilm:
+- the CR2 reader `wf_cr2.c`: a camera port of WindyStrife's host tool `tools/cr2_dec.c`, from the public TIFF / CR2 /
+  ITU-T T.81 (lossless JPEG) descriptions;
+- the develop `wf_dev.c` (B, section 3.2);
+- the baseline JPEG encoder `wf_jpe.c`, from T.81 and its Annex K tables;
+- the roll state machine `wf_roll.c`, the darkroom task `wf_dark.c` with its pure parts `wf_darkp.c`, and the screens
+  `ui/wf_dark_ui.c`.
+
+None of it is code from the Film Roll author, and Canon's ROM JPEG encoder is not used: the CR2 is developed outside
+Canon's pipeline, so there is no Canon YUV buffer to hand it. Nothing Genesis-related was opened. The reference video
+gave the idea and the layout only. None of its code, bitmaps or fonts was opened, and no reference frame is in the repo.
+Stocks keep their Windy names, and there are no brand logos.
+
+**Roll (shooting).**
+- **One roll at a time.** The roll picker (UI screen ROLL) has shelf tabs Colour / Slide / B&W / Cine / LUT, a can
+  carousel, and 12 / 24 / 36 exposures (default 24). SET loads the roll.
+  - While the roll has frames, loading is refused ("develop it first"). A roll with no frames yet is simply reloaded
+    with the new film or count.
+  - The film is locked while a roll is open: the browser refuses a film change.
+- **Roll file** `ML/SETTINGS/WFROLL.TXT` (format in `wf_roll.h`): plain text, always 1536 bytes.
+  - wf_task is its only writer. It creates the file once with `wf_fcreate` while Canon is idle, then rewrites it in
+    place with `wf_fopen_w(WF_FO_AT, 0)`. It is never created twice (trap W24).
+  - It is read at boot. A file that does not parse means no roll (logged).
+- **Frames.** wf_task counts frames while Canon is idle (job_state 0, no shot pending) and the file number from
+  `get_shooting_card()` has been stable over two polls. `wf_roll_seen` then adds every new number that has a CR2:
+  - numbers wrap 9999 -> 1 with the folder + 1;
+  - a jump of more than 64 means the counter was reset elsewhere: the roll re-anchors and adds nothing;
+  - frames past the count are not added, and at the count the roll is FULL.
+- **RAW+L forced.** While a roll can shoot, wf_task sets `PROP_PIC_QUALITY` to RAW + L fine when it differs. The old
+  value comes back once the roll is full, rewound or closed, and at unload. A frame without a CR2 does not count.
+- **The shot's JPEG** gets the module's normal 8-bit look of the roll's film, as before, so the card holds a picture
+  at once. RAW develop B at shot time is off in roll mode: the darkroom does it later, and 30 s per frame would hold
+  up the next shot.
+- **One mode at a time** (owner 11-14): both modes are in the one module, but only one is on.
+  - Loading a roll turns the menu "RAW develop" Off (logged; the picker says "RAW develop is off now").
+  - Turning "RAW develop" On while a roll is loaded ends the roll: rewound when it has frames (the Darkroom still
+    develops them), closed when it is empty. A full or rewound roll waiting for the Darkroom does not block B.
+- **Blind roll** (menu, default On):
+  - image review off (`PROP_REVIEW_TIME` 0, the old value back afterwards);
+  - PLAY blocked: CBR_KEYPRESS eats it (outside the ML menu) while a roll is in the camera (loaded or rewound, not yet developed or closed) and the darkroom is not running, and shows a short note.
+  - Off leaves Canon's review and PLAY alone.
+- **HUD** over LiveView (wf_task draws it, ML colour indices, solid black chips):
+  - "ROLL 021 <short name>" top left;
+  - the counter "5/12" bottom right, red when full, with "WIND ON" for 1 s after a frame, or "END OF ROLL" /
+    "REWOUND";
+  - an exposure ladder on the right edge.
+- **End / close.** "End roll now" (menu) ends the roll early (the roll is rewound: no more frames); starting the darkroom rewinds a loaded roll first.
+  "Close roll" gives up on the frames not yet developed: they become K and their CR2s stay untouched.
+
+**Darkroom (developing).**
+- **Entry.** ML menu "Darkroom" opens the darkroom screen. SET starts. MENU stops, after a second MENU to confirm,
+  and closes the screen when nothing runs.
+  - Starting needs: not movie mode, a card, and battery >= 30 %.
+- **Task "wf_dark"**, prio 0x1F (below wf_task 0x1E and the worker 0x1C), lives for one run.
+  - At start: PauseLiveView, powersave_prohibit, then the memory:
+    - raw: 32,598,720 B from the SRM suite (a contiguous run of its buffers);
+    - frame: 35,831,808 B (5184 x 3456 UYVY) from `shoot_malloc_suite_contig`, else another SRM run;
+    - a 256 KB DMA read buffer, a 256 KB cacheable decoder input, the 128 KB CR2 head, the encoder state and a 64 KB
+      out buffer;
+    - the develop tables and scratch (356 + 392 KB), built once per run for the roll's look (`wf_dev_build`, a file
+      read for Log + LUT cubes).
+  - If the raw or the frame cannot be had, the run fails with "no memory" and the log lists every chunk. A banded
+    fallback (no halation / mist) is the next step only if the camera run needs it.
+  - Everything is freed and LiveView resumed when the run ends.
+- **Per frame**, four phases (the UI names them; `wf_dark_view` publishes the progress):
+  1. **Load** ("Loading the negative"):
+     - open the CR2 read-only; 128 KB head -> `wf_cr2_parse`; 4 KB at the strip -> `wf_cr2_parse_ljpeg`;
+     - decode 64 JPEG rows per step from 256 KB reads (DMA buffer, then a copy into the cached input);
+     - Canon's APP1 from the first 64 KB of the paired JPG (`wf_dk_app1`); no JPG means a JFIF APP0 instead.
+  2. **Expose** ("Exposing the paper"):
+     - levels by `wf_dev_levels` (masked columns 16..64, clip pile-up), else the per-ISO white (`wf_dk_white`);
+     - WB = Canon's as-shot levels from the CR2's MakerNote ColorData;
+     - exposure = the fixed scene scale (clip at 0.18 x 2^3.3, as B's default) plus a per-ISO trim (`wf_dk_trim10`),
+       with the film shoulder on;
+     - `wf_dev_rows` in 64-row bands into the frame. The 288 x 192 print thumbnail is gathered from the rows
+       (`wf_dk_thumb_rows`), so the print fades in on the easel.
+  3. **Fix** ("In the fixer"): the look stage through the worker. `wf_shot_run` gets the frame flagged as developed
+     and runs the same stage as after B:
+     - films: the film table + effects;
+     - Log + LUT: effects only (the cube is in the develop tables);
+     - plain log: nothing.
+
+     Darkroom frames never touch the EXIF ring of the shot path: they are logged as "dark" lines.
+  4. **Dry** ("Washing and drying"):
+     - encode at q95, 4:2:2, in 16-row bands (`wf_jpe`), with Canon's APP1 copied in and our UserComment ("WindyFilm
+       Darkroom: <look> | ROLL 021 F01");
+     - write in 64 KB chunks;
+     - mark the frame D, save the roll file, hang the print on the wire (the last 8 prints, 72 x 48).
+- **Output** `<card root>ROLLS/ROLLnnn/Fnn_xxxx.JPG`: nn is the frame 01..36, xxxx Canon's IMG number.
+  - The directories are made with `FIO_CreateDirectory` through `wf_fmkdir` (only while Canon is idle, checked with
+    `is_dir`).
+  - Nothing is written in DCIM. The CR2 and Canon's JPG are never touched.
+  - A print of the same name from a stopped run is removed first.
+- **Stop / resume.**
+  - MENU, unload and power-off stop after the current band. The partial print is removed and the frame stays S, so
+    the next run starts with it.
+  - Battery below 15 % stops the run ("Battery low: charge, then develop the rest").
+  - A frame that fails (no file, bad CR2, decode or write error) becomes E, is logged, and the run goes on.
+- **Log** (wf_log ring): one line per frame, e.g. `dark F01 IMG_0206 iso 320: load 6.1 expose 31.2 fix 7.4 dry 10.3
+  s, 9.6 MB, wb as-shot, trim +0.0, black 2047 white 12636`, plus start / stop / memory lines.
+- **Time per EOS M frame** (memsim ARM946E-S 200 MHz, plus the host chain):
+
+  | step | time |
+  |---|---|
+  | CR2 decode | 5.3 s (cached input; 9.2 s uncached) |
+  | develop B | 29-36 s |
+  | look stage | as at shot time |
+  | encode q95 | 9.7 s |
+  | card | about 22 MB read + 7-10 MB written |
+
+  That is about 50-60 s a frame, so a 36-frame roll takes about 35 min. Host check: `tools/dr_dark_check.sh`, the
+  whole chain on the Day09 pairs (prints decode with djpeg and PIL, the encoder at 44 dB Y against its own frame, the
+  mid-tone level against Canon's JPEG).
+- **UI** (`ui/wf_dark_ui.c`; host renders `tests/ui/dr_run.sh`):
+  - a safelight-red room;
+  - the easel with the print fading in (palette only);
+  - the phase names;
+  - the wire with a 700 ms slide;
+  - a dial with progress ticks and a seconds hand;
+  - "n to go - about m min", battery % and clock.
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`
@@ -416,6 +543,12 @@ The layout, 720x480 (the ML bitmap):
   - deny words: florinkiritescu, FILMCAN, FILMROLL, filmroll, plus the DER and Genesis file names, in sources and
     packs;
   - no file under `src/`, `tools/`, `films/`, `cans/` is byte-equal to a DER file.
+  - public standard tables (added with the darkroom's JPEG encoder, 11-14): the ITU-T T.81 Annex K tables every
+    baseline JPEG encoder carries (zig-zag order of Figure A.6 and its inverse, K.1 / K.2 quantisation tables in
+    natural and zig-zag order, K.3-K.6 Huffman code counts and values) are built by the gate from the standard and
+    masked to 0 in both modules (8-, 16- and 32-bit LE arrays, whole tables only) before the string and window checks;
+    the bytes around a table are still compared, and the gate prints what it masked. `src/wf_jpe.c` holds them as
+    plain `uint8_t` arrays typed from the standard.
 
 ## 7. Card layout
 

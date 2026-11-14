@@ -35,6 +35,7 @@ void h_li_set(const char *field, int v);
 
 /* card: get_shooting_card()->file_number */
 void h_set_file_number(int n);
+void h_set_folder_number(int n);
 
 /* memory: shoot memory / Canon heap from a low arena (bit 30 clear: CACHEABLE() is the identity) */
 extern volatile int h_shoot_fail;                /* shoot_malloc_suite_contig returns 0 */

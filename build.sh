@@ -100,7 +100,14 @@ if [ $CAM = EOSM ]; then
   arm-none-eabi-ld -r -o $O/wf_dev.o $O/wf_dev_c.o $O/wf_dev_arm.o
   OBJS="$OBJS wf_dev.o"
   cc wf_rsrc.o   $MODFLAGS $S/wf_rsrc.c
+  # Roll + Darkroom's own CR2 reader, JPEG encoder and pure per-frame parts (docs/DESIGN.md 3.4; EOS M first)
+  cc wf_cr2.o    $MODFLAGS -O2 $S/wf_cr2.c
+  cc wf_jpe.o    $MODFLAGS -O2 $S/wf_jpe.c
+  cc wf_darkp.o  $MODFLAGS $S/wf_darkp.c
 fi
+# Roll + Darkroom: the roll state machine and the core (the 5D2 build: the darkroom stubs, WF_DARK_CAN 0)
+cc wf_roll.o     $MODFLAGS $S/wf_roll.c
+cc wf_dark.o     $MODFLAGS $S/wf_dark.c
 # log outputs: tables at the module flags, the kernel in ARMv5TE asm; one object (lenc_layout below)
 $CC $MODFLAGS -c -o $O/wf_logout_tab.o $S/wf_logout_tab.c
 $CC -mcpu=arm946e-s -marm -c -o $O/wf_logout_arm.o $S/wf_logout_arm.S

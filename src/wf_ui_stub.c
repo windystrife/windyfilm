@@ -8,3 +8,8 @@ void wf_ui_close(void) { }
 int  wf_ui_is_open(void) { return 0; }
 unsigned int wf_ui_key(unsigned int key) { (void)key; return 1; }
 int  wf_ui_open_key(unsigned int key) { (void)key; return 0; }
+
+/* Roll + Darkroom screens and the LiveView HUD (src/ui/wf_dark_ui.c, wf_dark.h): none without the browser */
+void wf_ui_open_scr(int scr) { (void)scr; wf_log("browser: not in this build"); }
+int  wfdr_hud_fonts(int on) { (void)on; return -1; }
+void wfdr_hud(uint8_t *vram, int pitch, int blink) { (void)vram; (void)pitch; (void)blink; }

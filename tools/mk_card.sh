@@ -40,6 +40,7 @@ printf 1 > "$DST/ML/SETTINGS/WINDYFLM.EN"
 cp "$B/windyflm.mo" "$DST/ML/modules/"
 cp "$B/WFFILMS.DAT" "$B/WFCANS.DAT" "$B/WFFONTS.DAT" "$D/"
 cp "$R/card/README_WINDYFILM_$CAM.txt" "$DST/README_WINDYFILM.txt"
+for f in "$R"/card/HUONGDAN_*_$CAM.txt; do cp "$f" "$DST/"; done   # the owner's step lists (Vietnamese), when there are any
 cp "$R/card/README_FILMLUT.txt" "$R/card/CHANGELOG_FILMLUT.txt" "$R/licenses/SPEKTRAFILM_LICENSE.txt" \
    "$R/licenses/UBUNTU_FONT_LICENCE.txt" "$DST/"
 cp "$R/ATTRIBUTIONS.md" "$DST/ATTRIBUTIONS.txt"

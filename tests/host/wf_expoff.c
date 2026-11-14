@@ -21,4 +21,12 @@ const int wf_t_li_picstyle = offsetof(struct lens_info, raw_picstyle);
 const int wf_t_li_isov = offsetof(struct lens_info, iso);             /* the ISO number (RAW develop's white per ISO) */
 const int wf_t_li_isoa = offsetof(struct lens_info, iso_auto);
 const int wf_t_card_fn = offsetof(struct card_info, file_number);
+const int wf_t_card_folder = offsetof(struct card_info, folder_number);   /* the roll's frame numbers (wf_card_nums) */
 const int wf_t_card_size = sizeof(struct card_info);
+/* struct menu_entry (ROLL mode: finds an entry of the module's menu by name and calls its select, as ML does on SET) */
+#include <menu.h>
+const int wf_t_me_size = sizeof(struct menu_entry);
+const int wf_t_me_name = offsetof(struct menu_entry, name);
+const int wf_t_me_priv = offsetof(struct menu_entry, priv);
+const int wf_t_me_select = offsetof(struct menu_entry, select);
+const int wf_t_me_children = offsetof(struct menu_entry, children);

@@ -29,6 +29,9 @@ void EngDrvOut(uint32_t reg, uint32_t value);
 uint32_t shamem_read(uint32_t addr);
 #define COLOR_WHITE 1
 #define COLOR_BLACK 2
+#define COLOR_RED 8                             /* ML bmp.h default palette indices (the HUD) */
+#define COLOR_YELLOW 0x0F
+#define COLOR_GRAY(p) (38 + ((p) * 41) / 100)
 
 /* RBF fonts (rbf_font.h / font.h / bmp.h) */
 #define RBF_MAX_NAME 64

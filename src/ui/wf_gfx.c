@@ -201,11 +201,17 @@ void wfg_bits16(const uint8_t *bits, int x, int y, int c)
 }
 
 /* ------------------------------------------------------------------ background: gradient, glow, floor shadow */
-#define GLOW_CX 125
-#define GLOW_CY 150
-#define GLOW_R  150                      /* circle; mockup glow(img, 125, 150, 150, 150, colour) */
-#define SH_CX   125
-#define SH_CY   272
+/* the glow and floor shadow sit under the big can: the browser's at (45, 40) (mockup glow(img, 125, 150, 150, 150,
+   colour), shadow(img, 125, 272, 78, 8)); the roll picker moves them under its carousel centre (wfg_glow_centre) */
+static int GLOW_CX = 125, GLOW_CY = 150, SH_CX = 125, SH_CY = 272;
+#define GLOW_R  150                      /* circle */
+void wfg_glow_centre(int cx, int cy, int shx, int shy)
+{
+    GLOW_CX = cx;
+    GLOW_CY = cy;
+    SH_CX = shx;
+    SH_CY = shy;
+}
 #define SH_RX   78
 #define SH_RY   8                        /* mockup shadow(img, 125, 272, 78, 8) */
 

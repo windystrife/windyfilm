@@ -23,6 +23,11 @@ Checks:
      (comments and strings aside) only in src/wf_main.c: in its extern lines and inside wf_fremove / wf_fcreate /
      wf_frename (src/wf_fio.h: Canon makes a second entry of the same name when a file is created over one; those
      three wait for an idle camera and check the name is gone first).
+Public standard tables: the ITU-T T.81 (JPEG) Annex K tables every baseline JPEG encoder carries (the zig-zag order of
+Figure A.6 and its inverse, the example quantisation tables K.1 / K.2 in natural and zig-zag order, the Huffman tables
+K.3-K.6: code-length counts and values) are built here from the standard and masked (set to 0) in both modules before
+checks 1 and 2, as 8-, 16- and 32-bit little-endian arrays, exact whole-table runs only. A shared standard table is then
+no finding, while the bytes around it are still compared. The summary line counts the masked runs.
 The third-party module is read only here, as deny input; its strings are extracted at run time and never stored.
 The deny words are assembled from pieces so this file and the allowlist (both skipped by check 3) do not hold them."""
 import hashlib, os, re, struct, sys
@@ -47,6 +52,48 @@ FIO_HOME = os.path.join("src", "wf_main.c")
 FIO_FUNCS = ("wf_fremove", "wf_fcreate", "wf_frename")
 WIN = 32
 WIN_FILL = 28                       # a window with one byte value >= this many times is a run of a single byte
+
+
+def zigzag():
+    """T.81 Figure A.6: zig-zag index -> natural (row-major) index"""
+    return [n for _, _, n in sorted((x + y, y if (x + y) % 2 else x, y * 8 + x) for y in range(8) for x in range(8))]
+
+
+ZZ = zigzag()
+IZZ = [ZZ.index(i) for i in range(64)]
+K1 = bytes.fromhex("100b0a101828333d0c0c0e131a3a3c370e0d1018283945380e11161d3357503e"
+                   "12162538446d674d182337405168715c31404e5767797865485c5f6270646763")
+K2 = bytes.fromhex("1112182f6363636312151a4263636363181a3863636363632f42636363636363" + "63" * 32)
+K5V = bytes.fromhex("01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728"
+                    "292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788"
+                    "898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9da"
+                    "e1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9fa")
+K6V = bytes.fromhex("000102031104052131061241510761711322328108144291a1b1c109233352f0156272d10a162434e125f11718191a"
+                    "262728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a82838485"
+                    "868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7"
+                    "d8d9dae2e3e4e5e6e7e8e9eaf2f3f4f5f6f7f8f9fa")
+ANNEX_K = [("zig-zag", bytes(ZZ)), ("zig-zag inverse", bytes(IZZ)), ("K.1", K1), ("K.2", K2),
+           ("K.1 zig-zag", bytes(K1[z] for z in ZZ)), ("K.2 zig-zag", bytes(K2[z] for z in ZZ)),
+           ("K.3 counts", bytes([0, 1, 5, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0])),
+           ("K.4 counts", bytes([0, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0])), ("K.3/K.4 values", bytes(range(12))),
+           ("K.5 counts", bytes([0, 2, 1, 3, 3, 2, 4, 3, 5, 5, 4, 4, 0, 0, 1, 0x7d])),
+           ("K.6 counts", bytes([0, 2, 1, 2, 4, 4, 3, 4, 7, 5, 4, 4, 0, 1, 2, 0x77])), ("K.5 values", K5V),
+           ("K.6 values", K6V)]
+assert len(K1) == len(K2) == 64 and len(K5V) == len(K6V) == 162 and ZZ[:6] == [0, 1, 8, 16, 9, 2] and ZZ[-1] == 63
+
+
+def mask_public(data, count):
+    """data with every whole Annex K table run (8 / 16 / 32-bit LE) set to 0; count[name] += runs masked"""
+    b = bytearray(data)
+    for name, tab in ANNEX_K:
+        for w in (1, 2, 4):
+            pat = b"".join(v.to_bytes(w, "little") for v in tab)
+            o = b.find(pat)
+            while o >= 0:
+                b[o:o + len(pat)] = bytes(len(pat))
+                count[name] = count.get(name, 0) + 1
+                o = b.find(pat, o + len(pat))
+    return bytes(b)
 
 
 def strings(data, n=MINSTR):
@@ -187,8 +234,9 @@ def main(argv):
         sys.exit(__doc__)
     if not os.path.isfile(a["--author"]):
         sys.exit("gate: FAIL: the deny input (the third-party module) is not at the expected place")
-    author = open(a["--author"], "rb").read()
-    ours = open(a["--mo"], "rb").read()
+    kmask = {}
+    author = mask_public(open(a["--author"], "rb").read(), {})
+    ours = mask_public(open(a["--mo"], "rb").read(), kmask)
     packs = []
     if a["--packs"] and os.path.isdir(a["--packs"]):
         packs = [os.path.join(a["--packs"], n) for n in sorted(os.listdir(a["--packs"])) if n.upper().endswith(".DAT")]
@@ -204,7 +252,7 @@ def main(argv):
     # 1. strings
     astr = strings(author)
     generic = {s for s in astr if s in allow or s in coresyms or one_byte(s)}
-    targets = [(a["--mo"], ours)] + [(p, open(p, "rb").read()) for p in packs]
+    targets = [(a["--mo"], ours)] + [(p, mask_public(open(p, "rb").read(), kmask)) for p in packs]
     for k, (path, data) in enumerate(targets):
         for ok in deny_ok:
             data = data.replace(ok, b"")
@@ -277,6 +325,8 @@ def main(argv):
                      "wf_frename (src/wf_fio.h)" % (rel, ln, nm))
     for f in fails[:int(os.environ.get("WF_GATE_SHOW", "40"))]:
         print("gate: FAIL: " + f)
+    if kmask:
+        print("gate: public T.81 Annex K tables masked in ours: " + ", ".join("%s x%d" % kv for kv in sorted(kmask.items())))
     print("gate: %s: strings %d checked (%d generic: %d allowlist, the rest core names / one-char runs) -> %d found; "
           "windows -> %d equal (%d runs of a single byte ignored); deny words: %d files; byte-equal: %s; "
           "card directory calls: %d in wf_main.c's wf_fio.h functions / externs, %d elsewhere"

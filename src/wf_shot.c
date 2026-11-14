@@ -604,6 +604,7 @@ struct wf_ev {
     int16_t ev8;
     uint8_t llut; int8_t lei;
     uint8_t rb;                                  /* RAW develop: 0 not asked / 8-bit, 1 developed, 2 stopped part way */
+    uint8_t dark;                                /* the Darkroom's frame: logged, never an EXIF entry */
     uint32_t buf, raw;
     int ms, q, h_ms, g_ms, m_ms, wait;
     struct wf_look lk;
@@ -785,6 +786,27 @@ static int wf_dispatch(struct wf_frame *f, int bot, struct wf_look *lk, int *llu
 {
     int raw = f->fmt == WF_FMT_RAW14, st;
     wf_rb_res = 0;
+    if (f->devd) {                               /* the Darkroom developed it (wf_dark.c): the stage after B only */
+        if (f->fmt != WF_FMT_UYVY8)
+            return WF_ST_NOSTAGE;
+        wf_rb_res = 1;
+        switch (lk->output) {
+        case WF_OUT_FILM:
+            if (!wf_ws_shot(f->part, bot, lk->row, lk->variant, lk->ftflags))
+                return WF_ST_NOTAB;
+            wf_colour_fx(f, bot, lk, wf_film_words, 0);
+            return WF_ST_FILM;
+        case WF_OUT_LLUT:
+            *llut = lk->flut;                    /* the darkroom's develop tables hold the cube */
+            *lei = lk->lei;
+            wf_colour_fx(f, bot, lk, wf_nop_words, 0);
+            return WF_ST_LLUT;
+        case WF_OUT_LOG:
+            return WF_ST_LOG;
+        default:
+            return lk->why == 1 ? WF_ST_NOFILM : WF_ST_OFF;
+        }
+    }
     if (raw)
         f->fmt = WF_FMT_UYVY8;                   /* dst holds Canon's UYVY8 frame until the develop writes it */
     else if (f->fmt != WF_FMT_UYVY8)
@@ -878,6 +900,7 @@ static void wf_run(void)
     e->lei = (int8_t)lei;
     e->fxp = (uint8_t)wf_fx_pend;
     e->rb = (uint8_t)wf_rb_res;
+    e->dark = f->devd;
     e->wait = wf_ws_waited + wf_fx_waited;
     e->lk = lk;
     WF_BARRIER();
@@ -1072,9 +1095,10 @@ static void wf_report(void)
         if (e->rb) n += snprintf(ex + n, sizeof ex - n, e->rb == 1 ? " raw" : " raw-stop");
         if (e->fxp && n < (int)sizeof ex) n += snprintf(ex + n, sizeof ex - n, " fx pending");
         if (e->wait > 0 && n < (int)sizeof ex) snprintf(ex + n, sizeof ex - n, " w%d", e->wait);
-        wf_log("yuv %s %x/%x: %s%s %dms%s q%d a%d%s", wf_kname[e->kind < 3 ? e->kind : 0], (unsigned)e->buf,
-               (unsigned)e->raw, wf_status_name(e->status), code, e->ms, fx, e->q, e->aspect, ex);
-        wf_shot_note(e);
+        wf_log("yuv %s %x/%x: %s%s %dms%s q%d a%d%s", e->dark ? "DARK" : wf_kname[e->kind < 3 ? e->kind : 0],
+               (unsigned)e->buf, (unsigned)e->raw, wf_status_name(e->status), code, e->ms, fx, e->q, e->aspect, ex);
+        if (!e->dark)                            /* a darkroom print is no Canon JPEG: no EXIF entry, no shot count */
+            wf_shot_note(e);
         WF_BARRIER();
         wf_ev_tail++;
     }
