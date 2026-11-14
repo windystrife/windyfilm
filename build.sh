@@ -90,6 +90,17 @@ cc wf_fx.o       $MODFLAGS $S/wf_fx.c
 cc wf_expsim.o   $MODFLAGS $MLFLAGS $S/wf_expsim.c
 [ $CAM = EOSM ] && cc wf_expk.o $MODFLAGS -O2 $S/wf_expk.c     # 5D2: wf_expsim.c has the no-op wf_exp_words
 cc wf_catalog.o  $MODFLAGS $B/wf_catalog.c
+# RAW develop "B" (wf_rawb.c; EOS M: the develop wf_dev.c at -O2 + its span kernel in ARMv5TE asm as one object like
+# wf_logout.o, and the buffer check wf_rsrc.c; 5D2: wf_rawb.c's stubs only, WF_RAWB_CAN 0)
+cc wf_rawb.o     $MODFLAGS $S/wf_rawb.c
+if [ $CAM = EOSM ]; then
+  $PY $R/tools/mk_devmat.py --check $S/wf_dev.c
+  $CC $MODFLAGS -O2 -c -o $O/wf_dev_c.o $S/wf_dev.c
+  $CC -mcpu=arm946e-s -marm -c -o $O/wf_dev_arm.o $S/wf_dev_arm.S
+  arm-none-eabi-ld -r -o $O/wf_dev.o $O/wf_dev_c.o $O/wf_dev_arm.o
+  OBJS="$OBJS wf_dev.o"
+  cc wf_rsrc.o   $MODFLAGS $S/wf_rsrc.c
+fi
 # log outputs: tables at the module flags, the kernel in ARMv5TE asm; one object (lenc_layout below)
 $CC $MODFLAGS -c -o $O/wf_logout_tab.o $S/wf_logout_tab.c
 $CC -mcpu=arm946e-s -marm -c -o $O/wf_logout_arm.o $S/wf_logout_arm.S
@@ -123,14 +134,14 @@ lenc_layout() {
 lenc_layout wf_logout.o
 bad=
 for o in $OBJS; do
-  case $o in wf_logout.o) arch=v5TE ;; *) arch=v5T ;; esac
+  case $o in wf_logout.o|wf_dev.o) arch=v5TE ;; *) arch=v5T ;; esac
   arm-none-eabi-readelf -A $o | grep -q "Tag_CPU_arch: $arch$" || bad="$bad $o(not $arch)"
   n=$(arm-none-eabi-objdump -d $o | grep -ciE "[[:space:]](ldr|str)d[a-z]{0,2}[[:space:]]" || true)
   [ "$n" = 0 ] || bad="$bad $o(LDRD/STRD $n)"
   arm-none-eabi-nm -u $o | grep -qE "__aeabi_(l|ul)divmod|__(u)?(div|mod)di3" && bad="$bad $o(64-bit division)"
 done
 [ -z "$bad" ] || { echo "object checks failed:$bad"; exit 1; }
-echo "objects: v5T (wf_logout.o v5TE), 0 LDRD/STRD, no 64-bit division helper"
+echo "objects: v5T (wf_logout.o, wf_dev.o v5TE), 0 LDRD/STRD, no 64-bit division helper"
 UD=$(for o in $OBJS; do arm-none-eabi-nm -u $o | awk -v o=$o '$2 ~ /^__aeabi_(ui|i)div/ {print o":"$2}'; done | tr '\n' ' ')
 echo "32-bit division helpers: ${UD:-none}"
 

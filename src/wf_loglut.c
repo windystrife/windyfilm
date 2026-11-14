@@ -531,6 +531,8 @@ static const uint8_t wf_ll_have_in[WF_LL_NINC] = { 1, WF_LL_HAVE_C1, WF_LL_HAVE_
 int wf_ll_curve_have(int k) { return k >= 0 && k < WF_LL_NINC && wf_ll_have_in[k]; }
 const char *wf_ll_curve_src(int k) { return k > 0 && k < WF_LL_NINC ? wf_ll_src_in[k] : ""; }
 static int wf_ll_inc(void) { int k = wf_ll_incurve; return k > 0 && wf_ll_curve_have(k) ? k : 0; }   /* slot in use */
+/* the RAW develop's WB fit (wf_rawb.c): slot k's decode table, 0 for sRGB / a slot not built in */
+const uint32_t *wf_ll_dec_of(int k) { return k > 0 && wf_ll_curve_have(k) ? wf_ll_dec_in[k] : 0; }
 #define WF_LL_GREY18 3019899                     /* 0.18 in Q24 */
 
 /* node -> grid coordinates (Q16, 0 .. (n-1) << 16) */

@@ -284,16 +284,18 @@ Open items:
    aspect, `exif IMG_nnnn.JPG ok`, Preview on / Fast, Light, Log + LUT with a real cube; 5D2: TOP / BOT pairing in the
    log (`TOP .., BOT ..`), one shot per output. With `filmroll.mo` still loaded the status must read
    "Disable filmroll.mo" and nothing is hooked.
-4. RAW develop stage: not implemented (section 7); `input=jpeg` only.
+4. RAW develop stage: "B" is wired on the EOS M on branch `raw-develop` (section 10.7: menu "RAW develop", RAW+L single
+   shots, about 32-40 s per shot), not run on a camera yet. The 5D2 has none. Config `input=raw` is not used.
 5. Preview exposure "Smooth" is EOS M only (5D2 build: no-ops, menu shows Camera).
 6. Real timings (shot ms per film / effect) exist only from the camera; host times under qemu say nothing.
 
-## 10. RAW develop "B" (branch `raw-develop`, not wired)
+## 10. RAW develop "B" (branch `raw-develop`, wired on EOS M, not run on a camera)
 
 The full in-camera develop of DESIGN 3.2 "B": an optional slow mode. It develops Canon's 14-bit raw of the shot and
-writes the graded UYVY 4:2:2 frame into Canon's YUV buffer, so Canon's JPEG encoder runs as usual. EOS M first; the
-code takes the 5D2 matrix too. The code is host-tested and memsim-timed. **No hook calls it yet.** The integration points
-are listed below; whoever merges does that after P0 has run on the camera.
+writes the graded UYVY 4:2:2 frame into Canon's YUV buffer, so Canon's JPEG encoder runs as usual. EOS M only; the
+develop code takes the 5D2 matrix too, but the 5D2 module has no RAW develop (`WF_RAWB_CAN` 0). Since 2026-11-14 it is
+wired (10.7): menu "RAW develop", RAW+L single shots. 10.1-10.6 are the develop itself as first written; 10.7 is what
+the wiring changed and measured.
 
 ### 10.1 Files (all new; no existing file changed)
 
@@ -509,4 +511,91 @@ bash tools/dev_bench.sh                      # memsim phases (QEMU / MEMSIM env)
 bash tools/dev_cr2.sh <dir with IMG_xxxx.CR2 + .JPG> [N]    # real pairs; A1SLOT=2 for Neutral, KEEP=1 keeps files
 ```
 `dev_cr2.sh` builds `dev_a1ref` when the tree has A1 (main's `wf_ll_incurve` and `luts/canon_curve/*.csv`). Without
-A1 the develop is compared with the sRGB-decoded JPEG path only.
+A1 the develop is compared with the sRGB-decoded JPEG path only. `CUBE=srgb bash tools/dev_bench.sh` times the shipped
+film case (SRGB tables, `wf_dev_levels`, shoulder).
+
+### 10.7 Wired (2026-11-14, EOS M)
+
+**Flow.**
+1. Camera layer (`wf_cam_eosm.c rawb_fill`, NN hook, only while the menu is on) checks the gates:
+   - `pic_quality == 0x3070000` (RAW + L Fine) exactly;
+   - aspect 3:2;
+   - `drive_mode` single / self-timer (0, 0x10, 0x11).
+   It then lists the raw candidates (below) and sets `fmt = WF_FMT_RAW14`, black 2048, white per ISO, raw crop 84 / 64,
+   masked columns 16..64. Otherwise `rb_skip` holds the reason.
+2. `wf_dispatch` (wf_shot.c) turns RAW14 back into UYVY8 (Canon's frame stays the fallback) and calls `wf_rawb_stage`
+   (src/wf_rawb.c):
+   - tables ready for this look's key;
+   - `wf_rs_pick` (src/wf_rsrc.c) picks the buffer against Canon's YUV;
+   - `wf_dev_levels`: black from the masked columns, white from the clip pile-up, else the ISO value;
+   - `wf_dev_prepare`, then `wf_dev_rows` in 64-row bands with `msleep(10)` between bands;
+   - stops on module unload, `ml_shutdown_requested`, half-shutter held 1.5 s, or 90 s.
+3. After a develop:
+   - film: `wf_film_words` (after the white-balance shot step);
+   - Log + LUT: the develop already applied the cube (`wf_nop_words` keeps the effects);
+   - Log: as is.
+   A stop gives `WF_ST_RBSTOP`: no look on a half developed frame. Not developed: the 8-bit path as before, with the
+   reason in the log.
+4. Tables: `wf_task` (`wf_rawb_poll`) builds `wf_dev_build` into one shoot memory block, 790 KB (tables 356 KB +
+   scratch + alignment, cacheable alias). It is rebuilt on a look change and given back in playback, menu off and
+   unload. Publish protocol: clear `rb_have`, back off while a develop holds `rb_live`, publish last. Keys:
+   - film: SRGB;
+   - Log: LOG with the curve;
+   - Log + LUT / cans: CUBE with curve, cube, EI and auto.
+   No memory → 8-bit, with a retry every 10 s.
+
+**Raw source** (P0 data, 10-15 shots): pitch 9240, 5280 x 3528. The candidates, each pool-checked and deduplicated:
+- S = (Eeko block + 0x50) - 480242, or else EDMAC WR0 - 32626440;
+- then S - 32 MB and S + 32 MB.
+`wf_rs_pick` scores luma NCC on blocks, mapping YUV (x, y) to raw (84 + x, 64 + y).
+
+| Pairs | own score (x 1000) | other buffers |
+|---|---|---|
+| burst IMG_6822..6835, Neutral decode | 997-1000 | neighbours up to 986 (same scene) |
+| the same, code^2 (the sRGB case) | 989-998 | up to 982 |
+| Day09 0227 / 0233 / 0236 / 0238 | 911-963 | <= 513 |
+
+So the threshold 800 holds with a wide margin. Two shots of the same scene can score within 2 %; the tie rule
+(within 3, the earlier candidate S wins) only matters if S held the previous shot. Bursts are gated off anyway.
+
+**Log lines per shot.** One of:
+- `rawb: 8-bit (<gate> <value>)`;
+- `rawb: 8-bit (buffer <why>, n, scores) ms`;
+- `rawb: buf <k> <addr> of <n>, scores, blocks`, then `black / white / wb / clip / roll`, then
+  `<done|stopped> rows, pick / lev / prep / rows ms (<reason>)`.
+A raw that changed during the develop (hash of 16 windows) is logged too. The shot line gets ` raw` / ` raw-stop`.
+
+**Menu.** "RAW develop" Off / On (slow) sits before RAW probe and is off at every boot. The warning row gives the
+state: RAW+L needed, drive, loading, no memory, table error, ready ("About 30 s per shot. Hold half-shutter to stop.").
+`NotifyBox` shows "RAW develop: preparing" / "RAW develop NN%" every second during a develop. No card writes besides
+the log.
+
+**Checks** (WSL, 2026-11-14):
+
+| Check | Result |
+|---|---|
+| EOS M `test.sh` | 622 / 0 (RAWB 59: bit-exact develop vs the direct call, both buffers, WR0 path, no-match → 8-bit, every gate, half-shutter, time limit, LOG / LLUT keys, playback / off / no memory) |
+| 5D2 `test.sh` | 505 / 0 (RAWB 14: no develop, film shot bit-exact) |
+| `dev_check.sh` | 537 / 0 (px 68, frame 56, bad 13, span 332, roll 52, rsrc 16) |
+| build EOS M | wf_dev.o v5TE, wf_rsrc.o v5T, gate PASS |
+
+**Time** (memsim, synthetic scene, `CUBE=srgb`):
+
+| Case | prepare | rows | develop |
+|---|---|---|---|
+| film | 4.90 s (levels + fit + map) | 26.58 s | 31.47 s |
+| CUBE V-Log | 3.43 s | 25.72 s | 29.15 s |
+
+Add 0.54 s of band naps, the pick (a few hundred ms, not benched) and the film look pass. Real raws took 10-20 % longer
+in rows (10.3), so plan on 32-40 s per shot.
+
+**Open risks.**
+- Watchdog: there is no sign of one. Shots already hold the hook several seconds, but none has held it 30 s.
+- Power off during a develop: the band loop sees `ml_shutdown_requested` within one band. Whether Canon's shutdown
+  waits for the hook is not known.
+- The S + 32 MB candidate: pool-checked on the host. On the camera any pool address reads, so only the NCC guards it.
+- A stopped develop leaves a half developed JPEG; the CR2 is never touched.
+- EXIF does not mark a B shot yet; the log does.
+- Halation on Log + LUT B frames reads graded words, whose highlights sit below 255.
+- IMG_0206: a magenta patch from the highlight rebuild.
+- `wf_dev_levels` can false-trigger on sparse synthetic histograms; real raws gave the right pile-up.

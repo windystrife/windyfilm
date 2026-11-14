@@ -16,7 +16,8 @@
 #include "host_ml.h"
 
 extern const int wf_t_li_size, wf_t_li_shutter, wf_t_li_aperture, wf_t_li_iso, wf_t_li_iso_auto, wf_t_li_ae,
-    wf_t_li_job, wf_t_li_wb_mode, wf_t_li_kelvin, wf_t_li_wbs_gm, wf_t_li_wbs_ba, wf_t_li_picstyle, wf_t_card_fn, wf_t_card_size;
+    wf_t_li_job, wf_t_li_wb_mode, wf_t_li_kelvin, wf_t_li_wbs_gm, wf_t_li_wbs_ba, wf_t_li_picstyle, wf_t_card_fn, wf_t_card_size,
+    wf_t_li_isov, wf_t_li_isoa;
 
 char __camera_model_short[16] = "EOSM", firmware_version[16] = "2.0.2";
 int pic_quality, shooting_mode = 3, lv = 1;
@@ -356,7 +357,8 @@ static const struct { const char *n; const int *off; int bytes; } h_li_fields[] 
     { "shutter", &wf_t_li_shutter, 1 }, { "aperture", &wf_t_li_aperture, 1 }, { "iso", &wf_t_li_iso, 1 },
     { "iso_auto", &wf_t_li_iso_auto, 1 }, { "ae", &wf_t_li_ae, 4 }, { "job", &wf_t_li_job, 4 },
     { "wb_mode", &wf_t_li_wb_mode, 4 }, { "kelvin", &wf_t_li_kelvin, 4 }, { "gm", &wf_t_li_wbs_gm, -1 },
-    { "ba", &wf_t_li_wbs_ba, -1 }, { "picstyle", &wf_t_li_picstyle, 1 },
+    { "ba", &wf_t_li_wbs_ba, -1 }, { "picstyle", &wf_t_li_picstyle, 1 }, { "isov", &wf_t_li_isov, 4 },
+    { "isoa", &wf_t_li_isoa, 4 },
 };
 int h_li_get(const char *field)
 {
@@ -462,3 +464,25 @@ void menu_remove(const char *name, void *e, int n) { (void)name; (void)e; (void)
 void menu_open_submenu(void) { }
 void bmp_printf(uint32_t font, int x, int y, const char *fmt, ...) { (void)font; (void)x; (void)y; (void)fmt; }
 void bmp_fill(uint8_t c, int x, int y, int w, int h) { (void)c; (void)x; (void)y; (void)w; (void)h; }
+
+/* ------------------------------------------------------------------ RAW develop "B" (wf_rawb.c, wf_cam_eosm.c) */
+int drive_mode;                                  /* ML: DRIVE_SINGLE 0, continuous 1 (EOS M) */
+int ml_shutdown_requested;
+volatile int h_half, h_half_step_ms, h_notify_n;
+char h_notify[160];
+/* each read moves the clock by h_half_step_ms: "held for seconds" / "past the time limit" without waiting */
+int get_halfshutter_pressed(void)
+{
+    if (h_half_step_ms)
+        h_clock_add_ms += h_half_step_ms;
+    return h_half;
+}
+void NotifyBox(int timeout, const char *fmt, ...)
+{
+    va_list ap;
+    (void)timeout;
+    va_start(ap, fmt);
+    vsnprintf(h_notify, sizeof h_notify, fmt, ap);
+    va_end(ap);
+    h_notify_n++;
+}

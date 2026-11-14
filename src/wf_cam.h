@@ -23,6 +23,7 @@
 #define WF_GRAIN_W              5616     /* image width of the grain pitch: 36000 / 5616 = 6.41 um */
 #define WF_EXP_CAN              0        /* Preview exposure: EOS M only (property 0x80000034, frame parameters at 0x404C8) */
 #define WF_PRB_CAN              0        /* RAW probe P0: the 5D2 part waits for raw-path/P0_5D2_SPEC.md */
+#define WF_RAWB_CAN             0        /* RAW develop "B": the 5D2 raw buffers are not known yet */
 #else
 #define WF_PV_CAN               1
 #define WF_GRAIN_CAN            1
@@ -38,6 +39,7 @@
 #define WF_GRAIN_W              WF_HALO_W
 #define WF_EXP_CAN              1
 #define WF_PRB_CAN              1        /* RAW probe P0 at the NN hook (wf_cam_eosm.c + wf_probe.c) */
+#define WF_RAWB_CAN             1        /* RAW develop "B" at the NN hook (wf_cam_eosm.c names the raw, wf_rawb.c) */
 #endif
 
 #endif

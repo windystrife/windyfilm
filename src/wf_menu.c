@@ -27,6 +27,7 @@
 #include "wf_loglut.h"
 #include "wf_fx.h"
 #include "wf_expsim.h"
+#include "wf_rawb.h"
 
 extern int shooting_mode;                         /* Canon mode dial: 3 = M */
 extern int lv;
@@ -91,6 +92,7 @@ static void wf_ps_base_prop(unsigned property, void *priv, uint32_t *buf, unsign
 }
 int wf_style_raw(void) { return lens_info.raw_picstyle; }
 int wf_job_state(void) { return (int)lens_info.job_state; }
+int wf_iso_now(void) { return lens_info.iso ? (int)lens_info.iso : (int)lens_info.iso_auto; }
 int wf_style_base(void) { return wf_ps_base; }
 int wf_style_con(void) { int c = picstyle_get_current_contrast(); return c >= -4 && c <= 4 ? c : -10; }
 /* why input curve `inc` is not usable under the camera's Picture Style: WF_PSW_OK, or the first thing that differs.
@@ -1200,6 +1202,37 @@ static MENU_UPDATE_FUNC(wf_prb_update)
 #define WF_PRB_ENTRY
 #endif
 
+#if WF_RAWB_CAN
+/* RAW develop "B" (wf_rawb.c): off at every boot, never saved */
+static const char *wf_rawb_name[2] = { "Off", "On (slow)" };
+static MENU_UPDATE_FUNC(wf_rawb_update)
+{
+    int st = wf_rawb_state(), dm = drive_mode;
+    if (!wf_rawb)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Develops the RAW of a RAW+L shot: about 30 s each. Off at boot.");
+    else if (!wf_yuv_active())
+        WF_NOT_ACTIVE();
+    else if (pic_quality != PICQ_RAW_JPG_LARGE_FINE)
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Set image quality to RAW+L: other shots get the normal look.");
+    else if (dm != DRIVE_SINGLE && dm != 0x10 && dm != 0x11)
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Single shot / self-timer only: bursts get the normal look.");
+    else if (st == WF_RB_LOADING)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Loading the develop tables...");
+    else if (st == WF_RB_NOMEM)
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "No memory for the develop tables: normal look.");
+    else if (st == WF_RB_ERR)
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Tables: %s. Normal look.", wf_loglut_errstr(wf_rawb_err()));
+    else if (st == WF_RB_IDLE)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Output Off: nothing to develop.");
+    else
+        MENU_SET_WARNING(MENU_WARN_INFO, "About 30 s per shot. Hold half-shutter to stop.");
+}
+#define WF_RAWB_ENTRY { .name = "RAW develop", .priv = (void *)&wf_rawb, .max = 1, .choices = wf_rawb_name, \
+                        .update = wf_rawb_update, .help = "Slow: the look from Canon's RAW (RAW+L single shots)." },
+#else
+#define WF_RAWB_ENTRY
+#endif
+
 #define WF_ROWE(nm, row, sel, hlp) { .name = nm, .priv = (void *)(intptr_t)((row) + 1), .select = sel, \
                                      .update = wf_row_update, .help = hlp, .icon_type = IT_DICE }
 static struct menu_entry wf_menu[] = {
@@ -1238,6 +1271,7 @@ static struct menu_entry wf_menu[] = {
               .help = "Smooth: steady LiveView; the shot's exposure is added digitally." },
             { .name = "EXIF info", .select = wf_exif_select, .update = wf_exif_update,
               .help = "Writes the shot's film and effects into the JPEG's EXIF comment." },
+            WF_RAWB_ENTRY
             WF_PRB_ENTRY
             { .name = "Status", .update = wf_status_update, .icon_type = IT_ACTION,
               .help = "Camera, hooks and film pack state." },

@@ -2,6 +2,8 @@
  *
  *   dev_bench DIR [CUBE]     DIR/scene.r14 + DIR/scene.uyvy from tests/host/wf_dev_scene.c (5184 x 3456 in a 5280 x 3528
  *                            raw, pitch 9240); CUBE default DIR/FILM33.CUB (V-Log)
+ *   dev_bench DIR srgb       the shipped film case (src/wf_rawb.c): SRGB tables, the shot's levels (wf_dev_levels, in
+ *                            phase 2) and the film shoulder (roll 1)
  * The raw and the frame sit in one region at 0x48000000 that tools/dev_bench.sh gives memsim as the NCNB shoot pool
  * (fb=, fbn=): the raw is read uncached as on the camera, the frame is Canon's YUV buffer (the WB fit reads it, then the
  * rows overwrite it). Tables and scratch are ordinary (cached) heap. Phases (prof_mark): 1 wf_dev_build (load time,
@@ -83,9 +85,17 @@ int main(int argc, char **argv)
     struct wf_ll_info inf;
     struct wf_dev_stat st;
 
+    int srgb = argc > 2 && !strcmp(argv[2], "srgb"), lb = 0, lw = 0;
     prof_mark(1);
-    int rc = wf_dev_build(t, WF_DEV_CUBE, WF_LL_VLOG, WF_DEV_EOSM, cube, 0, 0, &inf);
+    int rc = srgb ? wf_dev_build(t, WF_DEV_SRGB, 0, WF_DEV_EOSM, 0, 0, 0, &inf)
+                  : wf_dev_build(t, WF_DEV_CUBE, WF_LL_VLOG, WF_DEV_EOSM, cube, 0, 0, &inf);
     prof_mark(2);
+    if (srgb && !rc) {                           /* as wf_rawb.c: levels, then the shoulder */
+        wf_dev_levels(scr, &j, 16, 64, &lb, &lw);
+        if (lb) j.black = lb;
+        if (lw) j.white = lw;
+        j.roll = 1;
+    }
     int rp = rc ? -1 : wf_dev_prepare(scr, t, &j, &st);
     prof_mark(3);
     if (!rp)
@@ -101,5 +111,7 @@ int main(int argc, char **argv)
     printf("dev_bench: %dx%d, cube n %d, scratch %u B, tables %u B, wb src %d (n %d), clipped quads %d, highlight px %u, "
            "develop checksum %08x\n", w, h, inf.n, (unsigned)wf_dev_scratch_bytes(w, h), (unsigned)sizeof *t, st.wb_src,
            st.fit_n, st.clip_quads, st.hl_px, ck);
+    if (srgb)
+        printf("dev_bench: srgb, levels black %d white %d (0 = none), roll %d\n", lb, lw, st.roll);
     return 0;
 }

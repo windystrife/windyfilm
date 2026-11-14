@@ -12,6 +12,11 @@
  *   wf_dev_test bad               jobs wf_dev_prepare must refuse
  *   wf_dev_test span              the asm span kernel (src/wf_dev_arm.S) = the C reference bit for bit: random raw
  *                                 below clip, 3 node sources x 4 Bayer phases x 9 WB scales (matrix shifts down to 7)
+ *   wf_dev_test roll              the film shoulder on a neutral exposure ramp: CUBE (identity, film), SRGB, LOG, both cameras
+ *   wf_dev_test rsrc              which buffer holds the shot (src/wf_rsrc.c): pointer right / at the previous shot / 0,
+ *                                 no match, both buffers the same frame, no address, a frame with no mid-tones
+ *   wf_dev_test pick DIR1 DIR2..  real pairs: DIR1's Canon frame + curve against every DIR's raw (DIR1 must win)
+ *   wf_dev_test look DIR CUBE R   a real pair through a card cube, film shoulder R (writes DIR/look_r<R>_k<knee>.uyvy)
  *   wf_dev_test cr2 DIR [X0 Y0]   a real EOS M RAW+L pair prepared by tools/dev_cr2.sh: WB fit vs Canon's as-shot WB;
  *                                 the develop vs Log + LUT of Canon's JPEG on flat blocks (with A1's curve when
  *                                 dev_a1ref made ref_a1.uyvy + dec.bin: raw-unclipped blocks checked, clipped blocks
@@ -25,6 +30,7 @@
 #include <string.h>
 #include "wf_dev.h"
 #include "wf_dev_scene.h"
+#include "wf_rsrc.h"
 #define WF_LL_EXTERN_ENC
 #include "wf_loglut_tab.h"
 
@@ -723,6 +729,291 @@ static void mode_bad(void)
     sc_free(&s);
 }
 
+/* x of enc index i (wf_dv_idx inverted: 8-bit mantissa, linear inside an octave) and stops between two indexes */
+static double enc_x(int i) { int s = (i >> 8) - 1; return s < 0 ? (double)i : (double)(256 + (i & 255)) * (double)(1 << s); }
+static double enc_ev(int i, int i0) { return log2(enc_x(i) / enc_x(i0)); }
+
+/* look DIR CUBE ROLL [KNEE [FIT [LIFT]]]: one real shot (dev_cr2.sh KEEP=1 files: raw.r14, meta.txt, align.txt, jpeg.uyvy,
+   dec.bin) through a card cube on V-Log, film shoulder ROLL 0 / 1, knee KNEE enc steps below the first clip. WB / scale:
+   Canon's as-shot WB at match.py's scene scale (grey = 11352 / 2^3.3 DN), as the a1-vs-b renders; FIT 1 = the fit.
+   LIFT: the shoulder ends on the look's own luma LIFT enc steps above the sensor's white, -1 = the look's white
+   (wf_dev_roll_lift; not given = the library default, 384).
+   Writes DIR/look_r<ROLL>_k<KNEE>[_l<LIFT>].uyvy. Look checks only: no pass / fail on the picture. */
+extern int wf_dev_roll_knee, wf_dev_roll_lift;
+static void mode_look(const char *dir, const char *cube, int roll, int knee, int fit, int lift)
+{
+    char path[512];
+    int W = 0, H = 0, pitch = 0, iso = 0, wb[4] = { 0, 0, 0, 0 }, dx = 99, dy = 99, jw = 0, jh = 0, wmeas = 0;
+    double blk = 0, pk = 0;
+    FILE *f;
+    snprintf(path, sizeof path, "%s/meta.txt", dir);
+    if ((f = fopen(path, "r"))) {
+        int n = fscanf(f, "%d %d %d %d %lf %d %d %d %d %d", &W, &H, &pitch, &iso, &blk, &wb[0], &wb[1], &wb[2], &wb[3],
+                       &wmeas);
+        CHECK(n == 9 || n == 10, "meta.txt");
+        fclose(f);
+    }
+    snprintf(path, sizeof path, "%s/align.txt", dir);
+    if ((f = fopen(path, "r"))) {
+        CHECK(fscanf(f, "%d %d %lf %d %d", &dx, &dy, &pk, &jw, &jh) == 5, "align.txt");
+        fclose(f);
+    }
+    if (W <= 0 || jw <= 0) { CHECK(0, "%s: no meta.txt / align.txt", dir); return; }
+    uint8_t *raw = malloc((size_t)H * pitch + 16);
+    uint32_t *jpg = malloc((size_t)jw * jh * 2), *dev = malloc((size_t)jw * jh * 2);
+    CHECK(read_all(dir, "raw.r14", raw, (size_t)H * pitch) == 0 && read_all(dir, "jpeg.uyvy", jpg, (size_t)jw * jh * 2) == 0,
+          "%s: raw.r14 / jpeg.uyvy", dir);
+    struct wf_dev_job j;
+    memset(&j, 0, sizeof j);
+    j.raw = raw; j.pitch = pitch;
+    j.ax0 = 72; j.ay0 = 52; j.ax1 = W; j.ay1 = H;
+    j.x0 = 84; j.y0 = 64; j.w = jw; j.h = jh;
+    int wtab = iso == 100 ? 13582 : iso == 160 || iso == 320 ? 12636 : iso == 200 ? 15303 : 15200;
+    j.black = (int)(blk + 0.5); j.white = wmeas > j.black + 4096 ? wmeas : wtab; j.cfa = 0;
+    j.canon = jpg; j.canon_y0 = 0; j.canon_h = jh;
+    static uint32_t dec[1022];
+    if (read_all(dir, "dec.bin", dec, sizeof dec) == 0)
+        j.dec = dec;
+    if (!fit) {                                  /* raw unit -> lin Q24 x 256: 0.18 / (11352 / 2^3.3) per DN, as-shot WB */
+        double g = 0.18 / (11352.0 / pow(2.0, 3.3)) * 16777216.0 * 256.0;
+        j.wb_q8[0] = (int32_t)(g * wb[0] / wb[1] + 0.5);
+        j.wb_q8[1] = (int32_t)(g + 0.5);
+        j.wb_q8[2] = (int32_t)(g * wb[3] / wb[2] + 0.5);
+    }
+    j.roll = roll;
+    wf_dev_roll_knee = knee;
+    if (lift != -2)
+        wf_dev_roll_lift = lift;
+    struct wf_ll_info inf;
+    int rc = wf_dev_build(D, WF_DEV_CUBE, WF_LL_VLOG, WF_DEV_EOSM, cube, 0, 0, &inf);
+    CHECK(rc == 0, "build %s: %d", cube, rc);
+    void *scr = malloc(wf_dev_scratch_bytes(jw, jh));
+    struct wf_dev_stat st;
+    rc = rc ? rc : wf_dev_prepare(scr, D, &j, &st);
+    CHECK(rc == 0, "%s: prepare %d", dir, rc);
+    if (rc == 0) {
+        wf_dev_rows(scr, 0, jh, dev, jw * 2);
+        printf("look %s: ISO %d white %d, wb src %d, roll %d", dir, iso, j.white, st.wb_src, st.roll);
+        if (st.roll)
+            printf(": knee %+.2f, sensor white %+.2f, look white %+.2f EV over grey, ends at Y %.1f", enc_ev(st.ro_k, st.ro_grey),
+                   enc_ev(st.ro_c, st.ro_grey), enc_ev(st.ro_w, st.ro_grey), st.ro_ytop / 256.0);
+        printf("; clipped quads %d, highlight px %u\n", st.clip_quads, (unsigned)st.hl_px);
+        if (lift != -2)
+            snprintf(path, sizeof path, "look_r%d_k%d_l%d.uyvy", roll, knee, lift);
+        else
+            snprintf(path, sizeof path, "look_r%d_k%d.uyvy", roll, knee);
+        write_all(dir, path, dev, (size_t)jw * jh * 2);
+    }
+    free(scr); free(raw); free(jpg); free(dev);
+}
+
+/* roll: the film shoulder (wf_dv_roll) on a neutral exposure ramp, -7 .. +5.5 EV over grey across the frame, every row
+   the same, white-balanced raw (grey 500 / 1000 / 625 DN in R / G / B: G clips first, R last). Per camera and node
+   source: below the knee the words are the look's as is; Y never falls along the ramp and has no step; past the
+   sensor's white (R's clip, the all-clipped plateau) Y sits on the look's white, neutral; LOG ignores roll. */
+static const int roll_gdn[3] = { 500, 1000, 625 };
+static double roll_ev(int x, int w) { return -7.0 + 12.5 * x / (w - 1); }
+
+static void roll_case(int cam, int src, int ident, const char *what)
+{
+    const int w = 1024, h = 64, x0 = 84, y0 = 64, rw = ((x0 + w + 24) + 7) & ~7, rh = y0 + h + 20, pitch = rw / 8 * 14;
+    const int black = cam ? 1024 : 2048, white = cam ? 15600 : 12636;
+    uint16_t *row = malloc((size_t)rw * 2);
+    uint8_t *raw = malloc((size_t)rh * pitch + 16);
+    for (int y = 0; y < rh; y++) {
+        for (int x = 0; x < rw; x++) {
+            int xo = x - x0 < 0 ? 0 : x - x0 > w - 1 ? w - 1 : x - x0;
+            int ch = ((x - x0) & 1) + ((y - y0) & 1);  /* RGGB at (x0, y0): 0 R, 1 G, 2 B */
+            double v = x < 72 ? 0 : roll_gdn[ch] * pow(2.0, roll_ev(xo, w));
+            int r = black + (int)(v + 0.5);
+            row[x] = (uint16_t)(r > white ? white : r);
+        }
+        sc_pack14(row, raw + (size_t)y * pitch, rw);
+    }
+    struct wf_dev_job j;
+    memset(&j, 0, sizeof j);
+    j.raw = raw; j.pitch = pitch;
+    j.ax0 = 72; j.ay0 = 52; j.ax1 = rw; j.ay1 = rh;
+    j.x0 = x0; j.y0 = y0; j.w = w; j.h = h;
+    j.black = black; j.white = white; j.cfa = 0;
+    for (int c = 0; c < 3; c++)                  /* raw unit -> lin Q24 x 256: grey (0.18) at roll_gdn */
+        j.wb_q8[c] = (int32_t)(0.18 * 16777216.0 * 256.0 / roll_gdn[c] + 0.5);
+    struct wf_ll_info inf;
+    if (src == WF_DEV_CUBE) write_cube("ROLL.CUB", 33, ident);
+    int rc = wf_dev_build(D, src, WF_LL_VLOG, cam, src == WF_DEV_CUBE ? "ROLL.CUB" : 0, 0, 0, &inf);
+    CHECK(rc == 0, "%s: build %d", what, rc);
+    void *scr = malloc(wf_dev_scratch_bytes(w, h));
+    uint32_t *a = malloc((size_t)w * h * 2), *b = malloc((size_t)w * h * 2);
+    struct wf_dev_stat s0, s1;
+    rc = wf_dev_prepare(scr, D, &j, &s0);
+    CHECK(rc == 0 && !s0.roll, "%s: prepare (roll 0) %d", what, rc);
+    wf_dev_rows(scr, 0, h, a, w * 2);
+    j.roll = 1;
+    rc = wf_dev_prepare(scr, D, &j, &s1);
+    CHECK(rc == 0, "%s: prepare (roll 1) %d", what, rc);
+    wf_dev_rows(scr, 0, h, b, w * 2);
+    const int W2 = w / 2;
+    if (src == WF_DEV_LOG) {
+        CHECK(!s1.roll && ndiff(a, b, w * h / 2) == 0, "%s: LOG took the shoulder (roll %d, %ld words differ)", what, s1.roll,
+              ndiff(a, b, w * h / 2));
+        printf("roll %s: no shoulder on LOG, frame unchanged\n", what);
+    } else if (!s1.roll) {
+        CHECK(0, "%s: no shoulder", what);
+    } else {
+        double ek = enc_ev(s1.ro_k, s1.ro_grey), ec = enc_ev(s1.ro_c, s1.ro_grey), ew = enc_ev(s1.ro_w, s1.ro_grey);
+        double ec_want = log2((double)(white - black) / roll_gdn[0]);
+        int ytop = (s1.ro_ytop + 128) >> 8;
+        /* the same words below the knee (all rows; the demosaic reaches 2 px = 0.03 EV) */
+        long nd = 0, nt = 0;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x += 2)
+                if (roll_ev(x + 4, w) < ek - 0.05) {
+                    nt++;
+                    nd += a[y * W2 + x / 2] != b[y * W2 + x / 2];
+                }
+        /* along the middle row: drops, steps, the plateau past the sensor's white */
+        const uint32_t *ra = a + (h / 2) * W2, *rb = b + (h / 2) * W2;
+        int drop = 0, step = 0, drop0 = 0, nplat = 0, offw = 0, offc = 0, ya_plat = 0, yp = -1, yp0 = -1;
+        int u0 = 999, u1 = -999, v0 = 999, v1 = -999;
+        for (int x = 8; x < w - 8; x++) {
+            uint32_t wa = ra[x / 2], wb = rb[x / 2];
+            int ya = x & 1 ? wY1(wa) : wY0(wa), yb = x & 1 ? wY1(wb) : wY0(wb);
+            if (yp >= 0) {
+                drop += yb < yp - 1;
+                step += abs(yb - yp) > 3;
+                drop0 += ya < yp0 - 1;
+            }
+            yp = yb; yp0 = ya;
+            if (roll_ev(x - 4, w) > ec + 0.05) {
+                nplat++;
+                offw += yb < ytop - 2 || yb > ytop + 1;
+                offc += abs(wU(wb)) > 3 || abs(wV(wb)) > 3;
+                if (wU(wb) < u0) u0 = wU(wb);
+                if (wU(wb) > u1) u1 = wU(wb);
+                if (wV(wb) < v0) v0 = wV(wb);
+                if (wV(wb) > v1) v1 = wV(wb);
+                if (ya > ya_plat) ya_plat = ya;
+            }
+        }
+        printf("roll %s: knee %+.2f EV, sensor white %+.2f EV (want %+.2f), look white %+.2f EV, Y %d; below the knee %ld of "
+               "%ld words changed; ramp drops %d (look as is %d), steps > 3: %d; past the sensor white %d px: off Y %d, U %d..%d "
+               "V %d..%d (look as is ends at Y %d)\n", what, ek, ec, ec_want, ew, ytop, nd, nt, drop, drop0, step, nplat, offw,
+               u0, u1, v0, v1, ya_plat);
+        CHECK(fabs(ec - ec_want) < 0.02, "%s: sensor white %+.2f EV, want %+.2f", what, ec, ec_want);
+        CHECK(ek < ec - 0.4 && nt > 1000 && nd == 0, "%s: below the knee %ld of %ld words changed", what, nd, nt);
+        CHECK(drop == 0 && step == 0, "%s: ramp drops %d, steps %d", what, drop, step);
+        /* the look's own white: neutral for the identity cube and sRGB; a film cube's white may carry its tint, one tint */
+        int film = src == WF_DEV_CUBE && !ident;
+        CHECK(nplat > 20 && offw == 0 && (film ? u1 - u0 <= 1 && v1 - v0 <= 1 : offc == 0),
+              "%s: past the sensor white %d px: off Y %d, U %d..%d V %d..%d", what, nplat, offw, u0, u1, v0, v1);
+        if (src == WF_DEV_CUBE && ident)
+            CHECK(ya_plat < ytop - 10, "%s: the look as is already ends at %d (Y %d): nothing tested", what, ya_plat, ytop);
+    }
+    remove("ROLL.CUB");
+    free(scr); free(a); free(b); free(raw); free(row);
+}
+
+/* rsrc: which buffer holds the shot (src/wf_rsrc.c) on the synthetic shot, both cameras. Buffers: A = this shot's raw;
+   P = the "previous shot", the same scene 40 rows and 96 px away (the camera moved); M = another picture (A's rows
+   mirrored); Z = noise; A2 = a copy of A (the other buffer still holding the same frame). The pointer is candidate 0. */
+static void rs_case(const char *what, const uint32_t *cand, int nc, const uint32_t *yuv, const struct wf_rs_geom *g,
+                    int want, int why)
+{
+    struct wf_rs_res r;
+    int got = wf_rs_pick(cand, nc, yuv, g, 0, &r);
+    printf("rsrc %-34s pick %2d (want %2d) %-7s blocks %3d scores", what, got, want, wf_rs_why(r.why), r.n);
+    for (int k = 0; k < nc; k++) printf(" %5d", r.score[k]);
+    printf("\n");
+    CHECK(got == want && r.pick == want && r.why == why, "rsrc %s: pick %d (%s), want %d (%s)", what, got, wf_rs_why(r.why), want,
+          wf_rs_why(why));
+}
+
+static void mode_rsrc(void)
+{
+    for (int cam = 0; cam < 2; cam++) {
+        struct sc_shot s;
+        sc_default(&s, 1024, 640, cam);
+        CHECK(sc_render(&s) == 0, "render");
+        size_t nb = (size_t)s.raw_h * s.pitch + 16;
+        uint8_t *P = calloc(1, nb), *M = calloc(1, nb), *Z = malloc(nb), *A2 = malloc(nb);
+        for (int y = 0; y < s.raw_h; y++) {
+            int yp = y + 40, ym = s.raw_h - 2 - y;
+            if (yp < s.raw_h) memcpy(P + (size_t)y * s.pitch + 12 * 14, s.raw + (size_t)yp * s.pitch, (size_t)s.pitch - 12 * 14);
+            if (ym >= 0) memcpy(M + (size_t)y * s.pitch, s.raw + (size_t)ym * s.pitch, s.pitch);
+        }
+        for (size_t i = 0; i < nb; i++) Z[i] = (uint8_t)rnd();
+        memcpy(A2, s.raw, nb);
+        struct wf_rs_geom g = { s.pitch, s.ax0, s.ay0, s.w, s.h, s.black, 1 };
+        const char *cn = cam ? "5D2" : "EOSM";
+        char w[64];
+        uint32_t a = (uint32_t)(uintptr_t)s.raw, p = (uint32_t)(uintptr_t)P, m = (uint32_t)(uintptr_t)M,
+                 z = (uint32_t)(uintptr_t)Z, a2 = (uint32_t)(uintptr_t)A2;
+        { uint32_t c[2] = { a, m };  snprintf(w, sizeof w, "%s pointer right", cn);        rs_case(w, c, 2, s.uyvy, &g, 0, WF_RS_OK); }
+        { uint32_t c[2] = { p, a };  snprintf(w, sizeof w, "%s pointer at the previous shot", cn); rs_case(w, c, 2, s.uyvy, &g, 1, WF_RS_OK); }
+        { uint32_t c[3] = { 0, a, m }; snprintf(w, sizeof w, "%s pointer 0 (formula, other)", cn); rs_case(w, c, 3, s.uyvy, &g, 1, WF_RS_OK); }
+        { uint32_t c[2] = { z, m };  snprintf(w, sizeof w, "%s no match", cn);             rs_case(w, c, 2, s.uyvy, &g, -1, WF_RS_NOMATCH); }
+        { uint32_t c[2] = { a, a2 }; snprintf(w, sizeof w, "%s both buffers this frame", cn); rs_case(w, c, 2, s.uyvy, &g, 0, WF_RS_OK); }
+        { uint32_t c[2] = { 0, 0 };  snprintf(w, sizeof w, "%s no address", cn);           rs_case(w, c, 2, s.uyvy, &g, -1, WF_RS_NOCAND); }
+        uint32_t *flat = malloc((size_t)s.w * s.h * 2);
+        for (int i = 0; i < s.w * s.h / 2; i++) flat[i] = 0xf800f800u;   /* Y 248, chroma 0 */
+        { uint32_t c[2] = { a, m };  snprintf(w, sizeof w, "%s white frame (few blocks)", cn); rs_case(w, c, 2, flat, &g, -1, WF_RS_FEW); }
+        free(flat); free(P); free(M); free(Z); free(A2);
+        sc_free(&s);
+    }
+}
+
+/* pick DIR1 DIR2 ...: real pairs (dev_cr2.sh KEEP=1): Canon's frame and curve of DIR1 against the raw of every DIR */
+static void mode_pick(int n, char **dirs)
+{
+    if (n > WF_RS_NCAND) n = WF_RS_NCAND;
+    uint32_t cand[WF_RS_NCAND] = { 0 };
+    uint8_t *raw[WF_RS_NCAND] = { 0 };
+    int W = 0, H = 0, pitch = 0, jw = 0, jh = 0, dx, dy;
+    double blk = 0, pk;
+    for (int k = 0; k < n; k++) {
+        char path[512];
+        int iso, wb[4];
+        FILE *f;
+        snprintf(path, sizeof path, "%s/meta.txt", dirs[k]);
+        if (!(f = fopen(path, "r"))) { CHECK(0, "%s: no meta.txt", dirs[k]); return; }
+        CHECK(fscanf(f, "%d %d %d %d %lf %d %d %d %d", &W, &H, &pitch, &iso, &blk, &wb[0], &wb[1], &wb[2], &wb[3]) == 9, "meta");
+        fclose(f);
+        raw[k] = malloc((size_t)H * pitch + 16);
+        CHECK(read_all(dirs[k], "raw.r14", raw[k], (size_t)H * pitch) == 0, "%s: raw.r14", dirs[k]);
+        cand[k] = (uint32_t)(uintptr_t)raw[k];
+    }
+    char path[512];
+    FILE *f;
+    snprintf(path, sizeof path, "%s/align.txt", dirs[0]);
+    if (!(f = fopen(path, "r")) || fscanf(f, "%d %d %lf %d %d", &dx, &dy, &pk, &jw, &jh) != 5) { CHECK(0, "align.txt"); return; }
+    fclose(f);
+    uint32_t *yuv = malloc((size_t)jw * jh * 2);
+    static uint32_t dec[1022];
+    CHECK(read_all(dirs[0], "jpeg.uyvy", yuv, (size_t)jw * jh * 2) == 0, "jpeg.uyvy");
+    int hd = read_all(dirs[0], "dec.bin", dec, sizeof dec) == 0;
+    struct wf_rs_geom g = { pitch, 84, 64, jw, jh, (int)(blk + 0.5), 1 };
+    struct wf_rs_res r;
+    int got = wf_rs_pick(cand, n, yuv, &g, hd ? dec : 0, &r);
+    printf("pick %s (curve %s): candidate %d, %s, blocks %d, scores", dirs[0], hd ? "dec.bin" : "code^2", got, wf_rs_why(r.why), r.n);
+    for (int k = 0; k < n; k++) printf(" %d", r.score[k]);
+    printf("\n");
+    CHECK(got == 0, "%s: its own raw not picked (%d, %s)", dirs[0], got, wf_rs_why(r.why));
+    free(yuv);
+    for (int k = 0; k < n; k++) free(raw[k]);
+}
+
+static void mode_roll(void)
+{
+    for (int cam = 0; cam < 2; cam++) {
+        char what[48];
+        const char *cn = cam ? "5D2" : "EOSM";
+        snprintf(what, sizeof what, "%s CUBE V-Log identity", cn); roll_case(cam, WF_DEV_CUBE, 1, what);
+        snprintf(what, sizeof what, "%s CUBE film", cn); roll_case(cam, WF_DEV_CUBE, 0, what);
+        snprintf(what, sizeof what, "%s SRGB", cn); roll_case(cam, WF_DEV_SRGB, 0, what);
+        snprintf(what, sizeof what, "%s LOG", cn); roll_case(cam, WF_DEV_LOG, 0, what);
+    }
+}
+
 int main(int argc, char **argv)
 {
     const char *mode = argc > 1 ? argv[1] : "px";
@@ -733,7 +1024,13 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "full")) run_frame(0, 5184, 3456, argc > 2 ? argv[2] : 0);
     else if (!strcmp(mode, "bad")) mode_bad();
     else if (!strcmp(mode, "span")) mode_span();
+    else if (!strcmp(mode, "roll")) mode_roll();
+    else if (!strcmp(mode, "rsrc")) mode_rsrc();
+    else if (!strcmp(mode, "pick") && argc > 3) mode_pick(argc - 2, argv + 2);
     else if (!strcmp(mode, "cr2") && argc > 2) mode_cr2(argv[2], argc > 4 ? atoi(argv[3]) : 84, argc > 4 ? atoi(argv[4]) : 64);
+    else if (!strcmp(mode, "look") && argc > 4)
+        mode_look(argv[2], argv[3], atoi(argv[4]), argc > 5 ? atoi(argv[5]) : 128, argc > 6 ? atoi(argv[6]) : 0,
+                  argc > 7 ? atoi(argv[7]) : -2);
     else { printf("unknown mode %s\n", mode); return 2; }
     printf("RESULT dev %s: %d pass, %d fail\n", mode, np, nf);
     return nf != 0;

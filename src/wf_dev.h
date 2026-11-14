@@ -1,6 +1,6 @@
 /* wf_dev.h - WindyFilm full RAW develop (WindyStrife), "B" in docs/DESIGN.md 3.2: an optional slow mode that develops
  * Canon's 14-bit raw of the shot itself and writes the graded UYVY 4:2:2 frame into Canon's YUV buffer, so Canon's JPEG
- * encoder runs as usual. EOS M first. Not wired to a hook yet: docs/CORE-NOTES.md section 10 lists the integration points.
+ * encoder runs as usual. EOS M only: src/wf_rawb.c drives it (menu "RAW develop", RAW+L single shots; CORE-NOTES 10.7).
  *
  * Pipeline (per output pixel):
  *   14-bit packed raw (ML raw_pixblock, 8 px in 14 bytes) -> black subtract -> demosaic (MHC, 5x5, on int16 rows)
@@ -30,12 +30,16 @@
  *   - highlight map: one pass over the raw at 2x2 quad resolution: a quad is a ratio sample when its brightest
  *     photosite is 55..92 % of clip and no clipped photosite lies within 2 quads (>= 3 px); sums per 32x32 px block
  *     -> R/G and B/G, holes filled from neighbour blocks (8 rounds), then neutral (trap W19).
+ *   - film shoulder (j.roll): the look's tone curve to a knee half an octave below the first clip, then a shoulder that
+ *     reaches the look's white with zero slope at the sensor's white, folded into a per-shot copy of the enc tables
+ *     (no per-pixel cost). Without it a V-Log film cube, made for about 8 stops above grey, leaves the EOS M's clip
+ *     (3.2 - 4.1 stops) mid-shoulder: clipped sky and sun stop flat at about 195 - 213 instead of rolling into white.
  * Rows (wf_dev_rows): any band of output rows, so the NN full frame and the Diana halves use the same code.
  *
  * Threads and memory: wf_dev_build runs in wf_task (file I/O through wf_ll_parse, allocates its slabs with
  * __mem_malloc like wf_loglut.c). The worker calls wf_dev_prepare / wf_dev_rows only: no allocation, no log, no file
  * access, no wait. The node table (struct wf_dev_tabs, 356 KB) and the per-shot scratch (wf_dev_scratch_bytes(), about
- * 0.4 MB for the EOS M frame) are the caller's: shoot memory per the wf_fx.c rules (no SRM fallback), given back in
+ * 0.4 MB for the EOS M frame) are the caller's (wf_rawb.c: one 790 KB shoot memory block, no SRM fallback), given back in
  * playback. Integer only. armv5t, no LDRD / STRD, no 64-bit division (own shift-subtract divide). */
 #ifndef WF_DEV_H
 #define WF_DEV_H
@@ -90,6 +94,8 @@ struct wf_dev_job {
     int32_t  wb_q8[3];                           /* caller's scales raw unit -> linear Q24 (x 256), all 0 = fit / default */
     const uint32_t *dec;                         /* how the fit reads canon: code i/4 -> linear Q24, 1022 entries (the
                                                     input curve of Log + LUT: wf_ll_dec_c<k> on main's A1), 0 = sRGB */
+    int      roll;                               /* 1 = film shoulder: the sensor's white lands on the look's white (CUBE,
+                                                    SRGB; see wf_dev.c wf_dv_roll), 0 = the look's curve as is */
 };
 
 /* per-shot results (log line, tests) */
@@ -101,6 +107,9 @@ struct wf_dev_stat {
     int      hl_fill;                            /* blocks filled from neighbours / by the neutral fallback */
     uint32_t hl_px;                              /* pixels through the highlight path (wf_dev_rows) */
     int      sh, fast;                           /* matrix shift; 1 = the asm span kernel runs (blocks without clipping) */
+    int      roll;                               /* 1 = the film shoulder is in this shot's enc tables */
+    int      ro_k, ro_c, ro_w, ro_grey;          /* enc indices (256 per octave): knee, sensor white, look's white, 18 % grey */
+    int      ro_ytop;                            /* the look's white the shoulder ends on, 256 Y' */
 };
 
 /* ------------------------------------------------------------------ load time (wf_task) */
@@ -118,6 +127,15 @@ int  wf_dev_prepare(void *scratch, const struct wf_dev_tabs *t, const struct wf_
 /* output rows [ya, yb) of the frame into dst (UYVY words, dst_pitch bytes per row; dst row 0 = frame row ya), through
  * the cached scratch (rows are written whole, 8-word bursts). */
 void wf_dev_rows(void *scratch, int ya, int yb, uint32_t *dst, int dst_pitch);
+
+/* this shot's levels from its own raw (worker, before wf_dev_prepare; j: raw, pitch, ax0..ay1 only).
+ *   black: mean of the masked columns [bx0, bx1) (EOS M: 16, 64; the image data starts at 72) on every 64th active row;
+ *          0 when those columns do not look like optical black (outside 1024 .. 4096)
+ *   white: the clip pile-up: the most frequent value >= 8192 on every 4th active row, when it holds >= 200
+ *          photosites and >= 8 x the mean count of the 64 values 17 .. 80 below it (tools/cr2_dec.c's rule at a quarter of
+ *          the rows); 0 = no pile-up (nothing clipped in the sample: the caller's per-ISO value).
+ * scratch: at least 32 KB (the histogram; wf_dev_scratch_bytes is far more). About 8 MB of raw read. */
+void wf_dev_levels(void *scratch, const struct wf_dev_job *j, int bx0, int bx1, int *black, int *white);
 
 /* ------------------------------------------------------------------ parts (host tests, tools) */
 /* one pixel of linear light (x Q14 per channel, working gamut; t->gain is applied here) -> 256 Y', 256 (Cb + 128),

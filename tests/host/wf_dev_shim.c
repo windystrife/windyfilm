@@ -41,6 +41,10 @@ int64_t FIO_SeekSkipFile(void *f, int64_t pos, int whence)
     return (int64_t)ftello(f);
 }
 int FIO_RemoveFile(const char *path) { return unlink(h_path(path)) == 0 ? 0 : -1; }
+/* wf_fio.h (wf_main.c on the camera): the table cache's create / remove; the host card is never busy */
+struct wf_fe;
+void *wf_fcreate(const char *path, struct wf_fe *e) { (void)e; unlink(h_path(path)); return FIO_CreateFile(path); }
+int wf_fremove(const char *path, struct wf_fe *e) { (void)e; unlink(h_path(path)); return 0; }
 /* directory listing (the table cache's stale-file sweep): nothing found */
 struct wf_file_info { uint16_t mode; uint32_t size; uint64_t timestamp; char name[0x80]; };
 void *alloc_fio_file(void) { return calloc(1, 256); }

@@ -504,6 +504,9 @@ struct wf_dv_ctx {
     struct wf_dv_sum *sum;                       /* bw x bh; after the fill each entry holds its struct wf_dv_map */
     uint8_t  *need;                              /* bw x bh: highlight path (a clipped quad in this or a neighbour block) */
     uint32_t hl_px;
+    const uint32_t *enc;                         /* the shot's enc[3][WF_DEV_NENC]: t->enc, or enc2 with the film shoulder */
+    uint32_t *enc2;                              /* scratch: enc with the shoulder (wf_dv_roll) */
+    uint16_t *ytab;                              /* scratch: the look's neutral luma per enc index (wf_dv_roll only) */
 };
 
 static uint8_t *wf_dv_al(uint8_t *p) { return (uint8_t *)(((uintptr_t)p + 31) & ~(uintptr_t)31); }
@@ -546,6 +549,8 @@ size_t wf_dev_scratch_bytes(int w, int h)
     n += WF_DV_SPAN * 24 + 32;                   /* span kernel values */
     n += (size_t)bw * bh * sizeof(struct wf_dv_sum) + 32;
     n += (size_t)bw * bh + 32;
+    n += 3 * WF_DEV_NENC * 4 + 32;               /* enc2 (film shoulder) */
+    n += WF_DEV_NENC * 2 + 32;                   /* ytab */
     return n;
 }
 
@@ -817,6 +822,142 @@ static int wf_dv_rowbytes(const struct wf_dev_job *j)
     return n;
 }
 
+/* ------------------------------------------------------------------ the shot's levels (wf_dev.h) */
+void wf_dev_levels(void *scratch, const struct wf_dev_job *j, int bx0, int bx1, int *black, int *white)
+{
+    uint32_t *hist = (uint32_t *)wf_dv_al((uint8_t *)scratch);   /* values 8192 .. 16383 */
+    int16_t px[8];
+    *black = *white = 0;
+    uint32_t sb = 0, nb = 0;
+    bx0 &= ~7;
+    for (int y = j->ay0; y < j->ay1 && bx1 - bx0 >= 8; y += 64)
+        for (int x = bx0; x + 8 <= bx1; x += 8) {
+            wf_dev_unpack14(j->raw + (size_t)y * j->pitch + (size_t)(x >> 3) * 14, px, 8, 0);
+            for (int k = 0; k < 8; k++) { sb += (uint32_t)px[k]; nb++; }
+        }
+    if (nb) {
+        uint32_t b = (sb + nb / 2) / nb;
+        if (b >= 1024 && b <= 4096)
+            *black = (int)b;
+    }
+    for (int i = 0; i < 8192; i++) hist[i] = 0;
+    int xa = j->ax0 & ~7;
+    for (int y = j->ay0; y < j->ay1; y += 4)
+        for (int x = xa; x + 8 <= j->ax1; x += 8) {
+            wf_dev_unpack14(j->raw + (size_t)y * j->pitch + (size_t)(x >> 3) * 14, px, 8, 0);
+            for (int k = 0; k < 8; k++)
+                if (px[k] >= 8192)
+                    hist[px[k] - 8192]++;
+        }
+    int best = -1;
+    uint32_t bc = 0;
+    for (int v = 81; v < 8192; v++)
+        if (hist[v] > bc) { bc = hist[v]; best = v; }
+    if (best < 0 || bc < 200)
+        return;
+    uint32_t s = 0;
+    for (int v = best - 80; v <= best - 17; v++) s += hist[v];
+    if (bc * 64 >= 8 * s)                        /* >= 8 x the mean of those 64 values */
+        *white = best + 8192;
+}
+
+/* ------------------------------------------------------------------ film shoulder (job.roll, owner 2026-11-14)
+ * A print rolls the brightest light into paper white. The look's own curve does that only where its camera had the
+ * light: a V-Log film cube reaches its white about 8 stops above grey, the EOS M clips 3.2 (green) to 4.1 (the
+ * white-balanced plateau) stops above grey, so clipped sky and sun stop flat mid-shoulder (luma 195 - 213 with
+ * T250DMVL) next to a still-rising gradient: the "digital" edge.
+ * Here, per shot: the look's curve unchanged up to a knee, then a shoulder that reaches a target luma with zero slope
+ * exactly at the sensor's white xc = clip x max(m) (the all-clipped plateau of wf_dv_hl; anything brighter lands on
+ * the target too). On [knee, xc] the target luma is a cubic Hermite from the look's own value and slope to the
+ * target, slope 0; the enc index i of the shot then reads the look at i', where the look's neutral luma equals the
+ * target. It is a map of x alone, so every channel gets the same i -> i' (each channel reaches the top on its own:
+ * highlights lose saturation into white as on film), written into a per-shot copy of the enc tables: the kernels only
+ * see another table, no per-pixel cost. Knee: WF_DV_ROLL_KNEE below the first clip (97 % clip x min(m)), at most an
+ * octave below the look's white (sRGB base: Canon-like shoulder above 1.0).
+ * Target (WF_DV_ROLL_LIFT): the look's own luma 1.5 stops above the sensor's white (T250DMVL: about 232), capped at the
+ * look's white less one code. Reaching the look's white itself (about 242) needs the shoulder about twice as steep as
+ * the look at the knee; per channel that steepness spreads the channels apart before they meet at white: an orange
+ * ring round the sun, flare streaks turned red, blue sky pushed to cyan (Day09 IMG_0227 / 0236 / 0238). Ending on the
+ * look's value at the clip (about 214) hides the sun in a grey sky. The sRGB base reaches its white either way. */
+#define WF_DV_ROLL_KNEE 128                       /* knee below the first clip, enc steps (256 per octave) */
+int wf_dev_roll_knee = WF_DV_ROLL_KNEE;          /* host experiments (tools); the camera keeps the default */
+#define WF_DV_ROLL_LIFT 384                       /* the target: the look's own luma 1.5 stops above the sensor's white */
+int wf_dev_roll_lift = WF_DV_ROLL_LIFT;          /* -1 = the look's white (host experiments) */
+
+static uint32_t wf_dv_g7(int ch, uint32_t e) { return ((e >> 9) / (uint32_t)wf_dv_wst[ch]) << 7 | (e & 127); }
+
+static void wf_dv_roll(struct wf_dv_ctx *c, const int32_t m[3], struct wf_dev_stat *st)
+{
+    const struct wf_dev_tabs *t = c->t;
+    const uint32_t *E = t->enc[0];
+    uint16_t *Y = c->ytab;
+    int32_t mx = m[0], mn = m[0];
+    for (int k = 1; k < 3; k++) {
+        if (m[k] > mx) mx = m[k];
+        if (m[k] < mn) mn = m[k];
+    }
+    /* x Q14 = raw x m / 2^8 (lin Q24) / 2^10 x gain / 2^16 */
+    int64_t xc = ((int64_t)c->cl * mx >> 18) * t->gain >> 16, x1 = ((int64_t)c->thr * mn >> 18) * t->gain >> 16;
+    if (xc > WF_DEV_XMAX) xc = WF_DEV_XMAX;
+    if (x1 > WF_DEV_XMAX) x1 = WF_DEV_XMAX;
+    int ic = wf_dv_idx((uint32_t)xc), i1 = wf_dv_idx((uint32_t)x1);
+    int i0 = i1 - 1024 > 0 ? i1 - 1024 : 0;      /* the look's luma from 4 octaves below the first clip */
+    int ym = 0;
+    for (int i = i0; i < WF_DEV_NENC; i++) {
+        uint32_t a0, a1;
+        wf_dv_tet(t->node, E[i], E[WF_DEV_NENC + i], E[2 * WF_DEV_NENC + i], &a0, &a1);
+        int y = (int)(a0 & 0xffff) - 128;
+        if (y > ym) ym = y;                      /* monotone (a cube's neutral axis may wiggle) */
+        Y[i] = (uint16_t)ym;
+    }
+    int ytop = ym - 256, iw = i0;
+    if (wf_dev_roll_lift >= 0) {
+        int it = ic + wf_dev_roll_lift < WF_DEV_NENC - 1 ? ic + wf_dev_roll_lift : WF_DEV_NENC - 1;
+        if (Y[it] < ytop)
+            ytop = Y[it];
+    }
+    while (iw < WF_DEV_NENC - 1 && Y[iw] < ytop) iw++;
+    int ik = i1 - wf_dev_roll_knee;
+    if (ik > iw - 256) ik = iw - 256;
+    if (ik < i0 + 32) ik = i0 + 32;
+    if (ytop <= 0 || ic <= ik + 32 || ytop <= Y[ik] + 256)
+        return;                                  /* no room for a shoulder: the look as is */
+    int yk = Y[ik], dy = ytop - yk, span = ic - ik;
+    int64_t m0 = ((Y[ik + 16] - Y[ik - 16]) * span) >> 5;   /* the look's slope at the knee, over the span (< 2^29) */
+    if (m0 < 0) m0 = 0;
+    if (m0 > 3 * (int64_t)dy) m0 = 3 * (int64_t)dy;                 /* the Hermite stays monotone */
+    for (int ch = 0; ch < 3; ch++)
+        wf_copyw(c->enc2 + ch * WF_DEV_NENC, E + ch * WF_DEV_NENC, ik);
+    int j = i0;
+    for (int i = ik; i < WF_DEV_NENC; i++) {
+        int yt;
+        if (i >= ic) {
+            yt = ytop;
+        } else {                                 /* Hermite, s Q16: m0 (s^3 - 2 s^2 + s) + dy (3 s^2 - 2 s^3) */
+            int64_t s = ((i - ik) << 16) / span, s2 = s * s >> 16, s3 = s2 * s >> 16;   /* 32-bit division */
+            int64_t h = m0 * (s3 - 2 * s2 + s) + (int64_t)dy * (3 * s2 - 2 * s3);
+            yt = yk + (int)(h >> 16);
+        }
+        while (j < WF_DEV_NENC - 1 && Y[j + 1] < yt) j++;
+        int j1 = j + 1 < WF_DEV_NENC ? j + 1 : j, f = 0;   /* Y[j] < yt <= Y[j1]: fraction Q7 between them */
+        if (Y[j1] > Y[j] && yt > Y[j])
+            f = ((yt - Y[j]) << 7) / (Y[j1] - Y[j]);
+        if (f > 128) f = 128;
+        for (int ch = 0; ch < 3; ch++) {
+            const uint32_t *e = E + ch * WF_DEV_NENC;
+            int32_t g0 = (int32_t)wf_dv_g7(ch, e[j]), g1 = (int32_t)wf_dv_g7(ch, e[j1]);
+            c->enc2[ch * WF_DEV_NENC + i] = wf_dv_entry(ch, g0 + (((g1 - g0) * f + 64) >> 7));
+        }
+    }
+    c->enc = c->enc2;
+    st->roll = 1;
+    st->ro_k = ik;
+    st->ro_c = ic;
+    st->ro_w = iw;
+    st->ro_grey = wf_dv_idx((uint32_t)(((int64_t)2949 * t->gain) >> 16));   /* 0.18 in Q14, after the LUT EI */
+    st->ro_ytop = ytop;
+}
+
 int wf_dev_prepare(void *scratch, const struct wf_dev_tabs *t, const struct wf_dev_job *jin, struct wf_dev_stat *st)
 {
     static struct wf_dev_stat st0;
@@ -861,6 +1002,11 @@ int wf_dev_prepare(void *scratch, const struct wf_dev_tabs *t, const struct wf_d
     c->sum = (struct wf_dv_sum *)wf_dv_al(p);
     p = (uint8_t *)(c->sum + c->bw * c->bh);
     c->need = wf_dv_al(p);
+    p = c->need + c->bw * c->bh;
+    c->enc2 = (uint32_t *)wf_dv_al(p);
+    p = (uint8_t *)(c->enc2 + 3 * WF_DEV_NENC);
+    c->ytab = (uint16_t *)wf_dv_al(p);
+    c->enc = t->enc[0];
     c->cl = jin->white - jin->black;
     c->thr = c->cl - c->cl / 32;                 /* 97 % */
     c->hl_px = 0;
@@ -969,9 +1115,11 @@ int wf_dev_prepare(void *scratch, const struct wf_dev_tabs *t, const struct wf_d
         c->wcol[v][3] = q[6] | q[7] << 16;
         c->wcol[v][4] = q[8];
     }
+    if (jin->roll && t->src != WF_DEV_LOG)
+        wf_dv_roll(c, m, st);
     c->sp.node = t->node;
-    c->sp.enc = t->enc[0];
-    c->sp.encb = (const uint32_t *)((uintptr_t)t->enc[0] + (uintptr_t)(intptr_t)((23 - sh) * 256 * 4));
+    c->sp.enc = c->enc;
+    c->sp.encb = (const uint32_t *)((uintptr_t)c->enc + (uintptr_t)(intptr_t)((23 - sh) * 256 * 4));
     c->sp.k = 256u << sh;
     c->sp.sh = sh;
     st->sh = sh;
@@ -1199,7 +1347,7 @@ wf_dv_hlpair(struct wf_dv_ctx *c, int x, int y, int p, int nc, const int16_t *co
 {
     const int32_t *M = c->M;
     const int sh = c->sh;
-    const uint32_t *node = c->t->node, *e0 = c->t->enc[0], *e1 = c->t->enc[1], *e2 = c->t->enc[2];
+    const uint32_t *node = c->t->node, *e0 = c->enc, *e1 = e0 + WF_DEV_NENC, *e2 = e1 + WF_DEV_NENC;
     int32_t A[3], B[3];
     uint32_t a[2][2];
     wf_dv_mhc(R5[0], R5[1], R5[2], R5[3], R5[4], x, p, nc, A, B);
@@ -1238,7 +1386,7 @@ static void wf_dv_rowk(struct wf_dv_ctx *c, int y)
         R5[k] = wf_dv_row(c, y - 2 + k, &mk[k]) + c->ox;
     const int16_t *nn = R5[0], *n = R5[1], *o = R5[2], *s = R5[3], *ss = R5[4];
     const uint32_t *node = c->t->node;
-    const uint32_t *e0 = c->t->enc[0], *e1 = c->t->enc[1], *e2 = c->t->enc[2];
+    const uint32_t *e0 = c->enc, *e1 = e0 + WF_DEV_NENC, *e2 = e1 + WF_DEV_NENC;
     const int32_t M0 = c->M[0], M1 = c->M[1], M2 = c->M[2], M3 = c->M[3], M4 = c->M[4], M5 = c->M[5],
                   M6 = c->M[6], M7 = c->M[7], M8 = c->M[8];
     const int sh = c->sh;

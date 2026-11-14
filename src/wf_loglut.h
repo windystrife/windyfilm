@@ -77,6 +77,7 @@ extern int wf_ll_auto;
 extern int wf_ll_incurve;
 int wf_ll_curve_have(int k);                     /* slot k built in (0, sRGB: always; out of range: 0) */
 const char *wf_ll_curve_src(int k);              /* slot k's CSV first comment line, "" without */
+const uint32_t *wf_ll_dec_of(int k);             /* slot k's decode (code i/4 -> linear Q24, 1022 entries), 0 = sRGB */
 
 /* results (distinct, for the log line and the menu warning) */
 enum {

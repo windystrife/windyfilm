@@ -63,4 +63,10 @@ extern uint32_t h_pb[56], h_edmac[5], h_nav_a[5];
 extern volatile int h_nav_calls;
 uint32_t wf_host_mem_read(uint32_t addr);
 int wf_host_memnavi(uint32_t *out, uint32_t *tmp, int a, int layer);
+
+/* RAW develop "B": ML's drive_mode and ml_shutdown_requested; get_halfshutter_pressed() returns h_half and moves the clock
+ * by h_half_step_ms per read; NotifyBox keeps its last text (h_notify) and counts calls */
+extern int drive_mode, ml_shutdown_requested;
+extern volatile int h_half, h_half_step_ms, h_notify_n;
+extern char h_notify[160];
 #endif

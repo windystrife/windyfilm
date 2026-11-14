@@ -96,7 +96,46 @@ hay không (cần cho đường RAW sau này). Probe chỉ ghi lại, KHÔNG đ�
 - Probe tự tắt mỗi lần bật máy (không lưu vào cấu hình).
 
 
-5. FILE TRÊN THẺ
+5. RAW DEVELOP "B" (CHẬM): BẢN THỬ
+----------------------------------
+Mục đích: màu phim làm từ chính file RAW 14-bit của Canon (nhiều chi tiết
+vùng sáng / tối hơn JPEG), thay cho JPEG 8-bit của Canon. Mỗi ảnh mất khoảng
+30 giây. Chưa chạy trên máy thật lần nào: đây là lần thử đầu tiên.
+
+Bật:
+- Shoot > WindyFilm > RAW develop: "On (slow)". Mỗi lần bật máy nó tự về Off.
+- Chất lượng ảnh: RAW + L (JPEG L Fine). M / S RAW, chỉ JPEG hoặc chỉ RAW thì
+  không develop (ảnh có màu phim thường như cũ).
+- Tỉ lệ khung 3:2. Drive: chụp đơn hoặc hẹn giờ. Chụp liên tục thì mọi ảnh
+  có màu phim thường (8-bit), log ghi lý do.
+- Dòng menu báo trạng thái: đang nạp bảng, sẵn sàng ("About 30 s per shot"),
+  thiếu bộ nhớ, hoặc chất lượng / drive chưa đúng.
+
+Chụp:
+- Chụp từng tấm. Sau khi bấm, màn hình hiện "RAW develop: preparing" rồi
+  "RAW develop NN%". Chờ tới khi hết thông báo (khoảng 30 giây). Trong lúc đó
+  máy đang bận xử lý ảnh, chưa chụp tấm sau được: đó là bình thường.
+- Muốn dừng: giữ nửa nút chụp khoảng 2 giây. JPEG của tấm đó sẽ có phần trên đã
+  develop (chưa có màu phim), phần dưới là JPEG gốc của Canon. File CR2 không
+  bao giờ bị đổi. Quá 90 giây thì module tự dừng.
+- Tắt máy giữa chừng: module dừng trong khoảng 1 giây rồi để máy ghi ảnh và tắt.
+  Việc này CHƯA thử trên máy thật; nếu máy treo (không tắt, không phản hồi)
+  thì tháo pin ra lắp lại, và ghi lại lúc đó đang ở bao nhiêu %.
+- Nếu RAW trong RAM không khớp với ảnh vừa chụp, module KHÔNG develop mà dùng
+  màu phim thường; log ghi "rawb: 8-bit (...)" cùng lý do.
+
+Cần thử và gửi lại:
+1. Phim (Output Film), 3-4 tấm đơn: cảnh có trời sáng / đèn bị cháy sáng, và
+   cảnh tối. Mỗi cảnh chụp thêm 1 tấm với RAW develop Off để so sánh.
+2. 1-2 tấm với Output Log và Log + LUT.
+3. Một lần dừng bằng nửa nút chụp, và (nếu dám) một lần tắt máy giữa chừng.
+4. Một loạt chụp liên tục 3 tấm khi RAW develop On (phải ra màu phim thường).
+Gửi: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG của những tấm đó (cả tấm Off).
+Mỗi tấm có các dòng "rawb: ..." trong log: bộ đệm RAW đã chọn, điểm khớp,
+mức đen / trắng và thời gian từng bước.
+
+
+6. FILE TRÊN THẺ
 ----------------
 ML/modules/windyflm.mo    module
 ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper)
