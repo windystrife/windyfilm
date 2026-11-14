@@ -43,7 +43,7 @@ MODE_MAX = 16                     # fr_modes.h FR_MODE_MAX: 13..16 Canon Log (ow
 NAME_CH, SHORT_CH, SHORT_PX, LINE_CH, LINE_PX = 24, 11, 66, 44, 440
 FONT_UBUNTU = os.environ.get("WF_FONT", "/usr/share/fonts/truetype/ubuntu/UbuntuSans[wdth,wght].ttf")
 KINDS = ("COLOUR NEG", "SLIDE", "B&W NEG", "CINE NEG", "FILM LUT")
-FMTS = ("35mm", "120", "V-Log")
+FMTS = ("35mm", "120", "V-Log", "Standard")
 GROUPS = ("colour", "cine", "bw", "lut")
 PRINTS = ("scan", "cine", "paper")
 PSUFFIX = {"scan": "", "cine": "_C", "paper": "_P"}
@@ -303,8 +303,8 @@ FILMS = [
     # display-referred V-Log 65^3 cube: sRGB -> V-Log -> cube gives that look on the camera's Standard JPEG. So the can
     # reads the JPEG as sRGB whatever the Input curve, has no auto exposure, and its load sets Picture Style Standard
     # (wf_loglut.h WF_FLUT_DISP). Name only: no logo, mark or house colour of the camera maker on the can.
-    LUTCAN(84, "LLEICV", "Leica Vivid", 100, 72, 5200, 23, 23, "Vivid colour look made on the camera's", "Standard picture, applied as a LUT.",
-           "owner's Lumix L Leica 2 cube as a V-Log 65^3 display LUT LEICAVVL.CUB (Film Roll V14U), not in the repo"),
+    dict(LUTCAN(84, "LLEICV", "Leica Vivid", 100, 72, 5200, 23, 23, "A look on the camera's Standard picture,", "not a log or film look.",
+           "owner's Lumix L Leica 2 cube as a V-Log 65^3 display LUT LEICAVVL.CUB (Film Roll V14U), not in the repo"), fmt="Standard"),
 ]
 # the author's codes (no own code may equal one; generic notations only, PLAN 5.1)
 AUTHOR_CODE_RULE = "no code equal to one of the author's (P160 .. XP2): checked against tools/brandscan.py's list"

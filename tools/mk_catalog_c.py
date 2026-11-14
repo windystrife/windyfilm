@@ -25,7 +25,7 @@ GROUPS = ("colour", "cine", "bw", "lut")
 PRINTS = ("scan", "cine", "paper")
 FLUT_N = 24                       # src/wf_loglut.h WF_FLUT_N (asserted against the catalogue's FLUT_N when it has one)
 MAXROWS = 128                     # src/wf_shot.c WF_WS_MAXROW
-LIM = {"name": 24, "short": 11, "line1": 44, "line2": 44, "kind": 15, "fmt": 7, "code": 8}
+LIM = {"name": 24, "short": 11, "line1": 44, "line2": 44, "kind": 15, "fmt": 8, "code": 8}
 
 
 def load_catalog(path):

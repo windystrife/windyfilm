@@ -463,7 +463,8 @@ static void draw_info(const struct wf_film *f, int g)
         "Table", f->code ? f->code : "",
         "Daylight", kel,
         "Prints", lut ? "-" : pr,
-        "Output", lut ? "V-Log + the can's LUT" : "Film look",
+        "Output", lut ? (f->format && !strcmp(f->format, "Standard") ? "Look on the Standard picture" : "V-Log + the can's LUT")
+                      : "Film look",
         "On the card", av ? (lut ? "LUT cube found" : "Film table found") : (lut ? "LUT cube missing" : "Film table missing"),
         "State", wf_loaded() == f->id ? "Loaded" : "Not loaded",
         0 };

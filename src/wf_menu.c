@@ -206,6 +206,8 @@ const char *wf_look_title(const struct wf_look *lk, char *b, int n)
         snprintf(b, n, lk->variant ? "%s %s" : "%s", wf_films[r].name, wf_print_name[lk->variant < WF_NPRINTS ? lk->variant : 0]);
     else if (lk->output == WF_OUT_LLUT && r >= 0 && r < wf_nfilms)
         snprintf(b, n, "%s", wf_films[r].name);
+    else if (lk->output == WF_OUT_LLUT && WF_FLUT_DISP(lk->flut))
+        snprintf(b, n, "%s (look on Standard)", wf_flut_name[lk->flut]);
     else if (lk->output == WF_OUT_LLUT)
         snprintf(b, n, "%s %s", wf_out_name(WF_OUT_LLUT, lk->curve), wf_flut_name[lk->flut < WF_FLUT_N ? lk->flut : 0]);
     else if (lk->output == WF_OUT_LOG)
@@ -1084,7 +1086,7 @@ static MENU_UPDATE_FUNC(wf_top_update)
     else if (f)
         MENU_SET_VALUE("%s", f->name);
     else
-        MENU_SET_VALUE("%s", wf_out_name(wf_out, wf_curve));
+        MENU_SET_VALUE("%s", wf_out == WF_OUT_LLUT && WF_FLUT_DISP(wf_flut) ? "Look on Standard" : wf_out_name(wf_out, wf_curve));
 }
 
 static MENU_UPDATE_FUNC(wf_out_update)

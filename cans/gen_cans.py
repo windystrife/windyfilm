@@ -239,14 +239,15 @@ def body_art(st, ftype, small):
     H = int(LHU * SS)
     lip = Image.new("RGB", (int(LIPW * SS), H), BLACK)
     if not small:
-        tt = TYPE_TEXT[ftype]
+        tt = st.get("side", TYPE_TEXT[ftype])
         f, (l, t, r, b) = fit_font(tt, 92, 12, 14, 100, 700)
-        f2, (l2, t2, r2, b2) = fit_font("35mm", 40, 12, 14, 100, 700)
+        f2, (l2, t2, r2, b2) = fit_font(st.get("side35", "35mm") or " ", 40, 12, 14, 100, 700)
         strip = Image.new("L", (H, int(LIPW * SS)), 0)
         d = ImageDraw.Draw(strip)
         cy = 13.5 * SS - (t + b) / 2.0
-        d.text((7 * SS - l2, cy), "35mm", font=f2, fill=255, anchor="ls")
-        end = 7 * SS + (r2 - l2) + 12 * SS
+        if st.get("side35", "35mm"):
+            d.text((7 * SS - l2, cy), st.get("side35", "35mm"), font=f2, fill=255, anchor="ls")
+        end = 7 * SS + (r2 - l2) + 12 * SS if st.get("side35", "35mm") else 7 * SS
         d.text((end - l, cy), tt, font=f, fill=255, anchor="ls")
         strip = strip.rotate(90, expand=True)          # counter-clockwise: the text starts at the bottom
         lip.paste(Image.new("RGB", lip.size, st["lip"]), (0, 0), strip)
@@ -500,7 +501,8 @@ LEICV_ACC = (226, 204, 160)
 S("LLEICV", "Leica Vivid", ("Film LUT", SV), [("Leica", WH, 1.0), ("Vivid", LEICV_ACC, 1.0)], ("", WH), SV, LEICV_ACC,
   V((70, 72, 78), (26, 27, 30)),
   [band(0, 28, V((44, 45, 50), (30, 30, 34)), LEICV_ACC), Rc(0, 112, DW, 113.4, SV), Rc(0, 116, DW, 118.4, LEICV_ACC)],
-  lay=dict(maker=(5, 24), name=(36, 104), iso=(0, 1), maxw=100), badge=LUTB, foot_text="LOG + LUT")
+  lay=dict(maker=(5, 24), name=(36, 104), iso=(0, 1), maxw=100), badge=LUTB, foot_text="STD + LUT",
+  side="digital look", side35="")             # a look on the Standard picture, not a log / film look (owner 11-14)
 # ---- shipped films
 S("CHROME", "Classic Chrome", ("WindyStrife", (214, 208, 204)), [("Classic", WH), ("Chrome", SV)], ("200", WH), SV,
   (226, 120, 110), V((92, 95, 108), (62, 64, 74)),
