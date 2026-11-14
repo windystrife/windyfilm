@@ -38,6 +38,16 @@ Menu ML: Shoot > WindyFilm > "Film roll" -> màn hình chọn cuộn:
 - Lên / xuống (hoặc INFO): 3 / 6 / 12 / 24 / 36 kiểu (mặc định 24; 3 và 6 để thử nhanh).
 - SET: nạp cuộn: chạy hoạt ảnh nạp phim giống lúc nạp phim trong browser ("Loading the
   roll" -> "Roll loaded"), rồi tự đóng và về LiveView. MENU: thoát.
+- PLAY: vào thẳng Darkroom (chân màn hình có "[PLAY] Darkroom"). Chữ sáng khi cuộn có
+  kiểu để tráng; mờ khi chưa có cuộn ("Load a roll first") hoặc chưa chụp kiểu nào
+  ("No frames to develop"). Trong browser phim cũng vậy, khi đang có cuộn trong máy
+  (không có cuộn thì PLAY đóng browser như cũ).
+- Cuộn đang chụp dở mà đã có kiểu: không nạp cuộn khác được ("This roll has frames:
+  PLAY develops it").
+- Cuộn đã hết (hoặc đã tua lại) mà chưa tráng, chọn phim mới rồi SET: máy hỏi
+  "Roll 001 has 12 undeveloped frames. Close it and load the new roll? (the RAW/JPG
+  files stay on the card)". SET: đóng cuộn cũ (các kiểu chưa tráng bị bỏ, file RAW /
+  JPG vẫn còn trên thẻ) và nạp cuộn mới. MENU: huỷ. Không có hàng chờ nhiều cuộn.
 
 Mục "Blind roll" (mặc định On): khi có cuộn trong máy thì tắt xem lại ảnh sau khi
 chụp và khoá nút PLAY. Muốn xem ảnh như thường thì đặt Off.
@@ -67,12 +77,17 @@ không có CR2 thì không được đếm.
   ở góc dưới phải (đỏ khi hết cuộn). Thông tin hiện lại 2,5 giây khi LiveView quay
   lại (thoát menu, thoát xem ảnh), sau mỗi tấm chụp, khi đếm thêm kiểu, và khi đổi cuộn.
 - Đủ số kiểu: giữa màn hình hiện bảng lớn "END OF ROLL" (12/12, tên phim, số cuộn,
-  chỗ tráng: ML menu > Shoot > WindyFilm > Darkroom) khoảng 5 giây hoặc tới khi bấm
-  một nút. Bấm SET lúc bảng đang hiện: mở thẳng Darkroom. Bảng hiện lại 2,5 giây mỗi
-  lần LiveView quay lại, cho tới khi tráng hoặc Close roll. Bộ đếm đỏ "END OF ROLL";
-  các tấm sau không tính vào cuộn, WindyFilm vẫn chạy (JPEG vẫn có màu phim).
+  "Roll finished: develop it in the Darkroom, or load a new roll") khoảng 5 giây hoặc
+  tới khi bấm một nút. Lúc bảng đang hiện: SET mở thẳng Darkroom, INFO mở màn hình
+  chọn cuộn (cuộn mới). Bảng hiện lại 2,5 giây mỗi lần LiveView quay lại, cho tới khi
+  tráng hoặc Close roll. Bộ đếm đỏ "END OF ROLL".
+- KHOÁ CHỤP: cuộn hết (hoặc tua lại còn kiểu chưa tráng) thì nút chụp bị khoá (khoá
+  UI của ML, như lúc ML chống ERR70). Bấm nửa cò / chụp trên LiveView: bảng END OF ROLL
+  hiện lại ngay ("The shutter stays locked until then"). Mở khoá khi: vào Darkroom bắt
+  đầu tráng, Close roll, nạp cuộn mới, tắt module. Quay phim thì không khoá. Khoá không
+  ghi ra thẻ: tắt máy bật lại thì module tính lại từ trạng thái cuộn.
 - Muốn kết thúc sớm: menu "End roll now" (cuộn tua lại, hiện bảng "ROLL REWOUND" và
-  "REWOUND"; Darkroom tráng các kiểu đã chụp).
+  "REWOUND"; nút chụp cũng khoá; Darkroom tráng các kiểu đã chụp).
 - "Close roll": bỏ các kiểu chưa tráng (file RAW / JPG vẫn còn nguyên trên thẻ).
 - Mỗi tấm vẫn có JPEG màu phim ngay lúc chụp (như module thường; nếu RAW develop On
   thì là bản develop B). Darkroom in thêm bản in riêng từ CR2 sau.
@@ -100,7 +115,9 @@ không có CR2 thì không được đếm.
 -------------------
 a. Nạp cuộn 12 kiểu, phim màu bất kỳ. Chụp 12 tấm: cảnh sáng, cảnh tối, trong nhà,
    ISO 100 / 200 / 400 (thêm 1-2 tấm ISO 1600 càng tốt).
-b. Chụp thêm tấm thứ 13: bộ đếm phải đứng ở 12/12 "END OF ROLL".
+b. Chụp thêm tấm thứ 13: không chụp được (nút chụp khoá), bảng END OF ROLL hiện lại,
+   bộ đếm đứng ở 12/12 "END OF ROLL". Ghi lại: lúc khoá, bấm nửa cò máy có lấy nét
+   (AF) không. WINDYFLM.LOG phải có "roll: shutter blocked (full)".
 c. Bấm PLAY khi còn cuộn: phải hiện "Roll in camera: develop it in the Darkroom".
 d. Vào Darkroom, SET, chờ xong cả cuộn. Ghi lại thời gian thực tế (đồng hồ ngoài).
 e. Cuộn thứ hai: 12 kiểu, phim khác (kệ B&W hoặc LUT), chụp 5 tấm, "End roll now",
@@ -113,8 +130,16 @@ g. Hai chế độ cùng lúc: bật RAW develop, nạp cuộn 12 kiểu -> RAW 
 h. HUD: sau khi nạp cuộn, thông tin phim hiện khoảng 2,5 s rồi mờ đi, còn bộ đếm nhỏ.
    Vào menu ML rồi thoát ra: thông tin hiện lại. Chụp 1 tấm: hiện lại.
 i. Bảng hết cuộn: ở b. (tấm thứ 12) phải hiện bảng lớn "END OF ROLL" khoảng 5 s.
-   Bấm nửa cò: bảng tắt ngay. Vào menu ML rồi thoát: bảng hiện lại 2,5 s. Lúc bảng
-   đang hiện bấm SET: mở Darkroom. Ở e. "End roll now": bảng "ROLL REWOUND".
+   Bấm MENU hoặc phím mũi tên: bảng tắt ngay. Vào menu ML rồi thoát: bảng hiện lại
+   2,5 s. Lúc bảng đang hiện bấm SET: mở Darkroom; bấm INFO: mở màn hình chọn cuộn
+   (ghi lại nếu INFO không có tác dụng trên LiveView). Ở e. "End roll now": bảng
+   "ROLL REWOUND".
+j. Vào Darkroom, SET bắt đầu tráng: log có "roll: shutter free". Tráng xong chụp được
+   như thường.
+k. Cuộn hết, vào chọn cuộn, chọn phim khác, SET: phải hiện câu hỏi "Close it and load
+   the new roll?". MENU: huỷ, cuộn cũ còn nguyên. Lần nữa bấm SET: cuộn mới nạp, nút
+   chụp mở lại, log có "closed for a new roll".
+l. Chế độ quay phim khi cuộn đã hết: quay được bình thường (không khoá).
 
 
 6. GỬI LẠI

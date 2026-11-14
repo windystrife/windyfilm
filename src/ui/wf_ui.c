@@ -264,6 +264,16 @@ static void step_row(int d)
     if (wf_row_step(focus, d)) dirty = 1;
 }
 
+/* PLAY with a roll on the camera: the Darkroom (owner 11-15, EOS M) while it has frames to develop, else why not */
+static void dev_key(void)
+{
+    if (is5d2()) return;
+    const char *why = wfdr_dev_why();
+    if (why) { say(why); return; }
+    wf_log("ui: browser -> Darkroom");
+    scr_req = WFUI_SCR_DARK;
+}
+
 static void act(int k)
 {
     if (anim_on)
@@ -299,9 +309,12 @@ static void act(int k)
     case MODULE_KEY_PICSTYLE:
     case MODULE_KEY_TOUCH_1_FINGER: edit = 0; next_group(); break;
     case MODULE_KEY_INFO:         info = !info; dirty = 1; break;
+    case MODULE_KEY_PLAY:                                   /* a roll on the camera: the Darkroom entry; no roll: */
+        if (!is5d2() && wf_roll_open(wf_roll_now())) { dev_key(); break; }   /* closes, as before */
+        close_req = 1;
+        break;
     case MODULE_KEY_MENU:
     case MODULE_KEY_TRASH:
-    case MODULE_KEY_PLAY:
     case MODULE_KEY_LV:           close_req = 1; break;
     }
 }
@@ -539,6 +552,8 @@ static void draw_footer(void)
         x += kw + 5;
         x += ui_text(F_13, x, 455, k[1], C_TXT3) + 12;
     }
+    if (!is5d2() && wf_roll_open(wf_roll_now()))           /* owner 11-15: "[PLAY] Darkroom" while a roll is on the */
+        wfdr_dev_hint(706 - wfdr_dev_hint_w(), 455);         /* camera, dim without frames (no roll: as before) */
 }
 
 /* INFO: the film's details and the key map of this camera, over a dimmed browser */
@@ -546,7 +561,8 @@ static void draw_info(const struct wf_film *f, int g)
 {
     static const char *const h_eosm[] = { "Left / Right", "previous / next film", "Up / Down", "choose a row",
         "Rear ring", "change the row", "SET", "load the film", "1-finger tap", "next group",
-        "INFO", "this page", "MENU, 2-finger tap", "close", "Half-shutter", "close, shoot", 0 };
+        "INFO", "this page", "PLAY", "Darkroom (a roll on)", "MENU, 2-finger tap", "close", "Half-shutter",
+        "close, shoot", 0 };
     static const char *const h_5d2[] = { "Joystick left / right", "previous / next film", "Joystick up / down",
         "choose a row", "Main or rear dial", "change the row", "Joystick press", "edit row: L / R",
         "SET", "load the film", "Pict.Style", "next group", "INFO", "this page", "MENU, TRASH", "close",
@@ -971,6 +987,8 @@ int wfui_host_focus(void) { return focus; }
 int wfui_host_rtop(void) { return rtop; }
 int wfui_host_info(void) { return info; }
 int wfui_host_anim(void) { return anim_on; }
+int wfui_host_scr(void) { return scr; }
+const char *wfui_host_msg(void) { return msg && get_ms_clock() - msg_until < 0 ? msg : ""; }
 int wfui_host_edit(void) { return edit; }
 int wfui_host_phase(void) { return phase; }
 #endif

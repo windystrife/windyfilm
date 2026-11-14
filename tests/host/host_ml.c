@@ -38,6 +38,9 @@ volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy, 
 char h_fio_cpath[128];
 void *h_menu;
 volatile int h_menu_count;
+int icu_uilock, __recording, __recording_custom;    /* ML's UI lock word (gui_uilock sets its low 16 bits), recording */
+volatile int h_uilock_n;                            /* gui_uilock calls */
+void gui_uilock(int what) { h_uilock_n++; icu_uilock = what & 0xFFFF; }
 
 /* ------------------------------------------------------------------ ROM */
 static const uint32_t h_rom[][2] = {

@@ -14,6 +14,10 @@ static uint8_t print_buf[WF_DR_PW * WF_DR_PH];
 static uint8_t wire_buf[WF_DR_NWIRE][WF_DR_TW * WF_DR_TH];
 volatile int wf_blind = 1;
 
+static int locked, nswap;
+void fake_set_locked(int k) { locked = k; }
+int fake_nswap(void) { return nswap; }
+int wf_roll_shutter_locked(void) { return locked; }
 void fake_dark_reset(void)
 {
     wf_roll_reset(&roll);
@@ -24,6 +28,7 @@ void fake_dark_reset(void)
     view.print = print_buf;
     for (int i = 0; i < WF_DR_NWIRE; i++) view.wire[i] = wire_buf[i];
     req_film = req_exp = nstart = nstop = 0;
+    locked = nswap = 0;
     rgen++;
 }
 struct wf_roll *fake_roll(void) { rgen++; return &roll; }
@@ -60,6 +65,14 @@ int wf_roll_req_load(int film, int exp)
 }
 int wf_roll_req_rewind(void) { return wf_roll_rewind(&roll); }
 int wf_roll_req_close(void) { return wf_roll_close(&roll); }
+int wf_roll_req_swap(int film, int exp)
+{
+    if (!(roll.state == WF_RS_FULL || (roll.state == WF_RS_REWOUND && wf_roll_left(&roll) > 0))) return -1;
+    if (!wf_roll_ok_exp(exp)) return -2;
+    wf_roll_close(&roll);
+    nswap++;
+    return wf_roll_req_load(film, exp);
+}
 int wf_roll_hud(char *line, int n) { (void)line; (void)n; return 0; }
 const struct wf_dark_view *wf_dark_view(void) { return &view; }
 int wf_dark_start(void) { nstart++; return wf_roll_left(&roll) ? 0 : -1; }

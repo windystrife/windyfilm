@@ -409,13 +409,26 @@ Stocks keep their Windy names, and there are no brand logos.
   carousel, and 3 / 6 / 12 / 24 / 36 exposures (default 24). SET loads the roll and plays the same load animation as a film
   load in the browser ("Loading the roll", the can, the film's chips and "12 EXP"), then the UI closes and LiveView
   shows. A key skips the rest of the animation.
-  - While the roll has frames, loading is refused ("develop it first"). A roll with no frames yet is simply reloaded
-    with the new film or count.
+  - A roll with no frames yet is simply reloaded with the new film or count. A loaded roll with frames refuses a new
+    load ("This roll has frames: PLAY develops it (Darkroom)").
+  - **Close and load** (owner 11-15). A finished roll (full, or rewound with frames left) asks first: "Roll 021 has 12
+    undeveloped frames. / Close it and load the new roll? / <film> x12 / (the RAW/JPG files stay on the card)", keys
+    "SET Close and load / MENU Cancel" (`roll_confirm`, a scrim over the picker). SET calls `wf_roll_req_swap`: wf_task
+    closes the roll (its frames become K, `roll: 021 closed for a new roll, 12 frame(s) kept undeveloped`) and loads
+    the new one at once, with the load animation. MENU cancels and other keys do nothing. There is no queue of rolls:
+    the closed roll's frames are not developed later.
   - The film is locked while a roll is open: the browser refuses a film change.
 - **Roll file** `ML/SETTINGS/WFROLL.TXT` (format in `wf_roll.h`): plain text, always 1536 bytes.
   - wf_task is its only writer. It creates the file once with `wf_fcreate` while Canon is idle, then rewrites it in
-    place with `wf_fopen_w(WF_FO_AT, 0)`. It is never created twice (trap W24).
-  - It is read at boot. A file that does not parse means no roll (logged).
+    place with `wf_fopen_w(WF_FO_AT, 0)`. It is never created twice (trap W24): once one create has made the file
+    (even when its write was cut short), every later try opens it in place.
+  - A failed try is logged once, with its step (`roll: ... not saved (write rc 100), retry`), and retried on the next
+    poll; the first good write after failures logs `saved after n tries`.
+  - File handles: any value but 0 (and -1) is a good FIO handle (`WF_FH_OK`). DryOS hands out odd handles as often
+    as even ones; RAWB8 took 3 / 5 / 7 for errors and left the file open, so the roll file stayed 0 bytes and the
+    log, config and .RBT writes failed now and then ("rc 3/5/7").
+  - It is read at boot. A file that does not parse means no roll (logged); an empty file (a save that did not finish)
+    too.
 - **Frames.** wf_task counts frames while Canon is idle (job_state 0, no shot pending) and the file number from
   `get_shooting_card()` has been stable over two polls. `wf_roll_seen` then adds every new number that has a CR2:
   - numbers wrap 9999 -> 1 with the folder + 1;
@@ -457,17 +470,32 @@ Stocks keep their Windy names, and there are no brand logos.
   y 118..336, clear of the chip, the counter and the ladder; `wfdr_notice`, ML colour indices, a red frame):
   - full: "END OF ROLL", "12/12 . <film> . ROLL 021"; rewound ("End roll now", or a stopped darkroom run with frames
     left): "ROLL REWOUND", "7 frames . <film> . ROLL 021" (the frames still to develop);
-  - "Develop it: ML menu > Shoot > WindyFilm > Darkroom", "[SET] open the Darkroom now", and the small line "Shots from
-    now on are not counted, WindyFilm keeps working".
+  - "Roll finished: develop it in the Darkroom, or load a new roll", "Develop: open WindyFilm > Darkroom", the keys
+    "[SET] Darkroom   [INFO] New roll", and the small line "The shutter stays locked until then" (while the shutter
+    lock below holds; otherwise "Shots from now on are not counted, WindyFilm keeps working").
   - When: 5 s when the roll ends on this boot (its last frame counts, or End roll now); 2.5 s again on the HUD info rule
     (LiveView back, the ML menu / UI / PLAY gone, a shot done) while the roll stays full / rewound with frames to
     develop. A transition with no LiveView waits for it. Then the HUD's 0.4 s dithered fade, then the box goes back to
     0 and `redraw()` gives Canon's own LiveView marks back.
   - A key press (CBR_KEYPRESS: shutter, arrows, wheel, MENU, INFO, PLAY, ...) drops it at once and goes on to Canon / ML
     as before; SET / Q / joystick centre (EOS M LiveView sends SET as Q) is taken and opens the Darkroom screen
-    (`wf_ui_open_scr`, the same open as TRASH). Only while the box is up.
+    (`wf_ui_open_scr`, the same open as TRASH), and INFO is taken and opens the roll picker (a new roll, through the
+    close-and-load question). Only while the box is up.
   - Never under the ML menu, the UI, PLAY, in movie mode or during a darkroom run (a run's own rewind gives none).
     The log says `roll: end notice full|rewound` each time it shows.
+- **Shutter lock** (owner 11-15: a finished roll takes no more shots). While the roll is FULL, or REWOUND with frames
+  left to develop, wf_task holds ML's UI lock bit `UILOCK_SHUTTER` (0x0001): `gui_uilock(icu_uilock | 1)`, the call
+  ML's exmem.c uses against ERR70 (it waits up to 2 s on the property, so only wf_task calls it).
+  - The lock is derived from the roll state on every poll and never stored: nothing on the card holds it. It is
+    released when the Darkroom starts (and stays off while a run lives), on Close roll, when a new roll loads, at
+    unload (`wf_dark_end`), whenever the roll is not full / rewound, in movie mode and while recording
+    (`__recording || __recording_custom`). Each change logs `roll: shutter blocked (full|rewound), UI lock 1` or
+    `roll: shutter free, UI lock 0`.
+  - Half- and full-shutter presses in LiveView (not under the ML menu, the UI or PLAY) are also taken by CBR_KEYPRESS
+    and show the end-of-roll notice at once, so the press is answered. Whether Canon's half-press AF still runs under
+    `UILOCK_SHUTTER` is a camera check.
+  - With no roll on the camera nothing changes: no UI lock call, no key taken (host test).
+  - EOS M only (the 5D2 has no roll yet: `wf_roll_req_swap` returns -4 there).
 - **End / close.** "End roll now" (menu) ends the roll early (the roll is rewound: no more frames); starting the darkroom rewinds a loaded roll first.
 - **A full or rewound roll keeps** (until the Darkroom develops it or Close roll): the film loaded and locked (another
   film is refused; the same film plays the load animation); the film look on every later JPEG (and B with RAW develop
@@ -478,6 +506,11 @@ Stocks keep their Windy names, and there are no brand logos.
 **Darkroom (developing).**
 - **Entry.** ML menu "Darkroom" opens the darkroom screen. SET starts. MENU stops, after a second MENU to confirm,
   and closes the screen when nothing runs.
+  - From the WindyFilm UI (owner 11-15, EOS M): "[PLAY] Darkroom" in the footer of the roll picker, and of the browser
+    while a roll is on the camera. It is lit when the roll has frames to develop and dim otherwise, with the reason in
+    the status pill ("No frames to develop", "Load a roll first"; `wfdr_dev_why`). PLAY opens the darkroom screen
+    when lit. With no roll on the camera the browser's PLAY still closes it, as before. The end-of-roll notice's SET
+    goes to the same screen.
   - Starting needs: not movie mode, a card, battery >= 30 %, and no B develop of a shot still running.
 - **Task "wf_dark"**, prio 0x1F (below wf_task 0x1E and the worker 0x1C), lives for one run.
   - At start: PauseLiveView, powersave_prohibit, then the memory:

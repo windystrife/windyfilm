@@ -30,7 +30,7 @@ case $CAM in
 esac
 ALL="$ALL SHOT:late SHOT:noworker"                 # the worker's late start (DryOS refused its task at boot)
 ALL="$ALL LOG:odd"                                 # file handles odd as often as even (RAWB8 WFROLL.TXT)
-ALL="$ALL ROLL:save ROLL:short ROLL:back"          # the roll file on RAWB8's card (odd handles, empty file)
+ALL="$ALL ROLL:save ROLL:short ROLL:back ROLL:lock" # the roll file on RAWB8's card (odd handles, empty file)
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
 B=${OUT:-$R/build/$cam}
