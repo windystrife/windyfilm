@@ -2455,6 +2455,32 @@ static void t_rawb(void)
     chk(LOGW("dark: roll", 3000), "roll + B: the run ends on the host (no SRM): '%s'", log_line("dark: roll"));
     chk(LOGW("rawb: tables srgb", 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 3000) && WAIT(h_arena_live == live0 + 1, 3000),
         "roll + B: after the run B builds its tables again (blocks %d)", h_arena_live);
+    /* the darkroom's tables are B's choice (wf_dark_src): Leica Vivid (WF_FLUT_DISP) = the sRGB develop + the display cube
+     * on its codes, not log + cube; the CinePrint cans = log + their C2 cube (the curve names it), as the V-Log cans. The
+     * host run ends at "no memory" (no SRM raw) before the build, so the choice is checked here, the build by B's checks */
+    {
+        char nb[WF_LL_NAME];
+        const char *cp = wf_loglut_name(nb, WF_FLUT_CURVE(WF_FLUT_TUNG0), WF_FLUT_TUNG0, 0);
+        chk(wf_dark_src(WF_OUT_LLUT, WF_FLUT_LEICAV) == WF_DEV_DISP && wf_dark_src(WF_OUT_LLUT, WF_FLUT_TUNG0) == WF_DEV_CUBE
+            && wf_dark_src(WF_OUT_LLUT, 1) == WF_DEV_CUBE && wf_dark_src(WF_OUT_LLUT, 0) == WF_DEV_CUBE
+            && wf_dark_src(WF_OUT_FILM, WF_FLUT_LEICAV) == WF_DEV_SRGB && wf_dark_src(WF_OUT_LOG, 0) == WF_DEV_LOG
+            && wf_dark_src(WF_OUT_OFF, 0) == 0, "darkroom tables: B's choice (Leica Vivid disp, cubes cube, film srgb, log log)");
+        chk(cp && strlen(cp) > 6 && strcmp(cp + strlen(cp) - 6, "C2.CUB") == 0,
+            "darkroom tables: a CinePrint can names its Canon Log 2 cube ('%s')", cp ? cp : "-");
+    }
+    log_mark();
+    wf_out = WF_OUT_LLUT;
+    wf_flut = WF_FLUT_LEICAV;
+    chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 30000) && WAIT(wf_rawb_state() == WF_RB_READY, 3000),
+        "roll + B, Leica Vivid: B's display tables ('%s')", log_line("rawb: tables"));
+    log_mark();
+    ds = wf_dark_start();
+    chk(ds == 0 && LOGW("dark: roll 001 start, 1 of 1 to develop, look output 2", 5000) && WAIT(!wf_dark_busy(), 15000),
+        "roll + B, Leica Vivid: a darkroom run with the look (%d, '%s')", ds, log_line("dark: roll"));
+    chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 3000)
+        && WAIT(h_arena_live == live0 + 1, 3000), "roll + B, Leica Vivid: B builds again after the run (blocks %d)", h_arena_live);
+    wf_flut = 0;
+    wf_out = WF_OUT_FILM;
     chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "roll + B: Close roll");
     wf_rawb = 0;
     chk(WAIT(h_arena_live == live0, 3000), "off again: memory given back");

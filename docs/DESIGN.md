@@ -466,8 +466,11 @@ Stocks keep their Windy names, and there are no brand logos.
     - frame: 35,831,808 B (5184 x 3456 UYVY) from `shoot_malloc_suite_contig`, else another SRM run;
     - a 256 KB DMA read buffer, a 256 KB cacheable decoder input, the 128 KB CR2 head, the encoder state and a 64 KB
       out buffer;
-    - the develop tables and scratch (356 + 392 KB), built once per run for the roll's look (`wf_dev_build`, a file
-      read for Log + LUT cubes).
+    - the develop tables and scratch (356 + 392 KB), built once per run for the roll's look with B's choice: a file
+      read for Log + LUT cubes (`wf_dev_build`; the curve picks the cube, so the CinePrint cans read `<code>C2.CUB`
+      as the V-Log cans read `<code>VL.CUB`), and Leica Vivid's display cube `LEICAVSR.CUB` on the sRGB develop's
+      codes with no log step (`wf_dev_build_disp`, Highlights / Shadows on its output). The log names it
+      (`dark: tables disp c0 LEICAVSR.CUB`).
   - If the raw or the frame cannot be had, the run fails with "no memory" and the log lists every chunk. A banded
     fallback (no halation / mist) is the next step only if the camera run needs it.
   - Everything is freed and LiveView resumed when the run ends.

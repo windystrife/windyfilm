@@ -61,6 +61,8 @@ int  wf_dark_start(void);                        /* rewinds a loaded roll, start
                                                     develop, -2 = already running, -3 = not now (Canon busy / no card) */
 void wf_dark_stop(void);                         /* MENU: stop after the current band (the frame is done again next run) */
 int  wf_dark_eta_s(const struct wf_dark_view *v);   /* seconds left for the roll (estimate) */
+int  wf_dark_src(int output, int flut);          /* EOS M: the WF_DEV_* tables a run builds for look output (WF_OUT_*) +
+                                                    Film LUT, as B (Leica Vivid WF_DEV_DISP, cubes WF_DEV_CUBE); 0 = none */
 
 /* ------------------------------------------------------------------ UI */
 #define WF_UI_SCR_ROLL 1                         /* = WFUI_SCR_ROLL / WFUI_SCR_DARK of src/ui/wf_ui_int.h */

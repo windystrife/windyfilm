@@ -413,6 +413,15 @@ int wf_clock_hm(void)
 }
 
 #if WF_DARK_CAN
+/* the develop tables a run builds for a look, B's choice (wf_rawb.c): Leica Vivid (WF_FLUT_DISP) = the sRGB develop + the
+ * owner's display cube <CODE>SR.CUB on its codes, no log step; every other Film LUT can (V-Log, Canon Log 2 ...) = log +
+ * cube, the curve naming the cube (wf_loglut_name) */
+int wf_dark_src(int output, int flut)
+{
+    return output == WF_OUT_FILM ? WF_DEV_SRGB : output == WF_OUT_LOG ? WF_DEV_LOG
+         : output != WF_OUT_LLUT ? 0 : WF_FLUT_DISP(flut) ? WF_DEV_DISP : WF_DEV_CUBE;
+}
+
 static struct wf_cr2_dec dk_dec;
 static struct wf_cr2_info dk_inf;
 static uint32_t dk_jpe[1024] __attribute__((aligned(8)));   /* struct wf_jpe (wf_jpe_bytes() <= 4096) */
@@ -797,8 +806,7 @@ static void dk_task(void *arg)
         paused = 1;
     }
     powersave_prohibit();
-    int src = lk.output == WF_OUT_FILM ? WF_DEV_SRGB : lk.output == WF_OUT_LOG ? WF_DEV_LOG
-            : lk.output == WF_OUT_LLUT ? WF_DEV_CUBE : 0;
+    int src = wf_dark_src(lk.output, lk.flut);
     if (!src) {
         end_why = "no look (output Off)";
     } else if (dk_alloc((int)DK_RAW_N + 4096, DK_W * DK_H * 2) != 0) {
@@ -808,11 +816,17 @@ static void dk_task(void *arg)
         const char *cube = 0;
         struct wf_ll_info li;
         int rc = WF_LL_OK;
-        if (src == WF_DEV_CUBE && !(cube = wf_loglut_name(cn, lk.curve, lk.flut, 0)))
-            rc = WF_LL_E_MODE;
-        if (rc == WF_LL_OK)
+        if ((src == WF_DEV_CUBE || src == WF_DEV_DISP) && !(cube = wf_loglut_name(cn, lk.curve, lk.flut, 0)))
+            rc = WF_LL_E_MODE;                   /* a display look names "<CODE>SR.CUB" for any curve */
+        if (rc == WF_LL_OK && src == WF_DEV_DISP)   /* LUT EI by hand, Highlights / Shadows on the cube's output (as B) */
+            rc = wf_dev_build_disp(M.tabs, WF_DEV_EOSM, cube, lk.lei, lk.hl, lk.sh, &li);
+        else if (rc == WF_LL_OK)
             rc = wf_dev_build(M.tabs, src, src == WF_DEV_SRGB ? 0 : lk.curve, WF_DEV_EOSM, cube,
                               src == WF_DEV_CUBE ? lk.lei : 0, src == WF_DEV_CUBE && lk.flut != 0, &li);
+        if (rc == WF_LL_OK)
+            wf_log("dark: tables %s c%d%s%s",
+                   src == WF_DEV_SRGB ? "srgb" : src == WF_DEV_LOG ? "log" : src == WF_DEV_DISP ? "disp" : "cube",
+                   src >= WF_DEV_SRGB ? 0 : lk.curve, cube ? " " : "", cube ? cube + 8 : "");
         if (rc != WF_LL_OK) {
             wf_log("dark: tables err %d %s", rc, wf_loglut_errstr(rc));
             end_why = "develop tables";
