@@ -91,6 +91,7 @@ Each mode runs in `build/<cam>/test/run/<mode>` (a fresh card), log `build/<cam>
 | LIGHT | Day (film kelvin), Cloudy, Tungsten, Auto restores mode + shift, config keeps userwb, film change follows its kelvin, kelvin changed behind Light's back is set again, unload restores |
 | PRINT | Scan / Cine / Paper rows and shots, wrap, scan-only film greyed, pack without the print = scan, kept across films, greyed for log |
 | HS | Highlights / Shadows: `wf_hs_bend` vs the formula for all 121 pairs (identity and a film's N), never down, `WF_FT_HS` packing; 0 / 0 film sets bit-identical to the builder of 7f9e294 (FNV), h / s change N only; rows (no wrap), film shot + shot / yuv log + EXIF + preview (rebuilt on a change); Log + LUT bent after the load, `.FRT` unbent, grey at the bent N, an h / s change bends again without a load, a new EI loads and bends; flat Log / Off ignore it; `hl` / `sh` saved and read |
+| LEICA | Leica Vivid can 84 / Film LUT 23: catalogue names (no "Tung" left), cube names, hidden without LEICAVVL.CUB; its load asks for Picture Style Standard once (none when already Standard, none for a Windy can), reads sRGB with Film 1 chosen, no auto exposure (tables = sRGB, auto off), Film LUT row reaches it and asks too, `flut=leicav` |
 | LOGCHK | `wf_log_words` asm vs C reference on all 2^24 (U, V, Y) x 2 sets + random + small + n <= 0, qemu `-cpu arm946` |
 
 Results 2026-11-14: see section 9.

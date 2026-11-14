@@ -471,7 +471,7 @@ S("LEKTR5", "Kodak Ektar LUT", ("Kodak", RD), [("Ektar", WH)], ("100", Y2), Y2, 
   V((232, 100, 44), (176, 62, 30)),
   [band(0, 33, V((252, 214, 80), (246, 190, 30)), BK), Rc(0, 120, DW, 122.4, (120, 30, 20))],
   lay=TOP, nsh=(90, 28, 20), isosh=(110, 30, 20), badge=LUTB, foot_text="LOG + LUT")
-S("LTUNGN", "Tung Neutral", ("Film LUT", SV), [("Tung", WH, 1.0), ("Neutral", SV, 1.0)], ("", WH), SV, (200, 206, 220),
+S("LTUNGN", "Windy Neutral", ("Film LUT", SV), [("Windy", WH, 1.0), ("Neutral", SV, 1.0)], ("", WH), SV, (200, 206, 220),
   V((92, 95, 108), (58, 60, 70)),
   [band(0, 28, V((64, 66, 74), (44, 44, 50)), (200, 206, 220)), Rc(0, 116, DW, 118.4, SV)],
   lay=dict(maker=(5, 24), name=(36, 104), iso=(0, 1), maxw=100), badge=LUTB, foot_text="LOG + LUT")
@@ -480,7 +480,7 @@ S("LLBONO", "Luca Bono LUT", ("Film LUT", (236, 206, 166)), [("Luca", WH, 1.0), 
   V((104, 66, 44), (54, 32, 22)),
   [band(0, 28, V((70, 42, 28), (44, 26, 18)), (240, 176, 110)), Rc(0, 116, DW, 118.4, (240, 176, 110))],
   lay=dict(maker=(5, 24), name=(36, 104), iso=(0, 1), maxw=100), badge=LUTB, foot_text="LOG + LUT")
-# V14T (owner 2026-11-13 "names starting with Tung"): the twelve looks of the owner's film pack (catalog.py 66, 73..83)
+# V14T (owner 2026-11-13 "names starting with Tung"; "Windy" since 11-14, as Film Roll V14U): the twelve looks of the owner's film pack (catalog.py 66, 73..83)
 # in the Tung Neutral house layout, our own colours (no film's packaging): one colour per stock family, P (2383 print)
 # with a light rule under the top band, M (DI curve) without; the same LUT tag and foot
 TUNG_FAM = {"250D": ((250, 170, 80), V((98, 62, 32), (50, 30, 16))), "500T": ((130, 176, 244), V((32, 46, 88), (12, 18, 40))),
@@ -490,10 +490,17 @@ for _code, _fam, _pm in (("LEKTAP", "EKTA", "P"), ("LT25DP", "250D", "P"), ("LT2
                          ("LT50TM", "500T", "M"), ("LTEKTM", "EKTA", "M"), ("LTEKAP", "EKTAa", "P"), ("LTEKAM", "EKTAa", "M"),
                          ("LTEXRP", "EXR", "P"), ("LTEXRM", "EXR", "M"), ("LTEXAP", "EXRa", "P"), ("LTEXAM", "EXRa", "M")):
     _acc, _bg = TUNG_FAM[_fam]
-    S(_code, "Tung %s %s" % (_fam, _pm), ("Film LUT", SV), [("Tung", WH, 1.0), ("%s %s" % (_fam, _pm), _acc, 1.0)], ("", WH),
+    S(_code, "Windy %s %s" % (_fam, _pm), ("Film LUT", SV), [("Windy", WH, 1.0), ("%s %s" % (_fam, _pm), _acc, 1.0)], ("", WH),
       SV, _acc, _bg,
       [band(0, 28, V((64, 66, 74), (44, 44, 50)), _acc if _pm == "P" else None), Rc(0, 116, DW, 118.4, _acc)],
       lay=dict(maker=(5, 24), name=(36, 104), iso=(0, 1), maxw=100), badge=LUTB, foot_text="LOG + LUT")
+# 11-14 "Leica Vivid" (catalog.py 84): the same house layout in our own colours, a graphite body with a warm silver /
+# champagne accent; the name in our font only: no logo, no red dot, no script lettering, nothing of the maker's identity
+LEICV_ACC = (226, 204, 160)
+S("LLEICV", "Leica Vivid", ("Film LUT", SV), [("Leica", WH, 1.0), ("Vivid", LEICV_ACC, 1.0)], ("", WH), SV, LEICV_ACC,
+  V((70, 72, 78), (26, 27, 30)),
+  [band(0, 28, V((44, 45, 50), (30, 30, 34)), LEICV_ACC), Rc(0, 112, DW, 113.4, SV), Rc(0, 116, DW, 118.4, LEICV_ACC)],
+  lay=dict(maker=(5, 24), name=(36, 104), iso=(0, 1), maxw=100), badge=LUTB, foot_text="LOG + LUT")
 # ---- shipped films
 S("CHROME", "Classic Chrome", ("WindyStrife", (214, 208, 204)), [("Classic", WH), ("Chrome", SV)], ("200", WH), SV,
   (226, 120, 110), V((92, 95, 108), (62, 64, 74)),
@@ -528,7 +535,7 @@ DEFAULT_CODES = ["PRT160", "PRT400", "PRT800", "PAS400", "BLD100", "SUN200", "SN
                  "CIN50D", "TUN800", "PRS400", "STR400", "CHM400", "FIN100", "NT3200", "CRS100", "SHP50", "SLK100",
                  "VTG100", "CLS125", "BAS200", "CRX125", "CHROME", "CLSNEG", "PRONEG", "ETERNA", "CHUNGK", "C250D",
                  "LV250D", "LV500T", "LPR400", "LFP400", "LF3513", "LK83V3", "LK83V5", "LEKTR5", "LTUNGN", "LLBONO", "LEKTAP",
-                 "LT25DP", "LT25DM", "LT50TP", "LT50TM", "LTEKTM", "LTEKAP", "LTEKAM", "LTEXRP", "LTEXRM", "LTEXAP", "LTEXAM"]
+                 "LT25DP", "LT25DM", "LT50TP", "LT50TM", "LTEKTM", "LTEKAP", "LTEKAM", "LTEXRP", "LTEXRM", "LTEXAP", "LTEXAM", "LLEICV"]
 # rows for codes the catalogue does not (yet) have: id, ISO, type; the shipped films' names as in catalog.py
 SYNTH = {"CLS125": (125, "bw"), "BAS200": (200, "bw"), "CRX125": (125, "neg")}
 FALLBACK_ROW = {"CHROME": (26, 200, "slide", "Classic Chrome"), "CLSNEG": (27, 400, "neg", "Classic Neg"),

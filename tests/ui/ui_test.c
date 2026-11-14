@@ -159,6 +159,22 @@ int main(int argc, char **argv)
     shot("b2s_lut");
     close_ui(MODULE_KEY_TRASH, 0);
 
+    /* 2c. Leica Vivid (11-14): its can selected and loaded (SET), the Film LUT row on it; a Windy can for the new names */
+    fake_reset();
+    fake_set_card(card);
+    fake_set_loaded(id_of("PRT160"));
+    fake_set_row(WF_ROW_FLUT, 4);
+    open_ui();
+    go_to("LLEICV");
+    CHECK(wfui_host_sel_id() == id_of("LLEICV"), "Leica Vivid not selected");
+    CHECK(key(MODULE_KEY_PRESS_SET) == 0 && wf_loaded() == id_of("LLEICV"), "SET did not load Leica Vivid");
+    shot("b2s_leica");
+    go_to("LT25DP");
+    fake_set_row(WF_ROW_FLUT, 5);
+    CHECK(key(MODULE_KEY_PRESS_SET) == 0 && wf_loaded() == id_of("LT25DP"), "SET did not load Windy 250D P");
+    shot("b2s_windy");
+    close_ui(MODULE_KEY_MENU, 0);
+
     /* 2b. Highlights / Shadows: 9 rows, 7 shown, the list scrolls with the focus (the font keeps its size) */
     fake_reset();
     fake_set_card(card);

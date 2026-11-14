@@ -52,6 +52,14 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
   danh sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.
+- Lon Leica Vivid (nhóm Film LUT, cần ML/data/LEICAVVL.CUB): look "L Leica 2"
+  của Lumix, làm trên Picture Style Standard. Nạp lon thì module chuyển
+  Picture Style sang Standard (Neutral cũng chạy, màu nhạt hơn). Lon này luôn
+  đọc JPEG như sRGB, bất kể Input curve, và không tự bù sáng (LUT EI vẫn chỉnh
+  tay được). Lần đầu nạp cube 65^3 mất khoảng 30 giây, sau đó dùng cache .FRT.
+- 13 lon "Tung" cũ giờ tên "Windy ...": Windy Neutral, Windy EKTA P,
+  Windy 250D P / M, Windy 500T P / M, Windy EKTA M, Windy EKTAa P / M,
+  Windy EXR P / M, Windy EXRa P / M. Tên file cube trên thẻ giữ nguyên.
 - Input curve (cho Log + LUT và lon Film LUT): sRGB, Canon Film 1 hoặc Canon
   Neutral. Module đảo đúng đường cong của style đó, đo từ ảnh RAW+L của bạn:
     Canon Film 1:  nạp file Film 1 vào User Def. 1, Contrast -2, rồi chọn
