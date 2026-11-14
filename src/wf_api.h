@@ -73,6 +73,10 @@ void wf_ui_open_refused(unsigned int key, int play);   /* the open key did not o
 
 /* ------------------------------------------------------------------ core services */
 void wf_log(const char *fmt, ...);        /* ML/LOGS/WINDYFLM.LOG (buffered, written by the core task) */
-int  wf_card_read(const char *path, uint32_t pos, void *p, uint32_t n, uint32_t *size);   /* 0 = ok */
+int  wf_card_read(const char *path, uint32_t pos, void *p, uint32_t n, uint32_t *size);   /* 0 = ok, else WF_RD_* */
+/* wf_card_read results. MISSING only when the card answers for AUTOEXEC.BIN (the file ML booted from) but not for
+ * this file; when it answers for neither, Canon holds the card (boot, a shot being written): BUSY. */
+enum { WF_RD_OK = 0, WF_RD_MISSING = -1, WF_RD_NOMEM = -2, WF_RD_OPEN = -3, WF_RD_IO = -4, WF_RD_SHORT = -5,
+       WF_RD_BUSY = -6 };
 
 #endif

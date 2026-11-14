@@ -241,28 +241,32 @@ int wf_card_read(const char *path, uint32_t pos, void *p, uint32_t n, uint32_t *
     uint32_t sz = 0;
     if (size)
         *size = 0;
-    if (!path || FIO_GetFileSize(path, &sz) != 0)
-        return -1;
+    if (!path)
+        return WF_RD_MISSING;
+    if (FIO_GetFileSize(path, &sz) != 0) {       /* 11-14 log: "not on the card" while it was there, Canon busy */
+        uint32_t a = 0;
+        return FIO_GetFileSize("AUTOEXEC.BIN", &a) == 0 ? WF_RD_MISSING : WF_RD_BUSY;
+    }
     if (size)
         *size = sz;
     if (pos > sz || sz - pos < n)
-        return -1;
+        return WF_RD_SHORT;
     char *dma = __mem_malloc(WF_RD_CHUNK, WF_MEM_DMA | WF_MEM_TMP, "wf_main.c", __LINE__);
     if (!dma)
-        return -2;
+        return WF_RD_NOMEM;
     void *f = FIO_OpenFile(path, 0);
     int rc = 0;
     if (!f || ((uint32_t)f & 1)) {
-        rc = -1;
+        rc = WF_RD_OPEN;
         f = 0;
     } else if (FIO_SeekSkipFile(f, pos, 0) != (int64_t)pos) {
-        rc = -1;
+        rc = WF_RD_IO;
     } else {
         uint8_t *d = (uint8_t *)p;
         while (n && !rc) {
             int k = n > WF_RD_CHUNK ? WF_RD_CHUNK : (int)n;
             if (FIO_ReadFile(f, dma, k) != k)
-                rc = -1;
+                rc = WF_RD_IO;
             else if (d) {
                 memcpy(d, dma, k);
                 d += k;

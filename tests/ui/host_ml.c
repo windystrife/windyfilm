@@ -92,8 +92,12 @@ static font *rbf_load(const char *name)
     return f;
 }
 
+static const char *font_hidden;
+void host_hide_font(const char *name) { font_hidden = name; }
+
 uint32_t font_by_name(char *file, uint32_t fg, uint32_t bg)
 {
+    if (font_hidden && !strcmp(font_hidden, file)) return (7u << 16) | (bg << 8) | fg;
     for (int i = 0; i < MAX_DYN_FONTS; i++)
         if (slot_name[i] && !strcmp(slot_name[i], file) && font_dynamic[i].bitmap)
             return (i << 16) | (bg << 8) | fg;

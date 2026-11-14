@@ -141,6 +141,8 @@ static void mkdirs(void)
 {
     mkdir("ML", 0777); mkdir("ML/DATA", 0777); mkdir("ML/SETTINGS", 0777); mkdir("ML/LOGS", 0777);
     mkdir("DCIM", 0777); mkdir("DCIM/100CANON", 0777);
+    FILE *a = fopen("AUTOEXEC.BIN", "ab");                     /* ML booted from it (wf_card_read: missing vs busy) */
+    if (a) fclose(a);
 }
 static void put_file(const char *path, const void *p, size_t n)
 {
@@ -1368,9 +1370,13 @@ static void t_pack(const char *cs, const char *file)
         int r = wf_card_read("ML/DATA/WFFILMS.DAT", 0, h, 32, &sz);
         chk(r == 0 && sz == 32 + 4 * 24 + 4 * TW * 4 && !memcmp(h, "WFFT", 4), "wf_card_read: header, size %u", sz);
         r = wf_card_read("ML/DATA/WFFILMS.DAT", sz - 8, h, 16, &sz);
-        chk(r == -1 && sz == 32 + 4 * 24 + 4 * TW * 4, "wf_card_read: short read = error, size still set");
+        chk(r == WF_RD_SHORT && sz == 32 + 4 * 24 + 4 * TW * 4, "wf_card_read: short read = error, size still set");
         r = wf_card_read("ML/DATA/NONE.DAT", 0, h, 4, &sz);
-        chk(r == -1 && sz == 0, "wf_card_read: missing file, size 0");
+        chk(r == WF_RD_MISSING && sz == 0, "wf_card_read: missing file, size 0 (%d)", r);
+        rename("AUTOEXEC.BIN", "AUTOEXEC.OFF");                  /* the card answers for nothing: Canon holds it */
+        r = wf_card_read("ML/DATA/NONE.DAT", 0, h, 4, &sz);
+        chk(r == WF_RD_BUSY && sz == 0, "wf_card_read: no answer for AUTOEXEC.BIN either = card busy (%d)", r);
+        rename("AUTOEXEC.OFF", "AUTOEXEC.BIN");
         r = wf_card_read("ML/DATA/WFFILMS.DAT", 32, 0, 24, &sz);
         chk(r == 0, "wf_card_read: skip without a buffer");
         usleep(1500000);

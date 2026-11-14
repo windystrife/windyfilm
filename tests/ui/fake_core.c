@@ -9,6 +9,9 @@
 static int cam = WF_CAM_EOSM, loaded, gen = 1, grey_mask, missing[8], nmissing;
 static const char *status = "";
 static char card[512] = ".";
+static int busy_n, busy_from, nreads;      /* Canon holds the card: the next busy_n reads at pos >= busy_from (-1: all) */
+static char logbuf[32768];
+static int loglen;
 static int val[WF_NROWS];
 
 static const char *const names[WF_NROWS] = { "Light", "Print", "Grain", "Halation", "Mist", "Strength", "Highlights",
@@ -34,6 +37,7 @@ static int nvals(int r)
 void fake_reset(void)
 {
     cam = WF_CAM_EOSM; loaded = 0; gen++; grey_mask = 0; nmissing = 0; status = "";
+    busy_n = 0;
     for (int r = 0; r < WF_NROWS; r++) val[r] = 0;
     val[WF_ROW_GRAIN] = 2;                  /* Normal */
     val[WF_ROW_HALO] = 1;                   /* Neg */
@@ -108,26 +112,47 @@ uint32_t wf_gen(void) { return gen; }
 
 void wf_log(const char *fmt, ...)
 {
+    char line[512];
     va_list ap;
     va_start(ap, fmt);
-    fprintf(stderr, "[log] ");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
+    vsnprintf(line, sizeof line, fmt, ap);
     va_end(ap);
+    fprintf(stderr, "[log] %s\n", line);
+    int k = (int)strlen(line);
+    if (loglen + k + 2 < (int)sizeof logbuf)
+    {
+        memcpy(logbuf + loglen, line, k);
+        loglen += k;
+        logbuf[loglen++] = '\n';
+        logbuf[loglen] = 0;
+    }
 }
+void fake_log_clear(void) { loglen = 0; logbuf[0] = 0; }
+int fake_log_has(const char *s) { return strstr(logbuf, s) != 0; }
 
+void fake_card_busy(int n, int from_pos) { busy_n = n; busy_from = from_pos; }
+int fake_card_reads(void) { return nreads; }
+
+/* as the core's (wf_main.c): WF_RD_* results */
 int wf_card_read(const char *path, uint32_t pos, void *p, uint32_t n, uint32_t *size)
 {
+    nreads++;
+    if (size) *size = 0;
+    if (busy_n && (int)pos >= busy_from)
+    {
+        if (busy_n > 0) busy_n--;
+        return WF_RD_BUSY;
+    }
     char full[1024];
     snprintf(full, sizeof(full), "%s/%s", card, path);
     FILE *fp = fopen(full, "rb");
-    if (!fp) return -1;
+    if (!fp) return WF_RD_MISSING;
     fseek(fp, 0, SEEK_END);
     long sz = ftell(fp);
     if (size) *size = (uint32_t)sz;
-    if ((long)pos + (long)n > sz) { fclose(fp); return -2; }
+    if ((long)pos + (long)n > sz) { fclose(fp); return WF_RD_SHORT; }
     fseek(fp, pos, SEEK_SET);
     size_t got = fread(p, 1, n, fp);
     fclose(fp);
-    return got == n ? 0 : -3;
+    return got == n ? WF_RD_OK : WF_RD_IO;
 }

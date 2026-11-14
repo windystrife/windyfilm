@@ -94,15 +94,20 @@ Final screenshots: notes folder `windyfilm-ui/`.
 
 **UI task.**
 - `wf_ui_open()` (from the GUI task on the open key, or from wf_task after the menu entry) claims the open under `cli`
-  and only starts the task "wf_ui" (prio 0x1B: above the film worker 0x1C, which starved the old 0x1E task for the
-  seconds of a shot's develop; 8 KB stack). A failed `task_create` leaves it closed.
+  and only starts the task "wf_ui" (prio 0x1B: above the film worker 0x1C and wf_task 0x1E; wf_task builds the grain
+  tables for 2-19 s without sleeping and starved the old 0x1E task in the owner's RAWB2 log; 8 KB stack). A failed
+  `task_create` leaves it closed.
 - The task beats (`hb`, `phase`) at every step. `wf_ui_key()` passes a key on and asks the task to close when there was
   no beat for 2 s (log `ui: no beat for N ms (state S, phase P)`, phases at the top of wf_ui.c); the task is never
   declared closed from outside, it gives the screen back when it runs.
 - On start, the task:
   - stops the ML menu if it is shown;
   - builds the list (ready films, by group then `order`);
-  - opens both packs;
+  - opens both packs through `wfui_read`: a busy card (`WF_RD_BUSY`, also open / read / memory failures) is tried
+    again every 100 ms for up to 1.5 s; `WF_RD_MISSING` (the card answers for AUTOEXEC.BIN, not for the pack) and a
+    short file are not. A pack still not read is read again every 2 s while open (5 times, log `ui: fonts WFFONTS.DAT
+    ok, read again N` / `ui: packs read again 5 times: ...`); meanwhile term12 and plain cans (16 colours, palette log
+    `N in use`). With neither the pack nor term12 the small text is left out (host shot `b2s_nofont`);
   - 5D2: asks Canon for a dialog under the browser (mode 2 without LV, 38 in LV with the bitmap muted; none while
     recording; DESIGN 5);
   - calls `canon_gui_disable_front_buffer()`, which is the EOS M patch 0003 screen take and may sleep up to about 480 ms;

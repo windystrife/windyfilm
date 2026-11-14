@@ -532,9 +532,9 @@ void wfp_restore(void)
     }
 }
 
-void wfp_log(void)
+void wfp_log(int can_used)
 {
-    wf_log("ui: palette 0x%02x..0x%02x (%d UI + %d can slots), Canon white %08x black %08x -> op %d Y %d..%d",
-           WFUI_PAL_BASE, WFUI_PAL_END - 1, C_CAN0, WFUI_CAN_SLOTS, (unsigned)pal_canon_white,
+    wf_log("ui: palette 0x%02x..0x%02x (%d UI + %d can slots, %d in use), Canon white %08x black %08x -> op %d Y %d..%d",
+           WFUI_PAL_BASE, WFUI_PAL_END - 1, C_CAN0, WFUI_CAN_SLOTS, can_used, (unsigned)pal_canon_white,
            (unsigned)pal_canon_black, pal_op, pal_yb, pal_yw);
 }
