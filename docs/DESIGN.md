@@ -675,8 +675,9 @@ The layout, 720x480 (the ML bitmap):
   The owner's KEYTRACE: right after Canon's own MENU, that first ask did not take and the menu ran on mode 0 until
   ML's 2 s ask. Nothing of ours was open. Our side: (1) the browser never gives the front buffer back while the ML menu
   is up (a close under it waits for the menu to go, then gives everything back and redraws; an open under it is
-  refused), and the roll HUD does not draw under it; (2) EOS M guard task `wf_mguard` (prio 0x1B, 50 ms, its own task
-  because wf_task can be busy for tens of seconds): while the ML menu is up in stills LV on mode 0, it asks for 93
+  refused), and the roll HUD does not draw under it; (2) the EOS M guard, `wf_ui_menu_guard` (RAWB8 ran it in a task
+  of its own, `wf_mguard`; that extra task filled DryOS's task table at boot and the worker was refused, so from 15 Nov
+  it runs in wf_task's 10 ms waits; while wf_task reads a LUT for seconds, ML's own 2 s ask is left): while the ML menu is up in stills LV on mode 0, it asks for 93
   150 ms after the open and then every 300 ms, 8 times at most (log `menu: canon dialog 0 -> asked 93 (try n)`, then
   `menu: canon dialog 93 after try n, N ms ...` or `still 0 after 8 tries`); an ask that lands after the menu closed
   is asked back to 0 within 1 s. Not on the 5D2 (no such report there).

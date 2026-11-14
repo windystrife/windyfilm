@@ -1186,7 +1186,8 @@ int wf_ui_open_key(unsigned int key)
  * LV on mode 0, ask for 93 ourselves: 150 ms after it opened, then every 300 ms, MG_TRIES times (past ML's own 2 s
  * ask). Our asks may land after the menu has closed (ML closes it when it sees mode 0 after its redraw flood): Canon's
  * dialog would then stay up with no menu on it, so a 93 seen within 1 s of the close is asked back to 0.
- * Called every ~50 ms from the core's guard task (wf_main.c), never while the browser is open (the core's module UI
+ * Called every ~10 ms from wf_task's waits (wf_main.c; RAWB8 had a task of its own, dropped: DryOS's task table), never
+ * while the browser is open (the core's module UI
  * holds the dialog then). 5D2: nothing (its menu dialog is 38, no report of this there). State: mg (wf_api.h part). */
 #define MG_MODE      93                     /* GUIMODE_ML_MENU in stills LV (RECORDING_H264 -> 99: never asked) */
 #define MG_FIRST_MS  150

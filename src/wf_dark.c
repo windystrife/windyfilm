@@ -1037,10 +1037,11 @@ int wf_dark_start(void)
     WF_BARRIER();
     dk_running = 1;                              /* wf_task leaves the roll alone from here */
     int tid = task_create("wf_dark", DK_PRIO, 0x2000, (void *)dk_task, 0);
-    if (!DRY_OK(tid)) {
+    if (!DRY_OK(tid)) {                          /* DryOS's task table full: nothing taken yet, the roll as it was */
         dk_running = 0;
         dv.state = WF_DR_FAIL;
-        dv.msg = "no task";
+        dv.msg = "No free task: try again";
+        wf_log("dark: no task (%x)", (unsigned)tid);
         dv_bump();
         return -3;
     }

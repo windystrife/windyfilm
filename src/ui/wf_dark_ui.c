@@ -23,6 +23,15 @@ static void say(const char *s, int now) { msg = s; msg_until = now + MSG_MS; }
 
 static inline int is5d2(void) { return wf_cam() == WF_CAM_5D2; }
 
+/* why a film cannot load: a table not read yet (the worker starting, RAWB8) is not "not on the card" */
+static const char *not_avail(const struct wf_film *f)
+{
+    if (f->flags & WF_F_LUTCAN) return "LUT cube not on the card";
+    int fs = wf_films_state();
+    return fs == 0 ? "Starting: film tables not read yet" : fs == -1 ? "Worker not running: film tables cannot load"
+                   : "Film table not on the card";
+}
+
 static int text_r(int font, int xr, int y, const char *s, int c)
 {
     int w = ui_textw(font, s);
@@ -191,7 +200,7 @@ static int roll_key(int key, int now)
             return WFDR_LOADED;
         }
         if (wf_roll_open(r) && r->nshot > 0) { say("This roll has frames: develop it first (Darkroom)", now); break; }
-        if (!wf_avail(f->id)) { say(f->flags & WF_F_LUTCAN ? "LUT cube not on the card" : "Film table not on the card", now); break; }
+        if (!wf_avail(f->id)) { say(not_avail(f), now); break; }
         int rc = wf_roll_req_load(f->id, exps[rexp]);
         if (rc >= 0)                                /* as a film load: the animation, then close and LiveView */
         {
@@ -313,7 +322,7 @@ static void roll_info(void)
     wfg_tri(x + ew - 17, cy + 9, x + ew - 13, cy + 5, x + ew - 9, cy + 9, A);   /* up / down: the count changes */
     wfg_tri(x + ew - 17, cy + 13, x + ew - 13, cy + 17, x + ew - 9, cy + 13, A);
     if (!wf_avail(f->id))
-        text_c(F_13, 360, 416, f->flags & WF_F_LUTCAN ? "LUT cube not on the card" : "Film table not on the card", C_WARN);
+        text_c(F_13, 360, 416, not_avail(f), C_WARN);
     else
     {
         const struct wf_roll *r = wf_roll_now();
