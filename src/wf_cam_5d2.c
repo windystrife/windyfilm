@@ -9,6 +9,7 @@
  * plain, so the owed BOT finds its own TOP's half state. A BOT that never comes holds new TOPs off for WF_PAIR_MS at most.
  * Both hooks run at task priority 0x14; between the load and the store of wf_owed there is no call that can block. */
 #include "wf_core.h"
+#include "wf_probe.h"
 
 extern char __camera_model_short[];
 extern char firmware_version[];
@@ -77,6 +78,25 @@ static uint32_t check_buf(uint32_t b, uint32_t bytes)
     return b;
 }
 
+/* ------------------------------------------------------------------ RAW probe P0 (DESIGN 3.2), the 5D2 part
+ * Same record, log and file as the EOS M (wf_probe.c), taken at the entry of the TOP and the BOT hook (kind K_TOP /
+ * K_BOT in the record's mode bits 8-15). What is read (block, registers, ROM call, sources, the safe address range)
+ * comes from raw-path/P0_5D2_SPEC.md; until then WF_PRB_CAN is 0 and nothing of it is built. Hook rules as on the
+ * EOS M: no logging, no file I/O, only reads inside the spec's range, the frame is never written. */
+#if WF_PRB_CAN
+static const char *const prb_kname[K_N] = { "TOP", "BOT" };
+static void prb_read_5d2(struct wf_prb *p, int mode, uint32_t *s);     /* from the spec */
+static const struct wf_prb_cam prb_5d2 = {
+    .ver = 0x0102, .what = "TOP/BOT", .kname = prb_kname, .pool_lo = POOL_LO, .pool_hi = POOL_HI,
+    /* .npb, .rname, .sname, .read: from the spec */
+};
+#define PRB_ENTER(k, regs) wf_prb_enter(regs, k)
+#define PRB_LEAVE(on, rc, t) do { if (on) wf_prb_leave(rc, t); } while (0)
+#else
+#define PRB_ENTER(k, regs) 0
+#define PRB_LEAVE(on, rc, t) do { (void)(on); (void)(t); } while (0)
+#endif
+
 int wf_cam_init(void)
 {
     if (!streq(__camera_model_short, "5D2") || !streq(firmware_version, "2.1.2"))
@@ -88,6 +108,9 @@ int wf_cam_init(void)
             return 0;
         }
     }
+#if WF_PRB_CAN
+    wf_prb_setup(&prb_5d2);
+#endif
     return 1;
 }
 
@@ -119,6 +142,7 @@ static void wf_hook_5d2(uint32_t *regs, uint32_t *stack, uint32_t pc)
     if (k == K_N || !installed[k])
         return;
     calls[k]++;
+    int probe = PRB_ENTER(k, regs), t_shot = get_ms_clock();    /* RAW probe P0: off = 0, nothing read */
     uint32_t raw = regs[0];
     uint32_t buf = check_buf(raw, HALF_BYTES);
     int why = -1, owed = wf_owed;
@@ -139,6 +163,7 @@ static void wf_hook_5d2(uint32_t *regs, uint32_t *stack, uint32_t pc)
     }
     if (why >= 0) {
         reject(k, why, regs);
+        PRB_LEAVE(probe, why == R_WORKER ? 2 : 1, t_shot);
         return;
     }
     struct wf_frame f;
@@ -158,12 +183,14 @@ static void wf_hook_5d2(uint32_t *regs, uint32_t *stack, uint32_t pc)
     int st = -1;
     if (wf_shot_run(&f, &st) != 0) {
         reject(k, R_WORKER, regs);
+        PRB_LEAVE(probe, 2, t_shot);
         return;
     }
     if (k == K_TOP) {
         wf_owed_t = get_ms_clock();
         wf_owed = st < 0 || WF_ST_TOUCHED(st);   /* the worker changed the half (or the result is unknown) */
     }
+    PRB_LEAVE(probe, 0, t_shot);
 }
 
 int wf_cam_start(void)
@@ -199,6 +226,7 @@ int wf_cam_start(void)
 void wf_cam_poll(void)
 {
     static int said;
+    wf_prb_flush();                              /* RAW probe record (nothing while the 5D2 part is not built) */
     if (!said && bad_a) {
         said = 1;
         wf_log("5D2: ROM %x = %08x, not %08x: unsupported", (unsigned)bad_a, (unsigned)bad_w, (unsigned)bad_x);

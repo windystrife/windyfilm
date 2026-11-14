@@ -21,7 +21,10 @@ static uint32_t wff_len;
 static struct wff wff[3];
 static int wff_ok[3];
 static font *rbf[3];                    /* argnor23, argnor28, term12 (fallback for the small text) */
-static int fstat;
+static int fstat, fwhy;                         /* fwhy: why our pack is not used (WFF_W_*) */
+enum { WFF_W_OK, WFF_W_FILE, WFF_W_HEADER, WFF_W_MEM, WFF_W_READ, WFF_W_PARSE, WFF_W_N };
+static const char *const fwhy_names[WFF_W_N] = { "ok", "not on the card", "bad header", "no memory", "read failed",
+                                                 "bad font table" };
 
 static inline unsigned rd16(const uint8_t *p) { return p[0] | (p[1] << 8); }
 static inline uint32_t rd32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }
@@ -99,26 +102,36 @@ int wff_open(void)
     uint8_t hdr[16];
     uint32_t size = 0;
     wff_len = 0;
-    if (wf_card_read(WFF_PATH, 0, hdr, 16, &size) == 0 && !memcmp(hdr, "WFFN", 4))
+    fwhy = WFF_W_FILE;
+    if (wf_card_read(WFF_PATH, 0, hdr, 16, &size) == 0)
     {
         uint32_t n = rd32(hdr + 8);
-        if (n >= 16 && n < 256 * 1024 && (!size || size == n))
+        fwhy = WFF_W_HEADER;
+        if (!memcmp(hdr, "WFFN", 4) && n >= 16 && n < 256 * 1024 && (!size || size == n))
         {
+            fwhy = WFF_W_MEM;
             wff_buf = malloc(n);
-            if (wff_buf && wf_card_read(WFF_PATH, 0, wff_buf, n, &size) == 0)
+            if (wff_buf)
             {
-                wff_len = n;
-                wff_parse();
+                fwhy = WFF_W_READ;
+                if (wf_card_read(WFF_PATH, 0, wff_buf, n, &size) == 0)
+                {
+                    wff_len = n;
+                    fwhy = wff_parse() ? WFF_W_PARSE : WFF_W_OK;
+                }
             }
         }
     }
     if (!wff_ok[0] || !wff_ok[1] || !wff_ok[2])
     {
         fstat |= 1;
+        if (fwhy == WFF_W_OK)
+            fwhy = WFF_W_PARSE;                     /* a size slot missing or bad */
         rbf[2] = rbf_lookup("term12");
     }
     return fstat;
 }
+const char *wff_why(void) { return fwhy >= 0 && fwhy < WFF_W_N ? fwhy_names[fwhy] : "?"; }
 
 void wff_close(void)
 {

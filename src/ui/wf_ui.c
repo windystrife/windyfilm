@@ -524,7 +524,11 @@ void wfui_task_begin(void)
     canon_gui_disable_front_buffer();
     took = 1;
     wfp_take();
-    wf_log("ui: open, %d films, fonts %d, cans %d (%d colours)", nlist, fs, cs, wfc_pal_used());
+    char fw[96];                                /* wff_open / wfc_open return codes in words (0 = loaded) */
+    snprintf(fw, sizeof fw, "%s%s%s", fs & 1 ? wff_why() : "ok", fs & 2 ? ", no argnor23" : "",
+             fs & 4 ? ", no argnor28" : "");
+    wf_log("ui: open, %d films, fonts WFFONTS.DAT %s, cans WFCANS.DAT %s (%d colours)", nlist, fw, wfc_why(cs),
+           wfc_pal_used());
     wfp_log();
     int now = get_ms_clock();
     t_probe = t_force = t_heal = now;

@@ -1,0 +1,20 @@
+WindyFilm Film LUTs - changes relative to the spektrafilm profiles they encode
+(film data: spektrafilm profiles, CC BY-SA 4.0, A. Volpato (github.com/andreavolpato/spektrafilm); licence: SPEKTRAFILM_LICENSE.txt, CC BY-SA 4.0)
+
+2026-11-12  first version (mk_filmluts.py / fl_core.py, own code, no spektrafilm code):
+  - profiles used as published: spectral sensitivities, dye spectral densities, base density,
+    density curves of kodak_vision3_250d, kodak_vision3_500t, kodak_portra_400,
+    fujifilm_pro_400h (negatives) and kodak_2383 (print); NaN samples at the ends of the
+    wavelength range filled with the nearest valid value
+  - camera -> film layer exposure reduced to a 3x3 built from smooth positive spectra of the
+    Rec.709 primaries (sigmoid-quadratic), rows normalized so neutral is exact
+  - negative: added interlayer (DIR-like) colour term, 0.25 for print, 0.10 for scans
+    (neutral unchanged)
+  - printing: 3400 K + KG3 lamp, printer lights solved for neutral grey; half of the
+    print grey-scale colour crossover removed (neutral_axis 0.5); projection under
+    CIE D59 as a xenon proxy; display white = 1.2 x clear print base with a soft shoulder,
+    viewing flare 0.0015
+  - scans: ideal dye-amount scanner, per-channel levels, own soft tone curve
+  - output encoded for sRGB displays, gamut-compressed into Rec.709
+  - sampled on a 65^3 grid (first version 33^3; 65^3 since the second build of
+    2026-11-12, same parameters)

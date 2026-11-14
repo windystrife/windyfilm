@@ -23,6 +23,7 @@ h_hook_fn *h_hook_at(uint32_t addr);
 /* property handlers / changes */
 typedef void h_prop_fn(unsigned property, void *priv, uint32_t *buf, unsigned len);
 void h_prop_send(uint32_t property, uint32_t value);     /* call the module's handler of `property` */
+extern int h_ps_contrast;                                /* picstyle_get_current_contrast(), -10 = not known */
 extern volatile int h_nchanges;                  /* prop_request_change calls */
 extern uint32_t h_change_prop[256];
 extern int h_change_val[256];
@@ -43,13 +44,23 @@ extern volatile int h_arena_live;                /* blocks handed out and not fr
 /* clocks: h_clock_add_ms shifts get_ms_clock / get_us_clock forward (time jumps without waiting) */
 extern volatile int h_clock_add_ms;
 
-/* FIO: a path that refuses to open (EXIF busy test), "" none; counts */
-extern char h_fio_busy[128];
-extern volatile int h_fio_opens;
+/* FIO: a path that refuses to open, to be created, removed or renamed (EXIF busy test, the log / WFPROBE.BIN on a busy
+   card), "*" every path, "" none; counts; h_fio_wmax > 0: the next write to a file of the path h_fio_wpath stops after
+   that many bytes. h_fio_dup: creates on an existing name (two entries of one name on the camera), h_fio_dir_busy:
+   creates / removes / renames while lens_info.job_state != 0; main() fails every run on either. */
+extern char h_fio_busy[128], h_fio_wpath[128];
+extern volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy;
 
 /* the menu entries menu_add got */
 extern void *h_menu;
 extern volatile int h_menu_count;
 
 uint32_t wf_host_rom_read(uint32_t addr);
+
+/* RAW probe (EOS M): the Eeko parameter block copy at 0x41E82CEC, EDMAC WR0 / 308 / 408 / A08 / B08, and the
+ * MEMNAVI_GetReadMemory lookup (out[0] = h_nav_a[layer]); other addresses read 0xDEADBEEF */
+extern uint32_t h_pb[56], h_edmac[5], h_nav_a[5];
+extern volatile int h_nav_calls;
+uint32_t wf_host_mem_read(uint32_t addr);
+int wf_host_memnavi(uint32_t *out, uint32_t *tmp, int a, int layer);
 #endif

@@ -68,6 +68,15 @@ extern int wf_ll_ei;
  * the LUT EI on top. The result's pad[0] = that correction in 0.1 EV (int8), pad[1] = 0xa5; the .FRT key holds it. */
 extern int wf_ll_auto;
 #define WF_LL_AUTO_MARK 0xa5
+/* Input curve (DESIGN 3.2 A1, menu "Input curve"): 0 = the JPEG is read as sRGB (as before), k = 1 .. WF_LL_NINC - 1 =
+ * through the measured Canon Picture Style curve of slot k (1 Canon Film 1, 2 Canon Neutral; luts/canon_curve/, built
+ * in when build.sh found the CSV: wf_ll_curve_have(k)). A slot that is not built in reads as sRGB. Scene light above
+ * 1.0 then goes through each curve's log segment, as the LUT EI does. 18 % grey is 0.18 of the curve for the cube auto
+ * exposure. wf_task sets it before a load; the .FRT key holds the slot in bits 17-18 (0: the key as before). */
+#define WF_LL_NINC    3                  /* sRGB + 2 Canon curve slots (tools/mk_loglut_tab.py CANON_SLOTS + 1) */
+extern int wf_ll_incurve;
+int wf_ll_curve_have(int k);                     /* slot k built in (0, sRGB: always; out of range: 0) */
+const char *wf_ll_curve_src(int k);              /* slot k's CSV first comment line, "" without */
 
 /* results (distinct, for the log line and the menu warning) */
 enum {

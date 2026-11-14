@@ -119,6 +119,7 @@ int wf_look_now(struct wf_look *lk)
     lk->curve = c >= 1 && c <= WF_NCURVE ? c : WF_CURVE_VLOG;
     lk->flut = l > 0 && l < WF_FLUT_N ? l : 0;
     lk->lei = (int8_t)wf_lut_ei_t();
+    lk->incurve = (uint8_t)wf_incurve_t();
     lk->strength = s >= 0 && s < WF_NSTRENGTH ? s : 1;
     lk->grain = (uint8_t)wf_grain; lk->halo = (uint8_t)wf_halo; lk->mist = (uint8_t)wf_mist;
     lk->light = (uint8_t)wf_light;
@@ -161,8 +162,8 @@ int wf_post_now(void)
 /* ------------------------------------------------------------------ Log + LUT tables (wf_task writes, worker reads) */
 static struct wf_lltabs *wf_ll_tabs;             /* 181,356 B, malloc'd only while Log + LUT is the output */
 static volatile int wf_ll_have, wf_ll_loading;
-static volatile int wf_ll_have_lut, wf_ll_have_ei;
-static int wf_ll_tried, wf_ll_tried_lut, wf_ll_tried_ei;
+static volatile int wf_ll_have_lut, wf_ll_have_ei, wf_ll_have_inc;
+static int wf_ll_tried, wf_ll_tried_lut, wf_ll_tried_ei, wf_ll_tried_inc;
 static volatile int wf_half_ll;                  /* curve the TOP half was graded with, 0 = plain */
 static int wf_ll_rc[WF_NCURVE] = { -1, -1, -1, -1, -1 };
 static struct wf_ll_info wf_ll_inf[WF_NCURVE];
@@ -189,7 +190,8 @@ int wf_ll_state(int curve)
     if (curve < 1 || curve > WF_NCURVE)
         return -1;
     if (wf_ll_loading == curve || (wf_out == WF_OUT_LLUT && wf_curve == curve
-                                   && (wf_ll_tried != curve || wf_ll_tried_lut != wf_flut || wf_ll_tried_ei != wf_lut_ei_t())))
+                                   && (wf_ll_tried != curve || wf_ll_tried_lut != wf_flut || wf_ll_tried_ei != wf_lut_ei_t()
+                                       || wf_ll_tried_inc != wf_incurve_t())))
         return -2;
     return wf_ll_rc[curve - 1];
 }
@@ -199,8 +201,8 @@ static void wf_ll_poll(void)
     int c = wf_curve, l = wf_flut;
     int want = wf_yuv_active() && wf_out == WF_OUT_LLUT && c >= 1 && c <= WF_NCURVE ? c : 0;
     int lut = want && l > 0 && l < WF_FLUT_N ? l : 0;
-    int ei = want ? wf_lut_ei_t() : 0;
-    if (want == wf_ll_tried && lut == wf_ll_tried_lut && ei == wf_ll_tried_ei)
+    int ei = want ? wf_lut_ei_t() : 0, inc = want ? wf_incurve_t() : 0;
+    if (want == wf_ll_tried && lut == wf_ll_tried_lut && ei == wf_ll_tried_ei && inc == wf_ll_tried_inc)
         return;
     int had = wf_ll_have;
     wf_ll_have = 0;                              /* new shots stop using the tables */
@@ -233,6 +235,7 @@ static void wf_ll_poll(void)
     wf_ll_tried = want;
     wf_ll_tried_lut = lut;
     wf_ll_tried_ei = ei;
+    wf_ll_tried_inc = inc;
     if (wf_ll_tabs && !want) {
         __mem_free(wf_ll_tabs);
         wf_ll_tabs = 0;
@@ -248,6 +251,7 @@ static void wf_ll_poll(void)
     wf_ll_loading = want;
     wf_ll_ei = ei;
     wf_ll_auto = lut != 0;                       /* Film LUT cubes: exposed for 18 % grey -> 118 (Technical: as is) */
+    wf_ll_incurve = inc;                         /* a Canon curve slot instead of sRGB (cache key bits 17-18) */
     if (wf_ll_tabs && cp)
         rc = wf_loglut_load_cached(cp, wf_loglut_name(fn, want, lut, 1), want, wf_ll_tabs, in);
     else
@@ -256,10 +260,21 @@ static void wf_ll_poll(void)
     wf_ll_rc[want - 1] = rc;
     wf_ll_loading = 0;
     if (rc == WF_LL_OK) {
-        char eis[32] = "";
+        char eis[48] = "";
         int n = 0, av = (int8_t)wf_ll_tabs->pad[0];
+        int ch = wf_incurve > WF_INC_SRGB && wf_incurve < WF_INC_N && wf_ll_curve_have(wf_incurve) ? wf_incurve : 0;
+        int why = wf_style_why(ch);
+        if (inc)                                 /* the curve, with what the camera reported (base ff / c-10: not yet) */
+            n = snprintf(eis, sizeof eis, " in-%s b%02x c%d", inc == WF_INC_FILM1 ? "film1" : "neutral",
+                         wf_style_base() & 0xff, wf_style_con());
+        else if (ch && why == WF_PSW_BASE)       /* a curve chosen, the camera's style does not fit it */
+            n = snprintf(eis, sizeof eis, " srgb(base %02x)", wf_style_base());
+        else if (ch && why == WF_PSW_CONTRAST)
+            n = snprintf(eis, sizeof eis, " srgb(contrast %d)", wf_style_con());
+        else if (ch)
+            n = snprintf(eis, sizeof eis, " srgb(style %02x)", wf_style_raw());
         if (ei)
-            n = snprintf(eis, sizeof eis, " ei%+d/3", ei);
+            n += snprintf(eis + n, sizeof eis - n, " ei%s%d/3", ei < 0 ? "-" : "+", ei < 0 ? -ei : ei);   /* no %+d */
         if (wf_ll_tabs->pad[1] == WF_LL_AUTO_MARK) {
             int a = av < 0 ? -av : av, u = 0;
             while (a >= 10) { a -= 10; u++; }
@@ -269,6 +284,7 @@ static void wf_ll_poll(void)
                in->clamped, in->skipped, in->domain ? " dom" : "", eis, in->title);
         wf_ll_have_lut = lut;
         wf_ll_have_ei = ei;
+        wf_ll_have_inc = inc;
         WF_BARRIER();
         wf_ll_have = want;                       /* published last */
     } else {
@@ -721,6 +737,7 @@ static int wf_dispatch(struct wf_frame *f, int bot, struct wf_look *lk, int *llu
         *lei = wf_ll_have_ei;
         lk->flut = (uint8_t)*llut;               /* the tables' cube is what the shot got */
         lk->lei = (int8_t)*lei;
+        lk->incurve = (uint8_t)wf_ll_have_inc;
         wf_colour_fx(f, bot, lk, wf_ll_words, (int)(uintptr_t)wf_ll_tabs);
         return WF_ST_LLUT;
     }
@@ -948,7 +965,10 @@ static void wf_report(void)
         if (e->gst && n < (int)sizeof fx) n += snprintf(fx + n, sizeof fx - n, e->gst == 1 ? " g%d" : " g-", e->g_ms);
         if (e->mst && n < (int)sizeof fx) n += snprintf(fx + n, sizeof fx - n, e->mst == 1 ? " m%d" : " m-", e->m_ms);
         if (e->evs == '?' && n < (int)sizeof fx) snprintf(fx + n, sizeof fx - n, " ev?");
-        else if (e->evs && n < (int)sizeof fx) snprintf(fx + n, sizeof fx - n, " ev%d%c", (e->ev8 + 4) >> 3, e->evs);
+        else if (e->evs && n < (int)sizeof fx) {
+            char es[2] = { e->evs, 0 };          /* no %c: Canon's vsnprintf prints it wrong */
+            snprintf(fx + n, sizeof fx - n, " ev%d%s", (e->ev8 + 4) >> 3, es);
+        }
         if (e->lk.output == WF_OUT_FILM && e->lk.row >= 0)
             snprintf(code, sizeof code, " %s v%d s%d", wf_films[e->lk.row].code, e->lk.variant,
                      wf_strength_pct(e->lk.strength));

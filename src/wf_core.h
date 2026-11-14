@@ -14,6 +14,7 @@
 #include "wf_api.h"
 #include "wf_frame.h"
 #include "wf_cam.h"
+#include "wf_fio.h"                              /* card writes: wf_fopen_w, wf_fcreate, wf_fremove, wf_frename */
 
 /* ------------------------------------------------------------------ DryOS / ML imports (both cameras' .sym have them)
  * A file that includes ML's own headers first (wf_menu.c, wf_pv.c) defines WF_ML_HEADERS and takes ML's prototypes. */
@@ -39,6 +40,9 @@ enum { WF_OUT_FILM = 0, WF_OUT_LOG, WF_OUT_LLUT, WF_OUT_OFF, WF_NOUT };
 #define WF_NCURVE 5                               /* log curves 1..5 (wf_loglut.h WF_LL_SLOG3 .. WF_LL_CLOG3) */
 #define WF_CURVE_VLOG 2                           /* a Film LUT can's Load sets V-Log + LUT */
 enum { WF_LIGHT_AUTO = 0, WF_LIGHT_DAY, WF_LIGHT_CLOUDY, WF_LIGHT_TUNGSTEN, WF_NLIGHT };
+/* Log + LUT input curve (DESIGN 3.2 A1): the JPEG as sRGB, or through a measured Canon Picture Style curve ("Film 1"
+   in User Def. 1, "Neutral"). The values are the wf_loglut.h input curve slots (wf_ll_incurve, WF_LL_NINC). */
+enum { WF_INC_SRGB = 0, WF_INC_FILM1, WF_INC_NEUTRAL, WF_INC_N };
 #define WF_NSTRENGTH 3                            /* Strength 30 / 100 / 125 % (level 0..2) */
 
 /* effect post codes (wf_fx.c): which effect sets a shot uses. WF_POST_FILM + catalogue index for a film (its grain /
@@ -61,7 +65,8 @@ struct wf_look {
     uint8_t  grain, halo, mist;                   /* the settings as the menu counts them */
     uint8_t  light;                               /* WF_LIGHT_* (WB itself is set by the menu, not by the worker) */
     uint8_t  why;                                 /* WF_OUT_OFF: 0 set Off, 1 no film loaded, 2 film without a table */
-    int      post;                                /* effect post code (above) */
+    uint8_t  incurve;                             /* WF_INC_*: how Log + LUT read the JPEG (LLUT) */
+    int      post;                               /* effect post code (above) */
     int      ftflags;                             /* wf_film_build flags of the film (WF_FT_*) incl. strength */
 };
 
@@ -86,7 +91,8 @@ extern volatile int wf_cam_ok;                    /* 1 = ROM words matched (wf_c
 extern volatile int wf_unloading;                 /* module deinit started: hooks return, task ends */
 void wf_status_set(const char *s);                /* wf_status() text ("" = fine) */
 void wf_gen_bump(void);                           /* wf_gen() + 1 (UI redraw) */
-void wf_log_flush(void);                          /* wf_task: write the log ring to ML/LOGS/WINDYFLM.LOG */
+void wf_log_flush(void);                          /* wf_task: append the log ring to ML/LOGS/WINDYFLM.LOG */
+int wf_job_state(void);                           /* wf_menu.c: ML lens_info.job_state (Canon busy with a shot when != 0) */
 void wf_ui_request(void);                         /* menu: open the browser from wf_task after the ML menu closed */
 
 /* ------------------------------------------------------------------ camera layer (wf_cam_eosm.c / wf_cam_5d2.c) */
@@ -97,6 +103,11 @@ int  wf_cam_shot_ok(void);                        /* the in-camera path is up (w
 int  wf_cam_gate_pv(void);                        /* preview: a shot now would get a look at all (JPEG L, no multishot) */
 const char *wf_cam_name(void);                    /* "EOS M" / "5D2" */
 extern volatile int wf_aspect;                    /* JPEG aspect (EOS M property), -1 not reported; 5D2 always 0 */
+/* RAW probe P0 (wf_probe.c + the camera layer, DESIGN 3.2): log only, the frame is never touched; off at every boot,
+   never saved. The menu entry is built where WF_PRB_CAN (wf_cam.h). */
+enum { WF_PRB_OFF = 0, WF_PRB_ON, WF_PRB_NAV, WF_PRB_N };   /* NAV: also the camera's ROM call (EOS M: MEMNAVI) */
+extern int wf_probe_mode;
+int wf_prb_can(void);                             /* the camera layer set the probe up (body supported) */
 extern volatile int wf_req_live;                  /* a shot is between its hook post and done (preview stays off) */
 
 /* ------------------------------------------------------------------ wf_shot.c */
@@ -130,12 +141,22 @@ enum { WF_ST_NONE = 0, WF_ST_FILM, WF_ST_NOTAB, WF_ST_LOG, WF_ST_LLUT, WF_ST_NOL
 
 /* ------------------------------------------------------------------ wf_menu.c */
 extern volatile int wf_out, wf_film_id, wf_print, wf_light, wf_curve, wf_flut, wf_lut_ei, wf_strength, wf_exif_off;
+extern volatile int wf_incurve;
 extern volatile int wf_cfg_dirty;
 void wf_menu_init(void);                          /* module init: config read, menu added */
 void wf_menu_deinit(void);                        /* unload: WB back, menu removed */
 void wf_menu_poll(void);                          /* wf_task: config save, EXIF writer, Light */
 void wf_cfg_load(void);
 int  wf_lut_ei_t(void);                           /* LUT EI in 1/3 EV */
+int  wf_incurve_t(void);                          /* WF_INC_* in use: a Canon curve only when its table is built in
+                                                     and the camera is on its Picture Style (or not known yet) */
+int  wf_style_ok(int inc);                        /* Picture Style fits input curve `inc` (sRGB: any), or unknown */
+enum { WF_PSW_OK = 0, WF_PSW_STYLE, WF_PSW_BASE, WF_PSW_CONTRAST };
+int  wf_style_why(int inc);                       /* WF_PSW_*: what of the Picture Style differs from the measurement */
+int  wf_style_base(void);                         /* User Def. 1 base (PROP_PICSTYLE_OF_USERDEF1), -1 = not known */
+int  wf_style_con(void);                          /* the active style's Contrast, -10 = not known */
+int  wf_style_con_of(int inc);                    /* the Contrast input curve `inc` was measured at */
+int  wf_style_raw(void);                          /* PROP_PICTURE_STYLE value, 0 = not reported yet */
 int  wf_strength_pct(int level);
 void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev);   /* a shot of ours: its text (ring) */
 void wf_exif_none(void);                          /* a JPEG that got no look: keeps the ring aligned */

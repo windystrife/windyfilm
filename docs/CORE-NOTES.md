@@ -118,7 +118,17 @@ Deny input: the old module's binary (path assembled inside the script, read only
   `grain=off|fine|normal|strong`, `halation=off|halation|bloom|spk|spkbloom`, `mist=off|w8|w4|w2|w1|b8|b4|b2|b1`,
   `preview=off|on|fast`, `exposure=camera|smooth`, `exptrim=-16..16`, `exif=on|off`, `userwb=mode,kelvin,gm,ba`
   (only while Light holds the WB). Written by `wf_task` 1.5 s after a change, at most 600 B.
-- `ML/LOGS/WINDYFLM.LOG`: new file each boot. Useful lines: `hook NN ff169414 rom e92d41fc err 0`, `pack ok: N tables`,
+- `ML/LOGS/WINDYFLM.LOG`: appended across boots. A boot starts with `WindyFilm <date>: camera ..` (logged in
+  `wf_init`); at the first write of a boot a log over 512 KB becomes `WINDYFLM.OLD`. Lines wait in a 16 KB byte ring
+  until the card takes them (a refused open / a short write is retried every 200 ms, logged once as `log: card refused N
+  writes in .. ms (first: <step> rc <rc>, job <j>), lines kept`); a line that finds the ring full is counted
+  (`log: N lines lost so far`). Card files are written through `src/wf_fio.h` (wf_main.c): a create, remove or
+  rename only while Canon is idle (`lens_info.job_state` 0), a create only once the name is verified gone, since a
+  create over an existing name leaves two entries of that name (the 11-14 card: two `WINDYFLM.LOG`, trap W24); appends
+  and writes at an offset open the existing file. The log, WFPROBE.BIN, WINDYFLM.CFG and the `.FRT` caches all use it;
+  gate check 5 fails the build on a direct `FIO_CreateFile` / `FIO_RemoveFile` / `FIO_RenameFile` anywhere else.
+  Formats: only `%d %x %X %s` (+ `-` / `0`, width); `tools/fmt_check.py` fails the build otherwise (trap W23).
+  Useful lines: `hook NN ff169414 rom e92d41fc err 0`, `pack ok: N tables`,
   `pack <code> v<variant> loaded`, `yuv NN <buf>/<raw>: film <code> v0 s100 <ms> h<ms> g<ms> m<ms> q<ms> a<aspect>`,
   `shot #n <title>: <s> = look .. + mist .. (TOP .., BOT ..) EV..`, `lut <cube> 33^3 ok|cache ..`, `exif IMG_nnnn.JPG ok`,
   `fx halation|grain|mist .. ready`, `light Day: 5500K`, `expsim: ..`.
@@ -131,16 +141,55 @@ Deny input: the old module's binary (path assembled inside the script, read only
 Nothing RAW is implemented yet. The owner chose **Hybrid + Canon curve inversion** (2026-11-14); DESIGN 3.2 has the
 plan, the numbers and the traps. Exact touch points per step:
 
-- **A1** (waits for `luts/canon_curve/<STYLE>.csv` from the owner's RAW+L pairs):
-  - read the CSV in `tools/mk_logtab.py` (`wf_dec`) and `tools/mk_loglut_tab.py` (`wf_ll_dec`), in place of
-    `srgb_eotf`. Keep `--curve srgb` as the default, so the build stays reproducible without the CSV;
-  - fold K into both decode and encode tables (DESIGN 3.2, Headroom). `mk_logasm_tab.py` then follows, and its
-    asserts (`wf_dec <= 16384`, `max(wf_lenc) <= 65279`) must still pass;
-  - rerun `logchk`, the LOG / LOGCHK host tests and the gate, and write the curve name into the boot log line.
-- **P0** (EOS M only): `wf_cam_eosm.c` takes the snapshot in the NN hook before the gate (a static struct, no calls
-  except the optional `ff234680`). `wf_main.c` `wf_task` writes the lines and `ML/LOGS/WFPROBE.BIN`. A menu toggle
-  goes under a debug entry, default off; nothing is written to the config. Add a host test with a fake parameter block
-  and fake EDMAC words, and assert that the frame stays byte-identical.
+- **A1** (done for Log + LUT and the cans; curve `luts/canon_curve/EOSM_Film1.csv`, Picture Style Film 1; slot 2
+  Canon Neutral is wired and waits for `EOSM_Neutral.csv`):
+  - `tools/mk_loglut_tab.py <out> [film1.csv|-] [neutral.csv|-]`: `read_curve()` checks codes 0..255, strictly
+    increasing, 0 <= v <= 4.0; `wf_ll_dec_c<k>[1022]` interpolates per quarter code, with `WF_LL_HAVE_C<k>` and
+    `WF_LL_C<k>_SRC`. `build.sh` passes each slot's CSV when it exists (env `CURVE_FILM1` / `CURVE_NEUTRAL` override);
+  - slots (`WF_LL_NINC` = 3 = `WF_INC_N`): 0 sRGB, 1 Film 1 (Picture Style 0x21), 2 Neutral (0x84, CSV pending).
+    `wf_ll_curve_have(k)` / `wf_ll_curve_src(k)`; a slot without a CSV decodes as sRGB (`wf_ll_inc()` = 0);
+  - `wf_loglut.c`:
+    - `struct wf_ll_b.dec` picks the table;
+    - in `wf_ll_coords` the gain multiply (`eik`) and the log-segment up-shift (`eib && x > 1.0`) are separate steps.
+      `wf_ll_build` sets `eib` / `eid` for the curve even at gain 1;
+    - `wf_ll_lin8` follows the table, and the auto grey reference is `WF_LL_GREY18` (0.18 Q24);
+    - the cache key gets `| slot << 17` (bits 17-18; Film 1 keeps bit 17);
+  - state: `wf_incurve` / `wf_incurve_t()` (wf_menu.c, cfg `incurve`), `wf_look.incurve`. `wf_ll_poll` reloads on a
+    change (`wf_ll_tried_inc`), and `wf_dispatch` stamps the tables' value on the look;
+  - host tests (SHOT), per slot built in: the curve's first code at 0.18 comes out within 2 codes of sRGB code 118;
+    if code 250 is above 1.25 it comes out at least 8 codes above sRGB white; the slots' tables differ from sRGB and
+    from each other; going back to sRGB gives the same tables; a slot without a CSV reads sRGB; CFG round trip plus
+    `incurve=Neutral`. `wf_test.c` includes the generated `wf_loglut_tab.h` for the decode tables (`t_dec`);
+  - Picture Style: `wf_incurve_t()` also needs `wf_style_ok(k)` = `wf_style_why(k) == WF_PSW_OK`:
+    `lens_info.raw_picstyle` is the slot's style (`wf_inc_ps[]` in wf_menu.c), for Film 1 the User Def. 1 base
+    (`wf_ps_base`, own `prop_add_handler(PROP_PICSTYLE_OF_USERDEF1)` in `wf_menu_init`) is below 0x80 (a style file),
+    and `picstyle_get_current_contrast()` equals `wf_inc_con[]` (Film 1 -2, Neutral 0). Unknown values pass. New
+    imports: `picstyle_get_current_contrast` (both), `prop_add_handler` (5D2; EOS M had it). The host test uses
+    `h_li_set("picstyle", ..)`, `h_ps_contrast` and `h_prop_send(0x0206000a, ..)`: the other curve's style, another
+    Contrast and base Auto (0x87) each reload the sRGB tables; the right values bring the curve's tables back;
+  - a synthetic slot-2 CSV (scratch, never committed) checks the Neutral path before the measured curve exists:
+    `CURVE_NEUTRAL=<csv> OUT=<scratch dir>` for both build.sh and test.sh;
+  - still open: flat Log (`wf_dec`, K fold).
+- **P0** (EOS M done in a675c8a, 33 host checks in mode `PROBE`; 5D2 prepared, waits for
+  `raw-path/P0_5D2_SPEC.md`). The camera-independent part is `wf_probe.c` / `wf_probe.h` (split out on 14 Nov, the
+  EOS M record and log lines unchanged):
+  - one static `struct wf_prb` (4696 B, version 1 on the EOS M; `mode` bits 8-15 = the probed call's kind);
+  - the camera layer hands a `struct wf_prb_cam` to `wf_prb_setup()` in `wf_cam_init()`: pool bounds, log names, and
+    `read()` (block words, register words, the optional ROM call, raw source addresses). EOS M: `prb_read_eosm`
+    (parameter block 0x41E82CEC, five EDMAC words, `ff234680`);
+  - hook: `wf_prb_enter(regs, kind)` at the probed call (EOS M: NN with r2 == 0, before the gate), then
+    `wf_prb_leave(rc, t)` re-hashes the windows after the worker or the reject;
+  - 5D2: `wf_cam_5d2.c` calls `PRB_ENTER` / `PRB_LEAVE` in both hooks (TOP, BOT), empty while `WF_PRB_CAN` is 0
+    (wf_cam.h); `prb_5d2` waits for the spec's block, registers, sources and safe range.
+
+  `wf_cam_poll()` (wf_task) calls `wf_prb_flush()`: the lines of a taken record go to the log at once; the record is
+  copied to `prb_out` (the hook may take the next one) and written at its own offset (`prb_written` x 4696; the first
+  record of a boot makes a new file, once Canon is idle and the old file is verified gone), so a retry after a refused open or a short write never shifts the file. Retries every
+  200 ms for 30 s, logged as `probe: record #N not written .. yet: <step> rc <rc> (shot job <j>)` / `.. written .. on
+  try K`. A call that comes while one record waits for the card and another is taken is skipped and counted. The menu entry "RAW probe" is Off / On / On + ROM call and is not in the config. The
+  host shim fakes the parameter block, the EDMAC words and the ROM lookup (`wf_host_mem_read`, `wf_host_memnavi`).
+  The probe's own `" %08x"` lines are built word by word: a long repeated format string matched the old binary in the
+  gate.
 - **H**: the aux-plane fields in `src/wf_frame.h`; `wf_cam_eosm.c` fills them from what P0 found. A new stage goes in
   `wf_shot.c` `wf_dispatch()` for (UYVY8 + aux, Log + LUT); it works on bands or after a scan pass (DESIGN 3.2). The
   reconstruction is a new file `src/wf_hl.c`, with a host test on a synthetic raw plane.

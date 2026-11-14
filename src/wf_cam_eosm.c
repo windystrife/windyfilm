@@ -14,6 +14,9 @@
  *   JPEG aspect (PROP_IMAGE_ASPECT_RATIO): 0 3:2 5184x3456, 1 1:1 3456x3456, 2 4:3 4608x3456, 7 16:9 5184x2912; the L frame
  *   is packed at the aspect's size inside the max-size buffer. */
 #include "wf_core.h"
+#include "wf_probe.h"
+
+static const struct wf_prb_cam prb_eosm;          /* RAW probe P0, defined below */
 
 extern char __camera_model_short[];
 extern char firmware_version[];
@@ -44,10 +47,17 @@ extern void prop_add_handler(uint32_t property, void *handler);
 
 #ifdef WF_HOST
 extern uint32_t wf_host_rom_read(uint32_t addr);
+extern uint32_t wf_host_mem_read(uint32_t addr);
+extern int wf_host_memnavi(uint32_t *out, uint32_t *tmp, int a, int layer);
 #define ROM32(a) wf_host_rom_read(a)
+#define PRB_RD32(a) wf_host_mem_read(a)
+#define PRB_NAVCALL(o, t, a, l) wf_host_memnavi(o, t, a, l)
 #else
 #define ROM32(a) (*(volatile uint32_t *)(a))     /* D-side read: the original word even after patching */
+#define PRB_RD32(a) (*(volatile uint32_t *)(a))
+#define PRB_NAVCALL(o, t, a, l) ((int (*)(uint32_t *, uint32_t *, int, int))PRB_NAV)(o, t, a, l)
 #endif
+
 
 enum { K_NN = 0, K_TOP, K_BOT, K_N };
 static const char *const kname[K_N] = { "NN", "TOP", "BOT" };
@@ -100,6 +110,7 @@ int wf_cam_init(void)
     if (ROM32(SITE_NN) != INSTR_NN)
         return 0;
     prop_add_handler(PROP_IMAGE_ASPECT_RATIO, (void *)wf_aspect_prop);
+    wf_prb_setup(&prb_eosm);
     return 1;
 }
 
@@ -124,6 +135,41 @@ static void reject(int k, uint32_t raw, int nojpg)
     last_reject[k] = raw;
 }
 
+/* ------------------------------------------------------------------ RAW probe P0 (DESIGN 3.2), the EOS M part
+ * At the NN entry (CompleteSsrawToYuv, before Canon releases the SS resource) the hook takes one record (wf_probe.c):
+ * the Eeko copy of the 0xE0 parameter block (+0x50 raw input, +0x64.. SSRAW A[0..4]), five EDMAC address registers,
+ * optionally MEMNAVI_GetReadMemory(.., 1, layer) for layers 0..4, and for four candidate sources (raw, EDMAC WR0,
+ * A[0], A[1]) FNV-1a of 4 KB windows at +0 / +8 MB / +16 MB, at entry and again after the worker, plus 1 KB copied
+ * from the last window. Only shoot-pool addresses are read, through the uncached alias. The frame is never written.
+ * wf_task (wf_cam_poll -> wf_prb_flush) logs the record and appends it to ML/LOGS/WFPROBE.BIN. */
+#define PRB_PB      0x41E82CECu                  /* the parameter block's Eeko copy, uncached alias */
+#define PRB_NAV     0xFF234680u                  /* MEMNAVI_GetReadMemory(out, tmp, 1, layer) */
+
+static const uint32_t prb_edmac[PRB_NREG] = { 0xC0F04008u, 0xC0F26308u, 0xC0F26408u, 0xC0F26A08u, 0xC0F26B08u };
+static const char *const prb_rname[PRB_NREG] = { "wr0", "308", "408", "a08", "b08" };
+static const char *const prb_sname[PRB_NSRC] = { "raw", "wr0", "A0", "A1" };
+
+/* hook context (wf_prb_enter): the block, the registers, the ROM call; sources raw, EDMAC WR0, SSRAW A[0], A[1] */
+static void prb_read_eosm(struct wf_prb *p, int mode, uint32_t *s)
+{
+    for (int i = 0; i < PRB_PBW; i++)
+        p->pb[i] = PRB_RD32(PRB_PB + 4 * i);
+    for (int i = 0; i < PRB_NREG; i++)
+        p->edmac[i] = PRB_RD32(prb_edmac[i]);
+    if (mode == WF_PRB_NAV)
+        for (int i = 0; i < PRB_NNAV; i++)
+            p->nav_rc[i] = PRB_NAVCALL(&p->nav[i][2], &p->nav_tmp[i], 1, i);
+    s[0] = p->pb[0x50 / 4];
+    s[1] = p->edmac[0];
+    s[2] = p->pb[0x64 / 4];
+    s[3] = p->pb[0x68 / 4];
+}
+
+static const struct wf_prb_cam prb_eosm = {
+    .ver = 1, .what = "NN", .pool_lo = POOL_LO, .pool_hi = POOL_HI, .npb = PRB_PBW,
+    .rname = prb_rname, .sname = prb_sname, .read = prb_read_eosm,
+};
+
 /* Canon task (ShootSsDevelop / DianaFront / DianaRear): gates, then the worker. No logging, no file I/O here. */
 static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
 {
@@ -138,12 +184,16 @@ static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
         return;
     calls[k]++;
     uint32_t raw = regs[kreg[k]];
+    int probe = k == K_NN && regs[2] == 0 && wf_prb_enter(regs, 0); /* RAW probe: the frame call only */
+    int t_shot = get_ms_clock();
     uint32_t buf = check_buf(raw, k == K_NN ? (uint32_t)FRAME_W * FRAME_H * 2 : HALF_BYTES);
     int nojpg = (k == K_NN && (pic_quality & 0xFF000000) == PICQ_KIND_RAW)      /* RAW only: no JPEG */
         || shooting_mode == SHOOTMODE_NIGHTH || shooting_mode == SHOOTMODE_HDR;   /* multishot sub-frames */
     int w = 0, h = 0, ga = wf_aspect < 0 ? 0 : wf_aspect;                       /* never reported: 3:2 */
     if (!buf || (k == K_NN && regs[2] != 0) || nojpg || (pic_quality & PICQ_SIZE_MASK) || !geom(ga, &w, &h)) {
         reject(k, raw, nojpg);
+        if (probe)
+            wf_prb_leave(1, t_shot);
         return;
     }
     struct wf_frame f;
@@ -160,8 +210,11 @@ static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
     f.data = f.dst = (void *)(uintptr_t)buf;
     f.raw = raw;
     f.t_post = get_ms_clock();
-    if (wf_shot_run(&f, 0) != 0)
+    int rc = wf_shot_run(&f, 0);
+    if (rc != 0)
         reject(k, raw, 0);                       /* worker busy / not up: the JPEG stays plain */
+    if (probe)
+        wf_prb_leave(rc != 0 ? 2 : 0, t_shot);
 }
 
 int wf_cam_start(void)
@@ -190,9 +243,10 @@ int wf_cam_start(void)
     return 0;
 }
 
-/* wf_task: one line per kind whose reject count changed */
+/* wf_task: one line per kind whose reject count changed; the RAW probe record */
 void wf_cam_poll(void)
 {
+    wf_prb_flush();
     for (int k = 0; k < K_N; k++)
         if (rejects[k] != rej_logged[k]) {
             rej_logged[k] = rejects[k];

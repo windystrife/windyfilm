@@ -17,5 +17,6 @@ const int wf_t_li_wb_mode = offsetof(struct lens_info, wb_mode);
 const int wf_t_li_kelvin = offsetof(struct lens_info, kelvin);
 const int wf_t_li_wbs_gm = offsetof(struct lens_info, wbs_gm);
 const int wf_t_li_wbs_ba = offsetof(struct lens_info, wbs_ba);
+const int wf_t_li_picstyle = offsetof(struct lens_info, raw_picstyle);
 const int wf_t_card_fn = offsetof(struct card_info, file_number);
 const int wf_t_card_size = sizeof(struct card_info);

@@ -16,6 +16,13 @@
  *   LIGHT              Day / Cloudy / Tungsten / Auto, film kelvin, user WB back
  *   PRINT              Scan / Cine / Paper rows and shots, missing variants
  *   5D2                (5D2 build) TOP / BOT pairing: BOT alone, owed BOT, pairing timeout, r1 / RAW gates, Log halves
+ *   PROBE              (EOS M build) RAW probe P0: off at boot, record + log + WFPROBE.BIN, uncached alias, out-of-pool,
+ *                      CHANGED after the worker, ROM-call mode, gate reject probed, r2 != 0 not, frame never touched,
+ *                      WFPROBE.BIN refused (busy card): the record waits + retries, the next one is still logged, a torn
+ *                      record (short write) is overwritten at its offset
+ *   LOG [big]          the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
+ *                      the refusal logged), ring full (lines counted), a short write (no line twice); big: a log over
+ *                      512 KB becomes WINDYFLM.OLD at boot
  * Output: PASS / FAIL lines, then "RESULT MODE CASE: P pass, F fail"; exit status 1 on any failure. */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -35,6 +42,19 @@
 #include "wf_fx.h"
 #include "wf_expsim.h"
 #include "host_ml.h"
+#include "wf_probe.h"
+/* this build's input curve decode tables (generated header, static copies for the checks) */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-const-variable"
+#include "wf_loglut_tab.h"
+#pragma GCC diagnostic pop
+#if !WF_LL_HAVE_C1
+#define wf_ll_dec_c1 wf_ll_dec
+#endif
+#if !WF_LL_HAVE_C2
+#define wf_ll_dec_c2 wf_ll_dec
+#endif
+static const uint32_t *const t_dec[WF_LL_NINC] = { wf_ll_dec, wf_ll_dec_c1, wf_ll_dec_c2 };
 
 #ifndef MAP_FIXED_NOREPLACE
 #define MAP_FIXED_NOREPLACE 0x100000
@@ -75,6 +95,7 @@
 #define FRAME_B 0x4C000000u
 #define SENT 0xD15EA5EDu
 #define PROP_ASPECT 0x80040059u
+#define PROP_PSU1 0x0206000au                        /* PROP_PICSTYLE_OF_USERDEF1 (DIGIC 4 / 5) */
 #define NW (FW * FH / 2)
 
 struct t_modinfo { uint8_t magic, major, minor, patch; const char *name, *long_name; unsigned (*init)(void); unsigned (*deinit)(void); };
@@ -692,6 +713,115 @@ static void t_shot(const char *cs)
         memcpy(ref, in, NW * 4);
         ref_fn(ref, NW, wf_ll_words, (int)(uintptr_t)wf_ll_tables());
         chk(ndiff(out, ref, NW) == 0 && sb == 0, "can shot: bit-exact vs wf_ll_words on the published tables");
+
+        /* Input curve Canon Film 1 (DESIGN 3.2 A1), on the technical V-Log cube (identity): only the decode differs, so
+         * the curve's 18 % grey (code 139 -> 0.18) must come out where sRGB's (118) does, and its light above 1.0
+         * (white 2.07) above sRGB white through the log segment */
+        log_mark();
+        wf_flut = 0;
+        chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&ll, wf_ll_tables()),
+            "back to the technical cube, sRGB: %s", log_line("lut "));
+        chk(wf_incurve_t() == WF_INC_SRGB && !strstr(log_line("lut "), "in-film1"), "Input curve sRGB by default");
+        enum { GN = 64 };
+        static const uint8_t gy[4] = { 118, 255, 139, 250 };
+        uint32_t gs[GN], gc[GN];
+        for (int i = 0; i < GN; i++) gs[i] = word(0, gy[i & 3], 0, gy[i & 3]);
+        wf_ll_words_c(gs, GN, (int)(uintptr_t)&ll);
+        int y18s = WY0(gs[0]), yws = WY0(gs[1]);
+        /* every curve slot of this build (1 Film 1 in User Def. 1, 2 Neutral): the same checks; a slot without a CSV
+         * reads as sRGB. The cross style (Film 1 under Neutral, Neutral under User Def. 1) must read sRGB. */
+        static const char *const inkey[WF_INC_N] = { "srgb", "film1", "neutral" };
+        static const int inps[WF_INC_N] = { 0, 0x21, 0x84 };   /* each curve's Picture Style (wf_menu.c wf_inc_ps) */
+        static struct wf_lltabs lc[WF_INC_N];
+        int ncurve = 0;
+        for (int k = 1; k < WF_INC_N; k++) {
+            if (!wf_ll_curve_have(k)) {
+                wf_incurve = k;
+                chk(wf_incurve_t() == WF_INC_SRGB, "no %s curve in this build: it reads as sRGB", inkey[k]);
+                wf_incurve = WF_INC_SRGB;
+                continue;
+            }
+            ncurve++;
+            char inl[16], sl[24];
+            snprintf(inl, sizeof inl, " in-%s", inkey[k]);
+            log_mark();
+            wf_incurve = k;
+            chk(LOGW(inl, 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000),
+                "Input curve %s loaded: %s", inkey[k], log_line("lut "));
+            wf_ll_incurve = k;
+            rc = wf_loglut_load("ML/DATA/VLOG.CUB", WF_CURVE_VLOG, &lc[k], &inf);
+            chk(rc == WF_LL_OK && ll_same(&lc[k], wf_ll_tables()) && !ll_same(&ll, &lc[k]),
+                "%s tables = wf_loglut_load with the curve, not the sRGB ones (rc %d)", inkey[k], rc);
+            for (int j = 1; j < k; j++)
+                if (wf_ll_curve_have(j))
+                    chk(!ll_same(&lc[j], &lc[k]), "%s tables differ from the %s ones (own .FRT key)", inkey[k], inkey[j]);
+            sb = shot(in, out, FW, FH);
+            memcpy(ref, in, NW * 4);
+            ref_fn(ref, NW, wf_ll_words, (int)(uintptr_t)&lc[k]);
+            chk(ndiff(out, ref, NW) == 0 && sb == 0, "%s shot: bit-exact vs wf_ll_words on its tables", inkey[k]);
+            /* the curve's 18 % grey (its first code at 0.18) comes out where sRGB's (118) does; light above 1.0 at code
+             * 250 comes out above sRGB white through the log segment */
+            const uint32_t *dk = t_dec[k];
+            int g = 0;
+            while (g < 255 && dk[4 * g] < 3019899) g++;
+            for (int i = 0; i < GN; i++) gc[i] = i & 1 ? word(0, 250, 0, 250) : word(0, g, 0, g);
+            wf_ll_words_c(gc, GN, (int)(uintptr_t)&lc[k]);
+            int y18c = WY0(gc[0]), ywc = WY0(gc[1]);
+            chk(abs(y18c - y18s) <= 2 && WY1(gc[0]) == y18c, "18 %% grey: %s code %d -> %d, sRGB code 118 -> %d", inkey[k], g,
+                y18c, y18s);
+            if (dk[1000] > 20971520)
+                chk(ywc >= yws + 8, "headroom: %s code 250 (%.2f) -> %d, sRGB white -> %d", inkey[k], dk[1000] / 16777216.0, ywc,
+                    yws);
+            struct wf_look lk;
+            wf_look_now(&lk);
+            chk(lk.output == WF_OUT_LLUT && lk.incurve == k, "the look carries the input curve %s", inkey[k]);
+            int bad = k == WF_INC_FILM1 ? 0x84 : 0x21;
+            snprintf(sl, sizeof sl, "srgb(style %02x)", bad);
+            log_mark();
+            h_li_set("picstyle", bad);
+            chk(LOGW(sl, 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+                && ll_same(&ll, wf_ll_tables()) && wf_incurve == k && wf_incurve_t() == WF_INC_SRGB,
+                "Picture Style %02x: %s chosen, sRGB tables: %s", bad, inkey[k], log_line("lut "));
+            wf_look_now(&lk);
+            chk(lk.incurve == WF_INC_SRGB, "the look says sRGB under style %02x", bad);
+            log_mark();
+            h_li_set("picstyle", inps[k]);
+            chk(LOGW(inl, 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&lc[k], wf_ll_tables()),
+                "Picture Style %02x again: %s tables (.FRT): %s", inps[k], inkey[k], log_line("lut "));
+            /* the Contrast of the measurement (Film 1 -2, Neutral 0): another one reads sRGB; back, and the log says it */
+            int con = k == WF_INC_FILM1 ? -2 : 0;
+            log_mark();
+            h_ps_contrast = con + 1;
+            snprintf(sl, sizeof sl, "srgb(contrast %d)", con + 1);
+            chk(LOGW(sl, 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&ll, wf_ll_tables())
+                && wf_style_why(k) == WF_PSW_CONTRAST && wf_incurve_t() == WF_INC_SRGB,
+                "Contrast %d: %s chosen, sRGB tables: %s", con + 1, inkey[k], log_line("lut "));
+            log_mark();
+            h_ps_contrast = con;
+            snprintf(sl, sizeof sl, "%s b%02x c%d", inl, wf_style_base() & 0xff, con);
+            chk(LOGW(sl, 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&lc[k], wf_ll_tables()),
+                "Contrast %d again: %s tables, log '%s': %s", con, inkey[k], sl, log_line("lut "));
+            if (k == WF_INC_FILM1) {             /* User Def. 1 based on a built-in style (Auto) is not the Film 1 file */
+                log_mark();
+                h_prop_send(PROP_PSU1, 0x87);
+                chk(LOGW("srgb(base 87)", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+                    && ll_same(&ll, wf_ll_tables()) && wf_style_why(k) == WF_PSW_BASE,
+                    "User Def. 1 base Auto: sRGB tables: %s", log_line("lut "));
+                log_mark();
+                h_prop_send(PROP_PSU1, 0x41);
+                chk(LOGW(" in-film1 b41 c-2", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+                    && ll_same(&lc[k], wf_ll_tables()), "User Def. 1 base PC 1 (a style file): Film 1 tables: %s",
+                    log_line("lut "));
+            }
+            h_ps_contrast = -10;
+            h_li_set("picstyle", 0);
+        }
+        if (ncurve) {
+            log_mark();
+            wf_incurve = WF_INC_SRGB;
+            chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&ll, wf_ll_tables())
+                && !strstr(log_line("lut "), " in-"), "back to sRGB: the same tables as before: %s", log_line("lut "));
+        }
     }
 
     /* Off, no film */
@@ -1089,12 +1219,14 @@ static void t_cfg(void)
 {
     std_pack();
     const char *code1 = wf_flut_code[1];
-    put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nprint=CINE\nlight=tungsten\nstrength=strong\n"
+    put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "grain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
             "userwb=1,5600,2,-3\n", wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
+    chk(wf_incurve == WF_INC_FILM1 && wf_incurve_t() == (wf_ll_curve_have(WF_INC_FILM1) ? WF_INC_FILM1 : WF_INC_SRGB),
+        "incurve %d (in use %d)", wf_incurve, wf_incurve_t());
     chk(wf_print == 1 && wf_light == 3 && wf_strength == 2 && wf_grain == 1 && wf_halo == 4 && wf_mist == 7 && wf_pv_mode == 2,
         "print %d light %d strength %d grain %d halation %d mist %d preview %d", wf_print, wf_light, wf_strength, wf_grain, wf_halo,
         wf_mist, wf_pv_mode);
@@ -1107,15 +1239,41 @@ static void t_cfg(void)
     long n;
     char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     char want[700];
-    snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nprint=cine\nlight=tungsten\n"
+    snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\ngrain=normal\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=%s\nexptrim=-5\nexif=off\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
+    free(b);
+    /* Canon busy with a shot: the save waits (a create then could leave two WINDYFLM.CFG entries), then follows */
+    h_li_set("job", 1);
+    wf_row_step(WF_ROW_GRAIN, 1);
+    h_clock_add_ms += 2000;
+    usleep(400000);
+    b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(b && strstr(b, "grain=normal\n"), "Canon busy: the change not saved yet");
+    free(b);
+    h_li_set("job", 0);
+    h_clock_add_ms += 2000;
+    usleep(400000);
+    b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(b && !strstr(b, "grain=normal\n") && strstr(b, "grain="), "Canon idle: saved");
+    free(b);
+    wf_row_step(WF_ROW_GRAIN, -1);
+    h_clock_add_ms += 2000;
+    usleep(400000);
+    b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(b && !strcmp(b, want), "back to the first file");
     free(b);
     put_cfg("film=99999\noutput=nope\nlutei=77\nexptrim=99\ncurve=x\nprint=\n");
     wf_cfg_load();
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_lut_ei == -2 && wf_exp_trim == -5 && wf_curve == 4,
         "garbage values ignored");
+    int inc0 = wf_incurve;
+    put_cfg("incurve=Neutral\n");
+    wf_cfg_load();
+    chk(wf_incurve == WF_INC_NEUTRAL && wf_incurve_t() == (wf_ll_curve_have(WF_INC_NEUTRAL) ? WF_INC_NEUTRAL : WF_INC_SRGB),
+        "incurve=Neutral read: %d (in use %d)", wf_incurve, wf_incurve_t());
+    wf_incurve = inc0;
     char big[700];
     memset(big, '#', sizeof big);
     memcpy(big, "film=0\n", 7);
@@ -1385,6 +1543,346 @@ static void t_5d2(void)
 }
 #endif
 
+#ifndef WF_BUILD_5D2
+/* ------------------------------------------------------------------ PROBE (RAW probe P0, EOS M) */
+#define PRB_REC 4696                             /* sizeof(struct wf_prb), wf_probe.h: the EOS M record version 1 */
+typedef char prb_rec_check[sizeof(struct wf_prb) == PRB_REC ? 1 : -1];
+static uint32_t fnv4k(const uint8_t *p)
+{
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < 4096; i++) { h ^= p[i]; h *= 16777619u; }
+    return h;
+}
+static void probe_nn(uint32_t r2)
+{
+    memcpy(fa, in, NW * 4);
+    memset(regs, 0, sizeof regs); regs[0] = 0x00ABC000u; regs[1] = FRAME_A; regs[2] = r2; call_hook(S_NN);
+    memcpy(out, fa, NW * 4);
+}
+static void t_probe(const char *cs)
+{
+    const uint32_t raw_u = FRAME_B + 0x100002u, a0_u = FRAME_B + 0x10000u, a1_u = FRAME_A;
+    uint8_t *b = (uint8_t *)fb;
+    for (uint32_t i = 0; i < B_USED; i++) b[i] = (uint8_t)((i * 0x9E3779B1u) >> 24);
+    memset(h_pb, 0, sizeof h_pb);
+    h_pb[0x00 / 4] = 2;
+    h_pb[0x50 / 4] = raw_u - 0x40000000u;        /* cached twins: the probe reads the uncached alias */
+    h_pb[0x60 / 4] = 1;
+    h_pb[0x64 / 4] = a0_u - 0x40000000u;
+    h_pb[0x68 / 4] = a1_u - 0x40000000u;         /* "A1" = the frame itself: graded in place -> CHANGED */
+    h_pb[0x94 / 4] = 5184; h_pb[0x98 / 4] = 5184; h_pb[0x9c / 4] = 3456;
+    h_edmac[0] = 0x30000000u;                    /* outside the shoot pool: never read */
+    h_edmac[1] = 0x4D000000u; h_edmac[2] = 0x4D100000u; h_edmac[3] = 0x4D200000u; h_edmac[4] = 0x4D300000u;
+    for (int i = 0; i < 5; i++) h_nav_a[i] = 0x0C010000u + 0x100000u * i;
+
+    std_pack();
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\n", wf_films[fA].id);
+    mod_init(1);
+    h_prop_send(PROP_ASPECT, 0);
+    gen_frame(in, FW, FH, 0);
+    chk(WAIT(look_table_ready(), 10000), "film table published");
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fA][0], flags_of(fA, 1));
+
+    /* PROBE:boot - the first record of a boot starts WFPROBE.BIN over: only once Canon is idle (a create while it saves
+       a shot could leave two entries of the name) and once the old file is verified gone */
+    if (!strcmp(cs, "boot")) {
+        const char *bin = "ML/LOGS/WFPROBE.BIN";
+        long n = -1, n0 = 3 * PRB_REC;
+        char *old = calloc(1, n0);
+        put_file(bin, old, n0);
+        free(old);
+        wf_probe_mode = WF_PRB_ON;
+        h_li_set("job", 1);
+        log_mark();
+        probe_nn(0);
+        chk(LOGW("probe #1 ", 5000), "boot: the shot probed and logged");
+        chk(LOGW("probe: record #1 not written to ML/LOGS/WFPROBE.BIN yet: busy rc 1 (shot job 1)", 3000),
+            "boot, Canon busy: the new file waits ('%s')", log_line("probe: record #1"));
+        usleep(500000);
+        free(get_file(bin, &n));
+        chk(n == n0, "boot, Canon busy: the old file untouched (%ld B, was %ld)", n, n0);
+        snprintf(h_fio_busy, sizeof h_fio_busy, "%s", bin);  /* idle, but the card does not let go of the old file */
+        h_li_set("job", 0);
+        usleep(700000);
+        free(get_file(bin, &n));
+        chk(n == n0 && !log_has("probe: record #1 written"), "old file not removable: no new file over it (%ld B)", n);
+        h_fio_busy[0] = 0;
+        chk(WAIT((free(get_file(bin, &n)), n == PRB_REC), 3000) &&
+            LOGW("probe: record #1 written to ML/LOGS/WFPROBE.BIN on try ", 3000),
+            "card lets go: the old file removed, a new one with record #1 (%ld B): '%s'", n,
+            log_line("probe: record #1 written"));
+        char *f = get_file(bin, &n);
+        chk(f && n == PRB_REC && ((const uint32_t *)f)[0] == 0x42504657u && ((const uint32_t *)f)[2] == 1,
+            "boot: record #1 at the start of the new file");
+        free(f);
+        mod_deinit();
+        return;
+    }
+
+    /* off (the boot state): no record, no file, no ROM call */
+    chk(wf_probe_mode == WF_PRB_OFF, "probe off at boot");
+    log_mark();
+    probe_nn(0);
+    chk(ndiff(out, ref, NW) == 0, "off: the film shot as always");
+    chk(LOGW(": film ", 3000), "off: shot logged");
+    usleep(300000);
+    long n = -1;
+    char *f = get_file("ML/LOGS/WFPROBE.BIN", &n);
+    chk(!log_has("probe #") && !f && h_nav_calls == 0, "off: no probe line, no WFPROBE.BIN, no ROM call");
+    free(f);
+
+    /* on */
+    wf_probe_mode = WF_PRB_ON;
+    log_mark();
+    probe_nn(0);
+    chk(ndiff(out, ref, NW) == 0, "on: the frame is graded exactly as without the probe");
+    chk(LOGW("probe #1 r0 00abc000 r1 48000000 r2 0 mode 1", 5000), "on: header '%s'", log_line("probe #1"));
+    chk(LOGW("probe pb+60 00000001 ", 3000), "on: parameter block dumped ('%s')", log_line("probe pb+60"));
+    chk(log_has("probe edmac wr0 30000000 308 4d000000"), "on: EDMAC words ('%s')", log_line("probe edmac"));
+    char e[200];
+    snprintf(e, sizeof e, "probe raw %08x: %08x %08x %08x -> %08x %08x %08x same", raw_u, fnv4k(b + 0x100002),
+             fnv4k(b + 0x900002), fnv4k(b + 0x1100002), fnv4k(b + 0x100002), fnv4k(b + 0x900002), fnv4k(b + 0x1100002));
+    chk(LOGW(e, 3000), "on: raw windows (uncached alias, 3 FNV, unchanged): '%s'", log_line("probe raw"));
+    snprintf(e, sizeof e, "probe A0 %08x: %08x", a0_u, fnv4k(b + 0x10000));
+    chk(log_has(e) && strstr(log_line("probe A0"), " same"), "on: SSRAW A[0] from the block: '%s'", log_line("probe A0"));
+    snprintf(e, sizeof e, "probe A1 %08x: %08x", a1_u, fnv4k((const uint8_t *)in));
+    chk(log_has(e) && strstr(log_line("probe A1"), " CHANGED"), "on: a window the worker writes reads CHANGED: '%s'",
+        log_line("probe A1"));
+    chk(log_has("probe wr0 30000000: outside the shoot pool, not read"), "on: out-of-pool address not read");
+    chk(!log_has("probe nav") && h_nav_calls == 0, "on: no ROM call");
+    chk(WAIT((free(get_file("ML/LOGS/WFPROBE.BIN", &n)), n == PRB_REC), 3000), "on: one record in WFPROBE.BIN (%ld B)", n);
+    f = get_file("ML/LOGS/WFPROBE.BIN", &n);
+    if (f && n >= PRB_REC) {
+        const uint32_t *w = (const uint32_t *)f;
+        chk(w[0] == 0x42504657u && w[1] == 1 && w[2] == 1 && w[5] == FRAME_A && w[6] == 0 && w[7] == 1,
+            "record: magic, version 1, seq 1, r1, r2, mode");
+        chk(w[8 + 0x50 / 4] == raw_u - 0x40000000u && w[8 + 0x68 / 4] == a1_u - 0x40000000u, "record: parameter block");
+        chk(memcmp(f + 600, b + 0x1100002, 1024) == 0, "record: 1 KB of the raw from the +16 MB window");
+        chk(memcmp(f + 600 + 3 * 1024, (const uint8_t *)in + 0x1000000, 1024) == 0,
+            "record: A1 copy taken at entry (the frame before grading)");
+    }
+    free(f);
+
+    /* on + ROM call */
+    wf_probe_mode = WF_PRB_NAV;
+    log_mark();
+    probe_nn(0);
+    chk(LOGW("probe #2 ", 5000) && h_nav_calls == 5, "nav: record 2, MEMNAVI called for layers 0..4 (%d calls)", h_nav_calls);
+    snprintf(e, sizeof e, "probe nav 1: rc 0 tmp 00001234 | 00000000 00000000 %08x 00000000", h_nav_a[1]);
+    chk(LOGW(e, 3000), "nav: '%s'", log_line("probe nav 1"));
+    chk(ndiff(out, ref, NW) == 0, "nav: frame graded as always");
+    chk(WAIT((free(get_file("ML/LOGS/WFPROBE.BIN", &n)), n == 2 * PRB_REC), 3000), "nav: two records (%ld B)", n);
+
+    /* a gate reject (RAW only) is probed too; r2 != 0 calls are not */
+    wf_probe_mode = WF_PRB_ON;
+    pic_quality = 0x04000000;
+    log_mark();
+    probe_nn(0);
+    pic_quality = 0;
+    chk(ndiff(out, in, NW) == 0, "RAW only: frame untouched");
+    chk(LOGW("probe #3 ", 5000) && strstr(log_line("probe #3 "), " rc 1"), "RAW only: probed, rc 1 ('%s')",
+        log_line("probe #3 "));
+    log_mark();
+    probe_nn(1);
+    usleep(600000);
+    chk(!log_has("probe #4"), "an NN call with r2 != 0 is not probed");
+
+    /* the card refuses WFPROBE.BIN (busy with the shot): the record waits and retries, the next one is still logged */
+    const char *bin = "ML/LOGS/WFPROBE.BIN";
+    long n0;
+    free(get_file(bin, &n0));
+    snprintf(h_fio_busy, sizeof h_fio_busy, "%s", bin);
+    log_mark();
+    probe_nn(0);
+    chk(LOGW("probe: record #4 not written to ML/LOGS/WFPROBE.BIN yet: open rc 0 (shot job ", 5000),
+        "busy card: '%s'", log_line("probe: record #4"));
+    probe_nn(0);
+    chk(LOGW("probe #5 ", 5000), "busy card: the next shot is probed and logged while #4 waits");
+    probe_nn(0);
+    chk(LOGW("probe: 1 NN calls not probed so far", 5000), "busy card: a third call while two records wait is skipped ('%s')",
+        log_line("not probed so far"));
+    usleep(300000);
+    free(get_file(bin, &n));
+    chk(n == n0, "busy card: WFPROBE.BIN untouched (%ld B, was %ld)", n, n0);
+    h_fio_busy[0] = 0;
+    chk(WAIT((free(get_file(bin, &n)), n == n0 + 2 * PRB_REC), 5000), "card back: records #4 and #5 written (%ld B)", n);
+    chk(LOGW("probe: record #4 written to ML/LOGS/WFPROBE.BIN on try ", 3000), "'%s'", log_line("probe: record #4 written"));
+    f = get_file(bin, &n);
+    if (f && n == n0 + 2 * PRB_REC) {
+        const uint32_t *w3 = (const uint32_t *)(f + 3 * PRB_REC), *w4 = (const uint32_t *)(f + 4 * PRB_REC);
+        chk(w3[0] == 0x42504657u && w3[2] == 4 && w4[0] == 0x42504657u && w4[2] == 5, "records 4 and 5 at their offsets");
+    }
+    free(f);
+
+    /* a short write tears a record: the retry writes it again at its own offset */
+    snprintf(h_fio_wpath, sizeof h_fio_wpath, "%s", bin);
+    h_fio_wmax = 1000;
+    log_mark();
+    probe_nn(0);
+    chk(LOGW("probe: record #6 not written to ML/LOGS/WFPROBE.BIN yet: write rc 1000", 5000), "short write: '%s'",
+        log_line("probe: record #6"));
+    chk(WAIT((free(get_file(bin, &n)), n == n0 + 3 * PRB_REC) && log_has("probe: record #6 written"), 5000),
+        "short write: record #6 whole after the retry (%ld B)", n);
+    f = get_file(bin, &n);
+    if (f && n == n0 + 3 * PRB_REC) {
+        const uint32_t *w5 = (const uint32_t *)(f + 5 * PRB_REC);
+        chk(w5[0] == 0x42504657u && w5[2] == 6 && w5[1] == 1, "record 6 at its offset, not torn");
+    }
+    free(f);
+    h_fio_wpath[0] = 0;
+    mod_deinit();
+}
+#endif
+
+/* ------------------------------------------------------------------ LOG: the module's log on the card */
+static int count_str(const char *b, const char *s)
+{
+    int n = 0;
+    for (const char *p = b; p && (p = strstr(p, s)); p++)
+        n++;
+    return n;
+}
+/* the number after "log: " in the last line holding s, -1 none */
+static int log_num(const char *s)
+{
+    const char *l = log_line(s), *p = strstr(l, "log: ");
+    int v = -1;
+    if (p)
+        sscanf(p, "log: %d", &v);
+    return v;
+}
+static void t_log(const char *cs)
+{
+    long n;
+    char *b;
+    std_pack();
+    if (!strcmp(cs, "big")) {                    /* a log over 512 KB becomes WINDYFLM.OLD at the first write of a boot */
+        size_t big = 600 * 1024;
+        char *z = malloc(big);
+        memset(z, 'x', big);
+        z[big - 1] = '\n';
+        put_file(LOG_PATH, z, big);
+        free(z);
+        h_li_set("job", 1);                      /* Canon busy: the rename waits */
+        mod_init(0);
+        usleep(700000);
+        b = get_file("ML/LOGS/WINDYFLM.OLD", &n);
+        chk(!b && (free(get_file(LOG_PATH, &n)), n == (long)big), "Canon busy: the big log not renamed yet");
+        free(b);
+        h_li_set("job", 0);
+        chk(LOGW("WindyFilm ", 5000), "boot line written");
+        b = get_file(LOG_PATH, &n);
+        chk(b && n < 64 * 1024 && b[0] != 'x' && strstr(b, "WindyFilm "), "new log after the rotation (%ld B)", n);
+        free(b);
+        b = get_file("ML/LOGS/WINDYFLM.OLD", &n);
+        chk(b && n == (long)big && b[0] == 'x', "the big log kept as WINDYFLM.OLD (%ld B)", n);
+        free(b);
+        mod_deinit();
+        return;
+    }
+    if (!strcmp(cs, "new")) {                    /* no log on the card, Canon busy at boot: the log is made once idle */
+        unlink(LOG_PATH);
+        h_li_set("job", 1);
+        mod_init(0);
+        wf_log("a line while Canon is busy");
+        usleep(700000);
+        b = get_file(LOG_PATH, &n);
+        chk(!b, "Canon busy: no log made yet");
+        free(b);
+        h_li_set("job", 0);
+        chk(LOGW("a line while Canon is busy\n", 3000), "Canon idle: the log made, the waiting lines in it");
+        b = get_file(LOG_PATH, &n);
+        chk(b && strstr(b, "WindyFilm ") && count_str(b, "a line while Canon is busy\n") == 1,
+            "the boot line, the waiting line once");
+        free(b);
+        chk(LOGW("log: card refused ", 3000) && strstr(log_line("log: card refused"), "(first: busy rc 1, job 1)"),
+            "refusal logged: '%s'", log_line("log: card refused"));
+        mod_deinit();
+        return;
+    }
+    /* appended across boots: the old lines stay, the boot line follows them */
+    put_file(LOG_PATH, "old boot line\n", 14);
+    put_file("ML/LOGS/WINDYFLM.OLD", "older\n", 6);
+    mod_init(0);
+    chk(LOGW("WindyFilm ", 5000), "boot line written");
+    b = get_file(LOG_PATH, &n);
+    chk(b && !strncmp(b, "old boot line\n", 14) && strstr(b, "WindyFilm "), "appended to the old log (%ld B)", n);
+    free(b);
+    b = get_file("ML/LOGS/WINDYFLM.OLD", &n);
+    chk(b && !strcmp(b, "older\n"), "a small log is not rotated (WINDYFLM.OLD untouched)");
+    free(b);
+    const char *l = log_line("WindyFilm ");
+    int s = -1, t = -1;
+    char c = 0;
+    chk(sscanf(l, "%d.%d %c", &s, &t, &c) == 3 && s >= 0 && t >= 0 && t <= 9 && c == 'W', "time stamp '%.20s'", l);
+    usleep(500000);
+
+    /* card busy: the lines wait in the ring, the file is not removed or touched; then the refusal is logged */
+    long before;
+    free(get_file(LOG_PATH, &before));
+    log_at = before;
+    snprintf(h_fio_busy, sizeof h_fio_busy, "%s", LOG_PATH);
+    int creates = h_fio_creates;
+    for (int i = 0; i < 30; i++)
+        wf_log("busy test line %d", i);
+    usleep(700000);
+    free(get_file(LOG_PATH, &n));
+    chk(n == before && h_fio_creates == creates, "busy card: log untouched, never re-created (%ld B, was %ld)", n, before);
+    h_fio_busy[0] = 0;
+    chk(LOGW("busy test line 29\n", 3000), "card back: the waiting lines written");
+    b = get_file(LOG_PATH, &n);
+    int ok = b != 0;
+    const char *p = b ? b + log_at : 0;
+    for (int i = 0; i < 30 && ok; i++) {
+        char k[32];
+        snprintf(k, sizeof k, "busy test line %d\n", i);
+        const char *q = strstr(p, k);
+        ok = q != 0;
+        if (q) p = q;
+    }
+    chk(ok && count_str(b + log_at, "busy test line 7\n") == 1, "all 30 lines once, in order");
+    chk(b && !strncmp(b, "old boot line\n", 14), "the old lines still there");
+    free(b);
+    chk(LOGW("log: card refused ", 3000) && strstr(log_line("log: card refused"), "(first: open rc 0, job "),
+        "refusal logged: '%s'", log_line("log: card refused"));
+
+    /* ring full: lines dropped and counted, the first ones kept */
+    usleep(300000);
+    free(get_file(LOG_PATH, &before));
+    log_at = before;
+    snprintf(h_fio_busy, sizeof h_fio_busy, "%s", LOG_PATH);
+    for (int i = 0; i < 300; i++)
+        wf_log("ring line %03d .................................................................................", i);
+    usleep(300000);
+    h_fio_busy[0] = 0;
+    chk(LOGW("lines lost so far", 3000), "ring full: '%s'", log_line("lines lost so far"));
+    int lost = log_num("lines lost so far");
+    b = get_file(LOG_PATH, &n);
+    int kept = b ? count_str(b + log_at, "ring line ") : 0;
+    chk(b && strstr(b + log_at, "ring line 000 ") && !strstr(b + log_at, "ring line 299 ") && kept > 100 && lost > 0 &&
+        kept + lost >= 300, "ring full: %d kept (the first ones), %d counted lost", kept, lost);
+    free(b);
+
+    /* a short write: the rest follows, no line twice */
+    usleep(300000);
+    free(get_file(LOG_PATH, &before));
+    log_at = before;
+    snprintf(h_fio_wpath, sizeof h_fio_wpath, "%s", LOG_PATH);
+    h_fio_wmax = 20;
+    wf_log("short write line A, long enough for the short write to cut it");
+    wf_log("short write line B");
+    chk(LOGW("short write line B\n", 3000), "short write: the rest followed");
+    b = get_file(LOG_PATH, &n);
+    chk(b && count_str(b + log_at, "short write line A, long enough for the short write to cut it\n") == 1 &&
+        count_str(b + log_at, "short write line B\n") == 1, "short write: each line once, whole");
+    free(b);
+    chk(LOGW("log: card refused 1 writes", 3000) && strstr(log_line("log: card refused"), "first: write rc 20"),
+        "short write logged: '%s'", log_line("log: card refused"));
+    h_fio_wpath[0] = 0;
+    mod_deinit();
+}
+
 /* ------------------------------------------------------------------ main */
 int main(int argc, char **argv)
 {
@@ -1413,10 +1911,17 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "PACK")) t_pack(cs, argc > 3 ? argv[3] : 0);
     else if (!strcmp(mode, "LIGHT")) t_light();
     else if (!strcmp(mode, "PRINT")) t_print();
+    else if (!strcmp(mode, "LOG")) t_log(cs);
 #ifdef WF_BUILD_5D2
     else if (!strcmp(mode, "5D2")) t_5d2();
+#else
+    else if (!strcmp(mode, "PROBE")) t_probe(cs);
 #endif
     else { fprintf(stderr, "unknown mode %s for %s\n", mode, CAM_NAME); return 2; }
+    chk(h_fio_dup == 0, "no card file created over an existing name (%d times: two entries of one name on the camera)",
+        h_fio_dup);
+    chk(h_fio_dir_busy == 0, "no card file created / removed / renamed while Canon saved a shot (%d times)",
+        h_fio_dir_busy);
     if (nfail)
         log_tail(25);
     printf("RESULT %s %s %s: %d pass, %d fail\n", CAM_NAME, mode, cs, npass, nfail);

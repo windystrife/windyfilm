@@ -8,10 +8,10 @@ WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Bản c�
 `filmroll.mo` của tác giả khác. WindyFilm không dùng, không nạp và không chứa bất cứ thứ gì của module đó.
 **Đừng bật hai module cùng lúc.**
 
-> **Trạng thái 14/11/2026: module đã build được cho cả EOS M và 5D2, nhưng chưa chạy trên máy thật và chưa có thẻ
-> cài đặt.**
+> **Trạng thái 14/11/2026: đã có thẻ thử `F:\MagicLatern\EOSM_WindyFilm` và `F:\MagicLatern\5D2_WindyFilm`, nhưng
+> module chưa chạy trên máy thật.**
 >
-> - Test host: EOS M 386 phép kiểm tra, 5D2 373 phép, đều 0 lỗi.
+> - Test host: EOS M 449 phép kiểm tra (có probe RAW P0 và hai đường cong Film 1, Neutral), 5D2 403 phép, đều 0 lỗi.
 > - Cổng kiểm tra nguồn gốc: PASS.
 >
 > Tình trạng mới nhất ở `docs/HANDOFF-QWEN.md`.
@@ -36,10 +36,19 @@ WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Bản c�
   - Mist (chỉ EOS M);
   - Strength 30 / 100 / 125 %.
 - **Đầu ra log:** S-Log3, V-Log, LogC3, Canon Log 2, Canon Log 3, dạng phẳng hoặc **+ LUT** (cube trên thẻ). Có LUT EI.
+- **Input curve** (cho Log + LUT và các lon Film LUT): sRGB (mặc định), **Canon Film 1** hoặc **Canon Neutral**.
+  - Mỗi lựa chọn Canon đảo đúng đường cong Picture Style đo trên EOS M từ các cặp RAW+L của chủ dự án, thay cho sRGB.
+    Xám 18 % ra đúng chỗ, và phần sáng trên trắng (Film 1 tới 2,07, Neutral tới 1,70) đi vào đoạn log của đường cong.
+  - Canon Film 1 cần file style Film 1 nạp trong User Def. 1, Contrast −2. Canon Neutral cần style Neutral có sẵn,
+    Contrast 0. Sai style, User Def. 1 dựa trên style có sẵn, hay Contrast khác: module tự đọc sRGB và menu báo lý
+    do. Log phẳng và phim trong danh mục vẫn đọc sRGB.
 - **Film LUT can:** chọn một lon là đặt luôn V-Log + LUT với cube của lon đó.
 - **Xem trước trên LiveView** bằng cùng nhân màu, kèm xem trước độ phơi sáng.
 - **EXIF:** UserComment ghi phim, kiểu in, Light, hiệu ứng và EV của từng ảnh.
 - **Nhật ký:** `ML/LOGS/WINDYFLM.LOG`.
+- **RAW probe (P0, chỉ EOS M, để thử):** menu Shoot > WindyFilm > RAW probe. Probe ghi vào log và
+  `ML/LOGS/WFPROBE.BIN` địa chỉ RAW / SSRAW của Canon lúc chụp, không đổi ảnh, và tự tắt mỗi lần bật máy. Đây là bước
+  đầu của đường RAW (`docs/DESIGN.md` 3.2).
 
 ## Giao diện chọn phim
 
@@ -68,14 +77,17 @@ Mở từ menu **WindyFilm > Browser**, hoặc bằng phím tắt: EOS M giữ l
 ## Cài lên thẻ
 
 Thẻ WindyFilm nằm ở thư mục riêng (`EOSM_WindyFilm`, `5D2_WindyFilm`), không đụng vào các thẻ Film Roll đang dùng.
+Thẻ được tạo bằng `tools/mk_card.sh` (PLAYBOOK mục 7).
 
 ```
 ML/modules/windyflm.mo
-ML/DATA/WFFILMS.DAT    bảng màu của các phim (Scan / Cine / Paper)
-ML/DATA/WFCANS.DAT     hình lon phim
-ML/DATA/WFFONTS.DAT    font chữ nhỏ của giao diện
-ML/LUTS/               cube Film LUT
-README_WINDYFILM.txt, README_FILMLUT.txt, SPEKTRAFILM_LICENSE.txt, ATTRIBUTIONS.txt
+ML/data/WFFILMS.DAT    bảng màu của các phim (Scan / Cine / Paper)
+ML/data/WFCANS.DAT     hình lon phim
+ML/data/WFFONTS.DAT    font chữ nhỏ của giao diện
+ML/data/*.CUB          cube Film LUT
+ML/SETTINGS/WINDYFLM.EN  bật module lúc khởi động
+README_WINDYFILM.txt, README_FILMLUT.txt, CHANGELOG_FILMLUT.txt, SPEKTRAFILM_LICENSE.txt,
+UBUNTU_FONT_LICENCE.txt, ATTRIBUTIONS.txt, LICENSE_WINDYFILM.txt, MD5SUMS.txt
 ```
 
 - `autoexec.bin` và file `.sym` của máy (`EOSM_202.sym` / `5D2_212.sym`) phải luôn đi đúng cặp. Giữ nguyên cặp thẻ

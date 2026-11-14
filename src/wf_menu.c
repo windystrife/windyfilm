@@ -11,6 +11,7 @@
  *   input=jpeg       reserved for a RAW input path (docs/DESIGN.md 3.1); "jpeg" is the only value, no menu entry
  *   film=<id>        loaded film / Film LUT can id (0 none)          output=film|log|lut|off
  *   curve=slog3|vlog|logc3|clog2|clog3                                 flut=technical|<cube code>   lutei=<1/3 EV>
+ *   incurve=srgb|film1|neutral   how Log + LUT reads the JPEG (film1 / neutral: only when the build has that curve)
  *   print=scan|cine|paper   light=auto|day|cloudy|tungsten   strength=subtle|normal|strong
  *   grain=off|fine|normal|strong   halation=off|halation|bloom|spk|spkbloom   mist=off|w8|w4|w2|w1|b8|b4|b2|b1
  *   preview=off|on|fast   exposure=camera|smooth   exptrim=<1/8 EV>   exif=on|off
@@ -43,6 +44,7 @@ volatile int wf_light = WF_LIGHT_AUTO;
 volatile int wf_curve = WF_CURVE_VLOG;
 volatile int wf_flut;                             /* 0 Technical (the user's own <LOG>.CUB) */
 volatile int wf_lut_ei;                           /* 1/3 EV, WF_LL_EI_MIN..WF_LL_EI_MAX */
+volatile int wf_incurve;                          /* WF_INC_*: how Log + LUT reads the JPEG (wf_incurve_t) */
 volatile int wf_strength = 1;                     /* 30 / 100 / 125 % */
 volatile int wf_exif_off;
 volatile int wf_cfg_dirty;
@@ -62,6 +64,62 @@ int wf_lut_ei_t(void)
 {
     int v = wf_lut_ei;
     return v >= WF_LL_EI_MIN && v <= WF_LL_EI_MAX ? v : 0;
+}
+
+/* Picture Style (ML's PROP_PICTURE_STYLE handler keeps lens_info.raw_picstyle; 0 until the property was seen).
+ * Each Canon curve is measured under one style and one Contrast setting (raw-film-engine, makernote PSInfo):
+ *   Film 1: User Def. 1 holding the loaded style file (base PC 1), Contrast -2;
+ *   Neutral: the built-in Neutral, Contrast 0.
+ * Under anything else the JPEG is read as sRGB, and wf_ll_poll reloads the tables when it changes. The slot alone is
+ * not enough: User Def. 1 can be based on a built-in style (the owner's EOS M had base Auto on 2026-11-14), so its base
+ * comes from PROP_PICSTYLE_OF_USERDEF1 (a loaded file is below 0x80, as ML's picstyle.c tells them apart). */
+#define WF_PS_USER1   0x21                        /* User Def. 1 (ML picstyle.c USER1_ID): holds the Film 1 style */
+#define WF_PS_NEUTRAL 0x84                        /* PROP_PICTURE_STYLE value of Neutral */
+static const uint8_t wf_inc_ps[WF_INC_N] = { 0, WF_PS_USER1, WF_PS_NEUTRAL };
+static const int8_t wf_inc_con[WF_INC_N] = { 0, -2, 0 };   /* Contrast of the measurement */
+typedef char wf_inc_check[WF_INC_N == WF_LL_NINC ? 1 : -1];
+#define WF_PROP_PS_OF_USER1 0x0206000a            /* ML property.h PROP_PICSTYLE_OF_USERDEF1, DIGIC 4 / 5 (both bodies);
+                                                     not visible to module builds (its block needs CONFIG_DIGIC_45) */
+extern void prop_add_handler(uint32_t property, void *handler);
+extern int picstyle_get_current_contrast(void);   /* ML core: the active style's Contrast, -10 when not known */
+static volatile int wf_ps_base = -1;              /* PROP_PICSTYLE_OF_USERDEF1, -1 = not reported yet */
+static void wf_ps_base_prop(unsigned property, void *priv, uint32_t *buf, unsigned len)
+{
+    (void)property; (void)priv;
+    if (buf && len >= 4)
+        wf_ps_base = (int)(buf[0] & 0xff);
+}
+int wf_style_raw(void) { return lens_info.raw_picstyle; }
+int wf_job_state(void) { return (int)lens_info.job_state; }
+int wf_style_base(void) { return wf_ps_base; }
+int wf_style_con(void) { int c = picstyle_get_current_contrast(); return c >= -4 && c <= 4 ? c : -10; }
+/* why input curve `inc` is not usable under the camera's Picture Style: WF_PSW_OK, or the first thing that differs.
+ * Not reported yet (style 0, base -1, Contrast -10) counts as fitting. */
+int wf_style_why(int inc)
+{
+    int s = lens_info.raw_picstyle, c = wf_style_con();
+    if (inc <= 0 || inc >= WF_INC_N || s == 0)
+        return WF_PSW_OK;
+    if (s != wf_inc_ps[inc])
+        return WF_PSW_STYLE;
+    if (s == WF_PS_USER1 && wf_ps_base >= 0x80)
+        return WF_PSW_BASE;
+    if (c != -10 && c != wf_inc_con[inc])
+        return WF_PSW_CONTRAST;
+    return WF_PSW_OK;
+}
+int wf_style_ok(int inc) { return wf_style_why(inc) == WF_PSW_OK; }
+int wf_style_con_of(int inc) { return wf_inc_con[inc > 0 && inc < WF_INC_N ? inc : 0]; }
+extern const char *picstyle_get_current_name(void);   /* ML core (picstyle.c), exported to modules: Canon's names stay
+                                                         in the core, the module holds none (provenance gate) */
+
+/* the user's choice when its curve is built in, else sRGB (the menu value) */
+static int wf_inc_chosen(void) { int k = wf_incurve; return k > 0 && k < WF_INC_N && wf_ll_curve_have(k) ? k : WF_INC_SRGB; }
+
+int wf_incurve_t(void)
+{
+    int k = wf_inc_chosen();
+    return wf_style_ok(k) ? k : WF_INC_SRGB;
 }
 
 static const int wf_spct[WF_NSTRENGTH] = { 30, 100, 125 };
@@ -106,6 +164,8 @@ static const char *wf_out_menu[WF_NOUT] = { "Film", "Log", "Log + LUT", "Off" };
 static const char *wf_lei_name[WF_LL_EI_MAX - WF_LL_EI_MIN + 1] = { "-1 EV", "-2/3 EV", "-1/3 EV", "0", "+1/3 EV", "+2/3 EV",
                                                                     "+1 EV", "+1 1/3 EV", "+1 2/3 EV", "+2 EV" };
 typedef char wf_lei_check[sizeof wf_lei_name / sizeof *wf_lei_name == 10 && WF_LL_EI_MIN == -3 ? 1 : -1];
+static const char *wf_inc_name[WF_INC_N] = { "sRGB", "Canon Film 1", "Canon Neutral" };
+static const char *const wf_inc_key[WF_INC_N] = { "srgb", "film1", "neutral" };
 
 static const char *wf_pick(const char *const *t, int n, int v) { return t[v >= 0 && v < n ? v : 0]; }
 static int wf_cur(void) { int c = wf_curve; return c >= 1 && c <= WF_NCURVE ? c : WF_CURVE_VLOG; }
@@ -524,6 +584,8 @@ void wf_cfg_load(void)
             x = wf_cfg_int(&v, &ok);
             if (ok && x >= WF_LL_EI_MIN && x <= WF_LL_EI_MAX)
                 wf_lut_ei = x;
+        } else if ((v = wf_cfg_val(l, "incurve"))) {
+            wf_incurve = wf_cfg_word(v, wf_inc_key, WF_INC_N, WF_INC_SRGB);
         } else if ((v = wf_cfg_val(l, "print"))) {
             wf_print = wf_cfg_word(v, wf_print_key, WF_NPRINTS, WF_PRINT_SCAN);
         } else if ((v = wf_cfg_val(l, "light"))) {
@@ -576,10 +638,11 @@ static int wf_cfg_save(void)
     char b[WF_CFG_MAX];
     int lei = wf_lut_ei_t(), fl = wf_flut > 0 && wf_flut < WF_FLUT_N ? wf_flut : 0;
     int n = snprintf(b, sizeof b,
-                     "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nprint=%s\nlight=%s\nstrength=%s\n"
-                     "grain=%s\nhalation=%s\nmist=%s\npreview=%s\nexposure=%s\nexptrim=%d\nexif=%s\n",
+                     "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
+                     "strength=%s\ngrain=%s\nhalation=%s\nmist=%s\npreview=%s\nexposure=%s\nexptrim=%d\nexif=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
-                     fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_print_key, WF_NPRINTS, wf_print),
+                     fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
+                     wf_pick(wf_print_key, WF_NPRINTS, wf_print),
                      wf_pick(wf_light_key, WF_NLIGHT, wf_light), wf_pick(wf_strength_key, WF_NSTRENGTH, wf_strength),
                      wf_pick(wf_grain_key, WF_GRAIN_MAX + 1, wf_grain), wf_pick(wf_halo_key, WF_HALO_MAX + 1, wf_halo),
                      wf_pick(wf_mist_key, WF_MIST_MAX + 1, wf_mist), wf_pick(wf_pv_key, 3, wf_pv_mode),
@@ -589,12 +652,13 @@ static int wf_cfg_save(void)
         n += snprintf(b + n, sizeof b - n, "userwb=%d,%d,%d,%d\n", wf_wb_mode, wf_wb_kelvin, wf_wb_gm, wf_wb_ba);
     if (n <= 0 || n >= (int)sizeof b)
         return 1;
-    FILE *f = FIO_CreateFile(WF_CFG);
+    struct wf_fe e;
+    FILE *f = wf_fcreate(WF_CFG, &e);            /* only while Canon is idle, never over the old file (wf_fio.h) */
     int ok = f && FIO_WriteFile(f, b, n) == n;
     if (f)
         FIO_CloseFile(f);
     if (!ok) {
-        wf_cfg_t = get_ms_clock();               /* card busy: again in 1.5 s */
+        wf_cfg_t = get_ms_clock();               /* Canon / the card busy: again in 1.5 s */
         wf_cfg_dirty = 1;
     }
     return ok;
@@ -670,6 +734,8 @@ void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev)
         n += snprintf(b + n, sizeof b - n, " | %s", wf_out_name(WF_OUT_LLUT, lk->curve));
     if (lk->output == WF_OUT_LLUT && lk->lei && lk->lei >= WF_LL_EI_MIN && lk->lei <= WF_LL_EI_MAX && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, " | LUT EI %s", wf_lei_name[lk->lei - WF_LL_EI_MIN]);
+    if (lk->output == WF_OUT_LLUT && lk->incurve > WF_INC_SRGB && lk->incurve < WF_INC_N && n < (int)sizeof b)
+        n += snprintf(b + n, sizeof b - n, " | In %s", wf_inc_name[lk->incurve]);
     if (lk->light && lk->light < WF_NLIGHT && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, " | Light %s", wf_light_name[lk->light]);
     if (g > 0 && g <= WF_GRAIN_MAX && n < (int)sizeof b)
@@ -912,6 +978,20 @@ static MENU_SELECT_FUNC(wf_out_select)
 static MENU_SELECT_FUNC(wf_curve_select) { (void)priv; wf_step_int(&wf_curve, 1, WF_NCURVE, delta); }
 static MENU_SELECT_FUNC(wf_flut_select) { (void)priv; wf_step_int(&wf_flut, 0, WF_FLUT_N - 1, delta); }
 static MENU_SELECT_FUNC(wf_lei_select) { (void)priv; wf_step_int(&wf_lut_ei, WF_LL_EI_MIN, WF_LL_EI_MAX, delta); }
+static MENU_SELECT_FUNC(wf_inc_select)
+{
+    (void)priv;
+    int k = wf_inc_chosen();
+    for (int i = 0; i < WF_INC_N; i++) {          /* the next curve built into this build (sRGB always is), wrapping */
+        k = (k + (delta < 0 ? WF_INC_N - 1 : 1)) % WF_INC_N;
+        if (wf_ll_curve_have(k))
+            break;
+    }
+    if (k != wf_incurve) {
+        wf_incurve = k;
+        wf_dirty();
+    }
+}
 static MENU_SELECT_FUNC(wf_light_select) { (void)priv; wf_row_step(WF_ROW_LIGHT, delta); }
 static MENU_SELECT_FUNC(wf_print_select) { (void)priv; wf_row_step(WF_ROW_PRINT, delta); }
 static MENU_SELECT_FUNC(wf_grain_select) { (void)priv; wf_row_step(WF_ROW_GRAIN, delta); }
@@ -991,6 +1071,33 @@ static MENU_UPDATE_FUNC(wf_lut_update)
         MENU_SET_WARNING(MENU_WARN_INFO, "Used by the Log + LUT output (and the Film LUT cans).");
     else if (WF_FLUT_VLONLY(wf_flut) && wf_cur() != WF_CURVE_VLOG)
         MENU_SET_WARNING(MENU_WARN_ADVICE, "%s is a V-Log cube: set Log curve to V-Log.", wf_flut_name[wf_flut]);
+}
+
+static MENU_UPDATE_FUNC(wf_inc_update)
+{
+    int k = wf_inc_chosen();
+    MENU_SET_VALUE("%s", wf_inc_name[k]);
+    if (!wf_ll_curve_have(WF_INC_FILM1) && !wf_ll_curve_have(WF_INC_NEUTRAL))
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "This build has no Canon curve table: sRGB only.");
+    else if (!wf_yuv_active())
+        WF_NOT_ACTIVE();
+    else if (wf_out != WF_OUT_LLUT)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Used by the Log + LUT output (and the Film LUT cans).");
+    else if (k && wf_style_why(k) == WF_PSW_STYLE)
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Picture Style is %s, not %s: read as sRGB.", picstyle_get_current_name(),
+                         k == WF_INC_FILM1 ? "User Def. 1" : "Neutral");
+    else if (k && wf_style_why(k) == WF_PSW_BASE)
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "User Def. 1 is a built-in style, not the Film 1 file: read as sRGB.");
+    else if (k && wf_style_why(k) == WF_PSW_CONTRAST)
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Style contrast is %d, measured at %d: read as sRGB.", wf_style_con(),
+                         wf_style_con_of(k));
+    else if (k == WF_INC_FILM1)
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Needs Film 1 loaded in User Def. 1, contrast -2 (now: %s).",
+                         picstyle_get_current_name());
+    else if (k == WF_INC_NEUTRAL)
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Needs Picture Style Neutral, contrast 0 (now: %s).", picstyle_get_current_name());
+    else
+        MENU_SET_WARNING(MENU_WARN_INFO, "The JPEG is read as sRGB (any Picture Style).");
 }
 
 static MENU_UPDATE_FUNC(wf_row_update)
@@ -1076,6 +1183,23 @@ static MENU_UPDATE_FUNC(wf_status_update)
     MENU_SET_WARNING(MENU_WARN_INFO, "WindyFilm by WindyStrife, %s. Log: ML/LOGS/WINDYFLM.LOG.", wf_cam_name());
 }
 
+#if WF_PRB_CAN
+static const char *wf_prb_name[WF_PRB_N] = { "Off", "On", "On + ROM call" };
+static MENU_UPDATE_FUNC(wf_prb_update)
+{
+    if (!wf_prb_can())
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Not on this camera / firmware.");
+    else if (wf_probe_mode)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Shoot RAW+L (single and burst). Log + ML/LOGS/WFPROBE.BIN.");
+    else
+        MENU_SET_WARNING(MENU_WARN_INFO, "Test only, off at every boot. The photo is never changed.");
+}
+#define WF_PRB_ENTRY { .name = "RAW probe", .priv = &wf_probe_mode, .max = WF_PRB_N - 1, .choices = wf_prb_name, \
+                       .update = wf_prb_update, .help = "Test: logs where Canon keeps the RAW at the shot." },
+#else
+#define WF_PRB_ENTRY
+#endif
+
 #define WF_ROWE(nm, row, sel, hlp) { .name = nm, .priv = (void *)(intptr_t)((row) + 1), .select = sel, \
                                      .update = wf_row_update, .help = hlp, .icon_type = IT_DICE }
 static struct menu_entry wf_menu[] = {
@@ -1098,6 +1222,9 @@ static struct menu_entry wf_menu[] = {
             { .name = "LUT EI", .priv = (void *)&wf_lut_ei, .min = WF_LL_EI_MIN, .max = WF_LL_EI_MAX,
               .choices = wf_lei_name, .select = wf_lei_select,
               .help = "Extra exposure into Log + LUT, like a log EI." },
+            { .name = "Input curve", .priv = (void *)&wf_incurve, .max = WF_INC_N - 1, .choices = wf_inc_name,
+              .select = wf_inc_select, .update = wf_inc_update,
+              .help = "How Log + LUT reads the JPEG: sRGB, or a Canon style undone (Film 1, Neutral)." },
             WF_ROWE("Light", WF_ROW_LIGHT, wf_light_select, "White balance: Auto (yours), the stock's Day, Cloudy, Tungsten."),
             WF_ROWE("Print", WF_ROW_PRINT, wf_print_select, "Scan, cine print or paper print of the loaded film."),
             WF_ROWE("Grain", WF_ROW_GRAIN, wf_grain_select, "Film grain at the shot (films and Log + LUT)."),
@@ -1111,6 +1238,7 @@ static struct menu_entry wf_menu[] = {
               .help = "Smooth: steady LiveView; the shot's exposure is added digitally." },
             { .name = "EXIF info", .select = wf_exif_select, .update = wf_exif_update,
               .help = "Writes the shot's film and effects into the JPEG's EXIF comment." },
+            WF_PRB_ENTRY
             { .name = "Status", .update = wf_status_update, .icon_type = IT_ACTION,
               .help = "Camera, hooks and film pack state." },
             MENU_EOL
@@ -1125,6 +1253,7 @@ void wf_menu_init(void)
     if (!wf_cam_ok)
         wf_wb_saved = 0;                          /* unsupported body: never touch its white balance */
     wf_light_req = 1;
+    prop_add_handler(WF_PROP_PS_OF_USER1, (void *)wf_ps_base_prop);   /* Canon reports the value at once */
     menu_add("Shoot", wf_menu, COUNT(wf_menu));
     wf_menu_added = 1;
 }

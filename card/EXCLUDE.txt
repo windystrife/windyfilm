@@ -1,0 +1,12 @@
+# Files of the old module (and caches) that tools/mk_card.sh leaves out of a WindyFilm card.
+# One path pattern per line, relative to the card root, matched case-blind (bash globs).
+ML/modules/filmroll.mo
+ML/data/FILMCAN.DAT
+ML/data/FILMROLLN.DAT
+ML/data/WSFILMS.DAT
+ML/data/WSCANS.DAT
+ML/data/*.FRT
+ML/fonts/FILM*.RBF
+ML/FILMROLL.TXT
+ML/SETTINGS/*
+ML/LOGS/*

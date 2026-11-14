@@ -19,9 +19,13 @@ Checks:
      status text docs/DESIGN.md 3 prescribes and the card folder names of the .sym paths. docs/ is not scanned.
   4. byte-equal: no file under src/, tools/, films/, cans/ is byte-equal to a DER file of the phase 1 tree (--der,
      default /root/ml/wf_src; skipped with a note when that tree is not there).
+  5. card directory calls: FIO_CreateFile, FIO_CreateFileOrAppend, FIO_RemoveFile and FIO_RenameFile appear in src/
+     (comments and strings aside) only in src/wf_main.c: in its extern lines and inside wf_fremove / wf_fcreate /
+     wf_frename (src/wf_fio.h: Canon makes a second entry of the same name when a file is created over one; those
+     three wait for an idle camera and check the name is gone first).
 The third-party module is read only here, as deny input; its strings are extracted at run time and never stored.
 The deny words are assembled from pieces so this file and the allowlist (both skipped by check 3) do not hold them."""
-import hashlib, os, struct, sys
+import hashlib, os, re, struct, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -38,6 +42,9 @@ SCAN_FILES = ("build.sh", "test.sh")
 EQUAL_DIRS = ("src", "tools", "films", "cans")
 SELF = {os.path.join("tools", "provenance_gate.py"), os.path.join("tools", "gate_allow.txt")}
 MINSTR = 6
+FIO_DIR = ("FIO_CreateFile", "FIO_CreateFileOrAppend", "FIO_RemoveFile", "FIO_RenameFile")
+FIO_HOME = os.path.join("src", "wf_main.c")
+FIO_FUNCS = ("wf_fremove", "wf_fcreate", "wf_frename")
 WIN = 32
 WIN_FILL = 28                       # a window with one byte value >= this many times is a run of a single byte
 
@@ -110,6 +117,56 @@ def walk(root, dirs, files):
         p = os.path.join(root, f)
         if os.path.isfile(p):
             yield f, p
+
+
+def uncomment(t):
+    """C / asm text with comments and string / char literals blanked (newlines kept)"""
+    out, i, n = [], 0, len(t)
+    blank = lambda s: re.sub(r"[^\n]", " ", s)
+    while i < n:
+        if t.startswith("/*", i):
+            j = t.find("*/", i + 2)
+            j = n if j < 0 else j + 2
+            out.append(blank(t[i:j]))
+        elif t.startswith("//", i):
+            j = t.find("\n", i)
+            j = n if j < 0 else j
+            out.append(blank(t[i:j]))
+        elif t[i] in "\"'":
+            j = i + 1
+            while j < n and t[j] != t[i] and t[j] != "\n":
+                j += 2 if t[j] == "\\" else 1
+            j = min(j + 1, n)
+            out.append(blank(t[i:j]))
+        else:
+            j = i + 1
+            out.append(t[i])
+        i = j
+    return "".join(out)
+
+
+def fio_calls(repo):
+    """check 5: (allowed, [(rel, line, name)] outside wf_main.c's extern lines and wf_fremove / wf_fcreate / wf_frename)"""
+    call = re.compile(r"\b(%s)\b" % "|".join(FIO_DIR))
+    head = re.compile(r"^[A-Za-z_][^;{}]*\b(%s)\s*\([^;{}]*\)\s*\{" % "|".join(FIO_FUNCS), re.M)
+    close = re.compile(r"^\}", re.M)
+    allowed, bad = 0, []
+    for rel, path in walk(repo, ("src",), ()):
+        if not rel.endswith((".c", ".h", ".S")):
+            continue
+        t = uncomment(open(path, encoding="utf-8", errors="replace").read())
+        spans = []
+        if rel == FIO_HOME:
+            for m in head.finditer(t):
+                e = close.search(t, m.end())
+                spans.append((m.start(), e.end() if e else len(t)))
+        for m in call.finditer(t):
+            bol = t.rfind("\n", 0, m.start()) + 1
+            if rel == FIO_HOME and (t.startswith("extern", bol) or any(a <= m.start() < b for a, b in spans)):
+                allowed += 1
+            else:
+                bad.append((rel, t.count("\n", 0, m.start()) + 1, m.group(1)))
+    return allowed, bad
 
 
 def main(argv):
@@ -213,12 +270,18 @@ def main(argv):
         der_note = "%d DER files hashed, 0 equal" % len(der) if not nequal else "%d equal" % nequal
     else:
         der_note = "DER tree not found: skipped"
+    # 5. card directory calls only in wf_main.c's wf_fremove / wf_fcreate / wf_frename
+    fio_ok, fio_bad = fio_calls(a["--repo"])
+    for rel, ln, nm in fio_bad:
+        fails.append("%s:%d calls %s: card files are made / removed / renamed only through wf_fcreate / wf_fremove / "
+                     "wf_frename (src/wf_fio.h)" % (rel, ln, nm))
     for f in fails[:int(os.environ.get("WF_GATE_SHOW", "40"))]:
         print("gate: FAIL: " + f)
     print("gate: %s: strings %d checked (%d generic: %d allowlist, the rest core names / one-char runs) -> %d found; "
-          "windows -> %d equal (%d runs of a single byte ignored); deny words: %d files; byte-equal: %s"
+          "windows -> %d equal (%d runs of a single byte ignored); deny words: %d files; byte-equal: %s; "
+          "card directory calls: %d in wf_main.c's wf_fio.h functions / externs, %d elsewhere"
           % ("PASS" if not fails else "FAIL", len(astr), len(generic), len(allow & astr), nstr, nwin, nlow, nfiles,
-             der_note))
+             der_note, fio_ok, len(fio_bad)))
     return 1 if fails else 0
 
 

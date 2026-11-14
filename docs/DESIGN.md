@@ -87,8 +87,9 @@ shot: Canon YUV conversion site ─ hook (patch_hook_function) ─ gate ─ sema
 - **Preview:** LiveView display filter, the same kernels on the preview tables. Preview exposure (`wf_expsim`) needs ML
   core patch 0004. It is already in the EOS M card core; on the 5D2, check and gate.
 - **EXIF:** UserComment `WindyFilm <film> <print> <light> G<n> H<n> M<n> S<n> EV<x>` (core decides the exact text).
-- **Log:** `ML/LOGS/WINDYFLM.LOG`: boot line (camera, ROM check, hook result, pack and can status), and per shot: film,
-  variant, timings.
+- **Log:** `ML/LOGS/WINDYFLM.LOG`, appended across boots (over 512 KB at boot: kept as `WINDYFLM.OLD`): boot line
+  (camera, ROM check, hook result, pack and can status), and per shot: film, variant, timings. Lines wait in a ring
+  while the card is busy; lost lines are counted in the log.
 - **Config:** `ML/SETTINGS/WINDYFLM.CFG`, plain `key=value` lines: film id, print, light, grain, halation, mist,
   strength, output, curve, Film LUT, LUT EI, preview, preview exposure, EXIF.
 - **Coexistence:** do not load together with `filmroll.mo`. Symbols: everything except ML's `__module_*_windyflm` is
@@ -151,29 +152,64 @@ read for ideas.
   - linear is scene-linear Rec.709 with 18 % grey = 0.18, and code 255 maps to at most 4.0.
 
   One curve serves all three channels. Columns `code,r,g,b` are accepted if the pairs show a per-channel curve.
-- **Where it plugs in:** the decode tables are generated, so there is no runtime change.
-  - `tools/mk_logtab.py`, `wf_dec[1024]` (Q14). `mk_logasm_tab.py` reads `wf_logtab.h`, so the ARM Log kernel's padded
-    table follows automatically.
-  - `tools/mk_loglut_tab.py`, `wf_ll_dec[1022]` (Q24): the Log + LUT composite.
-  - `tools/mk_exptab.py` (preview exposure) keeps the sRGB EOTF: it only estimates brightness.
-- **Headroom (the one real change).** Today the decode tables end at 1.0, and the encode tables `wf_lenc` /
-  `wf_ll_enc` cover linear 0..1.0; an index >= 4096 is clamped. The ARM kernel relies on `wf_dec <= 16384` and on
-  `max(wf_lenc) <= 65279`, and the generator asserts both. A Canon inverse puts code 255 above 1.0 (about 1.6 in the
-  simulation). Fold the scale into the tables:
-  - decode stores linear / K, with K = the curve's value at code 255 rounded up to a power of 2 (K <= 4);
-  - encode is generated as `enc(i) = curve(i / 4096 * K)`.
+- **Implemented (Log + LUT and the cans), 14 Nov 2026.** The first curve is `luts/canon_curve/EOSM_Film1.csv`,
+  measured by the raw-film-engine session from the owner's RAW+L pairs:
+  - EOS M, Picture Style **Film 1** (User Def. 1, a third-party style file), not Standard;
+  - one curve for R, G and B; 18 % grey = 0.18 at code 139 (an assumed scale); white clips at code 242 with linear
+    2.07.
 
-  All Q formats and kernel identities stay. The encode step near black grows K times. The curves are linear down
-  there and the tables interpolate, so check it against `logchk` and the host LOG tests.
-- **Picture Style.** The tables are built for one Picture Style. If the camera is set to another style, log
-  `curve: style <n> != <built>` once per boot and keep going. This needs a way to read the style through the card
-  .sym; check that both cameras have one. A table per style comes later, only if the owner shoots
-  several styles.
+  Because the curve fits that one style only, it is a menu choice, not a replacement:
+  - menu "Input curve" = sRGB (default) / Canon Film 1 / Canon Neutral, config key `incurve=srgb|film1|neutral`;
+  - curve slots: slot 1 = Film 1 (`luts/canon_curve/EOSM_Film1.csv`), slot 2 = Neutral
+    (`luts/canon_curve/EOSM_Neutral.csv`, prepared 14 Nov; it waits for raw-film-engine's measured curve);
+  - `build.sh` passes one CSV per slot (or `-`) to `tools/mk_loglut_tab.py`, which emits `wf_ll_dec_c<k>[1022]` (Q24)
+    and `WF_LL_HAVE_C<k> 1`. The env vars `CURVE_FILM1` / `CURVE_NEUTRAL` point a slot at another CSV (tests). A slot
+    without a CSV has no table: the menu skips it, and a config that names it reads sRGB. Without any CSV the entry
+    is greyed;
+  - only the load-time Log + LUT builder (`wf_loglut.c`) reads it, so the cost per shot is 0. Flat Log (the ARM kernel,
+    `wf_dec`), the preview exposure tables and the catalogue film tables keep the sRGB EOTF;
+  - the shot's EXIF comment says `| In Canon Film 1` (or `| In Canon Neutral`), and the `lut` log line says `in-film1`
+    (`in-neutral`).
+- **Headroom without a K fold.** The Log + LUT builder already handles linear above 1.0 for the LUT EI. Above white
+  each curve is `a log10(x + b) + c`, so the builder shifts x down by 2^up and adds `up a log10 2` in the encode
+  domain, which is exact. The Canon decode (max 2.07 -> 34.7 M in Q24, below 2^31) goes through that same path:
+  - the gain multiply (only when the LUT EI or auto is set) and the up-shift (whenever `eib` is set and x > 1.0) are
+    now separate steps;
+  - the curve sets `eib` / `eid` even at gain 1. sRGB without a gain keeps `eib = 0`, so its tables are bit-identical
+    to before (host test).
+- **The K fold is still the plan for flat Log.** It applies if the owner wants Film 1 there too, because the ARM
+  kernel relies on `wf_dec <= 16384` and `max(wf_lenc) <= 65279`:
+  - decode stores linear / K, with K = the curve's value at code 255 rounded up to a power of 2;
+  - encode is generated as `enc(i) = curve(i / 4096 * K)`;
+  - then check `logchk` and the host LOG tests.
+- **Auto exposure of the Film LUT cubes.** The grey reference is 0.18 with the curve; sRGB keeps `lin(118)`.
+- **Table cache.** Bits 17-18 of the `.FRT` key hold the curve slot (Film 1 = bit 17, as in the first version;
+  Neutral = bit 18). Old caches have 0 there, so sRGB caches stay valid.
+- **Picture Style check.** Each curve is used only under the Picture Style and Contrast it was measured at
+  (raw-film-engine read them from the makernote PSInfo):
+  - Film 1: `lens_info.raw_picstyle` = User Def. 1 (0x21), User Def. 1 holds a loaded style file
+    (`PROP_PICSTYLE_OF_USERDEF1` below 0x80, as ML's picstyle.c tells them apart; the pairs had PC 1 = 0x41), and
+    Contrast -2. The slot alone is not enough: on 14 Nov the owner's EOS M had User Def. 1 based on Auto;
+  - Neutral: `raw_picstyle` = Neutral (0x84) and Contrast 0;
+  - the base comes from the module's own `prop_add_handler(PROP_PICSTYLE_OF_USERDEF1)` (0x0206000a on DIGIC 4 / 5),
+    the Contrast from ML's `picstyle_get_current_contrast()`. Not reported yet (style 0, base -1, Contrast -10)
+    counts as fitting.
+
+  Under anything else:
+  - the JPEG is read as sRGB;
+  - `wf_ll_poll` reloads the tables;
+  - the menu says what differs: `Picture Style is <name>, not User Def. 1` (or `not Neutral`), `User Def. 1 is a
+    built-in style, not the Film 1 file`, or `Style contrast is <n>, measured at <m>`;
+  - the `lut` log line says `srgb(style <hex>)`, `srgb(base <hex>)` or `srgb(contrast <n>)`. With a curve in use it
+    says `in-film1 b<base> c<contrast>` (`bff` / `c-10`: not reported).
+
+  The slot is checked, not the style file it holds. A table per style comes later, and only if the owner shoots
+  several styles. The 5D2 gets the same table, but the curve was measured on the EOS M only.
 - Optional later: **A2** (HTP + the same inversion, sun-area error 1.4, 3 degrees of hue drift) needs ISO >= 200 and
   costs 1 EV of shadow noise. It is the owner's call.
 
 **P0. Probe that only logs (EOS M, never changes the image).** The probe answers whether the raw and SSRAW are still
-intact at the hook.
+intact at the hook. It is implemented in commit a675c8a (`wf_cam_eosm.c`, host test `PROBE`).
 - It is a menu toggle under a debug entry, default off.
 - At the NN hook entry (`CompleteSsrawToYuv` 0xFF169414; r0 = job, r1 = finished YUV), the camera layer snapshots into
   a static struct:
@@ -186,7 +222,8 @@ intact at the hook.
   - an FNV-1a over the first 4 KB at the raw address and at A[0] / A[1], plus a copy of the first 1 KB of layers 0 and 1.
     Read an address only if it lies in the shoot pool 0x40D6C000..0x60000000.
 - `wf_task` writes the lines to `WINDYFLM.LOG` and the 1 KB copies to `ML/LOGS/WFPROBE.BIN` after the shot. Hooks never
-  log.
+  log. A record the card refuses (busy with the shot) is retried at its own offset; the log names the failing step.
+  The first record of a boot makes a new file only once Canon is idle (card writes: `src/wf_fio.h`).
 - **Run it with RAW+L, single and continuous drive.** Compare the raw checksum with the CR2. The open risk: after
   `DelayCompleteRawToSsraw`, Canon calls `ReallocateMemory` / `sssCompleteMemShrinkCB`, so in burst the raw may already
   be reused. SSRAW layer 0 is released only inside 0xFF169414, after our entry hook, which makes it the fallback.
