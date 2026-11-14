@@ -31,6 +31,18 @@ static volatile uint8_t kq[KQ_N];
 static volatile int kq_w, kq_r;
 static int took;                        /* we hold the screen (front buffer disabled) and the palette */
 
+/* 5D2 without LiveView (the viewfinder; owner 11-14: the browser came up only with LV on). Canon then shows nothing of
+ * its own on the LCD (often the display is off), so a bitmap drawn there is never seen. ML's own menu goes on screen
+ * there by asking Canon for its MENU GUI mode (menu.c piggyback_canon_menu, GUIMODE_ML_MENU = lv ? 38 : 2 on the 5D2):
+ * that turns the display on and keeps it on, and the disabled front buffer hides Canon's menu. The browser does the
+ * same, in ML's order: mode, then the front buffer; on close mode 0 first (close_canon_menu), then the front buffer. */
+#define VF_GUIMODE      2
+static int vf_mode;                     /* we asked Canon for VF_GUIMODE */
+static int vf_seen;                     /* the screen came up: losing the mode or the display then closes us */
+static void vf_take(void);
+static int vf_lost(void);
+static void vf_give(void);
+
 static uint8_t *list;                   /* wf_films index of each ready film: by group, then order */
 static int nlist;
 static int gstart[WF_NGROUPS + 1];
@@ -542,6 +554,8 @@ void wfui_task_begin(void)
     wfp_init_fixed();
     int cs = wfc_open();
     if (close_req) return;
+    vf_take();
+    if (close_req) return;
     canon_gui_disable_front_buffer();
     took = 1;
     wfp_take();
@@ -568,6 +582,7 @@ int wfui_task_tick(void)
         if (close_req) return 1;
     }
     if (gui_menu_shown()) return 1;                         /* the ML menu took the screen */
+    if (vf_lost()) return 1;
     int now = get_ms_clock();
     uint32_t gen = wf_gen();
     if (gen != drawn_gen) dirty = 1;
@@ -599,9 +614,12 @@ void wfui_task_end(void)
     {
         wfg_clear_front();
         wfp_restore();
+        vf_give();
         canon_gui_enable_front_buffer(1);
         took = 0;
     }
+    else
+        vf_give();
     const struct wf_film *f = film_at(sel);
     if (f) last_id = f->id;
     wfc_close();
@@ -628,6 +646,62 @@ int wfui_host_focus(void) { return focus; }
 int wfui_host_rtop(void) { return rtop; }
 int wfui_host_info(void) { return info; }
 #endif
+
+/* ------------------------------------------------------------------ 5D2 without LiveView */
+static int vf_wait(int ms, int want_mode)
+{
+    for (int t = 0; t < ms; t += 20)
+    {
+        if (get_gui_mode() == want_mode && (!want_mode || display_is_on())) return 1;
+        msleep(20);
+    }
+    return get_gui_mode() == want_mode && (!want_mode || display_is_on());
+}
+
+static void vf_take(void)
+{
+    vf_mode = vf_seen = 0;
+    if (wf_cam() != WF_CAM_5D2 || lv) return;
+    int t0 = get_ms_clock(), gm0 = get_gui_mode(), d0 = display_is_on();
+    vf_wait(1000, 0);                       /* opened from the ML menu: its own mode 0 comes first .. */
+    msleep(150);                            /* .. then its front buffer and redraw (menu_close) */
+    if (close_req) return;
+    if (get_gui_mode() == 0)
+    {
+        SetGUIRequestMode(VF_GUIMODE);
+        vf_mode = 1;
+        msleep(200);
+        vf_wait(800, VF_GUIMODE);
+    }
+    if (!display_is_on())
+    {
+        display_on();
+        for (int t = 0; t < 1000 && !display_is_on(); t += 20) msleep(20);
+    }
+    vf_seen = display_is_on() && (!vf_mode || get_gui_mode() == VF_GUIMODE);
+    wf_log("ui: 5D2 without LV: gui mode %d -> %d%s, display %d -> %d, %d ms", gm0, get_gui_mode(),
+           vf_mode ? " (asked 2)" : "", d0, display_is_on(), get_ms_clock() - t0);
+}
+
+/* 1 = Canon left the mode we asked for, or the display went off: close (else the next TRASH would open nothing) */
+static int vf_lost(void)
+{
+    if (!vf_seen) return 0;
+    if (display_is_on() && (!vf_mode || get_gui_mode() == VF_GUIMODE)) return 0;
+    wf_log("ui: 5D2 without LV: gui mode %d, display %d: closing", get_gui_mode(), display_is_on());
+    return 1;
+}
+
+static void vf_give(void)
+{
+    int gm = get_gui_mode();
+    if (vf_mode && (gm == VF_GUIMODE || gm == 0))  /* 0: our request may still be queued; 0 replaces it */
+    {
+        SetGUIRequestMode(0);
+        msleep(100);
+    }
+    vf_mode = vf_seen = 0;
+}
 
 /* ------------------------------------------------------------------ wf_api.h */
 void wf_ui_init(void)
@@ -693,6 +767,13 @@ unsigned int wf_ui_key(unsigned int key)
     }
     }
     return 0;                                               /* everything else is ours while the browser is up */
+}
+
+void wf_ui_open_refused(unsigned int key, int play)
+{
+    if (key != MODULE_KEY_TRASH) return;
+    wf_log("ui: TRASH not taken: open %d, ML menu %d, play %d, gui_state %d, lv %d, display %d", st != ST_CLOSED,
+           gui_menu_shown(), play, gui_state, lv, display_is_on());
 }
 
 int wf_ui_open_key(unsigned int key)

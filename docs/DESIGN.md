@@ -424,6 +424,11 @@ The layout, 720x480 (the ML bitmap):
     `canon_gui_disable_front_buffer`).
   - 5D2: joystick / wheel / SET / Q / INFO / MENU.
   - Open from the WindyFilm menu entry, or the open key (EOS M long DOWN, 5D2 TRASH).
+  - 5D2 without LiveView (owner 11-14: it came up only with LV on): the browser asks Canon for its MENU GUI mode 2 before
+    it takes the front buffer, as ML's own menu does there (`piggyback_canon_menu`, GUIMODE_ML_MENU = lv ? 38 : 2). That
+    mode turns the display on and keeps it on. If it does not, `display_on()`. On close it asks for mode 0 while the front
+    buffer is still ours. Canon leaving the mode or the display going off closes the browser. Opened from the ML menu,
+    it first waits for the menu's own mode 0. A TRASH that does not open the browser logs why (`ui: TRASH not taken`).
 - **INFO** toggles a details overlay: full description, ISO, kelvin, prints, table source.
 
 ## 6. Build and tests

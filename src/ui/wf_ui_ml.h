@@ -10,6 +10,7 @@
  *   canon_gui_disable_front_buffer, canon_gui_enable_front_buffer                        own the screen
  *   task_create, msleep, get_ms_clock                                                    UI task
  *   gui_menu_shown, gui_stop_menu, gui_state, lv, display_is_on, __mem_malloc, __mem_free
+ *   get_gui_mode, SetGUIRequestMode, display_on                                          5D2 without LiveView
  */
 #ifndef WF_UI_ML_H
 #define WF_UI_ML_H
@@ -23,6 +24,7 @@
 #include <menu.h>
 #include <propvalues.h>
 #include <gui-common.h>
+#include <powersave.h>
 #include <timer.h>
 #include <rbf_font.h>
 #endif
