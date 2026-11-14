@@ -22,6 +22,7 @@
  * 9 tick, 10 drawing, 11 copy, 12 palette check, 13 load animation, 14 closing, 15 starting LiveView. */
 #include "wf_ui_int.h"
 #include "wf_icons.h"
+#include "../wf_build.h"
 
 #define UI_PRIO         0x1B            /* above the film worker (0x1C), below ML's menu_task (0x1A) and Canon's GUI */
 #define UI_STACK        0x2000
@@ -319,7 +320,7 @@ static void draw_header(int now)
         wfg_rect(17 + i * 6, 23, 20 + i * 6, 25, C_BGLAST);
     }
     wfg_tri(18, 21, 25, 14, 32, 21, C_BGLAST);
-    int x = 44 + ui_text(F_ML23, 44, 4, "WindyFilm", C_TXT);
+    int x = 44 + ui_text(F_ML23, 44, 4, WF_TITLE, C_TXT);
     ui_text(F_13, x + 8, 11, "by WindyStrife", C_TXT3);
 
     const char *s, *st_s = wf_status();

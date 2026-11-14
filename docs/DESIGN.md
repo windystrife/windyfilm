@@ -28,6 +28,47 @@ The phase 1 audit (OWN / GLUE / DEP / DER for every file of the port) is in the 
 - Never commit: `*.mo`, `*.DAT`, `*.sym`, ROMs or firmware, the owner's cubes (CinePrint, Leica, V-Log grades, EKTA P
   export), `.FRT` caches.
 
+### 1a. Declared exception on branch `film-stage` (owner, 14 Nov 2026)
+
+**This branch is NOT clean-room. Do not publish it, do not hand it over as if it were, and never merge it into `main`
+without this paragraph staying at the top of the merge.**
+
+Branch `film-stage` carries film tables whose numbers are derived from **Genesis Pro 1.6.6** (Cullen Kelly Color, a
+commercial OFX film-emulation plugin, unrelated to the filmroll.mo author): the negative-stock DLogE (121 points),
+`StMtoPD` 3x4, the interlayer polynomial `IIE` 3x10, `Print_DLogE` 101, the `DyeAmountLUT` (16 print stocks, 65^3
+each, subsampled to 33^3) and the `Lin_to_LogFN` convention. The owner accepted the legal risk for his private use on
+14 Nov 2026, the same way he accepted it for the Film Roll port.
+
+What this means in practice:
+
+- The **module code stays ours**: the Genesis chain runs only in a host-side generator (`tools/mk_genesis_films.py`),
+  which samples it into the 17^3 table a WindyFilm film already is. Nothing of the plugin's is linked, patched or
+  called at runtime, and the module's size does not change.
+- The **generated tables are card data** (`ML/DATA`), never committed; they are Genesis-derived all the same, so a
+  card made from this branch carries no clean-room claim either.
+- `tools/provenance_gate.py` keeps its deny list for `main`, `raw-develop` and `darkroom`. On `film-stage` only, the
+  Genesis file names are allowed and the gate prints `gate: this tree is NOT clean-room (Genesis-derived tables)` on
+  every build, so a green gate can never be mistaken for a clean tree again.
+
+What this branch adds on top (14 Nov 2026, same day):
+
+- **Four films** in the catalogue, ids 85..88: `GX500T` Vision3 500T 2393, `GX250D` Vision3 250D 2383, `GXP400` Portra
+  400 2383, `GXE100` Ektar 100 3513 (a negative stock and a print stock of the chain per film). They are plain
+  WindyFilm films: one 17^3 table each, grain and halation from their rows, no code of the chain in the module.
+- **Placement**: the chain ends on the print's dye density, so its own black is the print's base fog (~0.03) and its
+  white whatever that print reaches (0.43..0.60 for these four). Stretching the *input* to fill the display crushed
+  everything below code 0.35 into the toe (measured), so the two ends are pinned on the **output** instead - base fog
+  to 0, print white to 1, i.e. printer points - and the exposure offset is fitted so 18 % grey lands on 0.18. What is
+  left in between is the film's own curve.
+- **A separate module**: `STAGE=1 bash build.sh` makes `windyfls.mo` ("WindyFilm Stage") beside `windyflm.mo`, with
+  its own `WINDYFLS.CFG` / `WINDYFLS.LOG`, the menu entry **Film Stage** instead of **WindyFilm**, `Film Stage:` as
+  the EXIF prefix and a rose accent instead of the amber one (`src/wf_build.h` holds every name). Both install on one
+  card; neither reads the other's settings. `STAGE=1 bash test.sh` runs the same 693 checks against that build.
+- The four tables are **not committed** (bullet above): `build.sh` calls `tools/mk_genesis_films.py stage
+  films/tables` when they are missing, and `mk_wfpack.py` leaves a film off the card when its table is not there. A
+  tree that never had the port tree builds the other 53 films and says so.
+
+
 ## 2. Repo layout and who owns what
 
 During Phase 2, agents write only inside their own paths and never commit. The lead session commits explicit paths.

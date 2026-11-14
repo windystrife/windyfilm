@@ -111,7 +111,7 @@ FAMILY = {
 LUT_GRAIN, LUT_HALO, LUT_SPK = ("Neg 400", 256), ("neg", 256), ("spk_s", 256)
 
 # strip labels (the text under a can on the browser strip), by id
-SHORT = {26: 'Chrome', 27: 'Classic Neg', 28: 'Pro Neg Std', 29: 'Eterna', 30: 'Chungking', 31: 'Cine 250D', 32: 'Portra 160', 33: 'Portra 400', 34: 'Gold 200', 35: 'Cine 800T', 37: 'Tri-X 400', 38: 'Superia 400', 39: 'Ektar 100', 40: 'UltraMax', 41: 'HP5 Plus', 43: 'Portra 800', 44: 'Pro 400H', 45: 'T-Max 100', 46: 'P3200', 47: 'XP2 Super', 48: 'ColorPlus', 50: 'Cine 50D', 53: 'Delta 100', 54: 'Pan F 50', 55: 'Acros 100', 56: 'Foma 100', 57: 'Lomo 800', 59: 'Azure', 60: 'Pan 200', 61: 'FP4 Plus', 62: 'V3 250D', 63: 'V3 500T', 64: 'Portra LUT', 65: '400H LUT', 66: 'EKTA P', 67: '3513 LUT', 68: '2383 v3', 69: '2383 v5', 70: 'Ektar LUT', 71: 'Neutral', 72: 'Luca Bono', 73: '250D P', 74: '250D M', 75: '500T P', 76: '500T M', 77: 'EKTA M', 78: 'EKTAa P', 79: 'EKTAa M', 80: 'EXR P', 81: 'EXR M', 82: 'EXRa P', 83: 'EXRa M', 84: 'Leica Vivid'}
+SHORT = {26: 'Chrome', 27: 'Classic Neg', 28: 'Pro Neg Std', 29: 'Eterna', 30: 'Chungking', 31: 'Cine 250D', 32: 'Portra 160', 33: 'Portra 400', 34: 'Gold 200', 35: 'Cine 800T', 37: 'Tri-X 400', 38: 'Superia 400', 39: 'Ektar 100', 40: 'UltraMax', 41: 'HP5 Plus', 43: 'Portra 800', 44: 'Pro 400H', 45: 'T-Max 100', 46: 'P3200', 47: 'XP2 Super', 48: 'ColorPlus', 50: 'Cine 50D', 53: 'Delta 100', 54: 'Pan F 50', 55: 'Acros 100', 56: 'Foma 100', 57: 'Lomo 800', 59: 'Azure', 60: 'Pan 200', 61: 'FP4 Plus', 62: 'V3 250D', 63: 'V3 500T', 64: 'Portra LUT', 65: '400H LUT', 66: 'EKTA P', 67: '3513 LUT', 68: '2383 v3', 69: '2383 v5', 70: 'Ektar LUT', 71: 'Neutral', 72: 'Luca Bono', 73: '250D P', 74: '250D M', 75: '500T P', 76: '500T M', 77: 'EKTA M', 78: 'EKTAa P', 79: 'EKTAa M', 80: 'EXR P', 81: 'EXR M', 82: 'EXRa P', 83: 'EXRa M', 84: 'Leica Vivid', 85: '500T 2393', 86: '250D 2383', 87: 'Portra C', 88: 'Ektar C'}
 # table variants made per table code (luts/film/src/mk_wfprints.py: Cine = negative -> 2383 print, Paper = negative -> the
 # colour paper of its spektrafilm profile). Films without an entry have the scan look only (no spektrafilm negative:
 # slide, B&W, Fuji / Kodak looks without a profile, effect looks). Film LUT cans have none.
@@ -146,11 +146,11 @@ def derive(f):
     return f
 
 def F(id, code, name, type, iso, isocode, kelvin, ev8, family, order, grain, halo, line1="", line2="", table=None,
-      ready=False, mode=None, v21=None, t17=None, prov="", fx="", spk=None, lut=0):
+      ready=False, mode=None, v21=None, t17=None, prov="", fx="", spk=None, lut=0, derived=False):
     return derive(dict(id=id, code=code, name=name, type=type, iso=iso, isocode=isocode, kelvin=kelvin, ev8=ev8,
                        family=family, order=order, grain=grain, halo=halo, line1=line1, line2=line2, table=table or code,
                        ready=ready, mode=mode, v21=(id >= 32) if v21 is None else v21, t17=t17, prov=prov, fx=fx, spk=spk,
-                       lut=lut))
+                       lut=lut, derived=derived))
 
 def LUTCAN(id, code, name, iso, isocode, kelvin, order, lut, line1, line2, prov):
     """a Film LUT can (see the top): colour negative, the + LUT modes' effect parameters"""
@@ -330,6 +330,27 @@ FILMS = [
     # exposure, and its load sets Picture Style Standard. Name only: no logo, mark or house colour of the camera maker.
     dict(LUTCAN(84, "LLEICV", "Leica Vivid", 100, 72, 5200, 23, 23, "A look on the camera's Standard picture,", "not a log or film look.",
            "owner's Lumix L Leica 2 display cube (sRGB in, sRGB out, 33^3) as LEICAVSR.CUB, not in the repo"), fmt="Standard"),
+    # ---- 14/11/2026, branch film-stage: four film pairs baked out of the Genesis 1.6.6 chain under the declared
+    # exception (docs/DESIGN.md 1a). The tables are card data made on a PC by tools/mk_genesis_cube.c (samples the chain,
+    # pins its print base fog to 0 and its print white to 1, so 18 % grey lands where sRGB puts it) and converted by
+    # tools/mk_wtab.py; no code of the chain is in the module and nothing of it is linked at run time. The camera shows a
+    # stock, not a tool, so the names are the stocks; where the numbers come from is in `prov` and in the DESIGN note.
+    F(85, "GX500T", "Vision3 500T 2393", "neg", 500, 91, 3200, 0, "cine", 55, ("Neg 800T", 256), ("C800T", 256),
+      "Tungsten cine negative on a cinema", "print stock (2393).", ready=True, spk=("spk_c", 256), derived=True,
+      prov="Genesis 1.6.6 film chain, negative 00 (Vision3 500T) + print 02 (2393), push 0 bleach 0 (declared exception, "
+           "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> films/tables/GX500T.T17"),
+    F(86, "GX250D", "Vision3 250D 2383", "neg", 250, 83, 5500, 0, "cine", 56, ("Neg 250", 256), ("neg", 256),
+      "Daylight cine negative on a cinema", "print stock (2383).", ready=True, spk=("spk_c", 256), derived=True,
+      prov="Genesis 1.6.6 film chain, negative 01 (Vision3 250D) + print 01 (2383), push 0 bleach 0 (declared exception, "
+           "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> films/tables/GX250D.T17"),
+    F(87, "GXP400", "Portra 400 2383", "neg", 400, 88, 5200, 0, "portrait neg", 57, ("Neg 400", 256), ("neg", 256),
+      "Portrait negative on a cinema print", "stock (2383).", ready=True, spk=("spk_s", 256), derived=True,
+      prov="Genesis 1.6.6 film chain, negative 02 (Portra 400) + print 01 (2383), push 0 bleach 0 (declared exception, "
+           "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> films/tables/GXP400.T17"),
+    F(88, "GXE100", "Ektar 100 3513", "neg", 100, 72, 5200, 0, "saturated / creative", 58, ("Neg 160", 256), ("neg", 256),
+      "Vivid negative on a Fuji cinema print", "stock (3513).", ready=True, spk=("spk_s", 256), derived=True,
+      prov="Genesis 1.6.6 film chain, negative 13 (Ektar 100) + print 14 (3513), push 0 bleach 0 (declared exception, "
+           "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> films/tables/GXE100.T17"),
 ]
 # the author's codes (no own code may equal one; generic notations only, PLAN 5.1)
 AUTHOR_CODE_RULE = "no code equal to one of the author's (P160 .. XP2): checked against tools/brandscan.py's list"
@@ -559,8 +580,15 @@ def check():
                     bad.append("%s: prints %r must be a tuple starting with 'scan' of %s" % (c, pr, PRINTS))
                 else:
                     for v in pr:
-                        if not os.path.exists(t17_path(f, v)): bad.append("%s: %s missing" % (c, t17_path(f, v)))
-                        elif os.path.getsize(t17_path(f, v)) != 19652: bad.append("%s: %s is not 4913 words" % (c, t17_path(f, v)))
+                        p = t17_path(f, v)
+                        if not os.path.exists(p):
+                            # a derived table (DESIGN 1a) is made by build.sh, not committed: not a problem, but it
+                            # only exists in a tree that could make it
+                            if f.get("derived"):
+                                print("catalog: %s: %s not made yet (derived, build.sh makes it)" % (c, os.path.basename(p)))
+                                continue
+                            bad.append("%s: %s missing" % (c, p))
+                        elif os.path.getsize(p) != 19652: bad.append("%s: %s is not 4913 words" % (c, p))
         if f["family"] not in FAMILY: bad.append("%s: family %r" % (c, f["family"]))
         if f["mode"] is not None and (i > 31 or not (1 <= f["mode"] <= 4 or f["mode"] in (11, 12))): bad.append("%s: film output modes are frozen (D4)" % c)
         if f["ready"]:

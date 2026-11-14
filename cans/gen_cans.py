@@ -503,6 +503,18 @@ S("LLEICV", "Leica Vivid", ("Film LUT", SV), [("Leica", WH, 1.0), ("Vivid", LEIC
   [band(0, 28, V((44, 45, 50), (30, 30, 34)), LEICV_ACC), Rc(0, 112, DW, 113.4, SV), Rc(0, 116, DW, 118.4, LEICV_ACC)],
   lay=dict(maker=(5, 24), name=(36, 104), iso=(0, 1), maxw=100), badge=LUTB, foot_text="STD + LUT",
   side="digital look", side35="")             # a look on the Standard picture, not a log / film look (owner 11-14)
+# 14/11/2026, branch film-stage: the four films baked out of the declared exception's chain (catalog.py 85..88). Our own
+# house layout: charcoal body, one accent per stock family, the name in our font, foot "35mm" - nothing of Kodak's or
+# Fuji's packaging, the stock name only as the film's name.
+for _c, _nm, _words, _iso, _acc, _bg in (
+        ("GX500T", "Vision3 500T 2393", ("Vision3", "500T"), "500", (132, 176, 244), V((30, 44, 86), (12, 18, 40))),
+        ("GX250D", "Vision3 250D 2383", ("Vision3", "250D"), "250", (250, 170, 80), V((96, 62, 32), (50, 30, 16))),
+        ("GXP400", "Portra 400 2383", ("Portra", "2383"), "400", (226, 120, 150), V((72, 28, 52), (30, 10, 22))),
+        ("GXE100", "Ektar 100 3513", ("Ektar", "3513"), "100", (196, 160, 244), V((54, 34, 88), (20, 12, 40)))):
+    S(_c, _nm, ("WindyStrife", SV), [(_words[0], WH), (_words[1], _acc)], (_iso, WH), SV, _acc, _bg,
+      [band(0, 30, V((64, 66, 74), (44, 44, 50)), _acc),
+       ribbon((58, 58, 64), (40, 40, 46), hi=_acc)],
+      lay=dict(maker=(6, 25), name=(34, 82), iso=(82, 124), maxw=100), foot_text="35mm")
 # ---- shipped films
 S("CHROME", "Classic Chrome", ("WindyStrife", (214, 208, 204)), [("Classic", WH), ("Chrome", SV)], ("200", WH), SV,
   (226, 120, 110), V((92, 95, 108), (62, 64, 74)),
@@ -537,7 +549,8 @@ DEFAULT_CODES = ["PRT160", "PRT400", "PRT800", "PAS400", "BLD100", "SUN200", "SN
                  "CIN50D", "TUN800", "PRS400", "STR400", "CHM400", "FIN100", "NT3200", "CRS100", "SHP50", "SLK100",
                  "VTG100", "CLS125", "BAS200", "CRX125", "CHROME", "CLSNEG", "PRONEG", "ETERNA", "CHUNGK", "C250D",
                  "LV250D", "LV500T", "LPR400", "LFP400", "LF3513", "LK83V3", "LK83V5", "LEKTR5", "LTUNGN", "LLBONO", "LEKTAP",
-                 "LT25DP", "LT25DM", "LT50TP", "LT50TM", "LTEKTM", "LTEKAP", "LTEKAM", "LTEXRP", "LTEXRM", "LTEXAP", "LTEXAM", "LLEICV"]
+                 "LT25DP", "LT25DM", "LT50TP", "LT50TM", "LTEKTM", "LTEKAP", "LTEKAM", "LTEXRP", "LTEXRM", "LTEXAP", "LTEXAM", "LLEICV",
+                 "GX500T", "GX250D", "GXP400", "GXE100"]
 # rows for codes the catalogue does not (yet) have: id, ISO, type; the shipped films' names as in catalog.py
 SYNTH = {"CLS125": (125, "bw"), "BAS200": (200, "bw"), "CRX125": (125, "neg")}
 FALLBACK_ROW = {"CHROME": (26, 200, "slide", "Classic Chrome"), "CLSNEG": (27, 400, "neg", "Classic Neg"),
