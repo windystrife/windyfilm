@@ -496,6 +496,112 @@ int main(int argc, char **argv)
         host_task_fail(0);
     }
 
+    /* 5g. Canon holds the card (owner's RAWB2 log, EOS M 10 s after boot: "fonts WFFONTS.DAT not on the card, cans
+     * WFCANS.DAT read failed (0 colours)" with both files on the card) */
+    {
+        char want[96];
+        fake_reset();                                               /* a short busy spell: the open waits it out */
+        fake_set_card(card);
+        fake_log_clear();
+        fake_card_busy(4, 0);
+        open_ui();
+        CHECK(!(wff_status() & 1) && wfc_status() == WFC_OK, "short busy spell: fonts %s, cans %s", wff_why(),
+              wfc_why(wfc_status()));
+        CHECK(fake_log_has(", 4 reads tried again"), "the open log does not count the reads tried again");
+        close_ui(MODULE_KEY_MENU, 0);
+
+        fake_reset();                                               /* busy through the whole open */
+        fake_set_card(card);
+        fake_log_clear();
+        fake_card_busy(-1, 0);
+        int t0 = get_ms_clock();
+        open_ui();
+        CHECK(get_ms_clock() - t0 <= 1700, "the open waited %d ms for the card", get_ms_clock() - t0);
+        CHECK((wff_status() & 1) && !strcmp(wff_why(), "card busy"), "fonts: %s", wff_why());
+        CHECK(wfc_status() == WFC_E_BUSY && wfc_pal_used() == WFC_PLAIN_N, "cans: %s, %d colours",
+              wfc_why(wfc_status()), wfc_pal_used());
+        snprintf(want, sizeof want, "fonts WFFONTS.DAT card busy, cans WFCANS.DAT card busy (plain cans, %d colours)",
+                 WFC_PLAIN_N);
+        CHECK(fake_log_has(want) && fake_log_has("packs tried again while open"), "open log: want \"%s\"", want);
+        snprintf(want, sizeof want, "can slots, %d in use)", WFC_PLAIN_N);
+        CHECK(fake_log_has(want), "the palette log counts can slots, not the colours in use");
+        CHECK(!fake_log_has("not on the card"), "a busy card reported as a missing file");
+        go_to("SUN200");
+        shot("b2s_cardbusy");
+        fake_card_busy(0, 0);                                       /* the card answers again: both packs come in */
+        tick(110);
+        CHECK(!closed && !(wff_status() & 1) && wfc_status() == WFC_OK, "not read again: fonts %s, cans %s",
+              wff_why(), wfc_why(wfc_status()));
+        CHECK(fake_log_has("ui: fonts WFFONTS.DAT ok, read again") && fake_log_has("ui: cans WFCANS.DAT ok ("),
+              "no log line for the packs read again");
+        shot("b2s_cardbusy_later");
+        close_ui(MODULE_KEY_MENU, 0);
+
+        fake_reset();                                               /* the header, then Canon takes the card */
+        fake_set_card(card);
+        fake_card_busy(-1, 1);                                      /* every read past offset 0 fails */
+        open_ui();
+        CHECK(!(wff_status() & 1), "fonts lost: %s", wff_why());
+        CHECK(wfc_status() == WFC_E_BUSY && wfc_pal_used() == WFC_PLAIN_N, "cans after the header: %s, %d colours",
+              wfc_why(wfc_status()), wfc_pal_used());
+        go_to("LV500T");
+        tick(5);
+        close_ui(MODULE_KEY_MENU, 0);                               /* end_checks: no index or blob left behind */
+
+        fake_reset();                                               /* busy for good: PACK_TRIES, then no more reads */
+        fake_set_card(card);
+        fake_log_clear();
+        fake_card_busy(-1, 0);
+        open_ui();
+        tick(5 * 100 + 20);
+        CHECK(fake_log_has("ui: packs read again 5 times: fonts card busy, cans card busy"), "no give-up line");
+        int r0 = fake_card_reads();
+        tick(200);
+        CHECK(!closed && fake_card_reads() == r0, "%d reads after giving up", fake_card_reads() - r0);
+        close_ui(MODULE_KEY_MENU, 0);
+
+        fake_reset();                                               /* can images that fail to read while open */
+        fake_set_card(card);
+        fake_set_loaded(id_of("PRT160"));
+        open_ui();
+        fake_card_busy(-1, 1);
+        go_to("LV500T");                                            /* another group: its cans are not cached */
+        r0 = fake_card_reads();
+        tick(100);
+        CHECK(fake_card_reads() - r0 <= 3, "%d image reads in 2 s on a busy card", fake_card_reads() - r0);
+        fake_card_busy(0, 0);
+        r0 = fake_card_reads();
+        tick(60);
+        CHECK(fake_card_reads() > r0, "the can images were not read again");
+        shot("b2s_blob_later");
+        close_ui(MODULE_KEY_MENU, 0);
+
+        fake_reset();                                               /* a pack really not on the card: no retries */
+        fake_set_card(nocans);
+        fake_log_clear();
+        open_ui();
+        CHECK(wfc_status() == WFC_E_NOFILE && fake_log_has("cans WFCANS.DAT not on the card (plain cans"),
+              "missing can pack: %s", wfc_why(wfc_status()));
+        tick(120);
+        CHECK(!fake_log_has("read again") && !fake_log_has("tried again"), "a missing pack was tried again");
+        close_ui(MODULE_KEY_MENU, 0);
+
+        if (empty)                                                  /* no font pack and no term12: text left out */
+        {
+            fake_reset();
+            fake_set_card(empty);
+            host_hide_font("term12");
+            open_ui();
+            CHECK((wff_status() & 1) && ui_textw(F_13, "Light") == 0 && ui_texth(F_13) > 0, "no-font fallback");
+            go_to("SUN200");
+            key(MODULE_KEY_INFO);
+            shot("b2s_nofont");
+            key(MODULE_KEY_INFO);
+            close_ui(MODULE_KEY_MENU, 0);
+            host_hide_font(0);
+        }
+    }
+
     /* 6. keys while closed pass on; the open key */
     CHECK(wf_ui_key(MODULE_KEY_PRESS_LEFT) == 1, "a key was eaten while closed");
     fake_set_cam(WF_CAM_EOSM);

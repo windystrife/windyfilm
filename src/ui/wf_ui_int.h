@@ -64,14 +64,15 @@ void wfp_set_rgb(int entry, int r, int g, int b);
 int  wfp_take(void);                    /* read Canon's black / white / opacity, write ours; 0 = ok */
 void wfp_keepalive(int force);          /* rewrite ours if Canon / ML replaced them */
 void wfp_restore(void);                 /* give Canon its entries back */
-void wfp_log(void);
+void wfp_log(int can_used);             /* can_used: can colours in use (pack or plain cans) */
 
 /* ------------------------------------------------------------------ wf_font.c: text */
 enum { F_ML23 = 0, F_ML28, F_15, F_13, F_13C, F_NFONTS };
 int  wff_open(void);                    /* load WFFONTS.DAT and look up ML's argnor23 / argnor28; 0 = all there */
 void wff_close(void);
 int  wff_status(void);                  /* bit 0: own pack missing, bit 1: argnor23 missing, bit 2: argnor28 */
-const char *wff_why(void);              /* why the own pack is not used ("ok", "not on the card", ...) */
+const char *wff_why(void);              /* why the own pack is not used ("ok", "not on the card", "card busy", ...) */
+int  wff_again(void);                   /* 1 = the own pack failed for a reason that may pass (card busy, memory) */
 int  ui_text(int font, int x, int y, const char *s, int c);                   /* returns the advance */
 int  ui_textw(int font, const char *s);
 int  ui_text_clip(int font, int x, int y, const char *s, int c, int xmax);    /* stops before xmax */
@@ -86,8 +87,14 @@ int  wfc_status(void);                  /* 0 ok, else the reason (WFC_E_*) */
 const char *wfc_why(int st);            /* a WFC_E_* code in words ("ok", "not on the card", ...) */
 int  wfc_glow(const struct wf_film *f, uint8_t rgb[3]);   /* 1 = from the pack, 0 = group colour */
 void wfc_draw(const struct wf_film *f, int size, int x, int y, int bg);   /* pack image or the plain can */
-int  wfc_pal_used(void);                /* can colours placed in the palette */
-enum { WFC_OK = 0, WFC_E_NOFILE, WFC_E_HEADER, WFC_E_SIZES, WFC_E_MEM, WFC_E_READ };
+int  wfc_pal_used(void);                /* can colours in use: the pack's, or the plain cans' (WFC_PLAIN_N) */
+int  wfc_again(void);                   /* 1 = the pack failed for a reason that may pass (card busy, memory) */
+enum { WFC_OK = 0, WFC_E_NOFILE, WFC_E_HEADER, WFC_E_SIZES, WFC_E_MEM, WFC_E_READ, WFC_E_BUSY };
+#define WFC_PLAIN_N     (4 + WF_NGROUPS * 3)                            /* plain can colours: caps, label, 3 per group */
+
+/* ------------------------------------------------------------------ wf_ui.c: pack reads */
+int  wfui_read(const char *path, uint32_t pos, void *p, uint32_t n, uint32_t *size);   /* wf_card_read, tried again
+                                        while Canon holds the card (until the open's deadline, beating) */
 
 /* ------------------------------------------------------------------ wf_ui.c (host harness entry points) */
 void wfui_task_begin(void);             /* the UI task's set-up: resources, screen, palette */

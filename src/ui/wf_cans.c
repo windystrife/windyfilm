@@ -28,6 +28,8 @@ static struct {
 struct blob { int16_t e; int8_t s; uint8_t ok; uint32_t n, age; uint8_t *p; };
 static struct blob cache[CACHE_N];
 static uint32_t cache_bytes, cache_clock;
+static int rd_hold, rd_held;            /* a blob read failed (Canon held the card): none until rd_hold (ms clock) */
+#define RD_HOLD_MS      1000            /* then the next redraw (HEAL_MS) reads them again */
 
 /* plain can colours, placed at C_CAN0 when there is no pack */
 enum { G_CAP = 0, G_CAPHI, G_CAPLO, G_LABEL, G_BODY0 };
@@ -41,8 +43,11 @@ static const uint8_t group_rgb[WF_NGROUPS][3] = {
 static inline unsigned rd16(const uint8_t *p) { return p[0] | (p[1] << 8); }
 static inline uint32_t rd32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }
 
+/* the plain cans' colours; the can slots past them get the darkest cap colour, so no colour of a pack that is not
+ * loaded (an earlier open) stays in the palette */
 static void place_plain_colours(void)
 {
+    for (int i = WFC_PLAIN_N; i < WFUI_CAN_SLOTS; i++) wfp_set_rgb(C_CAN0 + i, 26, 27, 31);
     wfp_set_rgb(C_CAN0 + G_CAP, 54, 56, 62);
     wfp_set_rgb(C_CAN0 + G_CAPHI, 112, 116, 124);
     wfp_set_rgb(C_CAN0 + G_CAPLO, 26, 27, 31);
@@ -59,11 +64,19 @@ static void place_plain_colours(void)
     }
 }
 
+/* a failed pack read (WF_RD_*) as a WFC_E_* code */
+static int why_of(int rc)
+{
+    return rc == WF_RD_MISSING ? WFC_E_NOFILE : rc == WF_RD_BUSY ? WFC_E_BUSY : rc == WF_RD_NOMEM ? WFC_E_MEM
+         : rc == WF_RD_SHORT ? WFC_E_HEADER : WFC_E_READ;
+}
+
 static int load(void)
 {
     uint8_t h[64];
     uint32_t size = 0;
-    if (wf_card_read(CANS_PATH, 0, h, 64, &size)) return WFC_E_NOFILE;
+    int rc = wfui_read(CANS_PATH, 0, h, 64, &size);
+    if (rc) return why_of(rc);
     if (memcmp(h, "WFCN", 4) || rd16(h + 4) != 1) return WFC_E_HEADER;
     int count = rd16(h + 6), npal = rd16(h + 8), nsizes = rd16(h + 10);
     if (count < 1 || count > 255 || npal < 1 || npal > 128 || nsizes != CAN_NSIZES) return WFC_E_HEADER;
@@ -76,8 +89,10 @@ static int load(void)
     uint8_t pal[128 * 4];
     P.idx = malloc(count * 32);
     if (!P.idx) return WFC_E_MEM;
-    if (wf_card_read(CANS_PATH, pal_off, pal, npal * 4, 0) || wf_card_read(CANS_PATH, idx_off, P.idx, count * 32, 0))
-        return WFC_E_READ;
+    rc = wfui_read(CANS_PATH, pal_off, pal, npal * 4, 0);
+    if (!rc) rc = wfui_read(CANS_PATH, idx_off, P.idx, count * 32, 0);
+    if (rc == WF_RD_MISSING) rc = WF_RD_BUSY;            /* the header came from it a moment ago */
+    if (rc) return why_of(rc);
 
     uint32_t mn = 0xFFFFFFFFu;
     for (int e = 0; e < count; e++)
@@ -112,18 +127,22 @@ static int load(void)
     return WFC_OK;
 }
 
+/* also again while open (the UI task tries a pack that Canon's card kept from it again): starts from nothing.
+ * Any failure leaves no pack state at all (no index, 0 entries, 0 pack colours): every can is the plain one. */
 int wfc_open(void)
 {
+    wfc_close();
     memset(&P, 0, sizeof(P));
-    P.st = load();
-    if (P.st)
+    int st = load();
+    if (st)
     {
         if (P.idx) free(P.idx);
-        P.idx = 0;
-        P.count = 0;
+        memset(&P, 0, sizeof(P));
         place_plain_colours();
     }
-    return P.st;
+    P.st = st;
+    rd_hold = rd_held = 0;
+    return st;
 }
 
 void wfc_close(void)
@@ -143,14 +162,15 @@ int wfc_status(void) { return P.st; }
 const char *wfc_why(int st)
 {
     static const char *const n[] = { "ok", "not on the card", "bad header", "other can sizes", "no memory",
-                                     "read failed" };
+                                     "read failed", "card busy" };
     return st >= 0 && st < (int)(sizeof n / sizeof n[0]) ? n[st] : "?";
 }
-int wfc_pal_used(void) { return P.st ? 0 : P.used; }
+int wfc_pal_used(void) { return P.st ? WFC_PLAIN_N : P.used; }
+int wfc_again(void) { return P.st == WFC_E_BUSY || P.st == WFC_E_READ || P.st == WFC_E_MEM; }
 
 static int entry_of(const struct wf_film *f)
 {
-    if (P.st || !f) return -1;
+    if (P.st || !P.idx || !f) return -1;
     if (f->can < P.count && P.idx[f->can * 32] == f->id) return f->can;
     if (f->can == 255) return -1;
     for (int e = 0; e < P.count; e++)
@@ -216,8 +236,11 @@ static int rle(const uint8_t *p, uint32_t n, int w, int h, int x, int y, int dra
     return 0;
 }
 
+/* a cached blob, else read now; a blob that does not decode stays cached as bad (plain can), but a read that failed
+ * keeps nothing: the can is plain until the card answers again (no reads for RD_HOLD_MS, then the next redraw) */
 static struct blob *fetch(int e, int s)
 {
+    if (P.st || !P.idx || e < 0 || e >= P.count || s < 0 || s >= CAN_NSIZES) return 0;
     cache_clock++;
     for (int i = 0; i < CACHE_N; i++)
         if (cache[i].p && cache[i].e == e && cache[i].s == s)
@@ -225,6 +248,9 @@ static struct blob *fetch(int e, int s)
             cache[i].age = cache_clock;
             return cache[i].ok ? &cache[i] : 0;
         }
+    int now = get_ms_clock();
+    if (rd_held && now - rd_hold < 0) return 0;
+    rd_held = 0;
     const uint8_t *ie = P.idx + e * 32;
     uint32_t off = rd32(ie + 8 + 4 * s), n = rd32(ie + 20 + 4 * s);
     if (!n || n > MAX_BLOB) return 0;
@@ -258,7 +284,16 @@ static struct blob *fetch(int e, int s)
     b->s = s;
     b->age = cache_clock;
     cache_bytes += n;
-    b->ok = wf_card_read(CANS_PATH, off, p, n, 0) == 0 && rle(p, n, wfc_size[s][0], wfc_size[s][1], 0, 0, 0) == 0;
+    if (wf_card_read(CANS_PATH, off, p, n, 0) != WF_RD_OK)
+    {
+        free(p);
+        b->p = 0;
+        cache_bytes -= n;
+        rd_held = 1;
+        rd_hold = now + RD_HOLD_MS;
+        return 0;
+    }
+    b->ok = rle(p, n, wfc_size[s][0], wfc_size[s][1], 0, 0, 0) == 0;
     return b->ok ? b : 0;
 }
 
