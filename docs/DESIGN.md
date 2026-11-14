@@ -73,7 +73,8 @@ shot: Canon YUV conversion site ─ hook (patch_hook_function) ─ gate ─ sema
   - Log: S-Log3 / V-Log / LogC3 / Canon Log 2 / Canon Log 3, flat.
   - Log + LUT: the same 5 curves plus a card cube.
   - Off.
-  - Loading a Film LUT can sets V-Log + LUT with the can's cube.
+  - Loading a Film LUT can sets Log + LUT with the can's cube on that cube's own curve (`WF_FLUT_CURVE`): V-Log, the
+    twelve CinePrint looks Canon Log 2 since 11-14 (3.5).
 - **Effects:** grain (`yg_*`), halation and bloom (`yh_*`), Mist (`wf_mist`, EOS M; on the 5D2 halves only once its
   map hand-over is wired, as before), Strength 30 / 100 / 125, Highlights / Shadows -5..+5 (section 3.3).
 - **Light** (new row): Auto = the camera's WB, untouched. Day = the stock's `kelvin`. Cloudy = kelvin x 1.25, rounded to
@@ -333,6 +334,56 @@ too), never flat Log. The math is WindyStrife's own (the V14U spec); WindyFilm h
 - **Windy names:** the 12 cans of the owner's film pack and his neutral cube (Film LUT 9, 11..22; can ids 66, 71,
   73..83) are named "Windy ..." instead of "Tung ..." (catalogue, `wf_flut_name`, cans with "Windy" on the body). Cube
   file names and config codes stay the same (`TUNGNTVL.CUB`, `flut=TUNGNT`, ...); `flut=leicav` selects Leica Vivid.
+
+### 3.5 The CinePrint looks on Canon Log 2 (owner 2026-11-14)
+
+Owner 11-14: "ma tien chuyen luon may film windy tru cai natuaral dung lut clog2 voi log clog2 cho dung canon di chu
+nhi", then "thay het qua clog2 thoi ban may cai cineprint ay", then richer colour: the cubes are 65^3 exports of the
+pack's C-Log2 PowerGrades. The twelve looks of the CinePrint Studio pack (Windy EKTA P = Film LUT 11 and Windy 250D P
+.. EXRa M = 12..22; can ids 66, 73..83) load Canon Log 2 cubes instead of V-Log ones. Windy Neutral (9, the owner's own
+grade), Luca Bono, the Kodak / Fuji cubes and Leica Vivid are unchanged.
+- The cubes: `YRGB - Canon Log2/C-Log2 <look> YRGB.drx` (6 nodes, DaVinci YRGB) applied in Resolve Studio 21 and
+  exported as 65PT LUTs ("C-Log2 <look> 65.cube", share Anh/CinePrint_CLog2_65 with MD5_8.txt and export_log.txt; copy
+  F:\MagicLatern\CinePrint_CLog2_65). Spatial nodes are not in a LUT: our grain / halation stay. 6.3..7.6 MB each, all
+  values in 0..1 (nothing clamped); the M looks have lifted blacks (min 0.05..0.09). The pack's OSM cubes ("OSM - Canon
+  Log2", 33^3, a flatter curve, the same input domain) also load.
+- `wf_flut_curve[]` (wf_loglut.c) / `WF_FLUT_CURVE(l)`: the curve each cube was made for (V-Log, `WF_LL_CLOG2` for
+  11..22; out of range V-Log). films/catalog.py `FLUT_CURVE` is the same table (`catalog.py check` reads the C one) and
+  gives the can chip `fmt` "C-Log2" and the cube name `flut_file()`.
+- A can shows (`wf_cube_have`, scanned at start and when the browser opens) and loads only with the cube of its own
+  curve: `<code>C2.CUB` (EKTAP_C2, T250DPC2, T250DMC2, T500TPC2, T500TMC2, TEKTAMC2, TEKAAPC2, TEKAAMC2, TEXRP_C2,
+  TEXRM_C2, TEXRAPC2, TEXRAMC2). Its Load sets Log + LUT and that curve; `wf_loaded()` matches only on it.
+- Windy EKTA P's can no longer loads `EKTAP_VL.CUB` (the owner's "Tung EKTA P V-Log" export, 33^3) nor the Film Roll
+  card's `EKTAP_C2.CUB` ("Tung EKTA P C-Log2", made by mk_usercube from that export). `tools/mk_card.sh
+  CINEPRINT_C2=<folder>` copies the twelve cubes under the C2 names (`catalog.py cubes` maps them, all twelve required)
+  and replaces a same-named cube of the source card. Per look it takes, first found, any case: the C2 card name,
+  "C-Log2 <look> 65.cube", "C-Log2 <look> YRGB.cube" or "C-Log2 <look> OSM.cube"; a cube must say LUT_3D_SIZE 2..65.
+- Film LUT row (`wf_flut_step`): each cube comes on its own curve while the curve in use is the current cube's own; a
+  Log curve set by hand that is not the cube's own (S-Log3 on Vision3 250D, V-Log on a CinePrint look) stays, and then
+  only the cubes on the card for that curve come (V-Log + T250DPVL.CUB, EKTAP_VL.CUB, ...). Technical keeps the curve.
+  The menu's "%s is a Canon Log 2 cube: set Log curve to Canon Log 2." advice is left out when V-Log is set and the
+  look's old VL cube is on the card (`wf_cube_vl`, same scan).
+- 65^3 needs no code change: the loader streams any 2..65 grid (two B-slabs held: peak 111 KB at 65^3); a 65^3 file
+  over a 33^3 one of the same name is parsed again (the .FRT key holds the cube's size and content samples); the .FRT
+  is 181,436 B whatever the grid. Host test CUBE65 (+ `WF_CUBE_REAL=a.cube:b.cube` to time real cubes). Time in qemu:
+  the PowerGrade 65^3 cubes 369..379 ms (P, 6.4..6.7 MB) and 413..418 ms (M, 7.6 MB), the 33^3 EKTAP_VL.CUB 101..106
+  ms: 3.6x / 4.0x (wf_loglut.c's instruction counts: 3.8x). The owner's EOS M log (RAWB2) has 33^3 first loads of
+  4.2..6.7 s (EKTAP_VL 4.9 s), so a 65^3 first load on the EOS M takes about 18..20 s (15..27 s over that spread); a
+  cache load stays 0.2..0.6 s (18..19 ms in qemu for every size). Not measured on the 5D2. 12 cubes = 84 MB of card.
+  One .FRT per cube: a change of LUT EI or of the Input curve in use (also the fall-back to sRGB when the Picture
+  Style does not fit) parses the cube again (about 20 s at 65^3, 5 s at 33^3); Highlights / Shadows do not (applied to
+  the cached tables).
+- Unchanged by the curve: auto exposure (`wf_ll_auto` for every film cube), the `.FRT` cache (the key holds the curve
+  in `mode` and the file name ends C2, so V-Log caches are never reused), the B develop on raw-develop (wf_dev handles
+  curves 1..5 the same way and takes `wf_loglut_name(.., lk.curve, ..)`).
+- Gamut A/B (notes `clog2-ab/` OSM, `clog2-ab-pg65/` PowerGrade 65, `clog2-ab/tool/`; Day09 JPEGs IMG_0208 250D P /
+  0210 500T M / 0233 EKTA P / 0215 EXRa P). OSM: the module with Cinema Gamut and the C2 cube against the module with
+  V-Gamut and the VL cube: mean dE00 0.53..1.09, p95 <= 2.6 (the same look); Rec.709 primaries instead 3.4..8.8 (p95
+  15..25), legal range 2.9..3.8. PowerGrade 65 (a different, denser look, so not the same picture as the V-Log OSM
+  one): vs the V-Log OSM render mean dE00 8.2..9.8 for the module, Cinema Gamut nearest in the float renders (8.7..10.3)
+  against Rec.709 primaries 11.8..14.2 (oversaturated: teal sky, hot orange) and legal range 8.8..11.9. So the
+  full-range code and Cinema Gamut the module uses stay right. Auto exposure lifts the PowerGrades' darker mids: +0.7..
+  +0.8 EV, EKTA P +1.5 EV (OSM +0.3..+0.5).
 
 ## 4. Interfaces
 

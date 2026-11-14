@@ -7,6 +7,7 @@ family and strip order, effect parameters, the table files and their provenance.
   catalog.py pack                                 the films that go into WFFILMS.DAT: "id table type flags variant t17" lines
   catalog.py docs OUT.md                          docs/FILMS.md
   catalog.py names                                every shipped catalogue string, one per line
+  catalog.py cubes                                "<card cube>\tC-Log2 <look>" per Canon Log 2 slot (mk_card.sh)
   catalog.py check                                naming rules, text widths (Ubuntu Sans via PIL), field and table checks
 Per row, besides the old fields (id code name type iso isocode kelvin ev8 family order grain halo spk v21 lut mode prov
 ready): `short` (strip label, <= 11 chars and <= 66 px at Ubuntu Sans 13 px wght 500 wdth 82), `line1` / `line2` (our
@@ -43,7 +44,7 @@ MODE_MAX = 16                     # fr_modes.h FR_MODE_MAX: 13..16 Canon Log (ow
 NAME_CH, SHORT_CH, SHORT_PX, LINE_CH, LINE_PX = 24, 11, 66, 44, 440
 FONT_UBUNTU = os.environ.get("WF_FONT", "/usr/share/fonts/truetype/ubuntu/UbuntuSans[wdth,wght].ttf")
 KINDS = ("COLOUR NEG", "SLIDE", "B&W NEG", "CINE NEG", "FILM LUT")
-FMTS = ("35mm", "120", "V-Log", "Standard")
+FMTS = ("35mm", "120", "V-Log", "C-Log2", "Standard")
 GROUPS = ("colour", "cine", "bw", "lut")
 PRINTS = ("scan", "cine", "paper")
 PSUFFIX = {"scan": "", "cine": "_C", "paper": "_P"}
@@ -58,6 +59,28 @@ FLUT_VL = (None, "V250D_VL.CUB", "V500T_VL.CUB", "PRT400VL.CUB", "FP400HVL.CUB",
            "FJ3513VL.CUB", "KD83V3VL.CUB", "KD83V5VL.CUB", "EKTAR5VL.CUB", "TUNGNTVL.CUB", "LBONO_VL.CUB", "EKTAP_VL.CUB",
            "T250DPVL.CUB", "T250DMVL.CUB", "T500TPVL.CUB", "T500TMVL.CUB", "TEKTAMVL.CUB", "TEKAAPVL.CUB", "TEKAAMVL.CUB",
            "TEXRP_VL.CUB", "TEXRM_VL.CUB", "TEXRAPVL.CUB", "TEXRAMVL.CUB", "LEICAVSR.CUB")   # Leica Vivid: sRGB in, any Log curve
+# the Log curve each cube was made for: a can's Load sets that curve (src/wf_loglut.c wf_flut_curve; 2 V-Log, 4 Canon Log 2).
+# Owner 11-14 "thay het qua clog2 thoi ban may cai cineprint ay": the twelve CinePrint looks (11 EKTA P, 12..22) are
+# Canon Log 2 cubes, since 11-14 evening 65^3 exports of the pack's C-Log2 PowerGrades (richer than its OSM cubes;
+# Cinema Gamut: the OSM A/B against the V-Log ones matched at mean dE 0.5..1.1, Rec.709 primaries did not, and the
+# PowerGrade A/B keeps Cinema Gamut nearest); Windy Neutral (9) is no CinePrint look and stays V-Log.
+FLUT_CURVE = (0, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2) + (4,) * 12 + (2,)
+CURVE_FMT = {2: "V-Log", 4: "C-Log2"}
+CURVE_SUF = {2: "VL", 4: "C2"}
+def flut_file(l):
+    """the cube a can loads: ML/DATA/<code padded to 6 with _><VL|C2|SR>.CUB (src/wf_loglut.c wf_loglut_name)"""
+    v = FLUT_VL[l]
+    return v if v.endswith("SR.CUB") else v[:6] + CURVE_SUF[FLUT_CURVE[l]] + ".CUB"
+# the CinePrint Studio look of each Canon Log 2 slot: the cards' cube is a 65^3 Resolve export of its PowerGrade
+# "YRGB - Canon Log2/C-Log2 <look> YRGB.drx" ("C-Log2 <look> 65.cube", share Anh/CinePrint_CLog2_65, MD5_8.txt);
+# "C-Log2 <look> OSM.cube" (the pack's flatter 33^3 monitoring cube) also loads; tools/mk_card.sh CINEPRINT_C2=<folder>
+# copies each as flut_file(slot)
+FLUT_CP = {11: "EKTA P", 12: "250D P", 13: "250D M", 14: "500T P", 15: "500T M", 16: "EKTA M", 17: "EKTAa P",
+           18: "EKTAa M", 19: "EXR P", 20: "EXR M", 21: "EXRa P", 22: "EXRa M"}
+def cp_cubes():
+    """lines "<card name>\tC-Log2 <look>" for the Canon Log 2 slots (tools/mk_card.sh CINEPRINT_C2 adds " 65.cube",
+    " YRGB.cube" or " OSM.cube")"""
+    return ["%s\tC-Log2 %s" % (flut_file(l), FLUT_CP[l]) for l in sorted(FLUT_CP)]
 TYPES = {"neg": 0, "slide": 1, "bw": 2}
 # yg_stocks.c rows and yh_halo.h profiles that exist in this build (a row of a film that is not ready may name a
 # row that a later batch adds; check() asserts the rows of ready films exist)
@@ -113,7 +136,7 @@ def derive(f):
     f["group"] = "lut" if f["lut"] else "bw" if f["type"] == "bw" else "cine" if f["family"] == "cine" else "colour"
     f["kind"] = ("FILM LUT" if f["lut"] else "SLIDE" if f["type"] == "slide" else "B&W NEG" if f["type"] == "bw"
                  else "CINE NEG" if f["group"] == "cine" else "COLOUR NEG")
-    f["fmt"] = "V-Log" if f["lut"] else "35mm"
+    f["fmt"] = CURVE_FMT[FLUT_CURVE[f["lut"]]] if f["lut"] else "35mm"
     f["short"] = SHORT.get(f["id"], "")
     f["prints"] = () if f["lut"] or not f["ready"] else VARIANTS.get(f["table"], ("scan",))
     if f["ready"] and not f["lut"]:
@@ -254,11 +277,12 @@ FILMS = [
            "V9 cube PRT400S3.CUB (spektrafilm profiles, CC BY-SA 4.0)"),
     LUTCAN(65, "LFP400", "Pro 400H LUT", 400, 88, 5200, 4, 4, "Portrait negative, airy scan: pastel", "colour, bright highlights.",
            "V9 cube FP400HS3.CUB (spektrafilm profiles, CC BY-SA 4.0)"),
-    # the owner's own Resolve power grade "V-Log EKTA P YRGB" (2026-11-13): his 65^3 V-Log export as EKTAP_VL.CUB, the
-    # other logs from it (luts_film/src/mk_usercube.py); not shipped, the can shows once his cube is on the card
-    # V14T: "Windy EKTA P" (named Tung until 11-14), the EKTA P look of the owner's film pack (its V-Log 33^3 cube, or his own 65^3 Resolve export)
-    LUTCAN(66, "LEKTAP", "Windy EKTA P", 100, 72, 5500, 15, 11, "Slide-film look with a cinema print", "finish, applied as a V-Log LUT.",
-           "owner's film pack V-Log cube EKTAP_VL.CUB (Resolve 33^3 or his 65^3 export), not in the repo"),
+    # V14T: "Windy EKTA P" (named Tung until 11-14), the EKTA P look of the owner's film pack. Owner 11-14: all CinePrint
+    # looks on Canon Log 2, so its can loads the 65^3 export of the PowerGrade "C-Log2 EKTA P YRGB" as EKTAP_C2.CUB
+    # (FLUT_CURVE). His own V-Log export (EKTAP_VL.CUB 33^3, TITLE "Tung EKTA P V-Log") may stay on the card: the can no
+    # longer loads it, the Film LUT row with Log curve V-Log still does.
+    LUTCAN(66, "LEKTAP", "Windy EKTA P", 100, 72, 5500, 15, 11, "Slide-film look with a cinema print", "finish, applied as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 EKTA P YRGB, 65^3 Canon Log 2 cube EKTAP_C2.CUB (Resolve export), not in the repo"),
     # ---- V12 (owner 2026-11-13 "make cans"): the owner's six V-Log cubes of V11 (Resolve 33^3 from his VlogCube folder,
     # licence unknown: on the cards only, never in the repo) as cans after the four; id 66 is the EKTA P can (V13,
     # branch ugrade-can). Print looks as daylight cine, Ektar as ISO 100, the two graders' looks ISO 400.
@@ -275,30 +299,31 @@ FILMS = [
     LUTCAN(72, "LLBONO", "Luca Bono LUT", 400, 88, 5200, 9, 10, "Graded film look with warm, rich tones,", "applied as a V-Log LUT.",
            "owner's V-Log cube LBONO_VL.CUB (Resolve 33^3), not in the repo"),
     # ---- V14T (owner 2026-11-13 "make films of these, names starting with Tung"; named "Windy" 11-14 as Film Roll V14U): the eleven other looks of the owner's
-    # purchased film pack (its V-Log 33^3 monitoring cubes, the same looks as its Resolve power grades with a flatter
-    # curve; on the cards only, never in the repo); id 66 above is their EKTA P. P = 2383 print output, M = simple DI curve.
-    LUTCAN(73, "LT25DP", "Windy 250D P", 250, 83, 5500, 11, 12, "Daylight cine negative with a cinema", "print finish, as a V-Log LUT.",
-           "owner's film pack V-Log cube T250DPVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(74, "LT25DM", "Windy 250D M", 250, 83, 5500, 12, 13, "Daylight cine negative with a plain", "intermediate curve, as a V-Log LUT.",
-           "owner's film pack V-Log cube T250DMVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(75, "LT50TP", "Windy 500T P", 500, 91, 3200, 13, 14, "Tungsten cine negative with a cinema", "print finish, as a V-Log LUT.",
-           "owner's film pack V-Log cube T500TPVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(76, "LT50TM", "Windy 500T M", 500, 91, 3200, 14, 15, "Tungsten cine negative with a plain", "intermediate curve, as a V-Log LUT.",
-           "owner's film pack V-Log cube T500TMVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(77, "LTEKTM", "Windy EKTA M", 100, 72, 5500, 16, 16, "Slide-film look with a plain", "intermediate curve, as a V-Log LUT.",
-           "owner's film pack V-Log cube TEKTAMVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(78, "LTEKAP", "Windy EKTAa P", 100, 72, 5500, 17, 17, "Alternate slide-film look with a cinema", "print finish, as a V-Log LUT.",
-           "owner's film pack V-Log cube TEKAAPVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(79, "LTEKAM", "Windy EKTAa M", 100, 72, 5500, 18, 18, "Alternate slide-film look with a plain", "intermediate curve, as a V-Log LUT.",
-           "owner's film pack V-Log cube TEKAAMVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(80, "LTEXRP", "Windy EXR P", 500, 91, 3200, 19, 19, "Classic 500T negative look with a cinema", "print finish, as a V-Log LUT.",
-           "owner's film pack V-Log cube TEXRP_VL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(81, "LTEXRM", "Windy EXR M", 500, 91, 3200, 20, 20, "Classic 500T negative look with a plain", "intermediate curve, as a V-Log LUT.",
-           "owner's film pack V-Log cube TEXRM_VL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(82, "LTEXAP", "Windy EXRa P", 500, 91, 3200, 21, 21, "Alternate 500T negative look with a cinema", "print finish, as a V-Log LUT.",
-           "owner's film pack V-Log cube TEXRAPVL.CUB (Resolve 33^3), not in the repo"),
-    LUTCAN(83, "LTEXAM", "Windy EXRa M", 500, 91, 3200, 22, 22, "Alternate 500T negative look with a plain", "intermediate curve, as a V-Log LUT.",
-           "owner's film pack V-Log cube TEXRAMVL.CUB (Resolve 33^3), not in the repo"),
+    # purchased film pack (CinePrint Studio: its 33^3 on-set monitoring cubes, the same looks as its Resolve power grades
+    # with a flatter curve; on the cards only, never in the repo); id 66 above is their EKTA P. P = 2383 print output,
+    # M = simple DI curve. Since 11-14 Canon Log 2 cubes (<code>C2.CUB): 65^3 exports of its C-Log2 PowerGrades.
+    LUTCAN(73, "LT25DP", "Windy 250D P", 250, 83, 5500, 11, 12, "Daylight cine negative with a cinema", "print finish, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 250D P YRGB, 65^3 Canon Log 2 cube T250DPC2.CUB (Resolve export), not in the repo"),
+    LUTCAN(74, "LT25DM", "Windy 250D M", 250, 83, 5500, 12, 13, "Daylight cine negative with a plain", "intermediate curve, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 250D M YRGB, 65^3 Canon Log 2 cube T250DMC2.CUB (Resolve export), not in the repo"),
+    LUTCAN(75, "LT50TP", "Windy 500T P", 500, 91, 3200, 13, 14, "Tungsten cine negative with a cinema", "print finish, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 500T P YRGB, 65^3 Canon Log 2 cube T500TPC2.CUB (Resolve export), not in the repo"),
+    LUTCAN(76, "LT50TM", "Windy 500T M", 500, 91, 3200, 14, 15, "Tungsten cine negative with a plain", "intermediate curve, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 500T M YRGB, 65^3 Canon Log 2 cube T500TMC2.CUB (Resolve export), not in the repo"),
+    LUTCAN(77, "LTEKTM", "Windy EKTA M", 100, 72, 5500, 16, 16, "Slide-film look with a plain", "intermediate curve, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 EKTA M YRGB, 65^3 Canon Log 2 cube TEKTAMC2.CUB (Resolve export), not in the repo"),
+    LUTCAN(78, "LTEKAP", "Windy EKTAa P", 100, 72, 5500, 17, 17, "Alternate slide-film look with a cinema", "print finish, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 EKTAa P YRGB, 65^3 Canon Log 2 cube TEKAAPC2.CUB (Resolve export), not in the repo"),
+    LUTCAN(79, "LTEKAM", "Windy EKTAa M", 100, 72, 5500, 18, 18, "Alternate slide-film look with a plain", "intermediate curve, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 EKTAa M YRGB, 65^3 Canon Log 2 cube TEKAAMC2.CUB (Resolve export), not in the repo"),
+    LUTCAN(80, "LTEXRP", "Windy EXR P", 500, 91, 3200, 19, 19, "Classic 500T negative look with a cinema", "print finish, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 EXR P YRGB, 65^3 Canon Log 2 cube TEXRP_C2.CUB (Resolve export), not in the repo"),
+    LUTCAN(81, "LTEXRM", "Windy EXR M", 500, 91, 3200, 20, 20, "Classic 500T negative look with a plain", "intermediate curve, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 EXR M YRGB, 65^3 Canon Log 2 cube TEXRM_C2.CUB (Resolve export), not in the repo"),
+    LUTCAN(82, "LTEXAP", "Windy EXRa P", 500, 91, 3200, 21, 21, "Alternate 500T negative look with a cinema", "print finish, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 EXRa P YRGB, 65^3 Canon Log 2 cube TEXRAPC2.CUB (Resolve export), not in the repo"),
+    LUTCAN(83, "LTEXAM", "Windy EXRa M", 500, 91, 3200, 22, 22, "Alternate 500T negative look with a plain", "intermediate curve, as a C-Log2 LUT.",
+           "CinePrint PowerGrade C-Log2 EXRa M YRGB, 65^3 Canon Log 2 cube TEXRAMC2.CUB (Resolve export), not in the repo"),
     # ---- 11-14: "Leica Vivid", the owner's Lumix "L Leica 2" look, a display cube made on Picture Style Standard (sRGB in,
     # sRGB out; the S9's Real Time LUT puts it on Standard). Owner 11-14: "grade tren srgb luon ko ra vlog dau": the cube
     # reads the Standard JPEG's sRGB codes directly, no V-Log on the way (wf_loglut.h WF_FLUT_DISP, wf_ll_disp), no auto
@@ -573,6 +598,22 @@ def check():
         bad.append("the B&W films come last on the strip")
     orders = [f["order"] for f in FILMS]
     if len(set(orders)) != len(orders): bad.append("strip order values not unique")
+    # the Log curve of each Film LUT: one table here and in src/wf_loglut.c wf_flut_curve; every Canon Log 2 slot
+    # has its CinePrint file (mk_card.sh CINEPRINT_C2) and its can names the cube flut_file() gives
+    if len(FLUT_CURVE) != FLUT_N or len(FLUT_VL) != FLUT_N or len(FLUT_NAME) != FLUT_N:
+        bad.append("FLUT_CURVE / FLUT_VL / FLUT_NAME must have FLUT_N entries")
+    if sorted(FLUT_CP) != [l for l in range(FLUT_N) if FLUT_CURVE[l] == 4]:
+        bad.append("FLUT_CP must name the CinePrint look of exactly the Canon Log 2 slots")
+    try:
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "wf_loglut.c")).read()
+        body = src.split("wf_flut_curve[WF_FLUT_N] = {", 1)[1].split("}", 1)[0]
+        cv = [{"0": 0, "WF_LL_VLOG": 2, "WF_LL_CLOG2": 4}.get(t.strip(), -1) for t in body.split(",")]
+        if tuple(cv) != FLUT_CURVE: bad.append("src/wf_loglut.c wf_flut_curve %s differs from FLUT_CURVE" % (cv,))
+    except (OSError, IndexError) as e:
+        bad.append("src/wf_loglut.c wf_flut_curve not read: %s" % e)
+    for f in FILMS:
+        if f["lut"] and FLUT_CURVE[f["lut"]] == 4 and flut_file(f["lut"]) not in (f.get("prov") or ""):
+            bad.append("%s: its provenance must name %s" % (f["code"], flut_file(f["lut"])))
     for b in bad: print("catalog: " + b)
     print("catalog: %d films (%d ready: %s), ids %d..%d, texts <= %d chars / %d px; %s" % (
         len(FILMS), sum(f["ready"] for f in FILMS), ", ".join("%s %d" % kv for kv in sorted(ngr.items())), ID0,
@@ -629,13 +670,13 @@ def docs(out):
     L += ["", "## Film LUT cans (V10)", "",
           "Rows of family `film LUT` (\"cube\" above) are no film of ours: no table in WSFILMS.DAT, no look of their own.",
           "Each stands for one film cube of the menu Film LUT (V9, docs/README_EOSM.txt): the shelf shows the can only",
-          "while its V-Log cube is in ML/DATA, and its Load sets Film LUT to that cube and the output to V-Log + LUT",
-          "(a + LUT output already set stays, its curve kept: S-Log3 / LogC3 + LUT then use the _S3 / _LC cube, so all",
-          "three cubes of the film belong on the card). Grain, halation and mist are those of the + LUT outputs.", "",
-          "| id | code | Film LUT | V-Log cube |", "|---:|---|---|---|"]
+          "while its cube is in ML/DATA, and its Load sets Film LUT to that cube and the output to <its curve> + LUT",
+          "(V-Log, or Canon Log 2 for the twelve CinePrint looks since 11-14; the Film LUT row with another Log curve",
+          "set by hand uses that curve's cube when it is on the card). Grain, halation and mist are those of the + LUT outputs.", "",
+          "| id | code | Film LUT | cube (its curve) |", "|---:|---|---|---|"]
     for f in sorted(FILMS, key=lambda f: f["id"]):
         if f["lut"]:
-            L.append("| %d | %s | %s | ML/DATA/%s |" % (f["id"], f["code"], FLUT_NAME[f["lut"]], FLUT_VL[f["lut"]]))
+            L.append("| %d | %s | %s | ML/DATA/%s |" % (f["id"], f["code"], FLUT_NAME[f["lut"]], flut_file(f["lut"])))
     L += ["", "Output modes 1..4, 11 and 12 of the Film Roll menu shoot ids 26..31 directly; every other film is",
           "used through the shelf (\"Loaded film\"). Ids never change once deployed; a placeholder keeps its id."]
     open(out, "w").write("\n".join(L) + "\n")
@@ -651,6 +692,8 @@ if __name__ == "__main__":
         docs(a[1])
     elif a and a[0] == "names":
         names()
+    elif a and a[0] == "cubes":
+        print("\n".join(cp_cubes()))
     elif a and a[0] == "check":
         sys.exit(0 if check() else 1)
     else:

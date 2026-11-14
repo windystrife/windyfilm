@@ -13,7 +13,8 @@ spektrafilm (GPLv3).
 Các cube còn lại trên thẻ (EKTAP, EKTAR5, FJ3513, KD83, LBONO, LEICAV, T250D,
 T500T, TEKAA, TEKTA, TEXRA, TEXRM, TEXRP, TUNGNT) là grade riêng của chủ máy,
 chỉ để dùng trên thẻ này. Các lon TUNGNT / EKTAP / T... giờ tên "Windy ..."
-(Windy Neutral, Windy EKTA P, Windy 250D P, ...); tên file không đổi. LEICAV là
+(Windy Neutral, Windy EKTA P, Windy 250D P, ...). Từ 14/11 mười hai lon Windy
+của CinePrint dùng cube Canon Log 2 (<mã>C2.CUB), xem mục 2. LEICAV là
 lon "Leica Vivid": cube hiển thị, xem mục 2.
 
 
@@ -23,9 +24,9 @@ lon "Leica Vivid": cube hiển thị, xem mục 2.
 
   Hậu tố   Chế độ trên máy
   S3       S-Log3 + LUT
-  VL       V-Log + LUT      (các lon Film LUT dùng bản VL)
+  VL       V-Log + LUT      (các lon Film LUT dùng bản VL, trừ 12 lon CinePrint)
   LC       LogC3 + LUT
-  C2       Canon Log 2 + LUT
+  C2       Canon Log 2 + LUT (12 lon Windy CinePrint từ 14/11)
   C3       Canon Log 3 + LUT
 
 Mỗi cube chỉ dùng cho đúng chế độ của nó; dùng sai chế độ thì màu và độ sáng
@@ -38,9 +39,16 @@ thuật "Technical": log -> Rec.709.
 - Cube nằm trong ML/data/ (giữ nguyên tên, chữ hoa 8.3).
 - Shoot > WindyFilm > Output: "Log + LUT", chọn Log curve, rồi Film LUT.
   Hoặc trong trình chọn phim, nạp một lon ở nhóm Film LUT: module tự đặt
-  V-Log + LUT với cube của lon đó. Lon chỉ hiện khi cube _VL của nó có trên thẻ.
+  Log + LUT với đường cong và cube của lon đó: V-Log (_VL) cho các lon phim
+  và Windy Neutral; Canon Log 2 (_C2) cho 12 lon Windy của CinePrint (Windy
+  EKTA P, 250D P / M, 500T P / M, EKTA M, EKTAa P / M, EXR P / M, EXRa P / M;
+  cube 65^3 xuất từ PowerGrade C-Log2 của CinePrint). Lon chỉ hiện
+  khi cube đó có trên thẻ. Windy EKTA P không còn nạp EKTAP_VL.CUB.
+  Hàng Film LUT: Log curve bạn chọn tay khác đường cong của cube thì được giữ,
+  và chỉ hiện các cube có bản cho đường cong đó (ví dụ V-Log + T250DPVL.CUB).
 - Lần đầu dùng mỗi cube, module nạp vài giây rồi lưu bảng đã tính vào
-  ML/data/<tên>.FRT; các lần sau nạp từ cache. Đợi menu Film LUT hết báo
+  ML/data/<tên>.FRT; các lần sau nạp từ cache. Cube 65^3 nạp lần đầu lâu hơn
+  khoảng 4 lần cube 33^3 (EOS M: khoảng 20 giây so với 5 giây). Đợi menu Film LUT hết báo
   "Loading" rồi hãy chụp. Chép đè cube mới thì .FRT tự tạo lại.
 - Cài đặt máy: Picture Style Neutral, Color space sRGB, JPEG L.
 - Riêng Leica Vivid (LEICAVSR.CUB): cube hiển thị làm trên ảnh Picture Style
