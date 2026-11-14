@@ -319,7 +319,7 @@ out:
  * does not match (key, size, hash) is rebuilt and rewritten; a write while Canon is busy is owed and tried again
  * every RB_RBT_MS while the same tables stay published. */
 #define RB_RBT_MAGIC 0x31544252u                 /* "RBT1" */
-#define RB_RBT_NKEY  9
+#define RB_RBT_NKEY  WF_RBT_NKEY                 /* wf_rawb.h: the darkroom keys the same file (wf_rawb_rbt_key) */
 #define RB_RBT_MS    2000
 static uint32_t rb_rbt_k[RB_RBT_NKEY];           /* the owed write: its key, file and tables key (0 = none) */
 static char rb_rbt_path[WF_LL_NAME];
@@ -340,6 +340,20 @@ static int rb_rbt_name(char *d, const char *cube)          /* ML/DATA/<name>.CUB
     d[n - 2] = 'B';
     d[n - 1] = 'T';
     return 1;
+}
+
+/* the one key of a look's .RBT (wf_rawb.h): B's own build below and the darkroom's (wf_dark.c, same camera, same struct) */
+int wf_rawb_rbt_key(const struct wf_look *lk, int src, const char *cube, char *path, uint32_t *key)
+{
+    if ((src != WF_DEV_CUBE && src != WF_DEV_DISP) || !cube || !rb_rbt_name(path, cube) || wf_llb_cube_id(cube, key + 5) != 0)
+        return -1;
+    int curve = src >= WF_DEV_SRGB ? 0 : lk->curve, autoexp = src == WF_DEV_CUBE && lk->flut != 0;
+    key[0] = RB_RBT_MAGIC;
+    key[1] = wf_dev_tabs_id(RB_CAM, src, curve);
+    key[2] = (uint32_t)rb_key(lk);
+    key[3] = (uint32_t)autoexp | (uint32_t)RB_CAM << 8;
+    key[4] = (uint32_t)sizeof(struct wf_dev_tabs);
+    return 0;
 }
 
 static void rb_rbt_retry(void)
@@ -513,13 +527,8 @@ void wf_rawb_poll(void)
     /* the .RBT first (cube tables only) */
     uint32_t rk[RB_RBT_NKEY];
     char rp[WF_LL_NAME];
-    int rbt = cube && rb_rbt_name(rp, cube) && wf_llb_cube_id(cube, rk + 5) == 0, got = -1;
+    int rbt = wf_rawb_rbt_key(&lk, src, cube, rp, rk) == 0, got = -1;   /* key word 2 = rb_key(&lk) = want */
     if (rbt) {
-        rk[0] = RB_RBT_MAGIC;
-        rk[1] = wf_dev_tabs_id(RB_CAM, src, curve);
-        rk[2] = (uint32_t)want;
-        rk[3] = (uint32_t)autoexp | (uint32_t)RB_CAM << 8;
-        rk[4] = (uint32_t)sizeof(struct wf_dev_tabs);
         got = wf_llb_read(rp, rk, RB_RBT_NKEY, rb_tabs, sizeof(struct wf_dev_tabs));
         if (got == WF_LLB_HIT && (rb_tabs->src != src || rb_tabs->curve != curve || rb_tabs->cam != RB_CAM
                                   || rb_tabs->n < 2 || rb_tabs->n > 65))
@@ -612,4 +621,9 @@ int  wf_rawb_state(void) { return wf_rawb ? WF_RB_NOCAM : WF_RB_OFF; }
 int  wf_rawb_err(void) { return 0; }
 int  wf_rawb_busy(void) { return 0; }
 int  wf_rawb_holds(void) { return 0; }
+int  wf_rawb_rbt_key(const struct wf_look *lk, int src, const char *cube, char *path, uint32_t *key)
+{
+    (void)lk; (void)src; (void)cube; (void)path; (void)key;
+    return -1;
+}
 #endif

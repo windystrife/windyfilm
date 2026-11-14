@@ -470,7 +470,10 @@ Stocks keep their Windy names, and there are no brand logos.
       read for Log + LUT cubes (`wf_dev_build`; the curve picks the cube, so the CinePrint cans read `<code>C2.CUB`
       as the V-Log cans read `<code>VL.CUB`), and Leica Vivid's display cube `LEICAVSR.CUB` on the sRGB develop's
       codes with no log step (`wf_dev_build_disp`, Highlights / Shadows on its output). The log names it
-      (`dark: tables disp c0 LEICAVSR.CUB`).
+      (`dark: tables disp c0 LEICAVSR.CUB`). Cube tables come from B's cache `ML/DATA/<cube>.RBT` when it
+      matches: same struct, camera and key (`wf_rawb_rbt_key`, one function for both), so a run reads what B wrote
+      and B, rebuilding after the run, reads its own file (`, LEICAVSR.RBT hit`). A miss is built and written
+      (Canon is idle during a run).
   - If the raw or the frame cannot be had, the run fails with "no memory" and the log lists every chunk. A banded
     fallback (no halation / mist) is the next step only if the camera run needs it.
   - Everything is freed and LiveView resumed when the run ends.

@@ -49,6 +49,10 @@ bật được cùng nhau, cái này không tắt cái kia:
 - Kiểu được đếm sau khi B develop xong (bộ đếm nhảy và "WIND ON" hiện sau khoảng 30 s).
 - Lúc Darkroom chạy, RAW develop tạm trả bộ nhớ, tráng xong tự dựng lại bảng.
   Darkroom không bắt đầu khi B còn đang develop một tấm: chờ xong rồi bấm SET.
+- Bảng của lon Log + LUT / Leica: Darkroom và RAW develop dùng chung file
+  ML/DATA/<tên cube>.RBT. Bên nào dựng trước thì ghi file, bên kia chỉ đọc (khoảng
+  1 giây thay vì vài giây đến vài chục giây với cube 65^3). Log ghi
+  "dark: tables ... .RBT hit" hoặc "... written".
 
 Module tự đặt chất lượng ảnh RAW + L (Fine) khi cuộn đang chụp, và trả lại như cũ
 khi cuộn hết / tua lại / đóng. Đừng tự đổi chất lượng trong lúc chụp cuộn: tấm nào

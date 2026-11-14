@@ -2608,12 +2608,32 @@ static void t_rawb(void)
     wf_flut = WF_FLUT_LEICAV;
     chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 30000) && WAIT(wf_rawb_state() == WF_RB_READY, 3000),
         "roll + B, Leica Vivid: B's display tables ('%s')", log_line("rawb: tables"));
+    {   /* the darkroom's own build keys B's .RBT the same way (wf_rawb_rbt_key): its read of the file B just wrote hits.
+         * (The host run below ends at "no memory" before its build, so this is the darkroom's call sequence.) */
+        struct wf_look lk;
+        char nb[WF_LL_NAME], rp[WF_LL_NAME];
+        uint32_t rk[WF_RBT_NKEY];
+        struct wf_dev_tabs *tb = malloc(sizeof *tb);
+        wf_look_now(&lk);
+        int sr = wf_dark_src(lk.output, lk.flut);
+        const char *cb = wf_loglut_name(nb, lk.curve, lk.flut, 0);
+        int kr = cb ? wf_rawb_rbt_key(&lk, sr, cb, rp, rk) : -9;
+        int rr = kr == 0 ? wf_llb_read(rp, rk, WF_RBT_NKEY, tb, sizeof *tb) : -9;
+        chk(sr == WF_DEV_DISP && kr == 0 && strcmp(rp, "ML/DATA/LEICAVSR.RBT") == 0 && rr == WF_LLB_HIT
+            && tb->src == WF_DEV_DISP && tb->cam == WF_DEV_EOSM && tb->curve == 0,
+            "roll + B, Leica Vivid: the darkroom's key reads B's .RBT (key %d, read %d, '%s')", kr, rr, kr == 0 ? rp : "-");
+        lk.lei = (int8_t)(lk.lei + 1);                         /* another LUT EI: another key */
+        rr = wf_rawb_rbt_key(&lk, sr, cb, rp, rk) == 0 ? wf_llb_read(rp, rk, WF_RBT_NKEY, tb, sizeof *tb) : -9;
+        chk(rr == WF_LLB_KEY, "roll + B, Leica Vivid: another LUT EI is another key (%d)", rr);
+        free(tb);
+    }
     log_mark();
     ds = wf_dark_start();
     chk(ds == 0 && LOGW("dark: roll 001 start, 1 of 1 to develop, look output 2", 5000) && WAIT(!wf_dark_busy(), 15000),
         "roll + B, Leica Vivid: a darkroom run with the look (%d, '%s')", ds, log_line("dark: roll"));
-    chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 3000)
-        && WAIT(h_arena_live == live0 + 1, 3000), "roll + B, Leica Vivid: B builds again after the run (blocks %d)", h_arena_live);
+    chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 10000) && LOGW(", LEICAVSR.RBT hit", 3000)
+        && WAIT(wf_rawb_state() == WF_RB_READY, 3000) && WAIT(h_arena_live == live0 + 1, 3000),
+        "roll + B, Leica Vivid: B's rebuild after the run reads its .RBT ('%s', blocks %d)", log_line("rawb: tables"), h_arena_live);
     wf_flut = 0;
     wf_out = WF_OUT_FILM;
     chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "roll + B: Close roll");

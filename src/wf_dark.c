@@ -818,15 +818,39 @@ static void dk_task(void *arg)
         int rc = WF_LL_OK;
         if ((src == WF_DEV_CUBE || src == WF_DEV_DISP) && !(cube = wf_loglut_name(cn, lk.curve, lk.flut, 0)))
             rc = WF_LL_E_MODE;                   /* a display look names "<CODE>SR.CUB" for any curve */
-        if (rc == WF_LL_OK && src == WF_DEV_DISP)   /* LUT EI by hand, Highlights / Shadows on the cube's output (as B) */
+        /* B's .RBT of these cube tables first (same struct, camera and key: wf_rawb_rbt_key); a miss is built and the
+         * file written for B and the next run (Canon is idle here: LiveView paused, no shot) */
+        int t0 = get_ms_clock(), curve = src >= WF_DEV_SRGB ? 0 : lk.curve, got = -1;
+        uint32_t rk[WF_RBT_NKEY];
+        char rp[WF_LL_NAME];
+        int rbt = rc == WF_LL_OK && wf_rawb_rbt_key(&lk, src, cube, rp, rk) == 0;
+        if (rbt) {
+            got = wf_llb_read(rp, rk, WF_RBT_NKEY, M.tabs, sizeof(struct wf_dev_tabs));
+            if (got == WF_LLB_HIT && (M.tabs->src != src || M.tabs->curve != curve || M.tabs->cam != WF_DEV_EOSM
+                                      || M.tabs->n < 2 || M.tabs->n > 65))
+                got = WF_LLB_BAD;
+        }
+        if (got != WF_LLB_HIT && rc == WF_LL_OK && src == WF_DEV_DISP)   /* LUT EI by hand, H / S on the cube's output (as B) */
             rc = wf_dev_build_disp(M.tabs, WF_DEV_EOSM, cube, lk.lei, lk.hl, lk.sh, &li);
-        else if (rc == WF_LL_OK)
-            rc = wf_dev_build(M.tabs, src, src == WF_DEV_SRGB ? 0 : lk.curve, WF_DEV_EOSM, cube,
+        else if (got != WF_LLB_HIT && rc == WF_LL_OK)
+            rc = wf_dev_build(M.tabs, src, curve, WF_DEV_EOSM, cube,
                               src == WF_DEV_CUBE ? lk.lei : 0, src == WF_DEV_CUBE && lk.flut != 0, &li);
-        if (rc == WF_LL_OK)
-            wf_log("dark: tables %s c%d%s%s",
+        if (rc == WF_LL_OK) {
+            static const char *const llb[4] = { "hit", "none", "key", "bad" };
+            char rs[64];                         /* ", <name>.RBT hit" / ", <name>.RBT none, written 120ms" */
+            int t1 = get_ms_clock(), wr = rbt && got != WF_LLB_HIT
+                                          ? wf_llb_write(rp, rk, WF_RBT_NKEY, M.tabs, sizeof(struct wf_dev_tabs)) : 0;
+            rs[0] = 0;
+            if (rbt && got == WF_LLB_HIT)
+                snprintf(rs, sizeof rs, ", %s hit", rp + 8);
+            else if (rbt && !wr)
+                snprintf(rs, sizeof rs, ", %s %s, written %dms", rp + 8, llb[got], get_ms_clock() - t1);
+            else if (rbt)
+                snprintf(rs, sizeof rs, ", %s %s, not written (%s)", rp + 8, llb[got], wf_fe_name(wr));
+            wf_log("dark: tables %s c%d%s%s %dms%s",
                    src == WF_DEV_SRGB ? "srgb" : src == WF_DEV_LOG ? "log" : src == WF_DEV_DISP ? "disp" : "cube",
-                   src >= WF_DEV_SRGB ? 0 : lk.curve, cube ? " " : "", cube ? cube + 8 : "");
+                   curve, cube ? " " : "", cube ? cube + 8 : "", t1 - t0, rs);
+        }
         if (rc != WF_LL_OK) {
             wf_log("dark: tables err %d %s", rc, wf_loglut_errstr(rc));
             end_why = "develop tables";

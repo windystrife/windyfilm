@@ -23,6 +23,7 @@
  * time per phase, or why the shot got the 8-bit look. */
 #ifndef WF_RAWB_H
 #define WF_RAWB_H
+#include <stdint.h>
 struct wf_frame;
 struct wf_look;
 
@@ -42,5 +43,11 @@ void wf_rawb_poll(void);                         /* wf_task: tables, memory, the
 void wf_rawb_end(void);                          /* wf_task at unload: waits up to 2 s for a develop to stop, frees */
 int  wf_rawb_busy(void);                         /* a shot's develop runs (the darkroom does not start then) */
 int  wf_rawb_holds(void);                        /* the tables + scratch block is held, or a develop runs */
+/* the .RBT of a look's cube tables (src WF_DEV_CUBE / WF_DEV_DISP of wf_dev.h, cube = wf_loglut_name's path) as B keys
+ * it: path (WF_LL_NAME bytes) and key (WF_RBT_NKEY words) for wf_llb_read / wf_llb_write (wf_loglut.h) with a struct
+ * wf_dev_tabs blob, so the darkroom (wf_dark.c) reads what B wrote and B what a run wrote. 0 = filled, -1 = no cache for
+ * these tables (SRGB / LOG, a bad name, no cube id, no B on this camera). Hashes the cube (file I/O, Canon idle). */
+#define WF_RBT_NKEY 9
+int  wf_rawb_rbt_key(const struct wf_look *lk, int src, const char *cube, char *path, uint32_t *key);
 
 #endif
