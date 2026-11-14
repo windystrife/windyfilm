@@ -75,7 +75,7 @@ shot: Canon YUV conversion site ─ hook (patch_hook_function) ─ gate ─ sema
   - Off.
   - Loading a Film LUT can sets V-Log + LUT with the can's cube.
 - **Effects:** grain (`yg_*`), halation and bloom (`yh_*`), Mist (`wf_mist`, EOS M; on the 5D2 halves only once its
-  map hand-over is wired, as before), Strength 30 / 100 / 125.
+  map hand-over is wired, as before), Strength 30 / 100 / 125, Highlights / Shadows -5..+5 (section 3.3).
 - **Light** (new row): Auto = the camera's WB, untouched. Day = the stock's `kelvin`. Cloudy = kelvin x 1.25, rounded to
   100 K. Tungsten = 3200 K.
   - Set through `lens_set_kelvin`, at load and when the row changes.
@@ -277,12 +277,40 @@ whichever P0 shows intact.
 **B. Full develop (later, optional "slow" mode):** 35-45 s per shot, only if the owner accepts the wait. It uses
 `WF_FMT_RAW14` as the main format and a LOG16 look path, as laid out in 3.1.
 
+### 3.3 Highlights / Shadows (owner 2026-11-14)
+
+Two settings, "Highlights" and "Shadows", -5..+5 each, default 0, for the film looks and Log + LUT (the Film LUT cans
+too), never flat Log. The math is WindyStrife's own (the V14U spec); WindyFilm has its own code.
+
+- **Curve.** On the neutral-axis curve N of `Y' = N[y] + E`: `N'[y] = N[y] + round((h x^2 (255 - x) + s x (255 - x)^2)
+  / 385341)`, x = N[y]. Two cubic humps, peaks at x = 170 (h) and 85 (s), 0 at black and white, about 6.4 codes a step;
+  +5 lifts code 170 by 32. Rounding is half away from zero (d < 0: -((192670 - d) / 385341), else (d + 192670) /
+  385341). The result is kept non-decreasing: `p = clamp(x + d, p, 255)`. `wf_hs_bend` (wf_film.c) does it. The
+  divisor is a constant, so the camera code is a UMULL, never `__aeabi_uidiv`.
+- **Films.** Build time only: `WF_FT_HS(h, s)` puts the two values as signed 4-bit fields in bits 16-23 of the
+  `wf_film_build` flags. The builder bends N last, after the Strong pass. E and C keep their values relative to the
+  unbent N, so every colour at a luma moves with its grey. 0 / 0 adds no bit and bends nothing: the set is
+  bit-identical to the builder before the feature (host mode HS: FNV of 8 sets against 7f9e294). The shot set's key
+  compares the flags, so h / s are in it. The preview key `wf_pv_fkey` carries them in bits 12-19.
+- **Log + LUT.** `wf_ll_poll` bends the loaded tables' N after `wf_loglut_load_cached`. The `.FRT` cache is written
+  inside the load, so it holds the tables unbent and needs no new key. When only h / s change, the poll waits for the
+  readers as for any change, then bends again from a 256-byte copy of the loaded N, with no card read (log `lut:
+  highlights +4 shadows -2`). A shot takes the tables' values (`wf_ll_have_hs`), as it takes their cube and EI.
+- **State.** `wf_hl` / `wf_sh`; config keys `hl` / `sh` (-5..5; out of range or not a number is ignored); EXIF `|
+  Highlights +3 | Shadows -2` and the log lines (`yuv .. hl+3 sh-2`, `shot #n <title> hl+3 sh-2: ..`, `lut <cube> ..
+  hl+3 sh-2`) only when a value is not 0. Text through `wf_hs_text` ("-5".."+5"; no `%+d` on the camera).
+- **UI.** ML menu entries "Highlights" / "Shadows" (row entries, greyed where they do nothing). Browser rows
+  `WF_ROW_HL` / `WF_ROW_SH` between Strength and Film LUT, no wrap at the ends. 9 rows do not fit the 19 px pitch above
+  the tabs (y 136-268), so 7 show and the list scrolls with the focus, with a 2 px scroll bar at x 712. The font keeps
+  its size. Icons: a tone disc, upper / lower half lit. Host render: `tests/ui` shots `b2s_hs`, `b2s_hs_top`.
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`
 
 Frozen: cameras, the catalogue struct, rows, load, status, UI entry points, log and card read. The core implements
-everything except `wf_ui_*`. The UI calls only these functions plus ML's drawing API.
+everything except `wf_ui_*`. The UI calls only these functions plus ML's drawing API. Rows (2026-11-14): Light, Print,
+Grain, Halation, Mist, Strength, Highlights, Shadows, Film LUT (`WF_NROWS` 9).
 
 ### 4.2 Catalogue
 
@@ -349,7 +377,7 @@ The layout, 720x480 (the ML bitmap):
 | header (0-33) | mark, "WindyFilm" argnor23, "by WindyStrife" 13 px, loaded chip 15 px |
 | big can | 160x226 at (45, 40), glow in the film's colour (16 palette rings, recoloured per film), floor shadow |
 | right column x 262 | name argnor28 at y 38; chips (kind / ISO / format) 13 px at y 72; SET Load button; description 15 px, 2 lines at y 96 / 113 |
-| rows | 7 rows from y 136, 19 px pitch; focus bar in the accent colour, chevrons on the focused value; Strength as 5 bars |
+| rows | 9 rows, 7 shown from y 136 at 19 px pitch; the list scrolls with the focus (2 px scroll bar at x 712); focus bar in the accent colour, chevrons on the focused value; Strength as 5 bars |
 | tabs | Colour / Cine / B&W / Film LUT with counts at y 276, underline on the active one; counter "n / N" |
 | strip | 35 mm band y 300-436 with sprocket holes; cans 52x73 with short names (13 px condensed) under them; selected can 58x82 framed in the accent colour; edge fades and arrows |
 | scrollbar | y 441-446 |

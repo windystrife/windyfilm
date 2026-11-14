@@ -66,6 +66,7 @@ struct wf_look {
     uint8_t  light;                               /* WF_LIGHT_* (WB itself is set by the menu, not by the worker) */
     uint8_t  why;                                 /* WF_OUT_OFF: 0 set Off, 1 no film loaded, 2 film without a table */
     uint8_t  incurve;                             /* WF_INC_*: how Log + LUT read the JPEG (LLUT) */
+    int8_t   hl, sh;                              /* Highlights / Shadows -5..5 (FILM: in ftflags; LLUT: the tables'), else 0 */
     int      post;                               /* effect post code (above) */
     int      ftflags;                             /* wf_film_build flags of the film (WF_FT_*) incl. strength */
 };
@@ -142,12 +143,16 @@ enum { WF_ST_NONE = 0, WF_ST_FILM, WF_ST_NOTAB, WF_ST_LOG, WF_ST_LLUT, WF_ST_NOL
 /* ------------------------------------------------------------------ wf_menu.c */
 extern volatile int wf_out, wf_film_id, wf_print, wf_light, wf_curve, wf_flut, wf_lut_ei, wf_strength, wf_exif_off;
 extern volatile int wf_incurve;
+extern volatile int wf_hl, wf_sh;                 /* Highlights / Shadows, WF_HS_MIN..WF_HS_MAX (wf_film.h) */
 extern volatile int wf_cfg_dirty;
 void wf_menu_init(void);                          /* module init: config read, menu added */
 void wf_menu_deinit(void);                        /* unload: WB back, menu removed */
 void wf_menu_poll(void);                          /* wf_task: config save, EXIF writer, Light */
 void wf_cfg_load(void);
 int  wf_lut_ei_t(void);                           /* LUT EI in 1/3 EV */
+int  wf_hl_t(void);                               /* Highlights / Shadows in range (-5..5) */
+int  wf_sh_t(void);
+const char *wf_hs_text(int v);                    /* "-5" .. "0" .. "+5" (no %+d on the camera) */
 int  wf_incurve_t(void);                          /* WF_INC_* in use: a Canon curve only when its table is built in
                                                      and the camera is on its Picture Style (or not known yet) */
 int  wf_style_ok(int inc);                        /* Picture Style fits input curve `inc` (sRGB: any), or unknown */

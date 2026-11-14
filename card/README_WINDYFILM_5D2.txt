@@ -43,6 +43,10 @@ Grain và Halation mặc định tắt trên 5D2 (mỗi nửa ảnh tốn vài g
 - Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
   WB của bạn được trả lại khi về Auto hoặc khi tắt module.
 - Hàng Print: Scan / Cine print / Paper (chỉ với phim có mô hình in).
+- Hàng Highlights / Shadows: -5 .. +5, mặc định 0. Dương làm sáng vùng sáng /
+  nâng vùng tối, âm làm tối. Áp cho phim và Log + LUT (cả lon Film LUT), không
+  áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 9 hàng: hiện 7,
+  danh sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.
 - Input curve (cho Log + LUT và lon Film LUT): sRGB, Canon Film 1 hoặc Canon

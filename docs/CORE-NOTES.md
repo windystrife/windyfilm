@@ -90,6 +90,7 @@ Each mode runs in `build/<cam>/test/run/<mode>` (a fresh card), log `build/<cam>
 | PACK | ok (+ `wf_card_read`: size, short read, missing, skip), missing / magic / index -> films plain, top byte / checksum -> that table dropped, wrong code / flags -> skipped, duplicate -> first wins, real (data's pack, all ready films have their scan table, sweep clean) |
 | LIGHT | Day (film kelvin), Cloudy, Tungsten, Auto restores mode + shift, config keeps userwb, film change follows its kelvin, kelvin changed behind Light's back is set again, unload restores |
 | PRINT | Scan / Cine / Paper rows and shots, wrap, scan-only film greyed, pack without the print = scan, kept across films, greyed for log |
+| HS | Highlights / Shadows: `wf_hs_bend` vs the formula for all 121 pairs (identity and a film's N), never down, `WF_FT_HS` packing; 0 / 0 film sets bit-identical to the builder of 7f9e294 (FNV), h / s change N only; rows (no wrap), film shot + shot / yuv log + EXIF + preview (rebuilt on a change); Log + LUT bent after the load, `.FRT` unbent, grey at the bent N, an h / s change bends again without a load, a new EI loads and bends; flat Log / Off ignore it; `hl` / `sh` saved and read |
 | LOGCHK | `wf_log_words` asm vs C reference on all 2^24 (U, V, Y) x 2 sets + random + small + n <= 0, qemu `-cpu arm946` |
 
 Results 2026-11-14: see section 9.
@@ -131,9 +132,10 @@ Deny input: the old module's binary (path assembled inside the script, read only
   Useful lines: `hook NN ff169414 rom e92d41fc err 0`, `pack ok: N tables`,
   `pack <code> v<variant> loaded`, `yuv NN <buf>/<raw>: film <code> v0 s100 <ms> h<ms> g<ms> m<ms> q<ms> a<aspect>`,
   `shot #n <title>: <s> = look .. + mist .. (TOP .., BOT ..) EV..`, `lut <cube> 33^3 ok|cache ..`, `exif IMG_nnnn.JPG ok`,
+  Highlights / Shadows when not 0: ` hl+3 sh-2` in the yuv, shot and lut lines, `lut: highlights +4 shadows -2` (bent again),
   `fx halation|grain|mist .. ready`, `light Day: 5500K`, `expsim: ..`.
 - EXIF: UserComment (0x9286, 264 zero bytes on Canon) overwritten in place with `ASCII\0\0\0WindyFilm: <title> | Print ..
-  | Strength ..% [| Light ..] [| Grain ..] [| Halation ..] [| Mist ..] [| EV..]`, verified by read-back; never a non-empty
+  | Strength ..% [| Highlights ..] [| Shadows ..] [| Light ..] [| Grain ..] [| Halation ..] [| Mist ..] [| EV..]`, verified by read-back; never a non-empty
   field, never a rewrite.
 
 ## 7. RAW develop stage: how it plugs in (DESIGN 3.1, 3.2)

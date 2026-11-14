@@ -43,8 +43,11 @@ static int wf_pv_want = -1;                      /* wf_task: the last key handle
 static volatile int wf_pv_nomem;
 static uint32_t wf_pv_scr[WF_LV_ROW] __attribute__((aligned(32)));   /* display task only */
 
-/* the key of a film look: catalogue row, print variant and strength (the table and the build flags) */
-static int wf_pv_fkey(const struct wf_look *lk) { return (lk->row + 1) | lk->variant << 8 | lk->strength << 10; }
+/* the key of a film look: catalogue row, print variant, strength, Highlights / Shadows (the table and the build flags) */
+static int wf_pv_fkey(const struct wf_look *lk)
+{
+    return (lk->row + 1) | lk->variant << 8 | lk->strength << 10 | (lk->hl & 15) << 12 | (lk->sh & 15) << 16;
+}
 
 /* the look the shot would get now: WF_PVK_* and *arg (FILM: its key; LOG / LLUT: the curve) */
 static int wf_pv_kind(struct wf_look *lk, int *arg)

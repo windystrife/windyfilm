@@ -13,6 +13,7 @@
  *   curve=slog3|vlog|logc3|clog2|clog3                                 flut=technical|<cube code>   lutei=<1/3 EV>
  *   incurve=srgb|film1|neutral   how Log + LUT reads the JPEG (film1 / neutral: only when the build has that curve)
  *   print=scan|cine|paper   light=auto|day|cloudy|tungsten   strength=subtle|normal|strong
+ *   hl=<-5..5>  sh=<-5..5>   Highlights / Shadows (films and Log + LUT; 0 = the curve as it was)
  *   grain=off|fine|normal|strong   halation=off|halation|bloom|spk|spkbloom   mist=off|w8|w4|w2|w1|b8|b4|b2|b1
  *   preview=off|on|fast   exposure=camera|smooth   exptrim=<1/8 EV>   exif=on|off
  *   userwb=<mode>,<kelvin>,<gm>,<ba>   the user's white balance while Light holds it (restored on Auto / unload, also
@@ -25,6 +26,7 @@
 #define WF_ML_HEADERS
 #include "wf_core.h"
 #include "wf_loglut.h"
+#include "wf_film.h"
 #include "wf_fx.h"
 #include "wf_expsim.h"
 
@@ -46,6 +48,7 @@ volatile int wf_flut;                             /* 0 Technical (the user's own
 volatile int wf_lut_ei;                           /* 1/3 EV, WF_LL_EI_MIN..WF_LL_EI_MAX */
 volatile int wf_incurve;                          /* WF_INC_*: how Log + LUT reads the JPEG (wf_incurve_t) */
 volatile int wf_strength = 1;                     /* 30 / 100 / 125 % */
+volatile int wf_hl, wf_sh;                        /* Highlights / Shadows, WF_HS_MIN..WF_HS_MAX, 0 = off */
 volatile int wf_exif_off;
 volatile int wf_cfg_dirty;
 static volatile int wf_cfg_t;
@@ -65,6 +68,13 @@ int wf_lut_ei_t(void)
     int v = wf_lut_ei;
     return v >= WF_LL_EI_MIN && v <= WF_LL_EI_MAX ? v : 0;
 }
+
+static int wf_hs_in(int v) { return v >= WF_HS_MIN && v <= WF_HS_MAX ? v : 0; }
+int wf_hl_t(void) { return wf_hs_in(wf_hl); }
+int wf_sh_t(void) { return wf_hs_in(wf_sh); }
+static const char *wf_hs_name[WF_HS_MAX - WF_HS_MIN + 1] = { "-5", "-4", "-3", "-2", "-1", "0", "+1", "+2", "+3", "+4", "+5" };
+typedef char wf_hs_check[sizeof wf_hs_name / sizeof *wf_hs_name == 11 && WF_HS_MIN == -5 ? 1 : -1];
+const char *wf_hs_text(int v) { return wf_hs_name[wf_hs_in(v) - WF_HS_MIN]; }
 
 /* Picture Style (ML's PROP_PICTURE_STYLE handler keeps lens_info.raw_picstyle; 0 until the property was seen).
  * Each Canon curve is measured under one style and one Contrast setting (raw-film-engine, makernote PSInfo):
@@ -280,7 +290,8 @@ int wf_loaded(void)
 }
 
 /* ------------------------------------------------------------------ rows (wf_api.h) */
-static const char *const wf_rname[WF_NROWS] = { "Light", "Print", "Grain", "Halation", "Mist", "Strength", "Film LUT" };
+static const char *const wf_rname[WF_NROWS] = { "Light", "Print", "Grain", "Halation", "Mist", "Strength", "Highlights",
+                                                "Shadows", "Film LUT" };
 
 const char *wf_row_name(int row) { return row >= 0 && row < WF_NROWS ? wf_rname[row] : ""; }
 
@@ -309,6 +320,8 @@ const char *wf_row_text(int row)
     case WF_ROW_HALO:     return wf_pick(wf_halo_name, WF_HALO_MAX + 1, wf_halo);
     case WF_ROW_MIST:     return wf_pick(wf_mist_name, WF_MIST_MAX + 1, wf_mist);
     case WF_ROW_STRENGTH: return wf_pick(wf_strength_name, WF_NSTRENGTH, wf_strength);
+    case WF_ROW_HL:       return wf_hs_text(wf_hl);
+    case WF_ROW_SH:       return wf_hs_text(wf_sh);
     case WF_ROW_FLUT:     return wf_out == WF_OUT_LLUT ? wf_flut_name[wf_flut > 0 && wf_flut < WF_FLUT_N ? wf_flut : 0] : "Off";
     }
     return "";
@@ -334,6 +347,8 @@ int wf_row_avail(int row)
     case WF_ROW_HALO:     return WF_HALO_CAN && post && wf_aspect_has_halo(wf_aspect);
     case WF_ROW_MIST:     return WF_MIST_CAN && post;
     case WF_ROW_STRENGTH: return lk.output == WF_OUT_FILM;
+    case WF_ROW_HL:
+    case WF_ROW_SH:       return lk.output == WF_OUT_FILM || lk.output == WF_OUT_LLUT;   /* not flat Log */
     case WF_ROW_FLUT:     return 1;
     }
     return 0;
@@ -407,6 +422,15 @@ int wf_row_step(int row, int delta)
         if (s < 0 || s >= WF_NSTRENGTH)
             return 0;
         wf_strength = s;
+        break;
+    }
+    case WF_ROW_HL:
+    case WF_ROW_SH: {
+        volatile int *p = row == WF_ROW_HL ? &wf_hl : &wf_sh;
+        int v = wf_hs_in(*p) + (delta < 0 ? -1 : 1);     /* -5 .. +5, no wrap */
+        if (v < WF_HS_MIN || v > WF_HS_MAX)
+            return 0;
+        *p = v;
         break;
     }
     case WF_ROW_FLUT:
@@ -592,6 +616,14 @@ void wf_cfg_load(void)
             wf_light = wf_cfg_word(v, wf_light_key, WF_NLIGHT, WF_LIGHT_AUTO);
         } else if ((v = wf_cfg_val(l, "strength"))) {
             wf_strength = wf_cfg_word(v, wf_strength_key, WF_NSTRENGTH, 1);
+        } else if ((v = wf_cfg_val(l, "hl"))) {
+            x = wf_cfg_int(&v, &ok);
+            if (ok && x >= WF_HS_MIN && x <= WF_HS_MAX)
+                wf_hl = x;
+        } else if ((v = wf_cfg_val(l, "sh"))) {
+            x = wf_cfg_int(&v, &ok);
+            if (ok && x >= WF_HS_MIN && x <= WF_HS_MAX)
+                wf_sh = x;
         } else if ((v = wf_cfg_val(l, "grain"))) {
             wf_grain = wf_cfg_word(v, wf_grain_key, WF_GRAIN_MAX + 1, WF_GRAIN_DEF);
         } else if ((v = wf_cfg_val(l, "halation"))) {
@@ -639,12 +671,12 @@ static int wf_cfg_save(void)
     int lei = wf_lut_ei_t(), fl = wf_flut > 0 && wf_flut < WF_FLUT_N ? wf_flut : 0;
     int n = snprintf(b, sizeof b,
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
-                     "strength=%s\ngrain=%s\nhalation=%s\nmist=%s\npreview=%s\nexposure=%s\nexptrim=%d\nexif=%s\n",
+                     "strength=%s\nhl=%d\nsh=%d\ngrain=%s\nhalation=%s\nmist=%s\npreview=%s\nexposure=%s\nexptrim=%d\nexif=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
                      wf_pick(wf_light_key, WF_NLIGHT, wf_light), wf_pick(wf_strength_key, WF_NSTRENGTH, wf_strength),
-                     wf_pick(wf_grain_key, WF_GRAIN_MAX + 1, wf_grain), wf_pick(wf_halo_key, WF_HALO_MAX + 1, wf_halo),
+                     wf_hl_t(), wf_sh_t(), wf_pick(wf_grain_key, WF_GRAIN_MAX + 1, wf_grain), wf_pick(wf_halo_key, WF_HALO_MAX + 1, wf_halo),
                      wf_pick(wf_mist_key, WF_MIST_MAX + 1, wf_mist), wf_pick(wf_pv_key, 3, wf_pv_mode),
                      wf_pick(wf_exp_key, 2, wf_exp_mode), wf_exp_trim >= -16 && wf_exp_trim <= 16 ? (int)wf_exp_trim : 0,
                      wf_exif_off ? "off" : "on");
@@ -736,6 +768,10 @@ void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev)
         n += snprintf(b + n, sizeof b - n, " | LUT EI %s", wf_lei_name[lk->lei - WF_LL_EI_MIN]);
     if (lk->output == WF_OUT_LLUT && lk->incurve > WF_INC_SRGB && lk->incurve < WF_INC_N && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, " | In %s", wf_inc_name[lk->incurve]);
+    if (lk->hl && (lk->output == WF_OUT_FILM || lk->output == WF_OUT_LLUT) && n < (int)sizeof b)
+        n += snprintf(b + n, sizeof b - n, " | Highlights %s", wf_hs_text(lk->hl));
+    if (lk->sh && (lk->output == WF_OUT_FILM || lk->output == WF_OUT_LLUT) && n < (int)sizeof b)
+        n += snprintf(b + n, sizeof b - n, " | Shadows %s", wf_hs_text(lk->sh));
     if (lk->light && lk->light < WF_NLIGHT && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, " | Light %s", wf_light_name[lk->light]);
     if (g > 0 && g <= WF_GRAIN_MAX && n < (int)sizeof b)
@@ -1002,6 +1038,8 @@ static MENU_SELECT_FUNC(wf_strength_select)
     (void)priv;
     wf_step_int(&wf_strength, 0, WF_NSTRENGTH - 1, delta);
 }
+static MENU_SELECT_FUNC(wf_hl_select) { (void)priv; wf_row_step(WF_ROW_HL, delta); }
+static MENU_SELECT_FUNC(wf_sh_select) { (void)priv; wf_row_step(WF_ROW_SH, delta); }
 static MENU_SELECT_FUNC(wf_pv_select)
 {
     (void)priv;
@@ -1232,6 +1270,8 @@ static struct menu_entry wf_menu[] = {
             WF_ROWE("Mist", WF_ROW_MIST, wf_mist_select, "Diffusion filter: glow on lights, veil on shadows."),
             { .name = "Strength", .priv = (void *)&wf_strength, .max = WF_NSTRENGTH - 1, .choices = wf_strength_name,
               .select = wf_strength_select, .help = "How strongly the film look is applied." },
+            WF_ROWE("Highlights", WF_ROW_HL, wf_hl_select, "-5..+5: darker / brighter upper tones (films, Log + LUT)."),
+            WF_ROWE("Shadows", WF_ROW_SH, wf_sh_select, "-5..+5: deeper / lifted lower tones (films, Log + LUT)."),
             { .name = "LiveView preview", .priv = (void *)&wf_pv_mode, .max = WF_PV_FAST, .choices = wf_pv_name,
               .select = wf_pv_select, .update = wf_pv_update, .help = "The look in LiveView. Needs Overlay > Global Draw." },
             { .name = "Preview exposure", .select = wf_exp_select, .update = wf_exp_update,

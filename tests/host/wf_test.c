@@ -23,6 +23,10 @@
  *                      other buffer, copies at +16 MB / +0); boot: the first record waits for an idle camera and a
  *                      removable old file. 5D2: TOP + BOT back to back (one slot each), the spec's words, sources and
  *                      copies, ROM getters with each half's job handle, not a live job, MEM1 past the pool, SH unaligned
+ *   HS                 Highlights / Shadows: wf_hs_bend vs the formula (121 pairs), never down, 0 / 0 bit-identical to the
+ *                      film builder before the feature (FNV), only N changes; rows, film shot + log + EXIF + preview; Log +
+ *                      LUT bent after the load (.FRT unbent), an h / s change bends again without a load; flat Log / Off
+ *                      ignore it; hl / sh in the file
  *   LOG [big]          the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
  *                      the refusal logged), ring full (lines counted), a short write (no line twice); big: a log over
  *                      512 KB becomes WINDYFLM.OLD at boot
@@ -1230,7 +1234,7 @@ static void t_cfg(void)
     std_pack();
     const char *code1 = wf_flut_code[1];
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
-            "grain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
+            "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
             "userwb=1,5600,2,-3\n", wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
@@ -1240,6 +1244,7 @@ static void t_cfg(void)
     chk(wf_print == 1 && wf_light == 3 && wf_strength == 2 && wf_grain == 1 && wf_halo == 4 && wf_mist == 7 && wf_pv_mode == 2,
         "print %d light %d strength %d grain %d halation %d mist %d preview %d", wf_print, wf_light, wf_strength, wf_grain, wf_halo,
         wf_mist, wf_pv_mode);
+    chk(wf_hl == 3 && wf_sh == -2, "hl %d sh %d", wf_hl, wf_sh);
     chk(wf_exp_mode == (WF_EXP_CAN ? WF_EXP_SMOOTH : WF_EXP_CANON) && wf_exp_trim == -5 && wf_exif_off == 1,
         "exposure %d exptrim %d exif off %d", wf_exp_mode, wf_exp_trim, wf_exif_off);
     chk(WAIT(h_kelvin_last == 3200, 5000), "Light Tungsten applied at start (%dK)", h_kelvin_last);
@@ -1250,7 +1255,7 @@ static void t_cfg(void)
     char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
-             "strength=strong\ngrain=normal\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=%s\nexptrim=-5\nexif=off\n"
+             "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=%s\nexptrim=-5\nexif=off\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
     free(b);
@@ -1274,9 +1279,10 @@ static void t_cfg(void)
     b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     chk(b && !strcmp(b, want), "back to the first file");
     free(b);
-    put_cfg("film=99999\noutput=nope\nlutei=77\nexptrim=99\ncurve=x\nprint=\n");
+    put_cfg("film=99999\noutput=nope\nlutei=77\nexptrim=99\ncurve=x\nprint=\nhl=7\nsh=\n");
     wf_cfg_load();
-    chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_lut_ei == -2 && wf_exp_trim == -5 && wf_curve == 4,
+    chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_lut_ei == -2 && wf_exp_trim == -5 && wf_curve == 4
+        && wf_hl == 3 && wf_sh == -2,
         "garbage values ignored");
     int inc0 = wf_incurve;
     put_cfg("incurve=Neutral\n");
@@ -2087,6 +2093,270 @@ static void t_log(const char *cs)
     mod_deinit();
 }
 
+/* ------------------------------------------------------------------ HS: Highlights / Shadows */
+/* the formula as specified, in 64 bits: round((h x^2 (255 - x) + s x (255 - x)^2) / 385341), half away from zero */
+static int hs_d(int x, int h, int s)
+{
+    long long d = (long long)h * x * x * (255 - x) + (long long)s * x * (255 - x) * (255 - x);
+    return (int)(d < 0 ? -((192670 - d) / 385341) : (d + 192670) / 385341);
+}
+/* ... applied to a curve with the non-decreasing clamp p = clamp(x + d, p, 255); 0 / 0 leaves it */
+static void hs_ref(uint8_t *N, int h, int s)
+{
+    if (!h && !s) return;
+    for (int y = 0, p = 0; y < 256; y++) {
+        p = clampi(N[y] + hs_d(N[y], h, s), p, 255);
+        N[y] = (uint8_t)p;
+    }
+}
+/* FNV of film sets built by the builder of 7f9e294 (before Highlights / Shadows), memset 0 first, bytes up to src */
+static const struct { int dy, du, dv, mono, flags; uint32_t fnv; } hs_gold[] = {
+    { 12, 6, -6, 0, 0x0000, 0xedfa640fu },
+    { 12, 6, -6, 0, 0x0001, 0x5f01b244u },
+    { 12, 6, -6, 0, 0x1e01, 0x5130d2a0u },
+    { 12, 6, -6, 0, 0x7d01, 0x9857eddau },
+    { -10, 0, 0, 0, 0x0001, 0xc69f90e8u },
+    { 24, 0, 0, 0, 0x7d01, 0x26f24324u },
+    { 0, 0, 0, 1, 0x0003, 0x332e189cu },
+    { 0, 0, 0, 1, 0x7d03, 0x332e189cu },
+};
+/* the display filter on one LiveView frame, against the film kernel built with `flags` */
+static int hs_pv_diff(int k, int flags)
+{
+    enum { LW = 360, LH = 480 };
+    uint32_t *src = malloc(LW * LH * 4), *dst = malloc(LW * LH * 4), *pr = malloc(LW * LH * 4);
+    gen_frame(src, 720, LH, 0);
+    uint32_t *bufs[2] = { src, dst };
+    int d = -1;
+    if (cbr_disp((unsigned)(uintptr_t)bufs) == 1) {
+        memcpy(pr, src, LW * LH * 4);
+        ref_film(pr, LW * LH, tabs[k][0], flags);
+        d = ndiff(dst, pr, LW * LH);
+    }
+    free(src); free(dst); free(pr);
+    return d;
+}
+static void t_hs(void)
+{
+    /* 1. the bend: all 121 pairs against the formula, on the identity and on a film's N; never down; the packing */
+    static struct wf_ftabs t1, t2;
+    uint8_t id[256], a[256], b[256];
+    for (int y = 0; y < 256; y++) id[y] = (uint8_t)y;
+    uint32_t *TA = tab_make(12, 6, -6, 0);
+    wf_film_build(&t1, TA, WF_FT_V21 | WF_FT_S(125));
+    int bad = 0, raw = 0, dec = 0, ends = 0, pk = 0, mx = 0;
+    for (int h = WF_HS_MIN; h <= WF_HS_MAX; h++)
+        for (int s = WF_HS_MIN; s <= WF_HS_MAX; s++) {
+            for (int c = 0; c < 2; c++) {
+                const uint8_t *src = c ? t1.N : id;
+                memcpy(a, src, 256);
+                memcpy(b, src, 256);
+                wf_hs_bend(a, h, s);
+                hs_ref(b, h, s);
+                bad += memcmp(a, b, 256) != 0;
+                for (int y = 1; y < 256; y++) dec += a[y] < a[y - 1];
+            }
+            memcpy(a, id, 256);
+            wf_hs_bend(a, h, s);
+            for (int y = 0; y < 256; y++) {
+                raw += a[y] != y + hs_d(y, h, s);
+                if (abs(a[y] - y) > mx) mx = abs(a[y] - y);
+            }
+            ends += a[0] != 0 || a[255] != 255;
+            int f = WF_FT_HS(h, s);
+            pk += WF_FT_HOF(f) != h || WF_FT_SHOF(f) != s || (f & ~0x00ff0000) || WF_FT_HOF(f | 0x7d03) != h
+                  || WF_FT_SOF(f | WF_FT_S(30)) != 30;
+        }
+    chk(bad == 0, "wf_hs_bend = the formula + clamp for all 121 pairs, on the identity and on a film's N (%d curves differ)",
+        bad);
+    chk(raw == 0 && ends == 0, "identity: the plain formula, the clamp never needed (%d codes differ), 0 and 255 kept (%d)",
+        raw, ends);
+    chk(dec == 0, "every bent curve non-decreasing (%d steps down)", dec);
+    chk(pk == 0 && WF_FT_HS(0, 0) == 0, "WF_FT_HS: -5..5 in bits 16-23, 0 / 0 adds no bit, strength untouched (%d bad)", pk);
+    memcpy(a, id, 256); wf_hs_bend(a, 5, 0);
+    memcpy(b, id, 256); wf_hs_bend(b, 0, 5);
+    int a2 = a[170], b2 = b[85];
+    memcpy(a, id, 256); wf_hs_bend(a, -5, 0);
+    memcpy(b, id, 256); wf_hs_bend(b, 0, -5);
+    chk(a2 == 202 && b2 == 117 && a[170] == 138 && b[85] == 53,
+        "+5 Highlights lifts 170 by 32 (%d), +5 Shadows 85 by 32 (%d), -5: %d / %d; largest shift (+5 / +5) %d", a2, b2,
+        a[170], b[85], mx);
+    free(TA);
+
+    /* 2. film sets: 0 / 0 is the builder before the feature bit for bit; h / s change N alone, by wf_hs_bend */
+    int ng = (int)(sizeof hs_gold / sizeof *hs_gold), gb = 0, nb = 0;
+    static const int8_t pr[5][2] = { { 5, 0 }, { 0, -5 }, { 3, -2 }, { -5, 5 }, { 1, 1 } };
+    size_t no = offsetof(struct wf_ftabs, N), ne = no + 256, end = offsetof(struct wf_ftabs, src);
+    for (int i = 0; i < ng; i++) {
+        uint32_t *T = tab_make(hs_gold[i].dy, hs_gold[i].du, hs_gold[i].dv, hs_gold[i].mono);
+        memset(&t1, 0, sizeof t1);
+        wf_film_build(&t1, T, hs_gold[i].flags | WF_FT_HS(0, 0));
+        uint32_t hh = fnv(2166136261u, (const uint8_t *)&t1, end);
+        if (hh != hs_gold[i].fnv) {
+            gb++;
+            printf("  set %d: fnv %08x, before the feature %08x\n", i, (unsigned)hh, (unsigned)hs_gold[i].fnv);
+        }
+        for (int j = 0; j < 5; j++) {
+            memset(&t2, 0, sizeof t2);
+            wf_film_build(&t2, T, hs_gold[i].flags | WF_FT_HS(pr[j][0], pr[j][1]));
+            memcpy(a, t1.N, 256);
+            wf_hs_bend(a, pr[j][0], pr[j][1]);
+            const uint8_t *p1 = (const uint8_t *)&t1, *p2 = (const uint8_t *)&t2;
+            nb += memcmp(a, t2.N, 256) || memcmp(p1, p2, no) || memcmp(p1 + ne, p2 + ne, end - ne) || t1.src != t2.src;
+        }
+        free(T);
+    }
+    chk(gb == 0, "0 / 0: %d film sets bit-identical to the builder before Highlights / Shadows (%d differ)", ng, gb);
+    chk(nb == 0, "h / s: only N changes, and it is wf_hs_bend of the 0 / 0 N (%d of %d sets wrong)", nb, ng * 5);
+
+    /* 3. through the module: rows, a film shot (+ log, EXIF), the preview */
+    std_pack();
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\npreview=on\n", wf_films[fA].id);
+    mod_init(1);
+    chk(!strcmp(wf_row_name(WF_ROW_HL), "Highlights") && !strcmp(wf_row_name(WF_ROW_SH), "Shadows")
+        && !strcmp(wf_row_text(WF_ROW_HL), "0") && !strcmp(wf_row_text(WF_ROW_SH), "0") && wf_hl == 0 && wf_sh == 0,
+        "rows Highlights / Shadows, 0 / 0 without the keys in the file");
+    chk(wf_row_avail(WF_ROW_HL) && wf_row_avail(WF_ROW_SH), "the rows are live with a film");
+    int st = 0;
+    for (int i = 0; i < 7; i++) st += wf_row_step(WF_ROW_HL, 1);
+    chk(st == 5 && wf_hl == 5 && !strcmp(wf_row_text(WF_ROW_HL), "+5"), "Highlights up to +5, then no step (%d steps)", st);
+    st = 0;
+    for (int i = 0; i < 9; i++) st += wf_row_step(WF_ROW_SH, -1);
+    chk(st == 5 && wf_sh == -5 && !strcmp(wf_row_text(WF_ROW_SH), "-5"), "Shadows down to -5, then no step (%d steps)", st);
+    wf_row_step(WF_ROW_HL, -1); wf_row_step(WF_ROW_HL, -1);
+    wf_row_step(WF_ROW_SH, 1); wf_row_step(WF_ROW_SH, 1); wf_row_step(WF_ROW_SH, 1);
+    chk(wf_hl == 3 && wf_sh == -2 && !strcmp(wf_row_text(WF_ROW_SH), "-2"), "Highlights +3, Shadows -2");
+    struct wf_look lk;
+    wf_look_now(&lk);
+    chk(lk.hl == 3 && lk.sh == -2 && lk.ftflags == (flags_of(fA, 1) | WF_FT_HS(3, -2)), "the look: hl %d sh %d, flags %x",
+        lk.hl, lk.sh, (unsigned)lk.ftflags);
+    gen_frame(in, FW, FH, 0);
+    chk(WAIT(look_table_ready(), 10000), "table published");
+    char p[64];
+    log_mark();
+    h_li_set("job", 1);                          /* Canon busy until its JPEG is on the card (EXIF) */
+    int sb = shot(in, out, FW, FH);
+    jpg_name(p, 9); jpeg_write(p, 0, 264, 0);
+    h_set_file_number(9);
+    h_li_set("job", 0);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fA][0], flags_of(fA, 1) | WF_FT_HS(3, -2));
+    memcpy(out2, in, NW * 4);
+    ref_film(out2, NW, tabs[fA][0], flags_of(fA, 1));
+    chk(ndiff(out, ref, NW) == 0 && sb == 0, "film shot +3 / -2: bit-exact vs wf_film_build with WF_FT_HS(3, -2) (%d differ)",
+        ndiff(out, ref, NW));
+    chk(ndiff(out, out2, NW) > NW / 4, "... and not the 0 / 0 picture (%d of %d words differ)", ndiff(out, out2, NW), NW);
+    chk(LOGW(" hl+3 sh-2:", 5000) && strstr(log_line("shot #"), " hl+3 sh-2:"), "shot line: '%s'", log_line("shot #"));
+    chk(strstr(log_line("yuv "), " hl+3 sh-2") != 0, "yuv line: '%s'", log_line("yuv "));
+    chk(LOGW("exif IMG_0009.JPG ok", 8000) && strstr(comment(p), " | Highlights +3 | Shadows -2"), "EXIF: '%s'", comment(p));
+    chk(WAIT(wf_pv_state() == WF_PV_READY, 10000), "preview ready (state %d)", wf_pv_state());
+    int d = hs_pv_diff(fA, flags_of(fA, 1) | WF_FT_HS(3, -2));
+    chk(d == 0, "preview +3 / -2: bit-exact vs the shot's kernel (%d words differ)", d);
+    wf_row_step(WF_ROW_HL, -1);
+    chk(WAIT(wf_pv_state() == WF_PV_READY, 10000), "preview rebuilt after Highlights +2 (state %d)", wf_pv_state());
+    d = hs_pv_diff(fA, flags_of(fA, 1) | WF_FT_HS(2, -2));
+    chk(d == 0, "preview +2 / -2: the new set (%d words differ)", d);
+    wf_row_step(WF_ROW_HL, -1); wf_row_step(WF_ROW_HL, -1);
+    wf_row_step(WF_ROW_SH, 1); wf_row_step(WF_ROW_SH, 1);
+    chk(wf_hl == 0 && wf_sh == 0, "back to 0 / 0");
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    chk(ndiff(out, out2, NW) == 0 && sb == 0, "film shot 0 / 0: the picture without the feature (%d differ)",
+        ndiff(out, out2, NW));
+    chk(LOGW("shot #", 5000) && !strstr(log_line("shot #"), " hl") && !strstr(log_line("yuv "), " hl"),
+        "0 / 0: nothing in the log lines: '%s'", log_line("shot #"));
+
+    /* 4. Log + LUT: N bent after the load (the .FRT holds it unbent); only h / s changed: bent again, no card read */
+    static struct wf_lltabs ll, l2, lb;
+    struct wf_ll_info inf;
+    wf_row_step(WF_ROW_HL, 1); wf_row_step(WF_ROW_HL, 1);
+    wf_row_step(WF_ROW_SH, -1); wf_row_step(WF_ROW_SH, -1);
+    cube_write("ML/DATA/VLOG.CUB", 9);
+    wf_curve = WF_CURVE_VLOG;
+    wf_flut = 0;
+    log_mark();
+    wf_out = WF_OUT_LLUT;
+    chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+        && strstr(log_line("lut VLOG.CUB"), " hl+2 sh-2"), "Log + LUT at +2 / -2: '%s'", log_line("lut VLOG.CUB"));
+    chk(wf_row_avail(WF_ROW_HL) && wf_row_avail(WF_ROW_SH), "the rows are live with Log + LUT");
+    int rc = wf_loglut_load("ML/DATA/VLOG.CUB", WF_CURVE_VLOG, &ll, &inf);
+    memcpy(&lb, &ll, sizeof ll);
+    wf_hs_bend(lb.N, 2, -2);
+    chk(rc == WF_LL_OK && ll_same(&lb, wf_ll_tables()) && !ll_same(&ll, wf_ll_tables()),
+        "published tables = wf_loglut_load with N bent +2 / -2, nothing else (rc %d)", rc);
+    rc = wf_loglut_load_cached("ML/DATA/VLOG.CUB", "ML/DATA/VLOG.FRT", WF_CURVE_VLOG, &l2, &inf);
+    chk(rc == WF_LL_OK && inf.cached && ll_same(&ll, &l2), "ML/DATA/VLOG.FRT holds the tables unbent (rc %d, cache %d)", rc,
+        inf.cached);
+    uint32_t g[128];
+    for (int i = 0; i < 128; i++) g[i] = word(0, 2 * i, 0, 2 * i + 1);
+    wf_ll_words_c(g, 128, (int)(uintptr_t)wf_ll_tables());
+    int ge = 0;
+    for (int i = 0; i < 128; i++) ge += WY0(g[i]) != lb.N[2 * i] || WY1(g[i]) != lb.N[2 * i + 1];
+    chk(ge == 0, "grey comes out at the bent N, every code (%d off)", ge);
+    sb = shot(in, out, FW, FH);
+    memcpy(ref, in, NW * 4);
+    ref_fn(ref, NW, wf_ll_words, (int)(uintptr_t)&lb);
+    chk(ndiff(out, ref, NW) == 0 && sb == 0, "Log + LUT shot +2 / -2: bit-exact vs wf_ll_words on the bent tables");
+    chk(LOGW(" hl+2 sh-2", 5000) && strstr(log_line("yuv "), " hl+2 sh-2"), "yuv line: '%s'", log_line("yuv "));
+    log_mark();
+    wf_row_step(WF_ROW_HL, 1); wf_row_step(WF_ROW_HL, 1);
+    chk(LOGW("lut: highlights +4 shadows -2", 10000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+        && !log_has("lut VLOG.CUB"), "Highlights +4: N bent again, no load: '%s'", log_line("lut"));
+    memcpy(&lb, &ll, sizeof ll);
+    wf_hs_bend(lb.N, 4, -2);
+    chk(ll_same(&lb, wf_ll_tables()), "tables = the loaded ones with N bent +4 / -2");
+    sb = shot(in, out, FW, FH);
+    memcpy(ref, in, NW * 4);
+    ref_fn(ref, NW, wf_ll_words, (int)(uintptr_t)&lb);
+    chk(ndiff(out, ref, NW) == 0 && sb == 0, "Log + LUT shot +4 / -2: bit-exact");
+    log_mark();
+    wf_lut_ei = 3;                               /* another load key: loaded again (cache), then bent */
+    chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+        && strstr(log_line("lut VLOG.CUB"), " ei+3/3 hl+4 sh-2"), "LUT EI +1 EV: loaded again and bent: '%s'",
+        log_line("lut VLOG.CUB"));
+    wf_ll_ei = 3;
+    rc = wf_loglut_load("ML/DATA/VLOG.CUB", WF_CURVE_VLOG, &l2, &inf);
+    wf_ll_ei = 0;
+    memcpy(&lb, &l2, sizeof l2);
+    wf_hs_bend(lb.N, 4, -2);
+    chk(rc == WF_LL_OK && ll_same(&lb, wf_ll_tables()), "tables = the EI +1 load with N bent +4 / -2 (rc %d)", rc);
+    log_mark();
+    for (int i = 0; i < 4; i++) wf_row_step(WF_ROW_HL, -1);
+    wf_row_step(WF_ROW_SH, 1); wf_row_step(WF_ROW_SH, 1);
+    chk(LOGW("lut: highlights 0 shadows 0", 10000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+        && ll_same(&l2, wf_ll_tables()), "0 / 0: the loaded tables as they are: '%s'", log_line("lut"));
+    wf_lut_ei = 0;
+
+    /* 5. flat Log and Off: no Highlights / Shadows */
+    wf_row_step(WF_ROW_HL, 1);
+    wf_out = WF_OUT_LOG;
+    chk(!wf_row_avail(WF_ROW_HL) && !wf_row_avail(WF_ROW_SH), "rows greyed for flat Log");
+    wf_look_now(&lk);
+    chk(lk.hl == 0 && lk.sh == 0, "flat Log: the look carries no Highlights / Shadows");
+    sb = shot(in, out, FW, FH);
+    memcpy(ref, in, NW * 4);
+    ref_fn(ref, NW, wf_log_words, WF_CURVE_VLOG);
+    chk(ndiff(out, ref, NW) == 0 && sb == 0, "flat Log with Highlights +1: plain wf_log_words");
+    wf_out = WF_OUT_OFF;
+    chk(!wf_row_avail(WF_ROW_HL) && !wf_row_avail(WF_ROW_SH), "rows greyed for Off");
+
+    /* 6. the file: hl / sh saved, read back, out of range ignored */
+    h_clock_add_ms += 2000;
+    usleep(400000);
+    long n;
+    char *f = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(f && strstr(f, "\nhl=1\nsh=0\n"), "saved: hl=1, sh=0");
+    free(f);
+    put_cfg("hl=-4\nsh=5\n");
+    wf_cfg_load();
+    chk(wf_hl == -4 && wf_sh == 5, "read back: hl %d sh %d", wf_hl, wf_sh);
+    put_cfg("hl=6\nsh=-9\nhl=x\n");
+    wf_cfg_load();
+    chk(wf_hl == -4 && wf_sh == 5, "out of range / not a number ignored: hl %d sh %d", wf_hl, wf_sh);
+    wf_hl = wf_sh = 0;
+    mod_deinit();
+}
+
 /* ------------------------------------------------------------------ main */
 int main(int argc, char **argv)
 {
@@ -2117,6 +2387,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LIGHT")) t_light();
     else if (!strcmp(mode, "PRINT")) t_print();
     else if (!strcmp(mode, "LOG")) t_log(cs);
+    else if (!strcmp(mode, "HS")) t_hs();
 #ifdef WF_BUILD_5D2
     else if (!strcmp(mode, "5D2")) t_5d2();
     else if (!strcmp(mode, "PROBE")) t_probe_5d2();
