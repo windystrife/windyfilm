@@ -122,7 +122,7 @@ void *wf_fcreate(const char *path, struct wf_fe *e)
     if (wf_fremove(path, e))
         return 0;
     void *f = FIO_CreateFile(path);              /* ML: _FIO_RemoveFile (nothing there now) + _FIO_CreateFile */
-    if (!f || !DRY_OK(f)) {
+    if (!WF_FH_OK(f)) {
         wf_fset(e, WF_FE_CREATE, (int)(uintptr_t)f);
         return 0;
     }
@@ -154,7 +154,7 @@ void *wf_fopen_w(const char *path, int how, uint32_t pos, struct wf_fe *e)
     if (how == WF_FO_NEW || (how == WF_FO_END_OR_NEW && !wf_fexists(path)))
         return wf_fcreate(path, e);
     void *f = FIO_OpenFile(path, WF_O_RDWR_SYNC);  /* an open never changes the directory: fine while Canon is busy */
-    if (!f || !DRY_OK(f)) {
+    if (!WF_FH_OK(f)) {
         wf_fset(e, WF_FE_OPEN, (int)(uintptr_t)f);
         return 0;
     }
@@ -305,7 +305,7 @@ int wf_card_read(const char *path, uint32_t pos, void *p, uint32_t n, uint32_t *
         return WF_RD_NOMEM;
     void *f = FIO_OpenFile(path, 0);
     int rc = 0;
-    if (!f || ((uint32_t)f & 1)) {
+    if (!WF_FH_OK(f)) {
         rc = WF_RD_OPEN;
         f = 0;
     } else if (FIO_SeekSkipFile(f, pos, 0) != (int64_t)pos) {

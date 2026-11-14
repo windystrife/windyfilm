@@ -28,7 +28,11 @@ extern void *__mem_malloc(size_t len, unsigned flags, const char *file, unsigned
 extern void  __mem_free(void *p);
 extern int  is_play_mode(void);
 #endif
-#define DRY_OK(h)   (((uint32_t)(h) & 1) == 0)   /* DryOS handles are even, errors odd and never 0 */
+#define DRY_OK(h)   (((uint32_t)(h) & 1) == 0)   /* DryOS task / semaphore handles are even, errors odd and never 0 */
+/* a file handle (ML's FIO_OpenFile / FIO_CreateFile): anything but 0, ML's error (it maps Canon's -1 to 0). DryOS file
+ * handles are small numbers, odd as often as even (RAWB8 logged 3, 5, 7 as "refused"): never DRY_OK on a file, or a good
+ * handle is taken for an error and left open (RAWB8's WFROLL.TXT: created empty, then never removable) */
+#define WF_FH_OK(f) ((uint32_t)(uintptr_t)(f) != 0 && (uint32_t)(uintptr_t)(f) != 0xFFFFFFFFu)
 #define DRY_SEM(h)  ((uint32_t)(h) != 0 && DRY_OK(h))
 #define DRY_TIMEOUT 9
 #define WF_MEM_DMA 1                              /* __mem_malloc flags (ML mem.h MEM_DMA / MEM_TEMPORARY) */

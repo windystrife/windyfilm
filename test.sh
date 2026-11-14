@@ -29,6 +29,7 @@ case $CAM in
   *) echo "CAM must be EOSM or 5D2"; exit 2 ;;
 esac
 ALL="$ALL SHOT:late SHOT:noworker"                 # the worker's late start (DryOS refused its task at boot)
+ALL="$ALL LOG:odd"                                 # file handles odd as often as even (RAWB8 WFROLL.TXT)
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
 B=${OUT:-$R/build/$cam}

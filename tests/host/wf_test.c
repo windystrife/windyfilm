@@ -2055,6 +2055,23 @@ static void t_log(const char *cs)
         mod_deinit();
         return;
     }
+    if (!strcmp(cs, "odd")) {                    /* every file handle odd: DryOS gives 3, 5, 7 as often as even ones (RAWB8) */
+        unlink(LOG_PATH);
+        h_fio_odd_fd = 1;
+        mod_init(0);
+        for (int i = 0; i < 20; i++) {
+            wf_log("odd handle line %d", i);
+            usleep(30000);
+        }
+        chk(LOGW("odd handle line 19\n", 3000), "odd handles: the log made and appended");
+        b = get_file(LOG_PATH, &n);
+        chk(b && count_str(b, "odd handle line ") == 20 && !strstr(b, "card refused"), "all 20 lines, no refusal (%d)",
+            b ? count_str(b, "odd handle line ") : -1);
+        free(b);
+        mod_deinit();
+        h_fio_odd_fd = 0;
+        return;
+    }
     if (!strcmp(cs, "new")) {                    /* no log on the card, Canon busy at boot: the log is made once idle */
         unlink(LOG_PATH);
         h_li_set("job", 1);
@@ -3672,6 +3689,10 @@ int main(int argc, char **argv)
         h_fio_dup);
     chk(h_fio_dir_busy == 0, "no card file created / removed / renamed while Canon saved a shot (%d times)",
         h_fio_dir_busy);
+    char open_names[256];
+    int open_n = h_fio_open_now(open_names, sizeof open_names);
+    chk(open_n == 0 && h_fio_rm_open == 0, "every card file closed (%d open: %s), no remove of an open file (%d)", open_n,
+        open_names, h_fio_rm_open);
     if (nfail)
         log_tail(25);
     printf("RESULT %s %s %s: %d pass, %d fail\n", CAM_NAME, mode, cs, npass, nfail);

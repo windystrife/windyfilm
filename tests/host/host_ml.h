@@ -52,6 +52,11 @@ extern volatile int h_clock_add_ms;
    creates / removes / renames while lens_info.job_state != 0; main() fails every run on either. */
 extern char h_fio_busy[128], h_fio_wpath[128];
 extern volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy;
+/* file handles are small numbers like DryOS's (odd as often as even); h_fio_rm_open: removes of a file still open
+   (refused); h_fio_open_now: handles open now, their names into names */
+extern volatile int h_fio_rm_open, h_fio_odd_fd, h_fio_cpath_n;   /* h_fio_odd_fd: only odd handles (3, 5, 7 ..) */
+extern char h_fio_cpath[128];                                       /* h_fio_cpath_n counts the creates of this path */
+int h_fio_open_now(char *names, int n);
 
 /* the menu entries menu_add got */
 extern void *h_menu;
