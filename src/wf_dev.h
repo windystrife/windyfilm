@@ -96,6 +96,8 @@ struct wf_dev_job {
                                                     input curve of Log + LUT: wf_ll_dec_c<k> on main's A1), 0 = sRGB */
     int      roll;                               /* 1 = film shoulder: the sensor's white lands on the look's white (CUBE,
                                                     SRGB; see wf_dev.c wf_dv_roll), 0 = the look's curve as is */
+    int      canon_pw;                           /* words per row of canon, 0 = w / 2 (a 5D2 half: the 5616 px row while
+                                                    the develop covers 5600 px of it, w must be a multiple of 32) */
 };
 
 /* per-shot results (log line, tests) */

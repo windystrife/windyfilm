@@ -1,6 +1,6 @@
 /* wf_rawb.c - RAW develop "B" in the shot pipeline (WindyStrife): the worker stage, the tables, the memory, the
  * progress box and the per-shot log line. See wf_rawb.h for the flow; the develop itself is wf_dev.c, the buffer check
- * wf_rsrc.c, the raw's address and the gates the camera layer (wf_cam_eosm.c). */
+ * wf_rsrc.c, the raw's address and the gates the camera layer (wf_cam_eosm.c; wf_cam_5d2.c: TOP + BOT halves). */
 #include "wf_core.h"
 #include "wf_loglut.h"
 #include "wf_rawb.h"
@@ -22,8 +22,19 @@ extern int   ml_shutdown_requested;
 extern int   get_halfshutter_pressed(void);
 extern void  NotifyBox(int timeout, const char *fmt, ...);
 
+#ifdef WF_BUILD_5D2
+#define RB_W        5616                         /* the 5D2 L frame, developed as Canon's TOP + BOT halves */
+#define RB_H        3744
+#define RB_CAM      WF_DEV_5D2
+#define RB_DX       8                            /* the develop covers columns 8 .. 5607 (wf_dev: w a multiple of 32); */
+#define RB_DW       5600                         /* the 8 px at each edge keep Canon's pixels under the 8-bit look */
+#else
 #define RB_W        5184                         /* the frame B develops: the EOS M L 3:2 frame (the camera layer's gate) */
 #define RB_H        3456
+#define RB_CAM      WF_DEV_EOSM
+#define RB_DX       0
+#define RB_DW       RB_W
+#endif
 #define RB_BAND     64                           /* rows per band between the sleeps and the stop checks */
 #define RB_NAP_MS   10
 #define RB_MAX_MS   90000                        /* a develop past this stops (the rest stays Canon's) */
@@ -39,6 +50,10 @@ static uint8_t *rb_mem;
 static volatile int rb_have;                     /* key of the published tables, 0 = none (published last) */
 static volatile int rb_live;                     /* the worker is inside wf_rawb_stage (set before it reads rb_have) */
 static int rb_tried, rb_rc = -1, rb_nomem, rb_retry, rb_play, rb_build_ms;
+static volatile int rb_gen;                      /* +1 per table publish: the scratch of a TOP belongs to one build */
+/* 5D2: the TOP half's develop that its BOT continues (prepare's scratch, the same raw, unchanged) */
+static int rb_top_key, rb_top_gen;
+static uint32_t rb_top_raw, rb_top_h;
 static struct wf_ll_info rb_inf;
 #define rb_tabs ((struct wf_dev_tabs *)rb_mem)
 #define rb_scr  ((void *)(rb_mem + RB_AL(sizeof(struct wf_dev_tabs))))
@@ -53,7 +68,7 @@ static const char *const rb_abname[RB_AB_N] = { "", "unload", "power", "half-shu
 struct rb_ev {
     uint8_t why, skip, out, cand_n;               /* WF_RBW_*, WF_RBS_* (camera gate), look output, candidates */
     int8_t  pick, rs_why;                         /* candidate, WF_RS_* */
-    uint8_t ab, wb_src, roll, tier;
+    uint8_t ab, wb_src, roll, tier, cont;          /* cont: a 5D2 BOT half that continued its TOP's develop */
     int16_t score[WF_RB_NCAND];
     int     arg, n_rs;
     uint32_t addr;
@@ -66,7 +81,8 @@ struct rb_ev {
 #define RB_EV_N 8
 static struct rb_ev rb_ev[RB_EV_N];
 static volatile unsigned rb_ev_head, rb_ev_tail, rb_ev_lost;
-static const char *const rb_whyname[WF_RBW_N] = { "ok", "notab", "buf", "prep", "look", "filmtab", "cam" };
+static const char *const rb_whyname[WF_RBW_N] = { "ok", "notab", "buf", "prep", "look", "filmtab", "cam",
+                                                   "TOP half not developed", "raw changed since the TOP half" };
 static const char *const rb_skipname[WF_RBS_N] = { "", "quality", "aspect", "drive", "noaddr" };
 
 /* the tables a look needs: 0 = B cannot do it (Off) */
@@ -137,7 +153,21 @@ int wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk)
     e->cand_n = f->nrawc;
     for (int k = 0; k < WF_RB_NCAND; k++)
         e->score[k] = -9999;
-    if (!key || f->part != WF_PART_FULL || f->fw != RB_W || f->fh != RB_H || f->pitch != 2 * RB_W) {
+    /* the rows this call develops: the whole frame (EOS M), or Canon's TOP / BOT half (5D2: f->y0, f->h) */
+    int part = f->part, top = part == WF_PART_TOP, bot = part == WF_PART_BOT;
+    int ya = top || bot ? f->y0 : 0, yz = top || bot ? f->y0 + f->h : f->fh;
+    if (bot) {
+        int tk = rb_top_key;
+        rb_top_key = 0;                          /* a TOP is continued once */
+        if (tk != key || rb_top_gen != rb_gen) {
+            e->why = WF_RBW_TOP;
+            goto out;
+        }
+    } else {
+        rb_top_key = 0;
+    }
+    if (!key || f->fw != RB_W || f->fh != RB_H || f->pitch != 2 * RB_W ||
+        !(part == WF_PART_FULL || (top && ya == 0 && yz == RB_H / 2) || (bot && ya == RB_H / 2 && yz == RB_H))) {
         e->why = WF_RBW_LOOK;
         goto out;
     }
@@ -147,11 +177,25 @@ int wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk)
     }
     uint32_t *dst = (uint32_t *)f->dst;
     const uint32_t *dec = wf_ll_dec_of(lk->incurve);
-    int t0 = get_ms_clock(), t1, t2, t3;
+    int t0 = get_ms_clock(), t1, t2, t3, words = f->pitch / 4;
+    const uint8_t *raw;
     rb_prog = 100;
+    if (bot) {                                   /* the TOP's prepare stands: same raw, unchanged, same tables */
+        e->pick = 0;
+        e->addr = rb_top_raw;
+        raw = (const uint8_t *)(uintptr_t)rb_top_raw;
+        e->h0 = rb_hash(raw, f->rpitch, f->ray1);
+        if (f->nrawc < 1 || f->rawc[0] != rb_top_raw || e->h0 != rb_top_h) {
+            e->why = WF_RBW_CHG;
+            goto out;
+        }
+        e->cont = 1;
+        t1 = t2 = t3 = t0;
+        goto rows;
+    }
 
     /* 1. which buffer */
-    struct wf_rs_geom g = { f->rpitch, f->rx0, f->ry0, f->fw, f->fh, f->black, f->cfa == 0 || f->cfa == 3 };
+    struct wf_rs_geom g = { f->rpitch, f->rx0, f->ry0, f->fw, yz - ya, f->black, f->cfa == 0 || f->cfa == 3 };
     struct wf_rs_res r;
     wf_rs_pick(f->rawc, f->nrawc, dst, &g, dec, &r);
     for (int k = 0; k < WF_RB_NCAND && k < WF_RS_NCAND; k++)
@@ -165,7 +209,7 @@ int wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk)
         e->why = WF_RBW_BUF;
         goto out;
     }
-    const uint8_t *raw = (const uint8_t *)(uintptr_t)f->rawc[r.pick];
+    raw = (const uint8_t *)(uintptr_t)f->rawc[r.pick];
     e->addr = f->rawc[r.pick];
 
     /* 2. levels */
@@ -186,12 +230,13 @@ int wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk)
     e->t_lev = t2 - t1;
 
     /* 3. prepare: WB fit on Canon's frame, highlight map, matrix, shoulder */
-    j.x0 = f->rx0; j.y0 = f->ry0;
-    j.w = f->fw; j.h = f->fh;
+    j.x0 = f->rx0 + RB_DX; j.y0 = f->ry0;
+    j.w = RB_DW; j.h = f->fh;
     j.cfa = f->cfa;
-    j.canon = dst;
+    j.canon = dst + RB_DX / 2;                   /* this call's rows (a 5D2 TOP: the top half only) */
+    j.canon_pw = words;
     j.canon_y0 = 0;
-    j.canon_h = f->fh;
+    j.canon_h = yz - ya;
     j.dec = dec;
     j.roll = lk->output != WF_OUT_LOG;
     struct wf_dev_stat st;
@@ -213,13 +258,14 @@ int wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk)
     e->ro_ytop = st.ro_ytop;
 
     /* 4. rows, a band at a time; Canon's rows below the last band stay when it stops */
-    int y = 0, half_t = 0, ab = RB_AB_NONE, words = f->pitch / 4;
-    while (y < f->fh) {
-        int yb = y + RB_BAND < f->fh ? y + RB_BAND : f->fh;
-        wf_dev_rows(rb_scr, y, yb, dst + y * words, f->pitch);
+rows:;
+    int y = ya, half_t = 0, ab = RB_AB_NONE;
+    while (y < yz) {
+        int yb = y + RB_BAND < yz ? y + RB_BAND : yz;
+        wf_dev_rows(rb_scr, y, yb, dst + (y - ya) * words + RB_DX / 2, f->pitch);
         y = yb;
-        rb_prog = y * 100 / f->fh;
-        if (y >= f->fh)
+        rb_prog = (y - ya) * 100 / (yz - ya);
+        if (y >= yz)
             break;
         int now = get_ms_clock();
         if (wf_unloading)
@@ -240,12 +286,18 @@ int wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk)
             break;
         msleep(RB_NAP_MS);                       /* wf_task, Canon's GUI and the notify box run meanwhile */
     }
-    e->rows = y;
+    e->rows = y - ya;
     e->ab = (uint8_t)ab;
     e->t_rows = get_ms_clock() - t3;
     e->h1 = rb_hash(raw, f->rpitch, f->ray1);
     e->why = WF_RBW_OK;
     rc = ab ? -1 : 1;
+    if (top && !ab && e->h0 == e->h1) {          /* the BOT half may continue this develop */
+        rb_top_raw = e->addr;
+        rb_top_h = e->h1;
+        rb_top_gen = rb_gen;
+        rb_top_key = key;
+    }
 out:
     if (e != &tmp)
         rb_ev_put();
@@ -297,10 +349,14 @@ static void rb_report(void)
         else if (e->why != WF_RBW_OK)
             wf_log("rawb: 8-bit (%s)", e->why < WF_RBW_N ? rb_whyname[e->why] : "?");
         else {
-            wf_log("rawb: buf %d %x of %d, scores %s, blocks %d", e->pick, (unsigned)e->addr, e->cand_n, sc, e->n_rs);
-            wf_log("rawb: black %d%s white %d%s, wb %d t%d n%d, clip %d fill %d, roll %d c%d y%d", e->black,
-                   e->lv_black ? "" : "(cam)", e->white, e->lv_white ? "" : "(iso)", e->wb_src, e->tier, e->fit_n,
-                   e->clip, e->hl_fill, e->roll, e->ro_c, e->ro_ytop);
+            if (e->cont)
+                wf_log("rawb: BOT half continues the TOP's develop (raw %x unchanged)", (unsigned)e->addr);
+            else
+                wf_log("rawb: buf %d %x of %d, scores %s, blocks %d", e->pick, (unsigned)e->addr, e->cand_n, sc, e->n_rs);
+            if (!e->cont)
+                wf_log("rawb: black %d%s white %d%s, wb %d t%d n%d, clip %d fill %d, roll %d c%d y%d", e->black,
+                       e->lv_black ? "" : "(cam)", e->white, e->lv_white ? "" : "(iso)", e->wb_src, e->tier, e->fit_n,
+                       e->clip, e->hl_fill, e->roll, e->ro_c, e->ro_ytop);
             wf_log("rawb: %s rows %d, pick %d lev %d prep %d rows %d ms%s%s%s",
                    e->ab ? "STOPPED" : "done", e->rows, e->t_pick, e->t_lev, e->t_prep, e->t_rows,
                    e->ab ? " (" : "", e->ab ? rb_abname[e->ab] : "", e->ab ? ")" : "");
@@ -386,7 +442,7 @@ void wf_rawb_poll(void)
     }
     int t0 = get_ms_clock();
     /* plain log has no EI in the JPEG path (wf_log_words) either; the Film LUT cubes get their auto exposure */
-    rb_rc = wf_dev_build(rb_tabs, src, src == WF_DEV_SRGB ? 0 : lk.curve, WF_DEV_EOSM, cube,
+    rb_rc = wf_dev_build(rb_tabs, src, src == WF_DEV_SRGB ? 0 : lk.curve, RB_CAM, cube,
                          src == WF_DEV_CUBE ? lk.lei : 0, src == WF_DEV_CUBE && lk.flut != 0, &rb_inf);
     rb_build_ms = get_ms_clock() - t0;
     if (rb_rc == WF_LL_OK) {
@@ -395,6 +451,7 @@ void wf_rawb_poll(void)
                cube ? " " : "", cube ? cube + 8 : "", rb_build_ms,
                (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10));
         WF_BARRIER();
+        rb_gen++;                                /* a TOP half of the old tables cannot be continued */
         rb_have = want;                          /* published last */
     } else {
         wf_log("rawb: tables err %d %s line %d (%s)", rb_rc, wf_loglut_errstr(rb_rc), rb_inf.line, cube ? cube + 8 : "-");

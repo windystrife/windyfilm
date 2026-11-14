@@ -32,7 +32,8 @@ int  wf_rawb_err(void);                          /* WF_RB_ERR: the WF_LL_* code 
    the 8-bit look), -1 = stopped part way (the caller does nothing more to the frame) */
 int  wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk);
 /* worker: a shot that asked for B but did not get it (the camera layer's gate, or a look B cannot do) */
-enum { WF_RBW_OK = 0, WF_RBW_NOTAB, WF_RBW_BUF, WF_RBW_PREP, WF_RBW_LOOK, WF_RBW_FILMTAB, WF_RBW_CAM, WF_RBW_N };
+enum { WF_RBW_OK = 0, WF_RBW_NOTAB, WF_RBW_BUF, WF_RBW_PREP, WF_RBW_LOOK, WF_RBW_FILMTAB, WF_RBW_CAM, WF_RBW_TOP,
+       WF_RBW_CHG, WF_RBW_N };            /* TOP / CHG: a 5D2 BOT half that cannot continue its TOP */
 void wf_rawb_note(const struct wf_frame *f, int why);
 void wf_rawb_poll(void);                         /* wf_task: tables, memory, the progress box, the shot's log line */
 void wf_rawb_end(void);                          /* wf_task at unload: waits up to 2 s for a develop to stop, frees */

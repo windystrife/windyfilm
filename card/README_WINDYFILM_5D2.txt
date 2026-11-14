@@ -94,7 +94,39 @@ còn nguyên trong RAM hay không, và mỗi nửa ảnh nằm ở đâu trong R
 - Probe tự tắt mỗi lần bật máy (không lưu vào cấu hình).
 
 
-5. FILE TRÊN THẺ
+5. RAW DEVELOP "B" (CHẬM): BẢN THỬ, CHƯA CÓ PROBE TRÊN 5D2
+----------------------------------------------------------
+Mục đích: màu phim làm từ chính file RAW 14-bit của Canon thay cho JPEG 8-bit.
+Mỗi ảnh khoảng 35-45 giây (nửa trên rồi nửa dưới). Chưa chạy trên máy thật.
+
+QUAN TRỌNG: địa chỉ RAW của 5D2 lấy từ phân tích firmware, CHƯA được RAW probe
+kiểm trên máy (mục 4). Vì vậy mỗi ảnh module đều so RAW với JPEG của Canon
+trước khi develop; không khớp thì ảnh ra màu phim thường (8-bit) và log ghi
+"rawb: 8-bit (buffer nomatch ...)" kèm điểm số. Nên chạy RAW probe (mục 4) trước.
+
+Bật:
+- Shoot > WindyFilm > RAW develop: "On (slow)". Mỗi lần bật máy nó tự về Off.
+- Chất lượng ảnh RAW + L (JPEG L Fine). Drive: chụp đơn hoặc hẹn giờ. Chụp liên
+  tục, M / S RAW, chỉ JPEG: màu phim thường như cũ.
+
+Chụp:
+- Chụp từng tấm, chờ hết thông báo "RAW develop NN%" (hiện hai lần: nửa trên,
+  nửa dưới). Trong lúc đó máy bận, chưa chụp tấm sau được: bình thường.
+- 8 điểm ảnh sát mép trái và phải mỗi ảnh vẫn là ảnh của Canon (màu phim
+  thường); phần còn lại là RAW develop.
+- Dừng: giữ nửa nút chụp khoảng 2 giây. Nửa trên dừng giữa chừng thì cả ảnh
+  không có màu phim (phần đã develop + phần JPEG gốc). CR2 không bao giờ bị đổi.
+- Tắt máy giữa chừng: module dừng trong khoảng 1 giây. CHƯA thử trên máy thật;
+  nếu máy treo thì tháo pin, và ghi lại lúc đó đang ở bao nhiêu %.
+- Highlights / Shadows có tác dụng với phim; với Log + LUT khi bật RAW develop
+  thì chưa.
+
+Gửi lại: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG (kèm 1 tấm cùng cảnh với
+RAW develop Off). Log có các dòng "rawb: ..." cho từng nửa ảnh: địa chỉ RAW,
+điểm khớp, mức đen / trắng, thời gian từng bước.
+
+
+6. FILE TRÊN THẺ
 ----------------
 ML/modules/windyflm.mo    module
 ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper)

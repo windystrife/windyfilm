@@ -600,8 +600,9 @@ static void wf_dv_fitsample(struct wf_dv_ctx *c, struct wf_dv_fit *F, int qi, in
     int py = 2 * qj - j->canon_y0;               /* frame rows 2 qj, 2 qj + 1 inside canon */
     if (py < 0 || py + 1 >= j->canon_h)
         return;
-    const uint32_t *p = j->canon + (size_t)py * (j->w >> 1) + qi;   /* word qi = pixels 2 qi, 2 qi + 1 */
-    uint32_t w0 = p[0], w1 = p[j->w >> 1];
+    int cpw = j->canon_pw ? j->canon_pw : j->w >> 1;                  /* words per canon row */
+    const uint32_t *p = j->canon + (size_t)py * cpw + qi;            /* word qi = pixels 2 qi, 2 qi + 1 */
+    uint32_t w0 = p[0], w1 = p[cpw];
     int u0 = (int8_t)(w0 & 255), u1 = (int8_t)(w1 & 255), v0 = (int8_t)((w0 >> 16) & 255), v1 = (int8_t)((w1 >> 16) & 255);
     int y[4] = { (int)((w0 >> 8) & 255), (int)(w0 >> 24), (int)((w1 >> 8) & 255), (int)(w1 >> 24) };
     int ymin = y[0], ymax = y[0];

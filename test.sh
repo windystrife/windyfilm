@@ -61,7 +61,7 @@ $HCC -c -o $T/obj/wf_test.o $H/wf_test.c
 MOD="wf_main.o wf_menu.o wf_shot.o wf_pv.o wf_probe.o wf_loglut.o wf_llk.o wf_llk_arm.o wf_film.o yh_halo.o wf_mist.o yg_grain.o yg_stocks.o
  wf_fx.o wf_expsim.o wf_catalog.o wf_logout.o wf_rawb.o"
 [ -f $O/wf_expk.o ] && MOD="$MOD wf_expk.o"
-[ $CAM = EOSM ] && MOD="$MOD wf_dev.o wf_rsrc.o"                  # RAW develop "B": the develop and the buffer check
+MOD="$MOD wf_dev.o wf_rsrc.o"                                     # RAW develop "B": the develop and the buffer check
 arm-linux-gnueabi-gcc -static -pthread -o $T/wf_test $T/obj/wf_test.o $T/obj/host_ml.o $(for o in $MOD; do echo $O/$o; done) \
   $T/obj/wf_cam_host.o $T/obj/wf_ui_stub.o $T/obj/wf_expoff.o -lm -Wl,--no-enum-size-warning -Wl,--no-wchar-size-warning -Wl,--no-warn-execstack
 set +e

@@ -613,3 +613,47 @@ in rows (10.3), so plan on 32-40 s per shot.
 - Halation on Log + LUT B frames reads graded words, whose highlights sit below 255.
 - IMG_0206: a magenta patch from the highlight rebuild.
 - `wf_dev_levels` can false-trigger on sparse synthetic histograms; real raws gave the right pile-up.
+
+### 10.8 5D2 (2026-11-14, from raw-path P0_5D2_SPEC.md; not probed on the camera)
+
+**Camera layer** (`wf_cam_5d2.c rawb_fill`, at both hooks while the menu is on):
+- gates: RAW + L fine, drive single / self-timer;
+- job handle H: TOP `[0x369C + 0x3C]`, BOT `[0x3630 + 0x2C]`;
+- `H[0] == 0xFFCD0761`, P = H[1], MEM1 = `[P + 0xC68]`;
+- raw = MEM1 + 0x76C8, 5792 x 3804, pitch 10136, GBRG, black 1024. It must sit inside the RscMgr pool below
+  0x5C000000;
+- every pointer is read only where `prb_ok` says it cannot fault;
+- white per ISO is a fallback only: 13300 for the 1/3-stop-down ISOs (ISO 640 measured 13318), 15600 otherwise. The
+  measured pile-up wins.
+
+**Halves** (`wf_rawb.c`):
+- The TOP does the whole of the EOS M stage on its half:
+  - pick: NCC of YUV rows 0..1871 against raw rows 56..;
+  - levels;
+  - prepare, with the WB fit on the TOP half;
+  - rows 0..1871.
+- The BOT continues it only when all of these hold:
+  - same tables generation and key;
+  - same raw address;
+  - raw hash unchanged (`rb_top_*`).
+  It then writes rows 1872..3743 with the TOP's scratch.
+- Otherwise the BOT gets the 8-bit look, with the reason "TOP half not developed" or "raw changed since the TOP half".
+- A stopped TOP is not `WF_ST_TOUCHED`, so the camera layer leaves the BOT plain: no look anywhere on that shot.
+
+**Width:**
+- `wf_dev` needs w as a multiple of 32, and 5616 is not one. So the develop covers columns 8..5607: x0 176, w 5600.
+- `wf_dev_job.canon_pw` (new, 0 = w / 2) lets the WB fit read the 5616-wide half.
+- The 8 edge columns on each side keep Canon's pixels under the 8-bit look.
+
+**Host test** (5D2 RAWB):
+- TOP + BOT bit-exact against the direct develop;
+- no match → 8-bit;
+- raw changed between the hooks → BOT 8-bit;
+- no live job, and MEM1 past 0x5C000000 → not read;
+- gates;
+- half-shutter stop in the TOP.
+
+**Not known until the camera runs:**
+- whether raw0 really holds this shot at both hooks: the P0 probe run answers it;
+- the RearDevelop task's patience while the TOP holds FrontDevelop about 20 s;
+- white levels per ISO.
