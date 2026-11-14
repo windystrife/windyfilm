@@ -8,6 +8,8 @@
  *   module init (ML's module loader): ROM checks (wf_cam_init), config, menu, the task. No hook, no file write.
  *   wf_task (prio 0x1E, own): starts the worker + hooks (wf_cam_start), then every ~50 ms: shot log, pack reader, Log + LUT
  *     tables, effects, preview tables, config save, EXIF writer, Light, the browser request, log flush.
+ *   wf_mguard (EOS M, prio 0x1B, own): every 50 ms the ML menu's Canon dialog (wf_ui_menu_guard, src/ui/wf_ui.c); its
+ *     own task because wf_task can be busy for tens of seconds (a LUT read, RAW develop tables). Logs, no files.
  *   worker film_yuv (prio 0x1C, wf_shot.c) and the Canon hook tasks never log and never touch files. */
 #include <module.h>
 #include "wf_core.h"
@@ -37,13 +39,14 @@ extern void NotifyBox(int timeout, const char *fmt, ...);
 extern void gui_stop_menu(void);
 extern void wf_film_shot_set_mem(void *mem);
 #define WF_TASK_PRIO 0x1E
+#define WF_MG_PRIO   0x1B                        /* above the shot worker (0x1C): a develop must not starve it */
 
 volatile int wf_cam_ok;
 volatile int wf_unloading;
 static volatile uint32_t wf_gen_n = 1;
 static const char *volatile wf_status_s = "";
 static volatile int wf_ui_req;
-static volatile int wf_task_up;
+static volatile int wf_task_up, wf_mg_up;
 
 /* ------------------------------------------------------------------ wf_api.h services */
 int wf_cam(void)
@@ -310,6 +313,10 @@ static void wf_ui_poll(void)
         wf_ui_req++;
         return;
     }
+    if (wf_ui_is_open() && wf_ui_req < 80) {     /* a browser still closing (it gives the screen back only once the ML */
+        wf_ui_req++;                             /* menu has gone, wf_ui.c): open again after it, up to ~2 s more */
+        return;
+    }
     wf_ui_req = 0;
     asked = 0;
     if (!wf_ui_is_open())
@@ -378,6 +385,19 @@ static void wf_task(void *arg)
     wf_task_up = 0;
 }
 
+#ifndef WF_BUILD_5D2
+/* EOS M: the ML menu's Canon dialog (src/ui/wf_ui.c wf_ui_menu_guard) */
+static void wf_mg_task(void *arg)
+{
+    (void)arg;
+    while (!wf_unloading) {
+        wf_ui_menu_guard();
+        msleep(50);
+    }
+    wf_mg_up = 0;
+}
+#endif
+
 /* ------------------------------------------------------------------ module init / deinit */
 static unsigned int wf_init(void)
 {
@@ -392,6 +412,15 @@ static unsigned int wf_init(void)
     wf_dark_init();
     wf_menu_init();                              /* config, ML menu */
     task_create("wf_task", WF_TASK_PRIO, 0x2000, (void *)wf_task, 0);
+#ifndef WF_BUILD_5D2
+    if (wf_cam_ok) {
+        wf_mg_up = 1;
+        if (task_create("wf_mguard", WF_MG_PRIO, 0x1000, (void *)wf_mg_task, 0) & 1) {   /* handles even, errors odd */
+            wf_mg_up = 0;
+            wf_log("menu: no guard task");
+        }
+    }
+#endif
     return 0;
 }
 
@@ -404,7 +433,7 @@ static unsigned int wf_deinit(void)
     wf_pv_deinit();
     wf_exp_deinit();
     wf_shot_deinit();
-    for (int i = 0; i < 50 && wf_task_up; i++)
+    for (int i = 0; i < 50 && (wf_task_up || wf_mg_up); i++)
         msleep(20);
     return 0;
 }

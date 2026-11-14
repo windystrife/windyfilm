@@ -10,7 +10,9 @@
  *   canon_gui_disable_front_buffer, canon_gui_enable_front_buffer                        own the screen
  *   task_create, msleep, get_ms_clock                                                    UI task
  *   gui_menu_shown, gui_stop_menu, gui_state, lv, display_is_on, __mem_malloc, __mem_free
- *   get_gui_mode, SetGUIRequestMode, display_on, bmp_off, bmp_on, __recording(_custom)    5D2: Canon's dialog
+ *   redraw, ml_shutdown_requested                                                        a close under the ML menu
+ *   get_gui_mode, SetGUIRequestMode, display_on, bmp_off, bmp_on, __recording(_custom)    5D2: Canon's dialog; EOS M: get_gui_mode,
+ *     SetGUIRequestMode, __recording for the ML menu's dialog (wf_ui_menu_guard)
  *   force_liveview                                                                       5D2: LiveView after a load
  *   cli / sei are inline (arm-mcr.h).
  */
@@ -30,6 +32,7 @@
 #include <powersave.h>
 #include <timer.h>
 #include <rbf_font.h>
+#include <tasks.h>                      /* ml_shutdown_requested */
 extern void force_liveview(void);       /* movtweaks.c (shoot.h) */
 #endif
 

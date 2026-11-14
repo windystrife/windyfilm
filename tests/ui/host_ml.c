@@ -107,8 +107,13 @@ uint32_t font_by_name(char *file, uint32_t fg, uint32_t bg)
 /* ------------------------------------------------------------------ GUI, tasks, time */
 static int front_disabled, clock_ms = 1000;
 int gui_state, lv = 1;
-void canon_gui_disable_front_buffer(void) { front_disabled = 1; }
-void canon_gui_enable_front_buffer(int also_redraw) { (void)also_redraw; front_disabled = 0; }
+/* the ML menu (host_menu): open / closing at a clock time / gui_stop_menu ignored; what happens under it is counted */
+#define MENU_PX 0x2A                    /* a pixel of the ML menu (ML's own colour range) at the front's top-left */
+static int menu_on, menu_off_at = -1, menu_sticky, under_enable, under_disable, menu_px_kept = -1, redraws;
+int ml_shutdown_requested;
+void canon_gui_disable_front_buffer(void) { if (menu_on) under_disable++; front_disabled = 1; }
+void canon_gui_enable_front_buffer(int also_redraw) { (void)also_redraw; if (menu_on) under_enable++; front_disabled = 0; }
+void redraw(void) { redraws++; }
 static int ntasks, task_fail;
 uint32_t task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg)
 {
@@ -120,8 +125,32 @@ int host_tasks(void) { return ntasks; }
 void host_task_fail(int f) { task_fail = f; }
 void msleep(int ms) { clock_ms += ms; }
 int get_ms_clock(void) { return clock_ms; }
-int gui_menu_shown(void) { return 0; }
-void gui_stop_menu(void) {}
+static void menu_gone(void)
+{
+    menu_px_kept = real_raw[OFF] == MENU_PX;
+    if (menu_px_kept) real_raw[OFF] = 0;                /* menu_close: Canon's redraw replaces the menu */
+    menu_on = 0;
+    menu_off_at = -1;
+}
+int gui_menu_shown(void)
+{
+    if (menu_on && menu_off_at >= 0 && clock_ms - menu_off_at >= 0) menu_gone();
+    return menu_on;
+}
+void gui_stop_menu(void) { if (menu_on && !menu_sticky) menu_gone(); }
+void host_menu(int on, int off_after_ms, int sticky)
+{
+    if (!on) { if (menu_on) menu_gone(); return; }
+    menu_on = 1;
+    menu_off_at = off_after_ms >= 0 ? clock_ms + off_after_ms : -1;
+    menu_sticky = sticky;
+    menu_px_kept = -1;
+    real_raw[OFF] = MENU_PX;                            /* menu_open paints the screen */
+}
+int host_menu_px_kept(void) { return menu_px_kept; }
+int host_under_enable(void) { return under_enable; }
+int host_under_disable(void) { return under_disable; }
+int host_redraws(void) { return redraws; }
 int is_movie_mode(void) { return 0; }
 static int gui_mode, gui_next = -1, gui_at, gui_lights = 1, disp = 1, gui_nreq, gui_req0_front = -1, disp_ons;
 static void gui_step(void)
@@ -138,14 +167,19 @@ int host_recording;
 int display_is_on(void) { gui_step(); return disp; }
 void display_on(void) { disp_ons++; disp = 1; }
 int get_gui_mode(void) { gui_step(); return gui_mode; }
+static int gui_drop, gui_last_req = -1;
 void SetGUIRequestMode(int mode)
 {
     gui_nreq++;
+    gui_last_req = mode;
     if (!mode) gui_req0_front = front_disabled;
     else muted_at_req = muted;
+    if (mode && gui_drop > 0) { gui_drop--; return; }   /* EOS M after Canon's own MENU: the ask does not take */
     gui_next = mode;
     gui_at = clock_ms + 60;
 }
+void host_gui_drop(int n) { gui_drop = n; }
+int host_gui_last_req(void) { return gui_last_req; }
 void bmp_off(void) { bmp_offs++; muted = 1; }
 void bmp_on(void) { muted = 0; }
 void force_liveview(void)                   /* ML: mode 0, then the LV button; LiveView is on 1.5 s later */
@@ -158,6 +192,7 @@ void force_liveview(void)                   /* ML: mode 0, then the LV button; L
 void host_gui_set(int mode, int display, int lights)
 {
     gui_mode = mode; gui_next = -1; disp = display; gui_lights = lights; gui_nreq = 0; gui_req0_front = -1; disp_ons = 0;
+    gui_drop = 0; gui_last_req = -1;
     muted = 0; bmp_offs = 0; muted_at_req = -1; lv_starts = 0;
 }
 int host_bmp_muted(void) { return muted; }

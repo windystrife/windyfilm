@@ -3004,8 +3004,15 @@ static void t_roll(void)
     chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && wf_rawb == 0,
         "RAW develop off: a roll loads, RAW develop stays off (%d, %d)", rc, wf_rawb);
     chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "the empty roll closes");
-    long n;
-    char *b = get_file("ML/SETTINGS/WFROLL.TXT", &n);
+    long n = 0;
+    char *b = 0;
+    for (int i = 0; i < 50; i++) {                  /* wf_task writes the file after the state changed in memory */
+        free(b);
+        b = get_file("ML/SETTINGS/WFROLL.TXT", &n);
+        if (b && strstr(b, "state=done"))
+            break;
+        usleep(100000);
+    }
     chk(b && n == 1536 && strstr(b, "state=done"), "roll file: 1536 bytes, state=done (%ld)", n);
     free(b);
 #endif

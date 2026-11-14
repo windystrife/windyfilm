@@ -263,7 +263,8 @@ static void roll_hud(void)
     if (want) {
         int blink = now - wind_t < 1000, t = now - info_t;
         int mode = t < HUD_INFO_MS ? WF_HUD_FULL : t < HUD_INFO_MS + HUD_FADE_MS ? WF_HUD_FADE : WF_HUD_SMALL;
-        if (!hud_on || mode != hud_mode || blink || now - hud_t >= 500) {
+        if ((!hud_on || mode != hud_mode || blink || now - hud_t >= 500) && !gui_menu_shown() && !wf_ui_is_open()) {
+            /* (again right before the pixels: the ML menu or the UI may have come since the top; never over them) */
             /* the first small pass clears what the full HUD drew (only our own rectangles) */
             wfdr_hud(bmp_vram(), WF_BMPPITCH, blink, mode == WF_HUD_SMALL && hud_mode != WF_HUD_SMALL ? WF_HUD_CLEAR : mode);
             hud_t = now;

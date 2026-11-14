@@ -639,7 +639,9 @@ The layout, 720x480 (the ML bitmap):
   animation (about 1.15 s: the film's leader winds out of its can, drawn from WFCANS.DAT, to a gate that lights with
   frame 1, over the dimmed browser), then the browser closes. EOS M: the browser is open only in stills LV, so LiveView
   is back. 5D2: opened without LV, `force_liveview()` once the screen is Canon's again. A key skips the rest; a
-  half-press closes without LiveView. "Already loaded" and the errors keep the browser open with their message.
+  half-press closes without LiveView. The film already loaded picked again (a roll's own film too) plays the same
+  animation and closes, without a load; on the roll picker the loaded roll's own film and count do the same (a full or
+  rewound roll keeps its message). The errors keep the browser open with their message.
 - **Never a dead camera (owner 11-14, EOS M: sometimes neither the film menu nor the ML menu opened):** the browser
   takes every key, so a UI task that does not run left both menus dead. The film worker (prio 0x1C) develops a shot for
   seconds (RAW develop 35-45 s), and wf_task (0x1E) builds the grain tables for 2-19 s without sleeping; the owner's
@@ -649,6 +651,16 @@ The layout, 720x480 (the ML bitmap):
   phases listed at the top of `src/ui/wf_ui.c`). The EOS M two-finger tap then opens the ML menu (no module took MENU).
   The open is claimed under `cli` (TRASH in the GUI task and the menu entry in wf_task cannot start two tasks), a failed
   `task_create` leaves the browser closed, and keys pass on while the task starts LiveView after a load.
+- **The ML menu over LiveView (owner RAWB7, EOS M: "the LiveView screen paints over" the menu a two-finger tap
+  opened):** the ML menu lives on Canon's LV Set dialog (GUI mode 93); ML asks for it once at the open and every 2 s.
+  The owner's KEYTRACE: right after Canon's own MENU, that first ask did not take and the menu ran on mode 0 until
+  ML's 2 s ask. Nothing of ours was open. Our side: (1) the browser never gives the front buffer back while the ML menu
+  is up (a close under it waits for the menu to go, then gives everything back and redraws; an open under it is
+  refused), and the roll HUD does not draw under it; (2) EOS M guard task `wf_mguard` (prio 0x1B, 50 ms, its own task
+  because wf_task can be busy for tens of seconds): while the ML menu is up in stills LV on mode 0, it asks for 93
+  150 ms after the open and then every 300 ms, 8 times at most (log `menu: canon dialog 0 -> asked 93 (try n)`, then
+  `menu: canon dialog 93 after try n, N ms ...` or `still 0 after 8 tries`); an ask that lands after the menu closed
+  is asked back to 0 within 1 s. Not on the 5D2 (no such report there).
 - **Pack reads while Canon holds the card** (owner's RAWB2 log, EOS M 10 s after boot: "fonts WFFONTS.DAT not on the
   card, cans WFCANS.DAT read failed" with both files there). `wf_card_read` returns `WF_RD_*` (wf_api.h); a file it
   cannot size is `MISSING` only when the card answers for `AUTOEXEC.BIN`, else `BUSY`. At open the pack reads are tried

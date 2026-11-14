@@ -183,6 +183,13 @@ static int roll_key(int key, int now)
     {
         if (!f) break;
         const struct wf_roll *r = wf_roll_now();
+        if (r->state == WF_RS_LOADED && r->film == f->id && r->exp == exps[rexp])
+        {                                           /* the roll in the camera picked again: as a film picked again, */
+            rl_film = f;                            /* the animation, then LiveView, no new load (owner 11-14). A full */
+            rl_exp = r->exp;                        /* or rewound roll keeps the message below: it takes no frame */
+            wf_log("ui: roll %d picked again (%d/%d)", r->num, r->nshot, r->exp);
+            return WFDR_LOADED;
+        }
         if (wf_roll_open(r) && r->nshot > 0) { say("This roll has frames: develop it first (Darkroom)", now); break; }
         if (!wf_avail(f->id)) { say(f->flags & WF_F_LUTCAN ? "LUT cube not on the card" : "Film table not on the card", now); break; }
         int rc = wf_roll_req_load(f->id, exps[rexp]);

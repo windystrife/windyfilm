@@ -46,6 +46,8 @@ static volatile int close_req;
 static volatile uint8_t kq[KQ_N];
 static volatile int kq_w, kq_r;
 static int took;                        /* we hold the screen (front buffer disabled) and the palette */
+static int fonts_held;                  /* this open counted itself a font pack user (wff_open): its close gives that back */
+static volatile int ui_quit;            /* wf_ui_close (unload): stop waiting for the ML menu to go */
 static volatile int scr;                /* WFUI_SCR_*: the browser, or a Roll + Darkroom screen (wf_dark_ui.c) */
 static volatile int scr_req = -1;       /* a switch asked for while open (the UI task makes it) */
 static volatile int hb, phase;          /* the UI task's last sign of life (ms clock) and where it was */
@@ -239,7 +241,8 @@ static void load_sel(void)
 {
     const struct wf_film *f = film_at(sel);
     if (!f) return;
-    if (wf_loaded() == f->id) { say("Already loaded"); return; }
+    if (wf_loaded() == f->id) { anim_start(f, 0); return; } /* picked again (a roll's own film too): the same animation,
+                                                               then LiveView, without a load (owner 11-14) */
     const struct wf_roll *ro = wf_roll_now();
     if (wf_roll_open(ro) && ro->nshot > 0) { say("A roll is in the camera: its film stays until the darkroom"); return; }
     int r = wf_load(f->id);
@@ -717,6 +720,12 @@ void wfui_task_begin(void)
         msleep(20);
         beat(PH_MENU);
     }
+    if (gui_menu_shown())                                   /* the ML menu keeps the screen: never draw over it */
+    {
+        wf_log("ui: the ML menu is still up after 1 s: not opened");
+        close_req = 1;
+        return;
+    }
     beat(PH_LIST);
     if (build_list()) { close_req = 1; return; }
     for (int g = 0; g < WF_NGROUPS; g++) { gsel[g] = gstart[g]; gfirst[g] = FIRST_UNSET; }
@@ -735,6 +744,7 @@ void wfui_task_begin(void)
     rd_tries = 0;
     beat(PH_FONTS);
     int fs = wff_open();
+    fonts_held = 1;
     wfp_init_fixed();
     beat(PH_CANS);
     int cs = wfc_open();
@@ -889,11 +899,30 @@ void wfui_task_end(void)
     beat(PH_END);
     if (took)
     {
+        /* The ML menu has the screen: the core opened it over us (a two-finger tap while this task did not beat, the
+         * core's 'F'), or it came another way. Canon's front buffer must stay off under it (menu_open turned it off) or
+         * Canon's LiveView GUI paints over the menu, and its pixels are not ours to clear. So: the palette back now,
+         * keys on (ST_CLOSING), and the screen back only once the menu has gone (menu_close gave Canon its GUI). */
+        int under = gui_menu_shown();
+        if (under)
+        {
+            st = ST_CLOSING;
+            wfp_restore();
+            wf_log("ui: the ML menu took the screen: given back after it closes");
+            int t0 = get_ms_clock();
+            while (gui_menu_shown() && !ui_quit && !ml_shutdown_requested)
+            {
+                beat(PH_END);
+                msleep(50);
+            }
+            wf_log("ui: the ML menu went after %d ms%s", get_ms_clock() - t0, ui_quit ? " (unload)" : "");
+        }
         wfg_clear_front();
-        wfp_restore();
+        if (!under) wfp_restore();
         int masked = dlg_give();                            /* mode 0 while the front buffer is still ours */
         canon_gui_enable_front_buffer(1);
         if (masked) bmp_on();
+        if (under) redraw();                                /* menu_close may have turned it on already: no redraw then */
         took = 0;
     }
     else if (dlg_give())
@@ -903,7 +932,8 @@ void wfui_task_end(void)
     if (scr != WFUI_SCR_BROWSER) wfdr_leave(scr);
     scr = WFUI_SCR_BROWSER;
     wfc_close();
-    wff_close();
+    if (fonts_held) wff_close();                            /* an open that ended before wff_open must not take the */
+    fonts_held = 0;                                         /* roll HUD's use of the shared pack */
     if (list) free(list);
     list = 0;
     nlist = 0;
@@ -1016,6 +1046,8 @@ static int dlg_give(void)
 }
 
 /* ------------------------------------------------------------------ wf_api.h */
+static struct { int shown, open_at, tries, last_ask, came, done, undo_until; } mg;   /* wf_ui_menu_guard (below) */
+
 void wf_ui_init(void)
 {
     scr = WFUI_SCR_BROWSER;
@@ -1025,7 +1057,9 @@ void wf_ui_init(void)
     list = 0;
     nlist = 0;
     took = 0;
+    fonts_held = ui_quit = 0;
     anim_on = lv_after = edit = 0;
+    mg.shown = mg.tries = mg.came = mg.done = mg.undo_until = 0;
 }
 
 int wf_ui_open(void)
@@ -1038,6 +1072,7 @@ int wf_ui_open(void)
         hb = now;
         phase = PH_CREATED;
         close_req = 0;
+        ui_quit = 0;
         kq_r = kq_w = 0;
         st = ST_OPENING;
     }
@@ -1059,6 +1094,7 @@ void wf_ui_close(void)
 {
     if (st == ST_CLOSED) return;
     close_req = 1;
+    ui_quit = 1;                                            /* a close waiting for the ML menu to go stops waiting */
 #ifndef WF_HOST
     for (int i = 0; i < 100 && st != ST_CLOSED; i++) msleep(20);
 #endif
@@ -1133,5 +1169,69 @@ int wf_ui_open_key(unsigned int key)
     if (st != ST_CLOSED || key != MODULE_KEY_TRASH) return 0;  /* EOS M: long DOWN arrives as TRASH (patch 0002) */
     if (gui_menu_shown() || gui_state != GUISTATE_IDLE) return 0;
     if (wf_cam() != WF_CAM_5D2 && (!lv || is_movie_mode())) return 0;   /* EOS M: Canon's LV Set dialog = stills LV */
+    return 1;
+}
+
+/* ------------------------------------------------------------------ EOS M: the ML menu's Canon dialog
+ * The ML menu lives on Canon's "LV Set" dialog (GUIMODE_ML_MENU = 93 in stills LV, platform/EOSM.202/consts.h):
+ * menu_open's piggyback_canon_menu asks for it once (SetGUIRequestMode, 200 ms), and menu_ensure_canon_dialog asks
+ * again every 2 s. The owner's RAWB7 KEYTRACE: right after Canon's own MENU (GUI mode 2) was left, the first ask did
+ * not take; the menu ran on mode 0 (plain LiveView, which paints over it) until the 2 s ask, 2.0 / 2.2 s after the
+ * tap. A tap 1.9 s after leaving the ML menu the same way (half-shutter) got 93 at once. So while the ML menu is up in
+ * LV on mode 0, ask for 93 ourselves: 150 ms after it opened, then every 300 ms, MG_TRIES times (past ML's own 2 s
+ * ask). Our asks may land after the menu has closed (ML closes it when it sees mode 0 after its redraw flood): Canon's
+ * dialog would then stay up with no menu on it, so a 93 seen within 1 s of the close is asked back to 0.
+ * Called every ~50 ms from the core's guard task (wf_main.c), never while the browser is open (the core's module UI
+ * holds the dialog then). 5D2: nothing (its menu dialog is 38, no report of this there). State: mg (wf_api.h part). */
+#define MG_MODE      93                     /* GUIMODE_ML_MENU in stills LV (RECORDING_H264 -> 99: never asked) */
+#define MG_FIRST_MS  150
+#define MG_EVERY_MS  300
+#define MG_TRIES     8
+#define MG_UNDO_MS   1000
+
+int wf_ui_menu_guard(void)
+{
+    if (wf_cam() != WF_CAM_EOSM) return 0;
+    int now = get_ms_clock(), shown = gui_menu_shown(), gm = get_gui_mode();
+    int ours = lv && !RECORDING && st == ST_CLOSED;         /* plain stills LV, no browser */
+    if (!shown)
+    {
+        if (mg.shown && mg.tries && !mg.came) mg.undo_until = now + MG_UNDO_MS;  /* closed, our asks may still land */
+        mg.shown = mg.tries = mg.came = mg.done = 0;
+        if (!mg.undo_until) return 0;
+        if (now - mg.undo_until >= 0) { mg.undo_until = 0; return 0; }
+        if (gm != MG_MODE || !ours) return 0;
+        mg.undo_until = 0;
+        SetGUIRequestMode(0);
+        wf_log("menu: closed before canon dialog %d came: asked 0", gm);
+        return 1;
+    }
+    if (!mg.shown)
+    {
+        mg.shown = 1;
+        mg.open_at = now;
+        mg.tries = mg.came = mg.done = mg.undo_until = 0;
+    }
+    if (gm)
+    {
+        if (mg.tries && !mg.came)
+        {
+            wf_log("menu: canon dialog %d after try %d, %d ms after the menu opened", gm, mg.tries, now - mg.open_at);
+            mg.came = mg.done = 1;                          /* this menu's round is over: ML's 2 s ask keeps it */
+        }
+        return 0;
+    }
+    if (!ours || mg.done) return 0;
+    if (mg.tries >= MG_TRIES)
+    {
+        wf_log("menu: canon dialog still 0 after %d tries (%d ms): left to ML", mg.tries, now - mg.open_at);
+        mg.done = 1;
+        return 0;
+    }
+    if (now - (mg.tries ? mg.last_ask + MG_EVERY_MS : mg.open_at + MG_FIRST_MS) < 0) return 0;
+    mg.tries++;
+    mg.last_ask = now;
+    SetGUIRequestMode(MG_MODE);
+    wf_log("menu: canon dialog 0 -> asked %d (try %d)", MG_MODE, mg.tries);
     return 1;
 }

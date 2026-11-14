@@ -164,6 +164,24 @@ int main(int argc, char **argv)
     key(MODULE_KEY_PRESS_SET);
     CHECK(fake_req_film() == before, "a roll with frames was replaced");
     shot("roll_loaded_msg");
+    /* .. the roll's own film and count picked again (owner 11-14): the load animation, then LiveView, no new load */
+    key(MODULE_KEY_PRESS_LEFT);
+    CHECK(wfdr_host_sel_id() == bw && wfdr_host_exp() == 12, "LEFT not back on the roll's film (%d x%d)",
+          wfdr_host_sel_id(), wfdr_host_exp());
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_anim() && !closed && fake_req_film() == before && wf_roll_now()->nshot == 5
+          && wf_roll_now()->state == WF_RS_LOADED, "the roll picked again: anim %d, request %d, %d frames",
+          wfui_host_anim(), fake_req_film(), wf_roll_now()->nshot);
+    tick(80);
+    CHECK(closed, "the roll picked again did not close the UI");
+    wfui_task_end();
+    CHECK(!wf_ui_is_open() && host_live_allocs() == 0, "after the roll picked again: open %d, %ld allocations",
+          wf_ui_is_open(), host_live_allocs());
+    /* .. a full roll's own film: the message stays (it takes no frame) */
+    roll_of(bw, 12, 12, WF_RS_FULL);
+    open_scr(WFUI_SCR_ROLL);
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(!wfui_host_anim() && !closed, "a full roll picked again animated");
     close_ui();
 
     /* 3. darkroom: ready */
@@ -274,6 +292,22 @@ int main(int argc, char **argv)
     CHECK(px > 100, "HUD text after the UI closed: %d white pixels", px);
     wfdr_hud_fonts(0);
     CHECK(host_live_allocs() == 0, "the HUD's close: %ld allocations left", host_live_allocs());
+
+    /* 12. an open that ends before its own wff_open (the ML menu stays up) must not give back the HUD's use of the pack */
+    wfdr_hud_fonts(1);
+    a0 = host_live_allocs();
+    host_menu(1, -1, 1);
+    open_scr(WFUI_SCR_BROWSER);
+    CHECK(closed, "an open under the ML menu did not end");
+    wfui_task_end();
+    host_menu(0, -1, 0);
+    CHECK(host_live_allocs() == a0, "a refused open took the HUD's pack (%ld -> %ld allocations)", a0, host_live_allocs());
+    hud_dump("after_refused", 0, WF_HUD_FULL, 0);
+    px = 0;
+    for (int i = 0; i < 480 * 720; i++) px += hv[i] == MLC_W;
+    CHECK(px > 100, "HUD text after a refused open: %d white pixels", px);
+    wfdr_hud_fonts(0);
+    CHECK(host_live_allocs() == 0, "the HUD's close (12): %ld allocations left", host_live_allocs());
 
     printf("peak UI heap %ld bytes\n", host_peak_bytes());
     printf("%s: %d failure(s)\n", fails ? "FAIL" : "PASS", fails);

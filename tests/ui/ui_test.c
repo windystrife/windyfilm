@@ -6,6 +6,7 @@
 #include "host_ml.h"
 #include "wf_ui_int.h"
 #include "fake_core.h"
+#include "fake_dark.h"
 
 int wfui_host_sel_id(void);
 int wfui_host_group(void);
@@ -80,9 +81,8 @@ static void open_ui(void)
 }
 
 /* the task closed (tick returned 1): end it and check that everything is given back */
-static void end_checks(void)
+static void given_back_checks(void)
 {
-    wfui_task_end();
     CHECK(!wf_ui_is_open(), "still open after close");
     CHECK(!host_front_disabled(), "front buffer not given back");
     CHECK(host_palette_is_canon(), "palette entries not given back");
@@ -90,6 +90,12 @@ static void end_checks(void)
     CHECK(host_live_allocs() == 0, "%ld allocations left after close", host_live_allocs());
     CHECK(host_lock_depth() == 0, "BMP lock depth %d", host_lock_depth());
     CHECK(!host_bmp_muted(), "Canon's bitmap left muted after close");
+}
+
+static void end_checks(void)
+{
+    wfui_task_end();
+    given_back_checks();
 }
 
 static void close_ui(int k, unsigned want)
@@ -112,6 +118,23 @@ static void load_and_close(int want_id)
     tick(40);
     CHECK(closed, "not closed after the load animation");
     end_checks();
+}
+
+/* the core's guard task: wf_ui_menu_guard every 50 ms for ms; returns the asks it made, *first = ms of the first one */
+static int mg_run(int ms, int *first)
+{
+    int n = 0, t0 = get_ms_clock();
+    if (first) *first = -1;
+    while (get_ms_clock() - t0 < ms)
+    {
+        if (wf_ui_menu_guard())
+        {
+            if (first && *first < 0) *first = get_ms_clock() - t0;
+            n++;
+        }
+        msleep(50);
+    }
+    return n;
 }
 
 static void shot(const char *name)
@@ -170,8 +193,29 @@ int main(int argc, char **argv)
     open_ui();
     CHECK(wfui_host_sel_id() == id_of("SUN200"), "reopen not on the loaded film");
     shot("b2s_loaded");
-    CHECK(key(MODULE_KEY_PRESS_SET) == 0 && !wfui_host_anim() && !closed, "SET on the loaded film: no animation, stays open");
-    close_ui(MODULE_KEY_MENU, 0);
+    {                                                               /* SET on the loaded film (owner 11-14): the same */
+        uint32_t g = wf_gen();                                      /* animation, then LiveView, without a load */
+        load_and_close(id_of("SUN200"));
+        CHECK(wf_gen() == g, "SET on the loaded film loaded it again");
+    }
+    /* .. ahead of the roll refusal: a roll with frames in the camera, its own film picked again animates, another
+     * film is refused with the message */
+    fake_dark_reset();
+    {
+        struct wf_roll *r = fake_roll();
+        wf_roll_load(r, id_of("SUN200"), 12, 100, 205);
+        r->nshot = 3;
+        uint32_t g = wf_gen();
+        open_ui();
+        load_and_close(id_of("SUN200"));
+        CHECK(wf_gen() == g && wf_roll_now()->nshot == 3, "the roll's own film: loaded again or the roll changed");
+        open_ui();
+        go_to("PRT160");
+        CHECK(key(MODULE_KEY_PRESS_SET) == 0 && !wfui_host_anim() && !closed && wf_loaded() == id_of("SUN200"),
+              "another film with a roll in the camera: refused, the browser stays open");
+        close_ui(MODULE_KEY_MENU, 0);
+    }
+    fake_dark_reset();
 
     /* 2. Film LUT group, LV500T, focus on Film LUT (mockup_B2s_strip_lut) */
     fake_reset();
@@ -494,6 +538,137 @@ int main(int argc, char **argv)
         host_task_fail(1);                                          /* no task: not open, keys pass on */
         CHECK(wf_ui_open() == -1 && !wf_ui_is_open() && wf_ui_key(MODULE_KEY_PRESS_LEFT) == 1, "task_create failure");
         host_task_fail(0);
+    }
+
+    /* 5h. the ML menu takes the screen while the browser is up (owner RAWB7: "the LiveView screen paints over" the menu
+     * a two-finger tap opened; the core's 'F' opens it over a browser that did not beat, or it comes another way): the
+     * close never gives Canon its front buffer under the menu (Canon's LiveView GUI would paint over it) and leaves the
+     * menu's pixels alone; keys pass on meanwhile; once the menu has gone, everything is given back and Canon redraws */
+    fake_reset();
+    fake_set_card(card);
+    host_gui_set(0, 1, 1);
+    open_ui();
+    {
+        int e0 = host_under_enable(), r0 = host_redraws();
+        host_menu(1, 3000, 0);                                      /* open now, closed by the user 3 s later */
+        tick(1);
+        CHECK(closed, "the browser did not end under the ML menu");
+        wfui_task_end();
+        CHECK(host_under_enable() == e0, "the front buffer was given back under the ML menu (%d times)", host_under_enable() - e0);
+        CHECK(host_menu_px_kept() == 1, "the ML menu's pixels were cleared under it (%d)", host_menu_px_kept());
+        CHECK(host_redraws() > r0, "no redraw once the ML menu went");
+        given_back_checks();
+    }
+    /* .. and the unload does not wait for the ML menu (wf_ui_close: the close gives the screen back at once) */
+    fake_reset();
+    fake_set_card(card);
+    open_ui();
+    host_menu(1, -1, 0);
+    tick(1);
+    CHECK(closed, "the browser did not end under the ML menu (2)");
+    wf_ui_close();
+    wfui_task_end();
+    CHECK(!wf_ui_is_open() && !host_front_disabled(), "an unload under the ML menu did not give the screen back");
+    host_menu(0, -1, 0);
+    CHECK(host_live_allocs() == 0, "%ld allocations left (unload under the ML menu)", host_live_allocs());
+
+    /* 5i. an open while the ML menu stays up (gui_stop_menu does not close it): the browser never takes the screen */
+    fake_reset();
+    fake_set_card(card);
+    host_menu(1, -1, 1);
+    closed = 0;
+    {
+        int d0 = host_under_disable(), e0 = host_under_enable();
+        CHECK(wf_ui_open() == 0, "open under the ML menu");
+        wfui_task_begin();
+        CHECK(!host_front_disabled() && host_under_disable() == d0, "the browser took the screen over the ML menu");
+        tick(1);
+        CHECK(closed, "an open under the ML menu did not end");
+        wfui_task_end();
+        CHECK(host_under_enable() == e0, "the front buffer was given back under the ML menu (open refused)");
+        CHECK(!wf_ui_is_open() && host_live_allocs() == 0, "the refused open left %ld allocations", host_live_allocs());
+    }
+    host_menu(0, -1, 0);
+
+    /* 5j. EOS M: the ML menu on Canon's plain LiveView (owner's RAWB7 KEYTRACE: after Canon's own MENU the first ask for
+     * the LV Set dialog did not take, the menu ran on mode 0 until ML's 2 s ask): the guard asks for 93 150 ms after
+     * the menu opened, then every 300 ms, up to 8 times; nothing when the ask took, outside LV, recording, with the
+     * browser up or on the 5D2; an ask that lands after the menu closed is asked back to 0 */
+    {
+        int first, n, r0;
+        fake_reset();
+        host_gui_set(0, 1, 1);
+        mg_run(100, 0);                                             /* no menu: nothing */
+        CHECK(host_gui_requests() == 0, "the guard asked without the ML menu (%d)", host_gui_requests());
+        /* the ask takes (the usual case): ML's own request only */
+        fake_log_clear();
+        host_menu(1, -1, 0);
+        SetGUIRequestMode(93);                                      /* piggyback_canon_menu */
+        n = mg_run(2500, 0);
+        CHECK(n == 0 && host_gui_requests() == 1 && host_gui_mode() == 93 && !fake_log_has("menu: "),
+              "the guard asked although Canon's dialog came (%d asks, %d requests, mode %d)", n, host_gui_requests(),
+              host_gui_mode());
+        host_menu(0, -1, 0);
+        SetGUIRequestMode(0);                                       /* menu_close */
+        n = mg_run(1200, 0);
+        CHECK(n == 0 && host_gui_mode() == 0, "the guard acted after a plain close (%d asks)", n);
+        /* the owner's case: ML's ask and our first two do not take, the third does */
+        host_gui_set(0, 1, 1);
+        host_gui_drop(3);
+        fake_log_clear();
+        host_menu(1, -1, 0);
+        SetGUIRequestMode(93);
+        n = mg_run(2500, &first);
+        CHECK(n == 3 && first >= 150 && first < 200 && host_gui_mode() == 93,
+              "guard: %d asks (want 3), the first at %d ms (want 150), mode %d", n, first, host_gui_mode());
+        CHECK(fake_log_has("menu: canon dialog 0 -> asked 93 (try 1)") && fake_log_has("menu: canon dialog 0 -> asked 93 (try 3)")
+              && !fake_log_has("(try 4)") && fake_log_has("menu: canon dialog 93 after try 3, "), "guard log lines");
+        r0 = host_gui_requests();
+        host_menu(0, -1, 0);
+        SetGUIRequestMode(0);
+        n = mg_run(1200, 0);
+        CHECK(n == 0 && host_gui_requests() == r0 + 1 && host_gui_mode() == 0, "the guard acted after its dialog came and"
+              " the menu closed (%d asks)", n);
+        /* Canon never takes it: 8 tries, then ML's own 2 s ask is left to it */
+        host_gui_set(0, 1, 1);
+        host_gui_drop(100);
+        fake_log_clear();
+        host_menu(1, -1, 0);
+        n = mg_run(4000, 0);
+        CHECK(n == 8 && fake_log_has("menu: canon dialog still 0 after 8 tries"), "guard: %d tries (want 8)", n);
+        host_menu(0, -1, 0);
+        n = mg_run(1200, 0);
+        CHECK(n == 0, "the guard asked 0 with no 93 in sight (%d)", n);
+        /* the menu closes before our ask lands (ML closes it on mode 0): Canon's dialog is asked back to 0 */
+        host_gui_set(0, 1, 1);
+        host_gui_drop(2);
+        fake_log_clear();
+        host_menu(1, 470, 0);                                       /* try 2 at 450 ms lands at 510, the menu went at 470 */
+        SetGUIRequestMode(93);
+        n = mg_run(1500, 0);
+        CHECK(n == 3 && host_gui_last_req() == 0 && host_gui_mode() == 0
+              && fake_log_has("menu: closed before canon dialog 93 came: asked 0"),
+              "a late 93 after the close: %d asks, last request %d, mode %d", n, host_gui_last_req(), host_gui_mode());
+        /* not ours: outside LV, recording, the browser up, the 5D2 */
+        for (int c = 0; c < 4; c++)
+        {
+            host_gui_set(0, 1, 1);
+            host_gui_drop(100);
+            if (c == 0) lv = 0;
+            if (c == 1) host_recording = 1;
+            if (c == 2) open_ui();
+            if (c == 3) fake_set_cam(WF_CAM_5D2);
+            host_menu(1, -1, 0);
+            n = mg_run(1000, 0);
+            CHECK(n == 0, "the guard asked in case %d (%d)", c, n);
+            host_menu(0, -1, 0);
+            mg_run(100, 0);
+            lv = 1;
+            host_recording = 0;
+            if (c == 2) close_ui(MODULE_KEY_PRESS_HALFSHUTTER, 1);
+            fake_set_cam(WF_CAM_EOSM);
+        }
+        host_gui_set(0, 1, 1);
     }
 
     /* 5g. Canon holds the card (owner's RAWB2 log, EOS M 10 s after boot: "fonts WFFONTS.DAT not on the card, cans

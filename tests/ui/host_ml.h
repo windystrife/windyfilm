@@ -63,6 +63,8 @@ void msleep(int ms);
 int get_ms_clock(void);
 int gui_menu_shown(void);
 void gui_stop_menu(void);
+void redraw(void);
+extern int ml_shutdown_requested;
 extern int gui_state;
 #define GUISTATE_IDLE 0
 extern int lv;
@@ -111,6 +113,13 @@ static inline void sei(uint32_t old) { (void)old; }
 void host_init(const char *rbf_dir, uint32_t canon_white, uint32_t canon_black);
 int  host_dump(const char *ppm_path);           /* front buffer through the hardware palette -> PPM; returns stray px */
 int  host_front_disabled(void);
+/* the ML menu: on now, gone after off_after_ms (-1 = stays), sticky = gui_stop_menu does not close it; it paints one
+ * pixel at the front's top-left. px_kept: that pixel was still there when it went (1), cleared under it (0), -1 none */
+void host_menu(int on, int off_after_ms, int sticky);
+int  host_menu_px_kept(void);
+int  host_under_enable(void);          /* canon_gui_enable_front_buffer calls while the ML menu was up */
+int  host_under_disable(void);         /* canon_gui_disable_front_buffer calls while the ML menu was up */
+int  host_redraws(void);               /* redraw() calls */
 /* Canon's GUI mode and display (5D2 without LiveView): a request is applied 60 ms later; a mode other than 0 turns the
  * display on when `lights` (Canon's menu does), display_on() always does */
 void host_gui_set(int mode, int display, int lights);
@@ -118,6 +127,8 @@ void host_gui_later(int mode, int after_ms);
 int  host_gui_mode(void);
 int  host_gui_requests(void);
 int  host_gui_req0_front(void);         /* front buffer state at the last SetGUIRequestMode(0): 1 = still disabled */
+void host_gui_drop(int n);              /* the next n non-zero requests do not take (EOS M after Canon's own MENU) */
+int  host_gui_last_req(void);           /* the last SetGUIRequestMode argument, -1 none since host_gui_set */
 int  host_display_ons(void);
 int  host_bmp_muted(void);              /* bmp_off() in force (Canon's bitmap hidden) */
 int  host_bmp_offs(void);               /* bmp_off() calls since host_gui_set */
