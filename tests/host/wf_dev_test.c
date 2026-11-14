@@ -1,0 +1,738 @@
+/* wf_dev_test.c - host test of the RAW develop "B" (src/wf_dev.c, WindyStrife). Static ARM Linux program (qemu-arm),
+ * linked with the module objects wf_dev.o, wf_loglut.o, wf_llk.o, wf_llk_arm.o, wf_logout.o and tests/host/wf_dev_shim.c.
+ *
+ *   wf_dev_test px                pixel look: wf_dev_px vs the Log + LUT JPEG path (wf_loglut_load + wf_ll_words) on the
+ *                                 same linear light, 5 curves x cubes 2 / 17 / 33 / 65, LUT EI, Film LUT auto exposure;
+ *                                 the SRGB base develop vs its own input
+ *   wf_dev_test frame             synthetic shot (wf_dev_scene.c, 1024 x 640): WB / exposure fit, patch match vs the JPEG
+ *                                 path, hot pixels outside the active area, row bands, highlight rebuild (LOG output), 5D2
+ *   wf_dev_test full DIR          the EOS M frame (5184 x 3456 of a 5280 x 3528 raw, pitch 9240) from DIR/scene.r14 and
+ *                                 scene.uyvy (made natively by wf_dev_scene, see tools/dev_check.sh): fit, patch match,
+ *                                 border; writes DIR/dev.uyvy, ref.uyvy and the develop checksum (= the bench's)
+ *   wf_dev_test bad               jobs wf_dev_prepare must refuse
+ *   wf_dev_test span              the asm span kernel (src/wf_dev_arm.S) = the C reference bit for bit: random raw
+ *                                 below clip, 3 node sources x 4 Bayer phases x 9 WB scales (matrix shifts down to 7)
+ *   wf_dev_test cr2 DIR [X0 Y0]   a real EOS M RAW+L pair prepared by tools/dev_cr2.sh: WB fit vs Canon's as-shot WB;
+ *                                 the develop vs Log + LUT of Canon's JPEG on flat blocks (with A1's curve when
+ *                                 dev_a1ref made ref_a1.uyvy + dec.bin: raw-unclipped blocks checked, clipped blocks
+ *                                 reported); the sRGB base develop vs the JPEG
+ * Cubes are written by the test itself (synthetic "film" cubes) into the current directory. Last line:
+ *   RESULT dev <mode>: N pass, M fail */
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "wf_dev.h"
+#include "wf_dev_scene.h"
+#define WF_LL_EXTERN_ENC
+#include "wf_loglut_tab.h"
+
+extern int wf_ll_ei, wf_ll_auto;
+
+static int np, nf;
+#define CHECK(c, ...) do { if (c) np++; else { nf++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
+
+/* ------------------------------------------------------------------ cubes */
+static double clamp01(double v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+#define write_cube sc_write_cube
+
+/* ------------------------------------------------------------------ helpers */
+static uint32_t rnd_st = 777;
+static uint32_t rnd(void) { rnd_st = rnd_st * 1103515245u + 12345u; return rnd_st >> 8; }
+
+static uint32_t word(int y0, int y1, int u, int v)
+{
+    return (uint32_t)(u & 255) | (uint32_t)y0 << 8 | (uint32_t)(v & 255) << 16 | (uint32_t)y1 << 24;
+}
+static int wY0(uint32_t w) { return (w >> 8) & 255; }
+static int wY1(uint32_t w) { return w >> 24; }
+static int wU(uint32_t w) { return (int8_t)(w & 255); }
+static long ndiff(const uint32_t *a, const uint32_t *b, int n)
+{
+    long d = 0;
+    for (int i = 0; i < n; i++) d += a[i] != b[i];
+    return d;
+}
+static int wV(uint32_t w) { return (int8_t)((w >> 16) & 255); }
+
+static void ycc2rgb8(double Y, double Cb, double Cr, double o[3])
+{
+    o[0] = Y + 1.402 * Cr;
+    o[1] = Y - 0.344136286201022 * Cb - 0.714136286201022 * Cr;
+    o[2] = Y + 1.772 * Cb;
+}
+
+/* linear Rec.709 -> x Q14 in the working gamut of curve (1..5), or Rec.709 for curve 0 */
+static void lin2x(int curve, const double lin[3], int32_t x[3])
+{
+    for (int r = 0; r < 3; r++) {
+        double s = 0;
+        for (int c = 0; c < 3; c++)
+            s += (curve ? wf_ll_mat[curve - 1][3 * r + c] / 1048576.0 : r == c) * lin[c];
+        s *= 16384;
+        x[r] = s < 0 ? 0 : s > WF_DEV_XMAX ? WF_DEV_XMAX : (int32_t)floor(s + 0.5);
+    }
+}
+
+struct st { double s, m; int n; int h[16]; };
+static void st_add(struct st *a, double d)
+{
+    d = fabs(d);
+    a->s += d;
+    if (d > a->m) a->m = d;
+    a->n++;
+    int k = (int)(d + 0.5);
+    a->h[k > 15 ? 15 : k]++;
+}
+static double st_mean(const struct st *a) { return a->n ? a->s / a->n : 0; }
+static int st_p99(const struct st *a)       /* the smallest whole-code error >= 99 % of the samples are within */
+{
+    int acc = 0;
+    for (int k = 0; k < 16; k++) { acc += a->h[k]; if (acc >= a->n * 0.99) return k; }
+    return 15;
+}
+
+/* ------------------------------------------------------------------ px */
+static struct wf_lltabs *T;
+static struct wf_dev_tabs *D;
+
+/* one comparison set: random JPEG codes + every grey; JPEG path = wf_ll_words on the codes; develop = wf_dev_px on the
+   linear light of the same codes */
+static void px_compare(int curve, const char *what, struct st *sy, struct st *sc)
+{
+    for (int i = 0; i < 20000 + 256; i++) {
+        int Y, U, V;
+        double c8[3];
+        if (i < 256) { Y = i; U = V = 0; }
+        else {
+            do {
+                Y = (int)(rnd() % 256); U = (int)(rnd() % 256) - 128; V = (int)(rnd() % 256) - 128;
+                ycc2rgb8(Y, U, V, c8);
+            } while (c8[0] < -0.5 || c8[1] < -0.5 || c8[2] < -0.5 || c8[0] > 255.5 || c8[1] > 255.5 || c8[2] > 255.5);
+        }
+        uint32_t w = word(Y, Y, U, V);
+        wf_ll_words(&w, 1, (int)T);
+        ycc2rgb8(Y, U, V, c8);
+        double lin[3];
+        for (int c = 0; c < 3; c++) lin[c] = sc_srgb_eotf(clamp01(c8[c] / 255.0));
+        int32_t x[3];
+        lin2x(curve, lin, x);
+        int o[3];
+        wf_dev_px(D, x, o);
+        int dy = ((o[0] + 128) >> 8) - wY0(w), du = ((o[1] + 128) >> 8) - 128 - wU(w), dv = ((o[2] + 128) >> 8) - 128 - wV(w);
+        st_add(sy, dy);
+        st_add(sc, du);
+        st_add(sc, dv);
+    }
+    (void)what;
+}
+
+static void px_case(int curve, int n, int ident, int ei, int autoexp, double lim_mean, int lim_p99)
+{
+    char path[64];
+    snprintf(path, sizeof path, "C%d_%d%s.CUB", curve, n, ident ? "I" : "F");
+    write_cube(path, n, ident);
+    struct wf_ll_info inf;
+    wf_ll_ei = ei;
+    wf_ll_auto = autoexp;
+    int rc = wf_loglut_load(path, curve, T, &inf);
+    CHECK(rc == WF_LL_OK, "wf_loglut_load %s: %d", path, rc);
+    rc = wf_dev_build(D, WF_DEV_CUBE, curve, WF_DEV_EOSM, path, ei, autoexp, &inf);
+    CHECK(rc == WF_LL_OK, "wf_dev_build %s: %d", path, rc);
+    if (autoexp)
+        CHECK((int8_t)T->pad[0] == D->auto10, "%s auto exposure: JPEG path %d, develop %d (0.1 EV)", path, (int8_t)T->pad[0],
+              D->auto10);
+    struct st sy = { 0 }, sc = { 0 };
+    px_compare(curve, path, &sy, &sc);
+    printf("px curve %d cube %2d%s EI %+d auto %d (%+.1f EV): Y mean %.3f p99 %d max %.0f | C mean %.3f p99 %d max %.0f\n",
+           curve, n, ident ? " identity" : " film    ", ei, autoexp, D->auto10 / 10.0, st_mean(&sy), st_p99(&sy), sy.m,
+           st_mean(&sc), st_p99(&sc), sc.m);
+    CHECK(st_mean(&sy) <= lim_mean && st_p99(&sy) <= lim_p99, "%s Y mean %.3f p99 %d", path, st_mean(&sy), st_p99(&sy));
+    CHECK(st_mean(&sc) <= lim_mean && st_p99(&sc) <= lim_p99, "%s C mean %.3f p99 %d", path, st_mean(&sc), st_p99(&sc));
+    remove(path);
+}
+
+static void mode_px(void)
+{
+    for (int curve = 1; curve <= WF_LL_NCURVE; curve++) {
+        px_case(curve, 2, 1, 0, 0, 0.6, 2);
+        px_case(curve, 33, 0, 0, 0, 0.6, 2);
+    }
+    px_case(WF_LL_VLOG, 17, 0, 0, 0, 0.6, 2);
+    px_case(WF_LL_VLOG, 65, 0, 0, 0, 0.6, 2);
+    px_case(WF_LL_VLOG, 33, 0, 3, 0, 0.6, 2);    /* LUT EI +1 EV: gain 2 (the log segment above white) */
+    px_case(WF_LL_VLOG, 33, 0, -2, 0, 0.6, 2);
+    px_case(WF_LL_VLOG, 33, 0, 0, 1, 0.6, 2);    /* Film LUT auto exposure */
+    px_case(WF_LL_SLOG3, 33, 0, 2, 1, 0.6, 2);
+    /* SRGB base develop: the linear light of a JPEG code comes back as that code (Rec.709, sRGB OETF) */
+    int rc = wf_dev_build(D, WF_DEV_SRGB, 0, WF_DEV_EOSM, 0, 0, 0, 0);
+    CHECK(rc == WF_LL_OK, "SRGB build %d", rc);
+    struct st sy = { 0 }, sc = { 0 };
+    for (int i = 0; i < 20256; i++) {
+        int Y, U, V;
+        double c8[3];
+        if (i < 256) { Y = i; U = V = 0; }
+        else do {
+            Y = (int)(rnd() % 256); U = (int)(rnd() % 256) - 128; V = (int)(rnd() % 256) - 128;
+            ycc2rgb8(Y, U, V, c8);
+        } while (c8[0] < -0.5 || c8[1] < -0.5 || c8[2] < -0.5 || c8[0] > 255.5 || c8[1] > 255.5 || c8[2] > 255.5);
+        ycc2rgb8(Y, U, V, c8);
+        double lin[3], ycc[3], q8[3];
+        for (int c = 0; c < 3; c++) lin[c] = sc_srgb_eotf(clamp01(c8[c] / 255.0));
+        for (int c = 0; c < 3; c++) q8[c] = 255 * clamp01(c8[c] / 255.0);
+        sc_ycc(q8, ycc);
+        int32_t x[3];
+        lin2x(0, lin, x);
+        int o[3];
+        wf_dev_px(D, x, o);
+        st_add(&sy, o[0] / 256.0 - ycc[0]);
+        st_add(&sc, o[1] / 256.0 - 128 - ycc[1]);
+        st_add(&sc, o[2] / 256.0 - 128 - ycc[2]);
+    }
+    printf("px SRGB base develop vs its input: Y mean %.3f p99 %d max %.2f | C mean %.3f p99 %d max %.2f\n", st_mean(&sy),
+           st_p99(&sy), sy.m, st_mean(&sc), st_p99(&sc), sc.m);
+    CHECK(st_mean(&sy) <= 0.5 && sy.m <= 2.0 && st_mean(&sc) <= 0.5 && sc.m <= 2.0, "SRGB identity");
+}
+
+/* ------------------------------------------------------------------ frame */
+static void job_of(const struct sc_shot *s, struct wf_dev_job *j)
+{
+    memset(j, 0, sizeof *j);
+    j->raw = s->raw;
+    j->pitch = s->pitch;
+    j->ax0 = s->ax0; j->ay0 = s->ay0; j->ax1 = s->ax0 + s->w; j->ay1 = s->ay0 + s->h;
+    j->x0 = s->ax0; j->y0 = s->ay0; j->w = s->w; j->h = s->h;
+    j->black = s->black; j->white = s->white; j->cfa = 0;
+    j->canon = s->uyvy; j->canon_y0 = 0; j->canon_h = s->h;
+}
+
+static int fit_check(const struct sc_shot *s, const struct wf_dev_stat *st, const char *what)
+{
+    double m[3];
+    for (int c = 0; c < 3; c++) m[c] = st->m_q8[c] / 4294967296.0;
+    double er = m[0] / m[1] / (s->m[0] / s->m[1]) - 1, eb = m[2] / m[1] / (s->m[2] / s->m[1]) - 1, eg = m[1] / s->m[1] - 1;
+    printf("%s fit: src %d tier %d n %d; R/G %+.2f %%, B/G %+.2f %%, exposure (G) %+.2f %%\n", what, st->wb_src, st->fit_tier,
+           st->fit_n, 100 * er, 100 * eb, 100 * eg);
+    CHECK(st->wb_src == 1, "%s: WB not fitted (src %d)", what, st->wb_src);
+    CHECK(fabs(er) < 0.015 && fabs(eb) < 0.015 && fabs(eg) < 0.03, "%s fit off", what);
+    return 0;
+}
+
+/* patch means of the develop vs the JPEG path, patches without clipping */
+static void patch_check(const struct sc_shot *s, const uint32_t *dev, const uint32_t *ref, const char *what, double lim_mean,
+                        double lim_max)
+{
+    struct st sy = { 0 }, sc = { 0 };
+    const int W2 = s->w / 2, step = s->w > 2048 ? 4 : 1;   /* the full frame: every 4th row and pair */
+    static double a[40][3], b[40][3];
+    static int cnt[40];
+    memset(a, 0, sizeof a); memset(b, 0, sizeof b); memset(cnt, 0, sizeof cnt);
+    for (int y = 4; y < s->h - 4; y += step)
+        for (int x = 4; x < s->w - 5; x += 2 * step) {
+            double lin[3];
+            int z, id, i1;
+            sc_scene(s, x, y, lin, &z, &id);
+            if (id < 0) continue;
+            sc_scene(s, x - 4, y, lin, &z, &i1); if (i1 != id) continue;
+            sc_scene(s, x + 5, y, lin, &z, &i1); if (i1 != id) continue;
+            sc_scene(s, x, y - 4, lin, &z, &i1); if (i1 != id) continue;
+            sc_scene(s, x, y + 4, lin, &z, &i1); if (i1 != id) continue;
+            uint32_t d = dev[y * W2 + x / 2], r = ref[y * W2 + x / 2];
+            a[id][0] += wY0(d) + wY1(d); a[id][1] += 2 * wU(d); a[id][2] += 2 * wV(d);
+            b[id][0] += wY0(r) + wY1(r); b[id][1] += 2 * wU(r); b[id][2] += 2 * wV(r);
+            cnt[id] += 2;
+        }
+    for (int id = 0; id < 40; id++) {
+        int n = cnt[id];
+        if (!n) continue;
+        st_add(&sy, (a[id][0] - b[id][0]) / n);
+        st_add(&sc, (a[id][1] - b[id][1]) / n);
+        st_add(&sc, (a[id][2] - b[id][2]) / n);
+    }
+    printf("%s patches vs JPEG path (%d patches, means): Y mean %.3f max %.2f | C mean %.3f max %.2f\n", what, sy.n, st_mean(&sy),
+           sy.m, st_mean(&sc), sc.m);
+    CHECK(sy.n == 40, "%s: %d patches", what, sy.n);
+    CHECK(st_mean(&sy) <= lim_mean && sy.m <= lim_max && st_mean(&sc) <= lim_mean && sc.m <= lim_max, "%s patch match", what);
+}
+
+/* the 2 px frame border vs 2 px inside, where the scene is flat there: a hot pixel outside the active area would show */
+static void border_check(const struct sc_shot *s, const uint32_t *dev, const char *what)
+{
+    const int W2 = s->w / 2;
+    int bad = 0, n = 0;
+#define DY(x, y) (((x) & 1) ? wY1(dev[(y) * W2 + (x) / 2]) : wY0(dev[(y) * W2 + (x) / 2]))
+    for (int y = 0; y < s->h; y++)
+        for (int k = 0; k < 2; k++) {
+            int xl = k, xr = s->w - 1 - k;
+            double l1[3], l2[3];
+            int z, id;
+            sc_scene(s, xl, y, l1, &z, &id); sc_scene(s, xl + 4, y, l2, &z, &id);
+            if (l1[0] == l2[0] && l1[1] == l2[1]) { n++; bad += abs(DY(xl, y) - DY(xl + 4, y)) > 4; }
+            sc_scene(s, xr, y, l1, &z, &id); sc_scene(s, xr - 4, y, l2, &z, &id);
+            if (z != SC_Z_DETAIL && fabs(l1[1] - l2[1]) < 0.002) { n++; bad += abs(DY(xr, y) - DY(xr - 4, y)) > 4; }
+        }
+    for (int x = 0; x < s->w; x++)
+        for (int k = 0; k < 2; k++) {
+            int yt = k, yb = s->h - 1 - k;
+            double l1[3], l2[3];
+            int z, id;
+            sc_scene(s, x, yt, l1, &z, &id); sc_scene(s, x, yt + 4, l2, &z, &id);
+            if (z != SC_Z_LAMP && l1[0] == l2[0] && l1[1] == l2[1]) { n++; bad += abs(DY(x, yt) - DY(x, yt + 4)) > 4; }
+            sc_scene(s, x, yb, l1, &z, &id); sc_scene(s, x, yb - 4, l2, &z, &id);
+            if (z != SC_Z_DETAIL && l1[0] == l2[0] && l1[1] == l2[1]) { n++; bad += abs(DY(x, yb) - DY(x, yb - 4)) > 4; }
+        }
+#undef DY
+    printf("%s border: %d of %d flat border pixels differ by > 4 codes from 4 px inside\n", what, bad, n);
+    CHECK(n > 1000 && bad == 0, "%s border (hot pixels outside the active area?)", what);
+}
+
+/* V-Log code (0..1) -> linear */
+static double vlog_inv(double v)
+{
+    return v < 0.181 ? (v - 0.125) / 5.6 : pow(10.0, (v - 0.598206) / 0.241514) - 0.00873;
+}
+
+/* highlight rebuild: LOG output (V-Log identity nodes) decoded back to linear V-Gamut, zone means vs the scene */
+static void highlight_check(const struct sc_shot *s, void *scr, const struct wf_dev_job *j)
+{
+    int rc = wf_dev_build(D, WF_DEV_LOG, WF_LL_VLOG, s->cam, 0, 0, 0, 0);
+    CHECK(rc == 0, "LOG build %d", rc);
+    struct wf_dev_stat st;
+    rc = wf_dev_prepare(scr, D, j, &st);
+    CHECK(rc == 0, "prepare (LOG) %d", rc);
+    uint32_t *out = malloc((size_t)s->w * s->h * 2);
+    wf_dev_rows(scr, 0, s->h, out, s->w * 2);
+    printf("highlights: clipped quads %d, ratio samples %d, blocks with clipping %d, filled %d, highlight px %u\n", st.clip_quads,
+           st.hl_samples, st.hl_blocks, st.hl_fill, st.hl_px);
+    const double cl = s->white - s->black;
+    double sum[4][3] = { { 0 } }, tru[4][3] = { { 0 } }, ysum[4] = { 0 };
+    int cnt[4] = { 0 };
+    const int W2 = s->w / 2;
+    for (int y = 6; y < s->h / 2 - 6; y++)
+        for (int x = (int)(0.6 * s->w) + 8; x < s->w - 8; x += 2) {
+            /* zone = channels whose true raw is at the clip, the same in the 7 x 7 window of both pixels */
+            int zone = -1, same = 1;
+            for (int dy = -3; dy <= 3 && same; dy++)
+                for (int dx = -3; dx <= 4 && same; dx++) {
+                    int k = 0;
+                    for (int c = 0; c < 3; c++) k += sc_rawval(s, x + dx, y + dy, c) >= cl * 0.97;
+                    if (zone < 0) zone = k;
+                    else if (k != zone) same = 0;
+                }
+            if (!same) continue;
+            uint32_t w = out[y * W2 + x / 2];
+            for (int e = 0; e < 2; e++) {
+                double c8[3], lin[3], t[3];
+                int z, id;
+                ycc2rgb8(e ? wY1(w) : wY0(w), wU(w), wV(w), c8);
+                sc_scene(s, x + e, y, lin, &z, &id);
+                for (int r = 0; r < 3; r++) {
+                    t[r] = 0;
+                    for (int c = 0; c < 3; c++) t[r] += wf_ll_mat[WF_LL_VLOG - 1][3 * r + c] / 1048576.0 * lin[c];
+                    sum[zone][r] += vlog_inv(c8[r] / 255.0);
+                    tru[zone][r] += t[r];
+                }
+                ysum[zone] += e ? wY1(w) : wY0(w);
+                cnt[zone]++;
+            }
+        }
+    static const char *zn[4] = { "none clipped", "1 channel", "2 channels", "all 3" };
+    for (int z = 0; z < 4; z++) {
+        if (!cnt[z]) { CHECK(0, "highlight zone %s empty", zn[z]); continue; }
+        double rg = sum[z][0] / sum[z][1], bg = sum[z][2] / sum[z][1], trg = tru[z][0] / tru[z][1], tbg = tru[z][2] / tru[z][1];
+        double lum = sum[z][1] / tru[z][1];
+        printf("highlights %-18s %6d px: R/G %.3f (scene %.3f, %+.1f %%), B/G %.3f (scene %.3f, %+.1f %%), G / scene G %.2f, Y %.1f\n",
+               zn[z], cnt[z], rg, trg, 100 * (rg / trg - 1), bg, tbg, 100 * (bg / tbg - 1), lum, ysum[z] / cnt[z]);
+        if (z < 3) {
+            CHECK(fabs(rg / trg - 1) < 0.06 && fabs(bg / tbg - 1) < 0.06, "highlight zone %s colour off", zn[z]);
+        } else {
+            CHECK(fabs(rg - 1) < 0.04 && fabs(bg - 1) < 0.04, "all-clipped core not neutral (R/G %.3f B/G %.3f)", rg, bg);
+        }
+        if (z)
+            CHECK(ysum[z] / cnt[z] >= ysum[z - 1] / cnt[z - 1] - 0.5, "zone %s darker than zone %s", zn[z], zn[z - 1]);
+    }
+    free(out);
+}
+
+static void run_frame(int cam, int w, int h, const char *dir)
+{
+    struct sc_shot s;
+    sc_default(&s, w, h, cam);
+    char what[32];
+    snprintf(what, sizeof what, "%s %dx%d", cam ? "5D2" : "EOSM", w, h);
+    if (dir)                                     /* the full frame: rendered natively by wf_dev_scene (tools/dev_check.sh) */
+        CHECK(sc_load(&s, dir) == 0, "%s: no scene in %s", what, dir);
+    else
+        CHECK(sc_render(&s) == 0, "render");
+    write_cube("FRAME.CUB", 33, 0);
+    wf_ll_ei = 0;
+    wf_ll_auto = 0;
+    struct wf_ll_info inf;
+    CHECK(wf_loglut_load("FRAME.CUB", WF_LL_VLOG, T, &inf) == 0, "load");
+    CHECK(wf_dev_build(D, WF_DEV_CUBE, WF_LL_VLOG, cam, "FRAME.CUB", 0, 0, &inf) == 0, "build");
+    struct wf_dev_job j;
+    job_of(&s, &j);
+    size_t nb = wf_dev_scratch_bytes(w, h);
+    void *scr = malloc(nb);
+    struct wf_dev_stat st;
+    int rc = wf_dev_prepare(scr, D, &j, &st);
+    CHECK(rc == 0, "%s prepare %d", what, rc);
+    printf("%s: scratch %u B, tables %u B\n", what, (unsigned)nb, (unsigned)sizeof *D);
+    fit_check(&s, &st, what);
+    uint32_t *dev = malloc((size_t)w * h * 2), *ref = malloc((size_t)w * h * 2);
+    wf_dev_rows(scr, 0, h, dev, w * 2);
+    memcpy(ref, s.uyvy, (size_t)w * h * 2);
+    wf_ll_words(ref, w * h / 2, (int)T);
+    patch_check(&s, dev, ref, what, 1.0, 2.5);
+    border_check(&s, dev, what);
+    if (w <= 2048) {
+        /* row bands in any order give the same frame */
+        uint32_t *b2 = malloc((size_t)w * h * 2);
+        int cut[4] = { 0, 37, 300, h };
+        for (int k = 2; k >= 0; k--)
+            wf_dev_rows(scr, cut[k], cut[k + 1], b2 + (size_t)cut[k] * (w / 2), w * 2);
+        CHECK(!memcmp(b2, dev, (size_t)w * h * 2), "%s: row bands differ from one call", what);
+        free(b2);
+        /* a caller's WB (the fitted scales passed back) gives the same frame */
+        struct wf_dev_job j2 = j;
+        struct wf_dev_stat st2;
+        for (int c = 0; c < 3; c++) j2.wb_q8[c] = st.m_q8[c];
+        j2.canon = 0;
+        CHECK(wf_dev_prepare(scr, D, &j2, &st2) == 0 && st2.wb_src == 2, "caller WB");
+        wf_dev_rows(scr, 0, h, b2 = malloc((size_t)w * h * 2), w * 2);
+        CHECK(!memcmp(b2, dev, (size_t)w * h * 2), "%s: caller WB frame differs", what);
+        /* the span kernel (src/wf_dev_arm.S) against its C reference */
+        CHECK(st.fast, "%s: span kernel off (sh %d)", what, st.sh);
+        wf_dev_kernel(1);
+        CHECK(wf_dev_prepare(scr, D, &j, &st2) == 0, "prepare (reference)");
+        wf_dev_rows(scr, 0, h, b2, w * 2);
+        wf_dev_kernel(0);
+        CHECK(ndiff(b2, dev, w * h / 2) == 0, "%s: span kernel differs from its C reference in %ld words", what,
+              ndiff(b2, dev, w * h / 2));
+        printf("%s: matrix shift %d, span kernel %s, highlight path %u px\n", what, st.sh, st.fast ? "on" : "off",
+               (unsigned)st.hl_px);
+        free(b2);
+        /* a window at x0 + 2 / + 6 (inside a pixblock, as Canon's JPEG crop): the same pixels where no clipping is near */
+        for (int dx = 2; dx <= 6; dx += 4) {
+            struct wf_dev_job j3 = j2;
+            j3.x0 += dx;
+            j3.w -= 32;
+            CHECK(wf_dev_prepare(scr, D, &j3, &st2) == 0, "%s: window at x0 + %d refused", what, dx);
+            uint32_t *b3 = malloc((size_t)j3.w * h * 2);
+            wf_dev_rows(scr, 0, h, b3, j3.w * 2);
+            long nd = 0, nt = 0;
+            for (int y = 0; y < h; y++)
+                for (int x = 8; x < (int)(0.55 * w) - 16; x += 2, nt++)
+                    nd += b3[(size_t)y * (j3.w / 2) + x / 2] != dev[(size_t)y * (w / 2) + (x + dx) / 2];
+            CHECK(nd == 0, "%s: window at x0 + %d differs in %ld of %ld pairs (patch zone)", what, dx, nd, nt);
+            free(b3);
+        }
+        highlight_check(&s, scr, &j);
+    }
+    if (dir) {                                   /* the frames for a look (and the bench's checksum) */
+        char p[256];
+        FILE *f;
+        snprintf(p, sizeof p, "%s/dev.uyvy", dir);
+        if ((f = fopen(p, "wb"))) { fwrite(dev, 1, (size_t)w * h * 2, f); fclose(f); }
+        snprintf(p, sizeof p, "%s/ref.uyvy", dir);
+        if ((f = fopen(p, "wb"))) { fwrite(ref, 1, (size_t)w * h * 2, f); fclose(f); }
+        uint32_t ck = 0;
+        for (size_t i = 0; i < (size_t)w * h / 2; i++) ck = (ck << 5 | ck >> 27) ^ dev[i];
+        printf("%s: wrote %s/dev.uyvy, ref.uyvy; develop checksum %08x\n", what, dir, ck);
+    }
+    remove("FRAME.CUB");
+    free(dev); free(ref); free(scr);
+    sc_free(&s);
+}
+
+/* random raw below the clip (every block on the span kernel): src/wf_dev_arm.S against its C reference for the three
+   node sources, the four Bayer phases and WB scales from 1/4 to 64 x the default (matrix shifts down to where the
+   kernel turns off) */
+static void mode_span(void)
+{
+    const int w = 512, h = 96;
+    struct sc_shot s;
+    sc_default(&s, w, h, 0);
+    CHECK(sc_render(&s) == 0, "render");
+    int thr = s.black + (s.white - s.black) * 96 / 100;
+    uint16_t *v = malloc((size_t)s.raw_w * 2);
+    for (int y = 0; y < s.raw_h; y++) {
+        for (int x = 0; x < s.raw_w; x++) {
+            uint32_t r = rnd() % 100;
+            v[x] = (uint16_t)(r < 10 ? rnd() % (s.black + 64) : r < 30 ? thr - 1 - rnd() % 512 : rnd() % thr);
+        }
+        sc_pack14(v, s.raw + (size_t)y * s.pitch, s.raw_w);
+    }
+    free(v);
+    write_cube("SPAN.CUB", 33, 0);
+    void *scr = malloc(wf_dev_scratch_bytes(w, h));
+    uint32_t *a = malloc((size_t)w * h * 2), *b = malloc((size_t)w * h * 2);
+    struct wf_dev_job j;
+    struct wf_dev_stat st;
+    job_of(&s, &j);
+    j.canon = 0;
+    int runs = 0, fast = 0, shmin = 99;
+    for (int src = 1; src <= 3; src++) {
+        CHECK(wf_dev_build(D, src, WF_LL_VLOG, 0, src == WF_DEV_CUBE ? "SPAN.CUB" : 0, 0, 0, 0) == 0, "build %d", src);
+        for (int k = 0; k < 3; k++) j.wb_q8[k] = 0;
+        CHECK(wf_dev_prepare(scr, D, &j, &st) == 0, "prepare");
+        int32_t m0[3] = { st.m_q8[0], st.m_q8[1], st.m_q8[2] };
+        for (int cfa = 0; cfa < 4; cfa++)
+            for (int e = 0; e <= 8; e++) {
+                j.cfa = cfa;
+                for (int k = 0; k < 3; k++) j.wb_q8[k] = (int32_t)(((int64_t)m0[k] << e) >> 2);
+                CHECK(wf_dev_prepare(scr, D, &j, &st) == 0, "prepare src %d cfa %d scale %d", src, cfa, e);
+                CHECK(st.hl_px == 0 && st.clip_quads == 0, "clipping in the random frame");
+                wf_dev_rows(scr, 0, h, a, w * 2);
+                wf_dev_kernel(1);
+                wf_dev_rows(scr, 0, h, b, w * 2);
+                wf_dev_kernel(0);
+                long nd = ndiff(a, b, w * h / 2);
+                CHECK(nd == 0, "span src %d cfa %d scale 2^%d / 4 (sh %d): %ld of %d words differ", src, cfa, e, st.sh, nd,
+                      w * h / 2);
+                runs++;
+                fast += st.fast;
+                if (st.fast && st.sh < shmin) shmin = st.sh;
+            }
+    }
+    CHECK(fast >= runs / 2 && fast < runs, "span kernel on in %d of %d runs (want most, not all)", fast, runs);
+    printf("span: %d runs (%d on the span kernel, lowest matrix shift %d), %d x %d random raw: asm = C reference\n", runs,
+           fast, shmin, w, h);
+    remove("SPAN.CUB");
+    free(a); free(b); free(scr);
+    sc_free(&s);
+}
+
+/* flat 16 x 16 blocks of the camera JPEG (Y range <= 8, not near 0 or 255): mean Y, Cb, Cr of a minus b */
+static int cmp_dbl(const void *a, const void *b) { double d = *(const double *)a - *(const double *)b; return (d > 0) - (d < 0); }
+/* m (optional, one byte per 16 x 16 block, w / 16 per row): only the blocks with m == want */
+static double flat_compare_m(const uint32_t *src, const uint32_t *a, const uint32_t *b, int w, int h, const char *what,
+                             const uint8_t *m, int want)
+{
+    int nb = 0, band_n[3] = { 0, 0, 0 };
+    double sd = 0, sad = 0, sc = 0, band_d[3] = { 0, 0, 0 };
+    double *ad = malloc(sizeof(double) * (size_t)(w / 16) * (h / 16));
+    for (int by = 0; by + 16 <= h; by += 16)
+        for (int bx = 0; bx + 16 <= w; bx += 16) {
+            if (m && m[(by / 16) * (w / 16) + bx / 16] != want)
+                continue;
+            int mn = 255, mx = 0;
+            double s[2][3] = { { 0, 0, 0 }, { 0, 0, 0 } };
+            for (int y = by; y < by + 16; y++)
+                for (int x = bx; x < bx + 16; x += 2) {
+                    size_t i = (size_t)y * (w / 2) + x / 2;
+                    int y0 = wY0(src[i]), y1 = wY1(src[i]);
+                    int lo = y0 < y1 ? y0 : y1, hi = y0 < y1 ? y1 : y0;
+                    if (lo < mn) mn = lo;
+                    if (hi > mx) mx = hi;
+                    s[0][0] += wY0(a[i]) + wY1(a[i]); s[0][1] += 2 * wU(a[i]); s[0][2] += 2 * wV(a[i]);
+                    s[1][0] += wY0(b[i]) + wY1(b[i]); s[1][1] += 2 * wU(b[i]); s[1][2] += 2 * wV(b[i]);
+                }
+            if (mx - mn > 8 || mn < 12 || mx > 243)
+                continue;
+            double dY = (s[0][0] - s[1][0]) / 256, dC = (fabs(s[0][1] - s[1][1]) + fabs(s[0][2] - s[1][2])) / 512;
+            double yb = s[1][0] / 256;
+            int band = yb < 85 ? 0 : yb < 170 ? 1 : 2;
+            band_n[band]++; band_d[band] += dY;
+            sd += dY; sad += fabs(dY); sc += dC; ad[nb++] = fabs(dY);
+        }
+    double p90 = 0;
+    if (nb) { qsort(ad, (size_t)nb, sizeof *ad, cmp_dbl); p90 = ad[nb * 9 / 10]; }
+    printf("%s: %d flat blocks: dY mean %+.2f, |dY| mean %.2f p90 %.1f | |dC| mean %.2f | dY shadows %+.1f (%d) mids %+.1f (%d)"
+           " highs %+.1f (%d)\n", what, nb, nb ? sd / nb : 0, nb ? sad / nb : 0, p90, nb ? sc / nb : 0,
+           band_n[0] ? band_d[0] / band_n[0] : 0, band_n[0], band_n[1] ? band_d[1] / band_n[1] : 0, band_n[1],
+           band_n[2] ? band_d[2] / band_n[2] : 0, band_n[2]);
+    free(ad);
+    return nb ? sad / nb : 99;
+}
+static double flat_compare(const uint32_t *src, const uint32_t *a, const uint32_t *b, int w, int h, const char *what)
+{
+    return flat_compare_m(src, a, b, w, h, what, 0, 0);
+}
+
+/* per 16 x 16 output block: 1 when a raw photosite within 2 px of the block is at or above thr (the develop rebuilds
+   it: no matching input on the JPEG side, Canon clips it), else 0 */
+static uint8_t *clip_blocks(const struct wf_dev_job *j, int W, int H, int thr, int *nclip)
+{
+    int bw = j->w / 16, bh = j->h / 16;
+    uint8_t *m = calloc((size_t)bw * bh, 1);
+    int16_t *r = malloc(sizeof(int16_t) * (size_t)W);
+    *nclip = 0;
+    for (int y = j->y0 - 2; y < j->y0 + bh * 16 + 2; y++) {
+        if (y < 0 || y >= H) continue;
+        wf_dev_unpack14(j->raw + (size_t)y * j->pitch, r, W & ~7, 0);
+        int bys[2] = { (y - j->y0 - 2) / 16, (y - j->y0 + 2) / 16 };
+        for (int x = j->x0 - 2; x < j->x0 + bw * 16 + 2 && x < (W & ~7); x++) {
+            if (r[x] < thr) continue;
+            int bxs[2] = { (x - j->x0 - 2) / 16, (x - j->x0 + 2) / 16 };
+            for (int a = 0; a < 2; a++)
+                for (int b = 0; b < 2; b++) {
+                    int by = bys[a], bx = bxs[b];
+                    if (y - j->y0 + 2 < 0 || x - j->x0 + 2 < 0) continue;
+                    if (by >= 0 && by < bh && bx >= 0 && bx < bw && !m[by * bw + bx]) { m[by * bw + bx] = 1; (*nclip)++; }
+                }
+        }
+    }
+    free(r);
+    return m;
+}
+
+static int read_all(const char *dir, const char *name, void *p, size_t n)
+{
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    size_t r = fread(p, 1, n, f);
+    fclose(f);
+    return r == n ? 0 : -1;
+}
+static void write_all(const char *dir, const char *name, const void *p, size_t n)
+{
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    FILE *f = fopen(path, "wb");
+    if (f) { fwrite(p, 1, n, f); fclose(f); }
+}
+
+/* a real EOS M shot (tools/dev_cr2.sh: tools/cr2_dec + tools/jpg_uyvy.py in dir: raw.r14, meta.txt, jpeg.uyvy and
+   align.txt for the window at x0, y0). The develop with the fitted WB against Canon's JPEG through the same Log + LUT
+   (the synthetic film cube, V-Log) and, with the sRGB nodes, against the JPEG itself, on flat blocks; the fit against
+   Canon's as-shot WB. Writes dev_lut.uyvy, ref_lut.uyvy, dev_srgb.uyvy for a look. */
+static void mode_cr2(const char *dir, int x0, int y0)
+{
+    char path[512];
+    int W = 0, H = 0, pitch = 0, iso = 0, wb[4] = { 0, 0, 0, 0 }, dx = 99, dy = 99, jw = 0, jh = 0, wmeas = 0;
+    double blk = 0, pk = 0;
+    FILE *f;
+    snprintf(path, sizeof path, "%s/meta.txt", dir);
+    if ((f = fopen(path, "r"))) {
+        int n = fscanf(f, "%d %d %d %d %lf %d %d %d %d %d", &W, &H, &pitch, &iso, &blk, &wb[0], &wb[1], &wb[2], &wb[3],
+                       &wmeas);
+        CHECK(n == 9 || n == 10, "meta.txt");
+        fclose(f);
+    }
+    snprintf(path, sizeof path, "%s/align.txt", dir);
+    if ((f = fopen(path, "r"))) {
+        CHECK(fscanf(f, "%d %d %lf %d %d", &dx, &dy, &pk, &jw, &jh) == 5, "align.txt");
+        fclose(f);
+    }
+    CHECK(W > 0 && jw > 0, "%s: no meta.txt / align.txt", dir);
+    if (W <= 0 || jw <= 0) return;
+    CHECK(dx == 0 && dy == 0, "%s: the JPEG sits %+d %+d px off the window at %d, %d", dir, dx, dy, x0, y0);
+    uint8_t *raw = malloc((size_t)H * pitch + 16);
+    uint32_t *jpg = malloc((size_t)jw * jh * 2), *dev = malloc((size_t)jw * jh * 2), *ref = malloc((size_t)jw * jh * 2);
+    CHECK(read_all(dir, "raw.r14", raw, (size_t)H * pitch) == 0 && read_all(dir, "jpeg.uyvy", jpg, (size_t)jw * jh * 2) == 0,
+          "%s: raw.r14 / jpeg.uyvy", dir);
+    struct wf_dev_job j;
+    memset(&j, 0, sizeof j);
+    j.raw = raw; j.pitch = pitch;
+    j.ax0 = 72; j.ay0 = 52; j.ax1 = W; j.ay1 = H;   /* EOS M CR2: image data from 72, 52 to the right / bottom edge */
+    j.x0 = x0; j.y0 = y0; j.w = jw; j.h = jh;
+    /* white: the shot's measured clip pile-up when it has one (the 1/3-stop ISOs clip lower: ISO 320 at ~12636, not the
+       15200 of the full stops), else the full-stop table. On the camera this comes from the raw backend (integration). */
+    j.black = (int)(blk + 0.5); j.white = wmeas > j.black + 4096 ? wmeas : iso == 100 ? 13400 : 15200; j.cfa = 0;
+    j.canon = jpg; j.canon_y0 = 0; j.canon_h = jh;
+    /* main's A1 (Canon input curve) when dev_cr2.sh made it: the curve table for the fit and the JPEG path's frame */
+    static uint32_t dec[1022];
+    uint32_t *ref_a1 = malloc((size_t)jw * jh * 2);
+    int have_a1 = read_all(dir, "dec.bin", dec, sizeof dec) == 0 && read_all(dir, "ref_a1.uyvy", ref_a1, (size_t)jw * jh * 2) == 0;
+    if (have_a1)
+        j.dec = dec;
+    write_cube("FRAME.CUB", 33, 0);
+    wf_ll_ei = 0;
+    wf_ll_auto = 0;
+    struct wf_ll_info inf;
+    CHECK(wf_loglut_load("FRAME.CUB", WF_LL_VLOG, T, &inf) == 0, "load");
+    CHECK(wf_dev_build(D, WF_DEV_CUBE, WF_LL_VLOG, WF_DEV_EOSM, "FRAME.CUB", 0, 0, &inf) == 0, "build");
+    void *scr = malloc(wf_dev_scratch_bytes(jw, jh));
+    struct wf_dev_stat st;
+    int rc = wf_dev_prepare(scr, D, &j, &st);
+    CHECK(rc == 0, "%s: prepare %d", dir, rc);
+    if (rc == 0) {
+        wf_dev_rows(scr, 0, jh, dev, jw * 2);
+        memcpy(ref, jpg, (size_t)jw * jh * 2);
+        wf_ll_words(ref, jw * jh / 2, (int)T);
+        double ar = wb[1] + wb[2] ? 2.0 * wb[0] / (wb[1] + wb[2]) : 0, ab = wb[1] + wb[2] ? 2.0 * wb[3] / (wb[1] + wb[2]) : 0;
+        double fr = (double)st.m_q8[0] / st.m_q8[1], fb = (double)st.m_q8[2] / st.m_q8[1];
+        printf("cr2 %s: ISO %d black %d white %d%s | WB src %d tier %d n %d: R/G %.3f B/G %.3f | Canon as-shot R/G %.3f B/G "
+               "%.3f (fit %+.1f %%, %+.1f %%) | sh %d, span kernel %s, clipped quads %d, highlight px %u\n",
+               dir, iso, j.black, j.white, j.white == wmeas ? " (measured)" : " (table)", st.wb_src, st.fit_tier, st.fit_n, fr, fb, ar, ab, ar ? 100 * (fr / ar - 1) : 0,
+               ab ? 100 * (fb / ab - 1) : 0, st.sh, st.fast ? "on" : "off", st.clip_quads, (unsigned)st.hl_px);
+        CHECK(st.wb_src == 1, "%s: no WB fit", dir);
+        if (have_a1) {
+            /* the matching input = blocks without clipped raw (the develop rebuilds the rest, above Canon's clip) */
+            int nclip = 0;
+            uint8_t *cm = clip_blocks(&j, W, H, j.black + (j.white - j.black) * 97 / 100, &nclip);
+            printf("cr2 %s: %d of %d blocks of 16 x 16 hold clipped raw (rebuilt highlights)\n", dir, nclip,
+                   (jw / 16) * (jh / 16));
+            double e = flat_compare_m(jpg, dev, ref_a1, jw, jh, "cr2 develop vs Log + LUT of the JPEG, A1 curve, raw unclipped",
+                                      cm, 0);
+            CHECK(e < 20, "%s: develop far from the JPEG path (|dY| mean %.1f)", dir, e);
+            flat_compare_m(jpg, dev, ref_a1, jw, jh, "cr2 develop vs Log + LUT of the JPEG, A1 curve, raw clipped", cm, 1);
+            write_all(dir, "ref_a1_ok", "", 0);
+            free(cm);
+        }
+        flat_compare(jpg, dev, ref, jw, jh, "cr2 develop vs Log + LUT of the JPEG, sRGB decode");
+        write_all(dir, "dev_lut.uyvy", dev, (size_t)jw * jh * 2);
+        write_all(dir, "ref_lut.uyvy", ref, (size_t)jw * jh * 2);
+        CHECK(wf_dev_build(D, WF_DEV_SRGB, WF_LL_VLOG, WF_DEV_EOSM, 0, 0, 0, 0) == 0, "build sRGB");
+        CHECK(wf_dev_prepare(scr, D, &j, &st) == 0, "prepare sRGB");
+        wf_dev_rows(scr, 0, jh, dev, jw * 2);
+        flat_compare(jpg, dev, jpg, jw, jh, "cr2 develop (sRGB nodes) vs Canon's JPEG");
+        write_all(dir, "dev_srgb.uyvy", dev, (size_t)jw * jh * 2);
+    }
+    remove("FRAME.CUB");
+    free(raw); free(jpg); free(dev); free(ref); free(ref_a1); free(scr);
+}
+
+static void mode_bad(void)
+{
+    struct sc_shot s;
+    sc_default(&s, 256, 128, 0);
+    sc_render(&s);
+    CHECK(wf_dev_build(D, WF_DEV_LOG, WF_LL_VLOG, 0, 0, 0, 0, 0) == 0, "build");
+    void *scr = malloc(wf_dev_scratch_bytes(256, 128));
+    struct wf_dev_job j, b;
+    job_of(&s, &j);
+    CHECK(wf_dev_prepare(scr, D, &j, 0) == 0, "good job refused");
+    b = j; b.x0 += 1; b.w -= 32; CHECK(wf_dev_prepare(scr, D, &b, 0) == -1, "x0 odd");
+    b = j; b.w -= 8; CHECK(wf_dev_prepare(scr, D, &b, 0) == -1, "w not a multiple of 32");
+    b = j; b.y0 += 1; b.h -= 2; CHECK(wf_dev_prepare(scr, D, &b, 0) == -1, "y0 odd");
+    b = j; b.x0 -= 8; CHECK(wf_dev_prepare(scr, D, &b, 0) == -1, "window left of the active area");
+    b = j; b.pitch = 64; CHECK(wf_dev_prepare(scr, D, &b, 0) == -1, "pitch too small");
+    b = j; b.white = b.black + 100; CHECK(wf_dev_prepare(scr, D, &b, 0) == -1, "white too close to black");
+    b = j; b.cfa = 4; CHECK(wf_dev_prepare(scr, D, &b, 0) == -1, "cfa 4");
+    CHECK(wf_dev_build(D, 9, 1, 0, 0, 0, 0, 0) == WF_LL_E_MODE, "source 9");
+    CHECK(wf_dev_build(D, WF_DEV_CUBE, 7, 0, "X.CUB", 0, 0, 0) == WF_LL_E_MODE, "curve 7");
+    CHECK(wf_dev_build(D, WF_DEV_CUBE, 2, 0, "NOFILE.CUB", 0, 0, 0) != 0, "missing cube");
+    /* unpack round trip */
+    uint16_t v[64], u[64];
+    uint8_t pk[112 + 16];
+    int16_t o[64];
+    for (int i = 0; i < 64; i++) v[i] = (uint16_t)((i * 2741 + 13) & 16383);
+    sc_pack14(v, pk, 64);
+    wf_dev_unpack14(pk, o, 64, 2048);
+    int ok = 1;
+    for (int i = 0; i < 64; i++) { u[i] = (uint16_t)(o[i] + 2048); ok &= u[i] == v[i]; }
+    CHECK(ok, "unpack14 round trip");
+    free(scr);
+    sc_free(&s);
+}
+
+int main(int argc, char **argv)
+{
+    const char *mode = argc > 1 ? argv[1] : "px";
+    T = malloc(sizeof *T);
+    D = malloc(sizeof *D);
+    if (!strcmp(mode, "px")) mode_px();
+    else if (!strcmp(mode, "frame")) { run_frame(0, 1024, 640, 0); run_frame(1, 1024, 640, 0); }
+    else if (!strcmp(mode, "full")) run_frame(0, 5184, 3456, argc > 2 ? argv[2] : 0);
+    else if (!strcmp(mode, "bad")) mode_bad();
+    else if (!strcmp(mode, "span")) mode_span();
+    else if (!strcmp(mode, "cr2") && argc > 2) mode_cr2(argv[2], argc > 4 ? atoi(argv[3]) : 84, argc > 4 ? atoi(argv[4]) : 64);
+    else { printf("unknown mode %s\n", mode); return 2; }
+    printf("RESULT dev %s: %d pass, %d fail\n", mode, np, nf);
+    return nf != 0;
+}
