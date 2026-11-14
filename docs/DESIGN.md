@@ -224,6 +224,15 @@ intact at the hook. It is implemented in commit a675c8a (`wf_cam_eosm.c`, host t
 - `wf_task` writes the lines to `WINDYFLM.LOG` and the 1 KB copies to `ML/LOGS/WFPROBE.BIN` after the shot. Hooks never
   log. A record the card refuses (busy with the shot) is retried at its own offset; the log names the failing step.
   The first record of a boot makes a new file only once Canon is idle (card writes: `src/wf_fio.h`).
+- **Record version 2 (11-14, after the first run):** the sources are raw, raw2 (the same place in the other raw buffer:
+  two buffers 32 MB apart, starts 0x46004894 / 0x48004894; the last frame of a burst finds +0x50 still on the previous
+  shot), A[0], A[1]; with +0x50 = 0 (first shot after power-on) the raw is WR0 - 32626440 + 480242. Copies: raw and raw2
+  from +16 MB, A[0] / A[1] from +0. Measured on the 11-14 run (raw-film-engine): YUV (x, y) = raw (84 + x, 64 + y),
+  black 2048.
+- **5D2 (record 0x0102, raw-path/P0_5D2_SPEC.md):** taken at the TOP and the BOT hook, one record slot per hook kind.
+  pb[56] = the job handle and H[0..4] of this half's develop state, P fields (MEM1 at P+0xC68), P[0..14], the engio
+  shadow base and 9 EDMAC shadows, this half's Mem1ToYuv block; sources raw0 = MEM1 + 0x76C8, qr, a08, m2r (copies from
+  +16 MB, inside the raw); "On + ROM call" runs 5 leaf getters for a live job only; pool 0x44000000..0x5C000000.
 - **Run it with RAW+L, single and continuous drive.** Compare the raw checksum with the CR2. The open risk: after
   `DelayCompleteRawToSsraw`, Canon calls `ReallocateMemory` / `sssCompleteMemShrinkCB`, so in burst the raw may already
   be reused. SSRAW layer 0 is released only inside 0xFF169414, after our entry hook, which makes it the fallback.

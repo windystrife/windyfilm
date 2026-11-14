@@ -83,9 +83,13 @@ Mục đích: biết lúc module xử lý ảnh, RAW 14-bit của Canon còn ngu
 hay không (cần cho đường RAW sau này). Probe chỉ ghi lại, KHÔNG đổi ảnh.
 
 - Shoot > WindyFilm > RAW probe: On. "On + ROM call" gọi thêm một hàm tra cứu
-  của Canon; chỉ thử sau khi On đã chạy ổn.
-- Đặt chất lượng RAW+L. Chụp 3 ảnh đơn, rồi một loạt chụp liên tục 3-4 ảnh.
-  Lặp lại với "On + ROM call".
+  của Canon (lần chạy 14/11 cho thấy an toàn).
+- Bật một phim (Output = phim, không phải Off) để module xử lý ảnh với thời
+  gian thật. Đặt chất lượng RAW+L.
+- Ngay sau khi bật máy: 1 ảnh đơn. Rồi thêm 2 ảnh đơn, một loạt chụp liên tục
+  5 ảnh, một loạt 2 ảnh. Có thể lặp lại với "On + ROM call".
+- Bản này ghi thêm buffer RAW thứ hai (ảnh cuối của loạt chụp nằm ở đó) và
+  ảnh đầu sau khi bật máy.
 - Gửi lại: ML/LOGS/WINDYFLM.LOG, ML/LOGS/WFPROBE.BIN và các file CR2 + JPG của
   những ảnh đó. Log giờ ghi nối tiếp, không cần xoá trước; WFPROBE.BIN vẫn làm
   mới ở ảnh probe đầu tiên của mỗi lần bật máy (ngay khi máy ghi xong ảnh đó),

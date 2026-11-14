@@ -25,7 +25,7 @@ case $CAM in
   EOSM) ML=/root/ml/expsim/mls; PLAT=EOSM.202; CAMDEF=; CAMSRC=wf_cam_eosm.c
         ALL="SHOT SHOT:nocam SHOT:busy FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT PROBE PROBE:boot LOG LOG:big LOG:new LOGCHK" ;;
   5D2)  ML=/root/ml/q5d2/ml; PLAT=5D2.212; CAMDEF=-DWF_BUILD_5D2; CAMSRC=wf_cam_5d2.c
-        ALL="SHOT SHOT:nocam SHOT:busy 5D2 FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT LOG LOG:big LOG:new LOGCHK" ;;
   *) echo "CAM must be EOSM or 5D2"; exit 2 ;;
 esac
 MODES=${MODES:-$ALL}

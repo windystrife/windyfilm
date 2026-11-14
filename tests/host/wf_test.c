@@ -16,10 +16,13 @@
  *   LIGHT              Day / Cloudy / Tungsten / Auto, film kelvin, user WB back
  *   PRINT              Scan / Cine / Paper rows and shots, missing variants
  *   5D2                (5D2 build) TOP / BOT pairing: BOT alone, owed BOT, pairing timeout, r1 / RAW gates, Log halves
- *   PROBE              (EOS M build) RAW probe P0: off at boot, record + log + WFPROBE.BIN, uncached alias, out-of-pool,
+ *   PROBE [boot]       RAW probe P0. EOS M: off at boot, record + log + WFPROBE.BIN, uncached alias, out-of-pool,
  *                      CHANGED after the worker, ROM-call mode, gate reject probed, r2 != 0 not, frame never touched,
  *                      WFPROBE.BIN refused (busy card): the record waits + retries, the next one is still logged, a torn
- *                      record (short write) is overwritten at its offset
+ *                      record (short write) is overwritten at its offset, an empty block (raw from WR0, raw2 = the
+ *                      other buffer, copies at +16 MB / +0); boot: the first record waits for an idle camera and a
+ *                      removable old file. 5D2: TOP + BOT back to back (one slot each), the spec's words, sources and
+ *                      copies, ROM getters with each half's job handle, not a live job, MEM1 past the pool, SH unaligned
  *   LOG [big]          the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
  *                      the refusal logged), ring full (lines counted), a short write (no line twice); big: a log over
  *                      512 KB becomes WINDYFLM.OLD at boot
@@ -93,6 +96,13 @@ static const uint32_t *const t_dec[WF_LL_NINC] = { wf_ll_dec, wf_ll_dec_c1, wf_l
 #endif
 #define FRAME_A 0x48000000u
 #define FRAME_B 0x4C000000u
+#ifdef WF_BUILD_5D2
+#define FRAME_C 0x50000000u                      /* the 5D2 probe's raw buffer (MEM1) */
+#define C_USED  0x2300000u
+#else
+#define FRAME_C 0x46000000u                      /* the EOS M probe's other raw buffer */
+#define C_USED  0x1100000u
+#endif
 #define SENT 0xD15EA5EDu
 #define PROP_ASPECT 0x80040059u
 #define PROP_PSU1 0x0206000au                        /* PROP_PICSTYLE_OF_USERDEF1 (DIGIC 4 / 5) */
@@ -295,7 +305,7 @@ static void std_pack(void)
 }
 
 /* ------------------------------------------------------------------ frames */
-static uint32_t *fa, *fb, *in, *out, *ref, *out2;
+static uint32_t *fa, *fb, *fc, *in, *out, *ref, *out2;
 static uint32_t *map_at(uint32_t a, uint32_t used)
 {
     void *p = mmap((void *)(uintptr_t)a, used + 4096, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
@@ -1543,9 +1553,8 @@ static void t_5d2(void)
 }
 #endif
 
-#ifndef WF_BUILD_5D2
-/* ------------------------------------------------------------------ PROBE (RAW probe P0, EOS M) */
-#define PRB_REC 4696                             /* sizeof(struct wf_prb), wf_probe.h: the EOS M record version 1 */
+/* ------------------------------------------------------------------ PROBE (RAW probe P0) */
+#define PRB_REC 4696                             /* sizeof(struct wf_prb), wf_probe.h: both cameras */
 typedef char prb_rec_check[sizeof(struct wf_prb) == PRB_REC ? 1 : -1];
 static uint32_t fnv4k(const uint8_t *p)
 {
@@ -1553,6 +1562,172 @@ static uint32_t fnv4k(const uint8_t *p)
     for (int i = 0; i < 4096; i++) { h ^= p[i]; h *= 16777619u; }
     return h;
 }
+#ifdef WF_BUILD_5D2
+/* 5D2: the Canon words of one develop job (P0_5D2_SPEC.md) as the shim serves them; the raw = MEM1 + 0x76C8 in fc */
+#define P5_H_TOP 0x00200000u
+#define P5_H_BOT 0x00200100u
+#define P5_P     0x00300000u
+#define P5_SH    0x00400000u
+#define P5_RAW   (FRAME_C + 0x76C8u)
+#define P5_PITCH 10136u
+static void p5_job(uint32_t magic, uint32_t mem1, uint32_t sh)
+{
+    h_mem_set(0x369Cu + 0x3C, P5_H_TOP); h_mem_set(0x369Cu + 0x40, 0x17);
+    h_mem_set(0x3630u + 0x2C, P5_H_BOT); h_mem_set(0x3630u + 0x30, 0x17);
+    for (int k = 0; k < 2; k++) {
+        uint32_t h = k ? P5_H_BOT : P5_H_TOP;
+        h_mem_set(h, magic); h_mem_set(h + 4, P5_P); h_mem_set(h + 8, 2 + k); h_mem_set(h + 12, 1); h_mem_set(h + 16, 0);
+    }
+    for (int i = 0; i < 15; i++)
+        h_mem_set(P5_P + 4 * i, 0x1000 + i);
+    for (int i = 0; i < 8; i++)                  /* GetShootParam's 8 words at P + 0x64 (+0x6C = the flags) */
+        h_mem_set(P5_P + 0x64 + 4 * i, 0x3000 + i);
+    h_mem_set(P5_P + 0x4C, 0x17); h_mem_set(P5_P + 0x48, 5); h_mem_set(P5_P + 0x6C, 0x00040100);
+    h_mem_set(P5_P + 0x538, 0xABCD0003u); h_mem_set(P5_P + 0xBE8, 1); h_mem_set(P5_P + 0xBE0, 0x00310000);
+    h_mem_set(P5_P + 0xC68, mem1);
+    h_mem_set(0x2AC34u + 0x54, mem1 + 0x76C8u);
+    h_mem_set(0x8FBC, sh);
+    h_mem_set(P5_SH | 0x4208, mem1 + 0x76C8u); h_mem_set(P5_SH | 0x420C, 0x144D8); h_mem_set(P5_SH | 0x4210, 0x60000000u);
+    h_mem_set(P5_SH | 0x4308, FRAME_A); h_mem_set(P5_SH | 0x4D08, FRAME_A); h_mem_set(P5_SH | 0x4408, 0x5A000000u);
+    for (int k = 0; k < 2; k++) {
+        uint32_t b = k ? 0x2A9F4u : 0x2AB14u;
+        for (int i = 0; i < 16; i++)
+            h_mem_set(b + 0x38 + 4 * i, 0x2000 + 0x100 * k + i);
+        h_mem_set(b + 0x44, mem1);
+        h_mem_set(b + 0x5C, mem1 + 0x24D1C00u);
+        h_mem_set(b + 0x74, k ? FRAME_B : FRAME_A);
+    }
+    static const uint32_t ed[5] = { 0xC0F04208u, 0xC0F04A08u, 0xC0F04308u, 0xC0F04D08u, 0xC0F04408u };
+    for (int i = 0; i < 5; i++)
+        h_mem_set(ed[i], 0x51000000u + 0x100 * i);
+    h_romcall_ret[0] = mem1; h_romcall_ret[1] = 0x17; h_romcall_ret[2] = P5_P + 0x64; h_romcall_ret[3] = 0x00310000;
+    h_romcall_ret[4] = mem1 + 0x76C8u;
+}
+/* one half of a shot: the frame from `in`, this half's CRAW read shadow (a08: raw row 56 / 1928) */
+static void p5_half(int bot)
+{
+    int nh = NW / 2;
+    h_mem_set(P5_SH | 0x4A08, P5_RAW + (bot ? 1928u : 56u) * P5_PITCH);
+    if (bot)
+        memcpy(fb, in + nh, nh * 4);
+    else
+        memcpy(fa, in, nh * 4);
+    half_call(bot ? S_BOT : S_TOP, bot ? FRAME_B : FRAME_A, 0, 0);
+}
+static const char *p5_src(char *e, int n, const char *name, uint32_t a)    /* "probe <name> <a>: fnv x3 -> same" */
+{
+    const uint8_t *c = (const uint8_t *)fc + (a - FRAME_C);
+    uint32_t h0 = fnv4k(c), h1 = fnv4k(c + 0x800000), h2 = fnv4k(c + 0x1000000);
+    snprintf(e, n, "probe %s %08x: %08x %08x %08x -> %08x %08x %08x same", name, a, h0, h1, h2, h0, h1, h2);
+    return e;
+}
+static void t_probe_5d2(void)
+{
+    uint8_t *c = (uint8_t *)fc;
+    for (uint32_t i = 0; i < C_USED; i++) c[i] = (uint8_t)((i * 0x9E3779B1u) >> 24);
+    p5_job(0xFFCD0761u, FRAME_C, P5_SH);
+    struct pk pe[] = { { fA, 0, tab_make(12, 6, -6, 0) }, { fC, 0, tab_make(0, 0, 0, 0) } };
+    pack_write(pe, 2, 0);
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\n", wf_films[fA].id);
+    mod_init(1);
+    gen_frame(in, FW, FH, 0);
+    chk(WAIT(look_table_ready(), 10000), "film table published");
+    int nh = NW / 2;
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fA][0], flags_of(fA, 1));
+    const char *bin = "ML/LOGS/WFPROBE.BIN";
+    long n = -1;
+    char *f, e[200];
+    const uint32_t a08t = P5_RAW + 56u * P5_PITCH, a08b = P5_RAW + 1928u * P5_PITCH;
+
+    /* off (the boot state): no record, no file, no ROM call */
+    chk(wf_prb_can() && wf_probe_mode == WF_PRB_OFF, "the 5D2 can probe; off at boot");
+    log_mark();
+    p5_half(0); p5_half(1);
+    chk(ndiff(fa, ref, nh) == 0 && ndiff(fb, ref + nh, nh) == 0, "off: both halves graded as always");
+    usleep(300000);
+    f = get_file(bin, &n);
+    chk(!log_has("probe #") && !f && h_romcalls == 0, "off: no probe line, no WFPROBE.BIN, no ROM call");
+    free(f);
+
+    /* on: the TOP and the BOT of one shot back to back (no flush between): one record each */
+    wf_probe_mode = WF_PRB_ON;
+    log_mark();
+    p5_half(0); p5_half(1);
+    chk(ndiff(fa, ref, nh) == 0 && ndiff(fb, ref + nh, nh) == 0, "on: both halves graded exactly as without the probe");
+    chk(LOGW("probe #1 TOP r0 48000000 r1 00000000 r2 0 mode 1", 5000), "on: TOP header '%s'", log_line("probe #1"));
+    chk(LOGW("probe #2 BOT r0 4c000000 r1 00000000 r2 0 mode 1", 5000), "on: BOT header '%s'", log_line("probe #2"));
+    chk(!log_has("not probed"), "on: the BOT is taken while the TOP's record waits (one slot per kind)");
+    snprintf(e, sizeof e, "probe pb+00 %08x 00000017 ffcd0761 %08x 00000002 00000001 00000000 %08x", P5_H_TOP, P5_P, P5_RAW);
+    chk(log_has(e), "on: TOP H, job id, H[0..4], Mem1ToRaw ('%s')", e);
+    snprintf(e, sizeof e, "probe pb+20 00000017 00000005 00040100 00000003 00000001 00310000 %08x 00001000", FRAME_C);
+    chk(log_has(e), "on: P fields (done mask a halfword), MEM1, P[0] ('%s')", e);
+    snprintf(e, sizeof e, "probe pb+60 00001009 0000100a 0000100b 0000100c 0000100d 0000100e %08x %08x", P5_SH, P5_RAW);
+    chk(log_has(e), "on: P[9..14], SH, the capture shadow ('%s')", e);
+    snprintf(e, sizeof e, "probe pb+80 000144d8 60000000 %08x deadbeef deadbeef 48000000 48000000 5a000000", a08t);
+    chk(log_has(e), "on: shadows, TOP a08 at raw row 56 ('%s')", e);
+    snprintf(e, sizeof e, "probe pb+c0 00002108 %08x 0000210a 0000210b 0000210c 0000210d 0000210e 4c000000",
+             FRAME_C + 0x24D1C00u);
+    chk(log_has(e), "on: the BOT's own Mem1ToYuv block ('%s')", e);
+    chk(log_has("probe edmac 208 51000000 a08 51000100 308 51000200 d08 51000300 408 51000400"), "on: registers '%s'",
+        log_line("probe edmac"));
+    chk(log_has(p5_src(e, sizeof e, "raw0", P5_RAW)), "on: raw0 = MEM1 + 0x76C8, unchanged by the worker ('%s')",
+        log_line("probe raw0"));
+    chk(log_has(p5_src(e, sizeof e, "qr", P5_RAW)) && log_has(p5_src(e, sizeof e, "m2r", P5_RAW)), "on: qr, m2r");
+    chk(log_has(p5_src(e, sizeof e, "a08", a08t)) && log_has(p5_src(e, sizeof e, "a08", a08b)),
+        "on: a08 of each half (rows 56 / 1928)");
+    chk(!log_has("probe nav") && h_romcalls == 0, "on: no ROM call");
+    chk(WAIT((free(get_file(bin, &n)), n == 2 * PRB_REC), 3000), "on: two records in WFPROBE.BIN (%ld B)", n);
+    f = get_file(bin, &n);
+    if (f && n == 2 * PRB_REC) {
+        const uint32_t *w = (const uint32_t *)f, *w2 = (const uint32_t *)(f + PRB_REC);
+        const int so = (int)(offsetof(struct wf_prb, src) / 4), co = (int)offsetof(struct wf_prb, cpy);
+        chk(w[0] == 0x42504657u && w[1] == 0x0102 && w[2] == 1 && w[7] == 1 && w2[2] == 2 && w2[7] == (1 | 1 << 8),
+            "records: version 0x0102, seq 1 TOP, seq 2 BOT (mode bits 8-15)");
+        chk(w[so] == P5_RAW && w[so + 2] == a08t && w2[so + 2] == a08b, "records: sources");
+        chk(memcmp(f + co, c + 0x76C8 + 0x1000000, 1024) == 0 &&
+            memcmp(f + PRB_REC + co + 2 * 1024, c + (a08b - FRAME_C) + 0x1000000, 1024) == 0,
+            "records: the 1 KB copies from +16 MB (inside the raw)");
+    }
+    free(f);
+
+    /* on + ROM call: the five getters per half, with that half's job handle */
+    wf_probe_mode = WF_PRB_NAV;
+    log_mark();
+    p5_half(0); p5_half(1);
+    chk(LOGW("probe #4 BOT", 5000) && h_romcalls == 10, "nav: 5 getters per half (%d calls)", h_romcalls);
+    chk(h_romcall_fn[0] == 0xFF8AC4B8u && h_romcall_arg[0] == P5_H_TOP && h_romcall_fn[3] == 0xFF8AEB84u &&
+        h_romcall_fn[4] == 0xFF9A550Cu && h_romcall_arg[4] == 0xC0F04208u && h_romcall_arg[5] == P5_H_BOT,
+        "nav: GetImageBuffer(H) .. GetFileContainer(H), shamem_read(0xC0F04208); the BOT with its own H");
+    snprintf(e, sizeof e, "probe nav 0: rc %x tmp 00000000 |", FRAME_C);
+    chk(log_has(e), "nav: GetImageBuffer = MEM1 ('%s')", log_line("probe nav 0"));
+    chk(log_has("probe nav 2: rc 300064 tmp 00000000 | 00003000 00003001 00040100 00003003 00003004 00003005 00003006 "
+                "00003007"), "nav: GetShootParam and its 8 words ('%s')", log_line("probe nav 2"));
+    chk(ndiff(fa, ref, nh) == 0 && ndiff(fb, ref + nh, nh) == 0, "nav: both halves graded as always");
+
+    /* not a live job (H[0] is not the magic): P not followed, no ROM call, no raw0 */
+    p5_job(0, FRAME_C, P5_SH);
+    int rc0 = h_romcalls;
+    log_mark();
+    p5_half(0); p5_half(1);
+    chk(LOGW("probe #6 BOT", 5000) && h_romcalls == rc0, "not a live job: no ROM call");
+    chk(log_has("probe pb+20 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000"),
+        "not a live job: P not followed ('%s')", log_line("probe pb+20"));
+    chk(log_has("probe raw0 00000000: outside the shoot pool, not read"), "not a live job: no raw0");
+
+    /* MEM1 past the probe's pool (0x5C000000), SH not word aligned: raw0 / qr / a08 / m2r not read */
+    p5_job(0xFFCD0761u, 0x5C000000u, 0x00400002u);
+    wf_probe_mode = WF_PRB_ON;
+    log_mark();
+    p5_half(0); p5_half(1);
+    chk(LOGW("probe #8 BOT", 5000) && log_has("probe raw0 5c0076c8: outside the shoot pool, not read") &&
+        log_has("probe m2r 5c0076c8: outside the shoot pool, not read"), "MEM1 past 0x5C000000: raw0, m2r not read");
+    chk(log_has("probe qr 00000000: outside the shoot pool, not read") && log_has("probe pb+60 00001009 0000100a "
+        "0000100b 0000100c 0000100d 0000100e 00400002 00000000"), "SH not aligned: no shadow read");
+    chk(ndiff(fa, ref, nh) == 0 && ndiff(fb, ref + nh, nh) == 0, "both halves graded as always");
+    mod_deinit();
+}
+#else
 static void probe_nn(uint32_t r2)
 {
     memcpy(fa, in, NW * 4);
@@ -1649,18 +1824,18 @@ static void t_probe(const char *cs)
     snprintf(e, sizeof e, "probe A1 %08x: %08x", a1_u, fnv4k((const uint8_t *)in));
     chk(log_has(e) && strstr(log_line("probe A1"), " CHANGED"), "on: a window the worker writes reads CHANGED: '%s'",
         log_line("probe A1"));
-    chk(log_has("probe wr0 30000000: outside the shoot pool, not read"), "on: out-of-pool address not read");
+    chk(log_has("probe raw2 00000000: outside the shoot pool, not read"), "on: a raw in neither raw buffer: no raw2");
     chk(!log_has("probe nav") && h_nav_calls == 0, "on: no ROM call");
     chk(WAIT((free(get_file("ML/LOGS/WFPROBE.BIN", &n)), n == PRB_REC), 3000), "on: one record in WFPROBE.BIN (%ld B)", n);
     f = get_file("ML/LOGS/WFPROBE.BIN", &n);
     if (f && n >= PRB_REC) {
         const uint32_t *w = (const uint32_t *)f;
-        chk(w[0] == 0x42504657u && w[1] == 1 && w[2] == 1 && w[5] == FRAME_A && w[6] == 0 && w[7] == 1,
-            "record: magic, version 1, seq 1, r1, r2, mode");
+        chk(w[0] == 0x42504657u && w[1] == 2 && w[2] == 1 && w[5] == FRAME_A && w[6] == 0 && w[7] == 1,
+            "record: magic, version 2, seq 1, r1, r2, mode");
         chk(w[8 + 0x50 / 4] == raw_u - 0x40000000u && w[8 + 0x68 / 4] == a1_u - 0x40000000u, "record: parameter block");
         chk(memcmp(f + 600, b + 0x1100002, 1024) == 0, "record: 1 KB of the raw from the +16 MB window");
-        chk(memcmp(f + 600 + 3 * 1024, (const uint8_t *)in + 0x1000000, 1024) == 0,
-            "record: A1 copy taken at entry (the frame before grading)");
+        chk(memcmp(f + 600 + 3 * 1024, (const uint8_t *)in, 1024) == 0,
+            "record: A1 copy from +0, taken at entry (the frame before grading)");
     }
     free(f);
 
@@ -1727,10 +1902,39 @@ static void t_probe(const char *cs)
     f = get_file(bin, &n);
     if (f && n == n0 + 3 * PRB_REC) {
         const uint32_t *w5 = (const uint32_t *)(f + 5 * PRB_REC);
-        chk(w5[0] == 0x42504657u && w5[2] == 6 && w5[1] == 1, "record 6 at its offset, not torn");
+        chk(w5[0] == 0x42504657u && w5[2] == 6 && w5[1] == 2, "record 6 at its offset, not torn");
     }
     free(f);
     h_fio_wpath[0] = 0;
+
+    /* the first shot after power-on (the block empty, pb+0x50 = 0): the raw from EDMAC WR0, raw2 = the other buffer
+       (raw-film-engine, the 11-14 run: S = WR0 - 32626440, raw = S + 480242, buffers 32 MB apart); copies: raw and
+       raw2 from +16 MB, A0 / A1 from +0 */
+    uint8_t *c = (uint8_t *)fc;
+    for (uint32_t i = 0; i < C_USED; i++) c[i] = (uint8_t)((i * 0x2545F491u) >> 24);
+    h_pb[0x50 / 4] = 0;
+    h_edmac[0] = 0x48004894u + 32626440u;
+    const uint32_t r1a = 0x48004894u + 480242u, r2a = r1a - 0x2000000u, o2 = r2a - FRAME_C;
+    log_mark();
+    probe_nn(0);
+    uint32_t q0 = fnv4k(c + o2), q1 = fnv4k(c + o2 + 0x800000), q2 = fnv4k(c + o2 + 0x1000000);
+    snprintf(e, sizeof e, "probe raw2 %08x: %08x %08x %08x -> %08x %08x %08x same", r2a, q0, q1, q2, q0, q1, q2);
+    chk(LOGW(e, 5000), "empty block: raw2 = the other buffer ('%s')", log_line("probe raw2"));
+    snprintf(e, sizeof e, "probe raw %08x: ", r1a);
+    chk(log_has(e), "empty block: the raw from EDMAC WR0 ('%s')", log_line("probe raw "));
+    chk(WAIT((free(get_file(bin, &n)), n == n0 + 4 * PRB_REC), 5000), "empty block: record #7 written (%ld B)", n);
+    f = get_file(bin, &n);
+    if (f && n == n0 + 4 * PRB_REC) {
+        const uint8_t *r = (const uint8_t *)f + 6 * PRB_REC;
+        const uint32_t *w = (const uint32_t *)r;
+        const int so = (int)(offsetof(struct wf_prb, src) / 4), co = (int)offsetof(struct wf_prb, cpy);
+        chk(w[2] == 7 && w[so] == r1a && w[so + 1] == r2a, "record 7: raw %08x, raw2 %08x", w[so], w[so + 1]);
+        chk(memcmp(r + co + 1024, c + o2 + 0x1000000, 1024) == 0, "record 7: raw2 copy from +16 MB");
+        chk(memcmp(r + co + 2 * 1024, b + 0x10000, 1024) == 0, "record 7: A0 copy from +0");
+    }
+    free(f);
+    h_pb[0x50 / 4] = raw_u - 0x40000000u;
+    h_edmac[0] = 0x30000000u;
     mod_deinit();
 }
 #endif
@@ -1890,6 +2094,7 @@ int main(int argc, char **argv)
     mallopt(M_ARENA_MAX, 1);
     fa = map_at(FRAME_A, A_USED);                /* first, before any thread or large allocation */
     fb = map_at(FRAME_B, B_USED);
+    fc = map_at(FRAME_C, C_USED);
     if (argc < 2) { fprintf(stderr, "usage: wf_test MODE [CASE [FILE]]\n"); return 2; }
     const char *mode = argv[1], *cs = argc > 2 ? argv[2] : "";
     mkdirs();
@@ -1914,6 +2119,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LOG")) t_log(cs);
 #ifdef WF_BUILD_5D2
     else if (!strcmp(mode, "5D2")) t_5d2();
+    else if (!strcmp(mode, "PROBE")) t_probe_5d2();
 #else
     else if (!strcmp(mode, "PROBE")) t_probe(cs);
 #endif

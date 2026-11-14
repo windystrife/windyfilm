@@ -50,7 +50,7 @@ Grain và Halation mặc định tắt trên 5D2 (mỗi nửa ảnh tốn vài g
   Contrast -2; Neutral: Contrast 0); trên 5D2 chưa kiểm, cứ để sRGB nếu không
   chắc.
 - Xem trước trên LiveView: cần bật Overlay > Global Draw của ML.
-- RAW probe chỉ có trên EOS M.
+- RAW probe (Shoot > WindyFilm): chỉ để thử, xem mục 4.
 
 
 3. LẦN CHẠY ĐẦU: CẦN XEM
@@ -64,7 +64,33 @@ Grain và Halation mặc định tắt trên 5D2 (mỗi nửa ảnh tốn vài g
 5. EXIF (UserComment) của ảnh có dòng "WindyFilm: ...".
 
 
-4. FILE TRÊN THẺ
+4. RAW PROBE (P0): CHỈ ĐỂ THỬ
+-----------------------------
+Mục đích: biết lúc module xử lý mỗi nửa ảnh (TOP / BOT), RAW 14-bit của Canon
+còn nguyên trong RAM hay không, và mỗi nửa ảnh nằm ở đâu trong RAW (cần cho
+đường RAW sau này). Probe chỉ ghi lại, KHÔNG đổi ảnh. Mỗi ảnh cho hai bản ghi
+(TOP và BOT).
+
+1. Cảnh nhiều chi tiết (lá cây, gạch, chữ; tránh trời trơn), ISO 100-400, chân
+   máy hoặc tì chắc. Bật một phim (Output = phim) và đặt chất lượng RAW+L.
+   Shoot > WindyFilm > RAW probe: On.
+2. Ba ảnh đơn, cách nhau khoảng 5 giây.
+3. Một loạt chụp liên tục 5 ảnh.
+4. RAW probe: On + ROM call (gọi thêm vài hàm tra cứu của Canon). Một ảnh đơn,
+   rồi một loạt 3 ảnh.
+5. (Tuỳ chọn, để biết mức trắng) mỗi ISO 100, 200, 400, 800, 1600, 3200 một
+   ảnh dư sáng khoảng 3 EV vào tường trắng hoặc trời (chỉ RAW cũng được).
+6. Gửi lại: ML/LOGS/WINDYFLM.LOG, ML/LOGS/WFPROBE.BIN và mọi file CR2 + JPG của
+   buổi chụp. WFPROBE.BIN làm mới ở lần probe đầu tiên của mỗi lần bật máy, nên
+   gửi nó trước khi tắt / bật lại máy để thử tiếp.
+
+- Khi thẻ đang bận ghi ảnh, module chờ và ghi lại sau; log có dòng "probe:
+  record #N not written ... yet: <bước> rc <mã>" rồi "written ... on try K".
+  Bước "busy" nghĩa là máy còn đang ghi ảnh; đó là bình thường.
+- Probe tự tắt mỗi lần bật máy (không lưu vào cấu hình).
+
+
+5. FILE TRÊN THẺ
 ----------------
 ML/modules/windyflm.mo    module
 ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper)
@@ -75,4 +101,5 @@ ML/SETTINGS/WINDYFLM.CFG  cấu hình (module tự ghi)
 ML/LOGS/WINDYFLM.LOG      nhật ký, ghi nối tiếp qua các lần bật máy; mỗi lần
                           bật máy bắt đầu bằng dòng "WindyFilm <ngày>: camera ..."
 ML/LOGS/WINDYFLM.OLD      nhật ký cũ (khi WINDYFLM.LOG quá 512 KB lúc bật máy)
+ML/LOGS/WFPROBE.BIN       bản ghi của RAW probe (chỉ khi bật probe)
 MD5SUMS.txt               md5 của mọi file khi làm thẻ

@@ -170,24 +170,34 @@ plan, the numbers and the traps. Exact touch points per step:
   - a synthetic slot-2 CSV (scratch, never committed) checks the Neutral path before the measured curve exists:
     `CURVE_NEUTRAL=<csv> OUT=<scratch dir>` for both build.sh and test.sh;
   - still open: flat Log (`wf_dec`, K fold).
-- **P0** (EOS M done in a675c8a, 33 host checks in mode `PROBE`; 5D2 prepared, waits for
-  `raw-path/P0_5D2_SPEC.md`). The camera-independent part is `wf_probe.c` / `wf_probe.h` (split out on 14 Nov, the
-  EOS M record and log lines unchanged):
-  - one static `struct wf_prb` (4696 B, version 1 on the EOS M; `mode` bits 8-15 = the probed call's kind);
+- **P0** (EOS M a675c8a, record version 2 since 11-14 afternoon; 5D2 from `raw-path/P0_5D2_SPEC.md`, record 0x0102).
+  Host modes `PROBE` + `PROBE:boot` (EOS M), `PROBE` (5D2). The camera-independent part is `wf_probe.c` /
+  `wf_probe.h`:
+  - one record slot per probed call kind (`PRB_NK` 2: the 5D2 BOT comes a few hundred ms after its TOP, often before
+    wf_task flushed the TOP), each a `struct wf_prb` (4696 B; `mode` bits 8-15 = the kind) plus the source addresses
+    the camera named; a call whose slot is still full is skipped and counted; up to `PRB_MAX` 64 records a boot;
   - the camera layer hands a `struct wf_prb_cam` to `wf_prb_setup()` in `wf_cam_init()`: pool bounds, log names, and
-    `read()` (block words, register words, the optional ROM call, raw source addresses). EOS M: `prb_read_eosm`
-    (parameter block 0x41E82CEC, five EDMAC words, `ff234680`);
-  - hook: `wf_prb_enter(regs, kind)` at the probed call (EOS M: NN with r2 == 0, before the gate), then
-    `wf_prb_leave(rc, t)` re-hashes the windows after the worker or the reject;
-  - 5D2: `wf_cam_5d2.c` calls `PRB_ENTER` / `PRB_LEAVE` in both hooks (TOP, BOT), empty while `WF_PRB_CAN` is 0
-    (wf_cam.h); `prb_5d2` waits for the spec's block, registers, sources and safe range.
+    `read()` (block words, register words, the optional ROM call, raw source addresses) and `cwin` (per source, the
+    window the 1 KB copy comes from). EOS M: `prb_read_eosm` (parameter block 0x41E82CEC, five EDMAC words,
+    `ff234680`; sources raw, raw2 = `prb_other()` (the other raw buffer, +-32 MB), A0, A1; an empty block takes the raw
+    from WR0; copies raw / raw2 from +16 MB, A0 / A1 from +0);
+  - 5D2: `prb_read_5d2` (the spec's pb[56] table: job handle from the FrontDevelop / RearDevelop state, H[0..4],
+    P fields and P[0..14] only for a live job (H[0] = 0xFFCD0761), the engio shadow base [0x8FBC] and 9 EDMAC shadows
+    read inline, this half's Mem1ToYuv block; registers 208 / a08 / 308 / d08 / 408; sources raw0 = MEM1 + 0x76C8, qr,
+    a08, m2r; ROM getters 0xFF8AC4B8 / 0xFF8AA9D4 / 0xFF8AC4F8 / 0xFF8AEB84 with H and 0xFF9A550C with 0xC0F04208,
+    live job only; pointers only when aligned and inside RAM, sources only inside 0x44000000..0x5C000000);
+  - hook: `wf_prb_enter(regs, kind)` at the probed call (EOS M: NN with r2 == 0; 5D2: TOP / BOT; before the gates),
+    then `wf_prb_leave(kind, rc, t)` re-hashes the windows after the worker or the reject;
 
   `wf_cam_poll()` (wf_task) calls `wf_prb_flush()`: the lines of a taken record go to the log at once; the record is
   copied to `prb_out` (the hook may take the next one) and written at its own offset (`prb_written` x 4696; the first
   record of a boot makes a new file, once Canon is idle and the old file is verified gone), so a retry after a refused open or a short write never shifts the file. Retries every
   200 ms for 30 s, logged as `probe: record #N not written .. yet: <step> rc <rc> (shot job <j>)` / `.. written .. on
-  try K`. A call that comes while one record waits for the card and another is taken is skipped and counted. The menu entry "RAW probe" is Off / On / On + ROM call and is not in the config. The
-  host shim fakes the parameter block, the EDMAC words and the ROM lookup (`wf_host_mem_read`, `wf_host_memnavi`).
+  try K`. The full slots are logged in seq order, then go one by one through `prb_out`. The menu entry "RAW probe" is
+  Off / On / On + ROM call and is not in the config (both cameras). The host shim fakes the parameter block, the EDMAC
+  words and the ROM lookup (`wf_host_mem_read`, `wf_host_memnavi`); for the 5D2 Canon words by address (`h_mem_set`)
+  and the getters (`wf_host_romcall`); the EOS M other raw buffer and the 5D2 raw are mapped at 0x46000000 /
+  0x50000000 (`fc`).
   The probe's own `" %08x"` lines are built word by word: a long repeated format string matched the old binary in the
   gate.
 - **H**: the aux-plane fields in `src/wf_frame.h`; `wf_cam_eosm.c` fills them from what P0 found. A new stage goes in
