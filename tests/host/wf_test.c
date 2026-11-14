@@ -2183,12 +2183,15 @@ static void rb_raw(uint8_t *raw, const uint32_t *src)
 }
 /* the develop of RB_A called directly, the way wf_rawb_stage does it (levels, then prepare on Canon's frame, rows) */
 static int rb_ref_hl, rb_ref_sh;                 /* WF_DEV_DISP: Highlights / Shadows of the reference */
+static int rb_ref_curve;                         /* WF_DEV_CUBE: the curve and cube of the reference, auto exposure on */
+static const char *rb_ref_cube;
 static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
 {
     static struct wf_dev_tabs T;
     struct wf_ll_info inf;
+    int cu = src == WF_DEV_CUBE;
     int rc = src == WF_DEV_DISP ? wf_dev_build_disp(&T, WF_DEV_EOSM, "ML/DATA/LEICAVSR.CUB", 0, rb_ref_hl, rb_ref_sh, &inf)
-                                : wf_dev_build(&T, src, 0, WF_DEV_EOSM, 0, 0, 0, &inf);
+                                : wf_dev_build(&T, src, cu ? rb_ref_curve : 0, WF_DEV_EOSM, cu ? rb_ref_cube : 0, 0, cu, &inf);
     void *scr = memalign(32, wf_dev_scratch_bytes(FW, FH));
     struct wf_dev_job j;
     memset(&j, 0, sizeof j);
@@ -2390,6 +2393,47 @@ static void t_rawb(void)
         wf_hl = wf_sh = 0; rb_ref_hl = rb_ref_sh = 0;
         wf_flut = 0;
         free(l0);
+    }
+    /* a CinePrint can (main 856178c): Canon Log 2 + Cinema Gamut, auto exposure, its <code>C2.CUB; a 33^3 and a 65^3 cube
+     * (same .FRT-free B tables, the load time grows with the cube) */
+    {
+        uint32_t *v0 = malloc(NW * 4);
+        int ms[2] = { -1, -1 };
+        static const int fl[2] = { WF_FLUT_TUNG0, WF_FLUT_TUNG0 + 4 }, nn[2] = { 33, 65 };
+        static const char *const cn[2] = { "ML/DATA/T250DPC2.CUB", "ML/DATA/TEKTAMC2.CUB" };
+        for (int t = 0; t < 2; t++) {
+            char want[64], nb[WF_LL_NAME];
+            dcube_write(cn[t], nn[t]);
+            chk(!strcmp(wf_loglut_name(nb, WF_LL_CLOG2, fl[t], 0), cn[t]) && WF_FLUT_CURVE(fl[t]) == WF_LL_CLOG2,
+                "CinePrint %d: Canon Log 2 can, cube %s", fl[t], cn[t]);
+            snprintf(want, sizeof want, "rawb: tables cube c4 %s", cn[t] + 8);
+            log_mark();
+            wf_curve = WF_LL_CLOG2;
+            wf_flut = fl[t];
+            wf_out = WF_OUT_LLUT;
+            chk(LOGW(want, 120000), "CinePrint %d^3: '%s'", nn[t], log_line("rawb: tables"));
+            const char *l = log_line("rawb: tables");
+            const char *p = l ? strstr(l, "C2.CUB ") : 0;
+            if (p)
+                ms[t] = atoi(p + 7);
+            rb_ref_curve = WF_LL_CLOG2;
+            rb_ref_cube = cn[t];
+            rb_ref(ref, in, WF_DEV_CUBE, 1);
+            log_mark();
+            sb = shot(in, out, FW, FH);
+            chk(sb == 0 && LOGW("rawb: done", 3000) && ndiff(out, ref, NW) == 0,
+                "CinePrint %d^3 shot: bit-exact vs the Canon Log 2 cube develop, auto exposure (%d words differ)", nn[t],
+                ndiff(out, ref, NW));
+        }
+        rb_ref_curve = WF_CURVE_VLOG;                /* the same 65^3 cube read as a V-Log one: a different picture */
+        rb_ref(v0, in, WF_DEV_CUBE, 1);
+        chk(ndiff(out, v0, NW) > NW / 4, "CinePrint: Canon Log 2 / Cinema Gamut, not V-Log (%d words differ)",
+            ndiff(out, v0, NW));
+        printf("CinePrint B table build: 33^3 %d ms, 65^3 %d ms (host)\n", ms[0], ms[1]);
+        rb_ref_cube = 0;
+        wf_flut = 0;
+        wf_curve = WF_CURVE_VLOG;
+        free(v0);
     }
     log_mark();
     wf_out = WF_OUT_FILM;
