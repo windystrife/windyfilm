@@ -374,17 +374,76 @@ FILMS = [
 # carry their index.
 GX_NEG_N, GX_PRINT_N = 46, 16
 GX_SKIP = {(17, 3), (17, 8), (17, 13), (17, 15)} | {(33, p) for p in range(GX_PRINT_N)}
+# index 45 repeats index 0 in the plugin (its switch aliases it), so it gets no row of its own.
+GX_ALIAS = {45: 0}
+# the plugin's own stock names, recovered 15/11/2026 from Genesis.ofx offset 0x3504e50 (char[24] entries, plugin order,
+# owner confirmed the order): (display name <= 24 chars, strip label <= 11 chars, official name <= 44 chars)
+GX_NAMES = [
+    ("Vision2 5201 50D", "5201 50D", "Kodak Vision2 5201 50D"),
+    ("Vision3 5203 50D", "5203 50D", "Kodak Vision3 5203 50D"),
+    ("Vision2 5205 250D", "5205 250D", "Kodak Vision2 5205 250D"),
+    ("Vision3 5207 250D", "5207 250D", "Kodak Vision3 5207 250D"),
+    ("Vision2 5212 100T", "5212 100T", "Kodak Vision2 5212 100T"),
+    ("Vision3 5213 200T", "5213 200T", "Kodak Vision3 5213 200T"),
+    ("Vision2 5217 200T", "5217 200T", "Kodak Vision2 5217 200T"),
+    ("Vision2 5218 500T", "5218 500T", "Kodak Vision2 5218 500T"),
+    ("Vision3 5219 500T", "5219 500T", "Kodak Vision3 5219 500T"),
+    ("Double-X 5222", "5222 B&W", "Eastman Double-X 5222"),
+    ("Vision2 Expr 5229", "5229 500T", "Kodak Vision2 Expression 5229 500T"),
+    ("EXR 5245 50D", "5245 50D", "Eastman EXR 5245 50D"),
+    ("Vision 5246 250D", "5246 250D", "Kodak Vision 5246 250D"),
+    ("ECN-I 5247 16D", "5247 16D", "Eastman ECN-I 5247 16D"),
+    ("ECN-II 5247 100T", "5247 100T", "Eastman ECN-II 5247 100T (1974)"),
+    ("ECN-II 5247 125T", "5247 125T", "Eastman ECN-II 5247 125T (1983)"),
+    ("ECN-I 5254 100T", "5254 100T", "Eastman ECN-I 5254 100T"),
+    ("ECN-I 5248 25T", "5248 25T", "Eastman ECN-I 5248 25T (1952)"),
+    ("EXR 5248 100T", "5248 100T", "Eastman EXR 5248 100T"),
+    ("ECN-I 5250 50D", "5250 50D", "Eastman ECN-I 5250 50D"),
+    ("ECN-I 5251 50T", "5251 50T", "Eastman ECN-I 5251 50T"),
+    ("Vision2 5260 500T", "5260 500T", "Kodak Vision2 5260 500T"),
+    ("Vision 5263 500T", "5263 500T", "Kodak Vision 5263 500T"),
+    ("Vision 5274 200T", "5274 200T", "Kodak Vision 5274 200T"),
+    ("Vision 5277 320T", "5277 320T", "Kodak Vision 5277 320T"),
+    ("Vision 5279 500T", "5279 500T", "Kodak Vision 5279 500T"),
+    ("Vision 5284 500T", "5284 500T", "Kodak Vision 5284 500T"),
+    ("EXR 5287 200T", "5287 200T", "Eastman EXR 5287 200T"),
+    ("Vision 5289 800T", "5289 800T", "Kodak Vision 5289 800T"),
+    ("ECN-II 5293 250T", "5293 82", "Eastman ECN-II 5293 250T (1982)"),
+    ("EXR 5293 250T", "5293 92", "Eastman EXR 5293 250T (1992)"),
+    ("ECN-II 5294 400T", "5294 400T", "Eastman ECN-II 5294 400T"),
+    ("EXR 5296 500T", "5296 500T", "Eastman EXR 5296 500T"),
+    ("ECN-II 5297 250D", "5297 250D", "Eastman ECN-II 5297 250D"),
+    ("EXR 5298 500T", "5298 500T", "Eastman EXR 5298 500T"),
+    ("Primetime 5620 640T", "5620 640T", "Kodak 5620 Primetime 640T"),
+    ("Eterna Vivid 8543", "8543 160T", "Fuji Eterna Vivid 8543 160T"),
+    ("Eterna Vivid 8547", "8547 500T", "Fuji Eterna Vivid 8547 500T"),
+    ("Eterna 8553 250T", "8553 250T", "Fuji Eterna 8553 250T"),
+    ("Eterna 8563 250D", "8563 250D", "Fuji Eterna 8563 250D"),
+    ("Eterna 8583 400T", "8583 400T", "Fuji Eterna 8583 400T"),
+    ("Reala 8592 500D", "8592 500D", "Fuji Reala 8592 500D"),
+    ("SuperF 8572 500T", "8572 500T", "Fuji Super F-Series 8572 500T"),
+    ("SuperF 8532 125T", "8532 125T", "Fuji Super F-Series 8532 F-125T"),
+    ("Color A 8518 250T", "8518 250T", "Fuji Color A 8518 250T"),
+]
+assert len(GX_NAMES) == 45, len(GX_NAMES)
+for _n in range(GX_NEG_N):                             # the strip labels first: derive() reads SHORT when the row is made
+    if _n not in GX_ALIAS:
+        SHORT[89 + _n] = GX_NAMES[_n if _n < 45 else 44][1]
 for _n in range(GX_NEG_N):
+    if _n in GX_ALIAS:
+        continue
+    _disp, _short, _official = GX_NAMES[_n if _n < 45 else 44]
     _pr = tuple("p%02d" % _p for _p in range(GX_PRINT_N) if (_n, _p) not in GX_SKIP)
     if not _pr:
         continue
-    FILMS.append(F(89 + _n, "G%02d" % _n, "Negative %02d" % _n, "neg", 100, 72, 5200, 0, "cine", 59 + _n,
-                   ("Neg 400", 256), ("neg", 256), "Negative stock %02d of the chain;" % _n,
-                   "Print picks the print stock.", ready=True, table="G%02d" % _n, spk=("spk_c", 256),
+    FILMS.append(F(89 + _n, "G%02d" % _n, _disp, "neg", 100, 72, 5200, 0, "cine", 59 + _n,
+                   ("Neg 400", 256), ("neg", 256), _official,
+                   "Print stock row picks the print.", ready=True, table="G%02d" % _n, spk=("spk_c", 256),
                    derived=True, prints=_pr,
-                   prov="Genesis 1.6.6 film chain, negative %02d x the sixteen print stocks (declared exception, "
+                   prov="Genesis 1.6.6 film chain, negative %02d (%s) x the sixteen print stocks (declared exception, "
                         "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> "
-                        "films/tables/G%02dP*.T17" % (_n, _n)))
+                        "films/tables/G%02dP*.T17" % (_n, _official, _n)))
+    SHORT[89 + _n] = _short
 # 59..104 minus the 6 values the catalogue already uses (66 = DLY200's preset order); the chain rows only have to stay
 # between the slide films (50..58) and the B&W films (200..) on the strip
 _used = {f["order"] for f in FILMS if f["order"] < 130 and not (f["code"].startswith("G") and f["id"] >= 89)}
