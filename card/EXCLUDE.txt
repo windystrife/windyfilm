@@ -1,5 +1,6 @@
 # Files of the old module (and caches) that tools/mk_card.sh leaves out of a WindyFilm card.
 # One path pattern per line, relative to the card root, matched case-blind (bash globs).
+# LEICAVVL.CUB: Leica Vivid's old V-Log cube (Film Roll V14U); WindyFilm reads LEICAVSR.CUB (sRGB in) since fb6bf1d.
 ML/modules/filmroll.mo
 ML/data/FILMCAN.DAT
 ML/data/FILMROLLN.DAT
@@ -7,6 +8,7 @@ ML/data/WSFILMS.DAT
 ML/data/WSCANS.DAT
 ML/data/*.FRT
 ML/fonts/FILM*.RBF
+ML/data/LEICAVVL.CUB
 ML/FILMROLL.TXT
 ML/SETTINGS/*
 ML/LOGS/*
