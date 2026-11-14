@@ -730,6 +730,19 @@ static void t_shot(const char *cs)
             struct wf_look lk;
             wf_look_now(&lk);
             chk(lk.output == WF_OUT_LLUT && lk.incurve == WF_INC_FILM1, "the look carries the input curve");
+            /* the curve is for Picture Style User Def. 1: another style reads sRGB (tables reloaded), back on UD1 */
+            log_mark();
+            h_li_set("picstyle", 0x81);
+            chk(LOGW("srgb(style 81)", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+                && ll_same(&ll, wf_ll_tables()) && wf_incurve == WF_INC_FILM1 && wf_incurve_t() == WF_INC_SRGB,
+                "Picture Style Standard: Film 1 chosen, sRGB tables: %s", log_line("lut "));
+            wf_look_now(&lk);
+            chk(lk.incurve == WF_INC_SRGB, "the look says sRGB under Standard");
+            log_mark();
+            h_li_set("picstyle", 0x21);
+            chk(LOGW(" in-film1", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&lc, wf_ll_tables()),
+                "Picture Style User Def. 1 again: Film 1 tables: %s", log_line("lut "));
+            h_li_set("picstyle", 0);
             log_mark();
             wf_incurve = WF_INC_SRGB;
             chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&ll, wf_ll_tables())

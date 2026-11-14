@@ -11,7 +11,7 @@ WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Bản c�
 > **Trạng thái 14/11/2026: đã có thẻ thử `F:\MagicLatern\EOSM_WindyFilm` và `F:\MagicLatern\5D2_WindyFilm`, nhưng
 > module chưa chạy trên máy thật.**
 >
-> - Test host: EOS M 429 phép kiểm tra (có probe RAW P0 và đường cong Film 1), 5D2 383 phép, đều 0 lỗi.
+> - Test host: EOS M 432 phép kiểm tra (có probe RAW P0 và đường cong Film 1), 5D2 386 phép, đều 0 lỗi.
 > - Cổng kiểm tra nguồn gốc: PASS.
 >
 > Tình trạng mới nhất ở `docs/HANDOFF-QWEN.md`.
@@ -39,7 +39,8 @@ WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Bản c�
 - **Input curve** (cho Log + LUT và các lon Film LUT): sRGB (mặc định) hoặc **Canon Film 1**.
   - Canon Film 1 đảo đúng đường cong Picture Style "Film 1" (User Def. 1) đo trên EOS M từ các cặp RAW+L của chủ dự
     án, thay cho sRGB. Xám 18 % ra đúng chỗ, và phần sáng trên trắng (tới 2,07) đi vào đoạn log của đường cong.
-  - Chỉ đúng khi máy để Picture Style Film 1. Log phẳng và phim trong danh mục vẫn đọc sRGB.
+  - Chỉ đúng khi máy để Picture Style Film 1 (User Def. 1). Ở style khác, module tự đọc sRGB và menu báo. Log phẳng
+    và phim trong danh mục vẫn đọc sRGB.
 - **Film LUT can:** chọn một lon là đặt luôn V-Log + LUT với cube của lon đó.
 - **Xem trước trên LiveView** bằng cùng nhân màu, kèm xem trước độ phơi sáng.
 - **EXIF:** UserComment ghi phim, kiểu in, Light, hiệu ứng và EV của từng ảnh.

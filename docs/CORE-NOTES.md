@@ -144,7 +144,10 @@ plan, the numbers and the traps. Exact touch points per step:
     change (`wf_ll_tried_inc`), and `wf_dispatch` stamps the tables' value on the look;
   - host tests (SHOT): at Film 1, code 139 comes out within 2 codes of sRGB code 118, and code 250 comes out at least
     8 codes above sRGB white; going back to sRGB gives the same tables; plus a CFG round trip;
-  - still open: flat Log (`wf_dec`, K fold) and a Picture Style check through the .sym.
+  - Picture Style: `wf_incurve_t()` also needs `wf_style_ok()`, i.e. `lens_info.raw_picstyle` is 0x21 (User Def. 1)
+    or 0 (not reported yet). This needs no new import. The host test sets it through `h_li_set("picstyle", ..)`:
+    Standard reloads the sRGB tables, and User Def. 1 brings the Film 1 tables back;
+  - still open: flat Log (`wf_dec`, K fold).
 - **P0** (EOS M only; done in a675c8a, 33 host checks in mode `PROBE`). `wf_cam_eosm.c` takes the snapshot in the NN
   hook (r2 == 0 calls), before the gate:
   - one static `struct wf_prb`, with no calls except the optional `ff234680`;

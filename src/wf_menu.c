@@ -66,7 +66,19 @@ int wf_lut_ei_t(void)
     return v >= WF_LL_EI_MIN && v <= WF_LL_EI_MAX ? v : 0;
 }
 
-int wf_incurve_t(void) { return wf_incurve == WF_INC_FILM1 && wf_ll_canon_have() ? WF_INC_FILM1 : WF_INC_SRGB; }
+/* Picture Style (ML's PROP_PICTURE_STYLE handler keeps lens_info.raw_picstyle; 0 until the property was seen).
+ * The Canon Film 1 curve is measured for User Def. 1 holding the Film 1 style: under any other style the JPEG is read
+ * as sRGB, and wf_ll_poll reloads the tables when the style changes. */
+#define WF_PS_USER1 0x21                          /* User Def. 1 (ML picstyle.c USER1_ID) */
+int wf_style_raw(void) { return lens_info.raw_picstyle; }
+int wf_style_ok(void) { int s = lens_info.raw_picstyle; return s == 0 || s == WF_PS_USER1; }
+extern const char *picstyle_get_current_name(void);   /* ML core (picstyle.c), exported to modules: Canon's names stay
+                                                         in the core, the module holds none (provenance gate) */
+
+int wf_incurve_t(void)
+{
+    return wf_incurve == WF_INC_FILM1 && wf_ll_canon_have() && wf_style_ok() ? WF_INC_FILM1 : WF_INC_SRGB;
+}
 
 static const int wf_spct[WF_NSTRENGTH] = { 30, 100, 125 };
 int wf_strength_pct(int level) { return wf_spct[level >= 0 && level < WF_NSTRENGTH ? level : 1]; }
@@ -1012,14 +1024,18 @@ static MENU_UPDATE_FUNC(wf_lut_update)
 
 static MENU_UPDATE_FUNC(wf_inc_update)
 {
-    MENU_SET_VALUE("%s", wf_inc_name[wf_incurve_t()]);
+    int film1 = wf_incurve == WF_INC_FILM1 && wf_ll_canon_have();
+    MENU_SET_VALUE("%s", wf_inc_name[film1 ? WF_INC_FILM1 : WF_INC_SRGB]);
     if (!wf_ll_canon_have())
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "This build has no Canon curve table: sRGB only.");
     else if (!wf_yuv_active())
         WF_NOT_ACTIVE();
     else if (wf_out != WF_OUT_LLUT)
         MENU_SET_WARNING(MENU_WARN_INFO, "Used by the Log + LUT output (and the Film LUT cans).");
-    else if (wf_incurve_t() == WF_INC_FILM1)
+    else if (film1 && !wf_style_ok())
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "Picture Style is %s, not User Def. 1: read as sRGB.",
+                         picstyle_get_current_name());
+    else if (film1)
         MENU_SET_WARNING(MENU_WARN_ADVICE, "Set Picture Style to Film 1 (User Def. 1). Measured on EOS M.");
     else
         MENU_SET_WARNING(MENU_WARN_INFO, "The JPEG is read as sRGB (any Picture Style).");

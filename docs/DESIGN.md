@@ -178,9 +178,15 @@ read for ideas.
   - then check `logchk` and the host LOG tests.
 - **Auto exposure of the Film LUT cubes.** The grey reference is 0.18 with the curve; sRGB keeps `lin(118)`.
 - **Table cache.** Bit 17 of the `.FRT` key is the curve. Old caches have 0 there, so sRGB caches stay valid.
-- **Picture Style.** Nothing checks the camera's style yet: the menu tells the user to set Film 1. Reading the style
-  through the card .sym, and a table per style, come later, and only if the owner shoots several styles. The 5D2
-  gets the same table, but the curve was measured on the EOS M only.
+- **Picture Style check.** Film 1 is used only while `lens_info.raw_picstyle` (ML's `PROP_PICTURE_STYLE` handler)
+  is User Def. 1 (0x21), or 0 (not reported yet). Under any other style:
+  - the JPEG is read as sRGB;
+  - `wf_ll_poll` reloads the tables;
+  - the menu warns `Picture Style is <name>, not User Def. 1`;
+  - the `lut` log line says `srgb(style <hex>)`.
+
+  The slot is checked, not the style file it holds. A table per style comes later, and only if the owner shoots
+  several styles. The 5D2 gets the same table, but the curve was measured on the EOS M only.
 - Optional later: **A2** (HTP + the same inversion, sun-area error 1.4, 3 degrees of hue drift) needs ISO >= 200 and
   costs 1 EV of shadow noise. It is the owner's call.
 

@@ -16,7 +16,7 @@
 #include "host_ml.h"
 
 extern const int wf_t_li_size, wf_t_li_shutter, wf_t_li_aperture, wf_t_li_iso, wf_t_li_iso_auto, wf_t_li_ae,
-    wf_t_li_job, wf_t_li_wb_mode, wf_t_li_kelvin, wf_t_li_wbs_gm, wf_t_li_wbs_ba, wf_t_card_fn, wf_t_card_size;
+    wf_t_li_job, wf_t_li_wb_mode, wf_t_li_kelvin, wf_t_li_wbs_gm, wf_t_li_wbs_ba, wf_t_li_picstyle, wf_t_card_fn, wf_t_card_size;
 
 char __camera_model_short[16] = "EOSM", firmware_version[16] = "2.0.2";
 int pic_quality, shooting_mode = 3, lv = 1;
@@ -294,6 +294,7 @@ static uint8_t h_card[64] __attribute__((aligned(8)));
 void *get_shooting_card(void) { return h_card; }
 void h_set_file_number(int n) { memcpy(h_card + wf_t_card_fn, &n, 4); }
 const char *get_dcim_dir(void) { return "B:/DCIM/100CANON"; }
+const char *picstyle_get_current_name(void) { return "(host style)"; }
 char *get_file_prefix(void) { return "IMG_"; }
 
 /* ------------------------------------------------------------------ lens_info, properties, white balance */
@@ -301,7 +302,7 @@ static const struct { const char *n; const int *off; int bytes; } h_li_fields[] 
     { "shutter", &wf_t_li_shutter, 1 }, { "aperture", &wf_t_li_aperture, 1 }, { "iso", &wf_t_li_iso, 1 },
     { "iso_auto", &wf_t_li_iso_auto, 1 }, { "ae", &wf_t_li_ae, 4 }, { "job", &wf_t_li_job, 4 },
     { "wb_mode", &wf_t_li_wb_mode, 4 }, { "kelvin", &wf_t_li_kelvin, 4 }, { "gm", &wf_t_li_wbs_gm, -1 },
-    { "ba", &wf_t_li_wbs_ba, -1 },
+    { "ba", &wf_t_li_wbs_ba, -1 }, { "picstyle", &wf_t_li_picstyle, 1 },
 };
 int h_li_get(const char *field)
 {

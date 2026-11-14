@@ -44,7 +44,8 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
   README_FILMLUT.txt), Off.
 - Input curve (cho Log + LUT và lon Film LUT): sRGB, hoặc Canon Film 1. Chọn
   Canon Film 1 khi máy để Picture Style Film 1 (User Def. 1): module đảo đúng
-  đường cong của style đó, đo từ ảnh RAW+L của bạn.
+  đường cong của style đó, đo từ ảnh RAW+L của bạn. Nếu máy ở style khác, module
+  tự đọc sRGB và menu báo "Picture Style is ..., not User Def. 1".
 - Xem trước trên LiveView: cần bật Overlay > Global Draw của ML.
 
 

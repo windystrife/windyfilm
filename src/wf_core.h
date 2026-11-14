@@ -145,7 +145,10 @@ void wf_menu_deinit(void);                        /* unload: WB back, menu remov
 void wf_menu_poll(void);                          /* wf_task: config save, EXIF writer, Light */
 void wf_cfg_load(void);
 int  wf_lut_ei_t(void);                           /* LUT EI in 1/3 EV */
-int  wf_incurve_t(void);                          /* WF_INC_*: FILM1 only when the build has the Canon curve table */
+int  wf_incurve_t(void);                          /* WF_INC_* in use: FILM1 only with the Canon curve table built in
+                                                     and the camera on Picture Style User Def. 1 (or not known yet) */
+int  wf_style_ok(void);                           /* Picture Style is User Def. 1, or not reported yet */
+int  wf_style_raw(void);                          /* PROP_PICTURE_STYLE value, 0 = not reported yet */
 int  wf_strength_pct(int level);
 void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev);   /* a shot of ours: its text (ring) */
 void wf_exif_none(void);                          /* a JPEG that got no look: keeps the ring aligned */

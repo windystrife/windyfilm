@@ -264,6 +264,8 @@ static void wf_ll_poll(void)
         int n = 0, av = (int8_t)wf_ll_tabs->pad[0];
         if (inc == WF_INC_FILM1)
             n = snprintf(eis, sizeof eis, " in-film1");
+        else if (wf_incurve == WF_INC_FILM1 && wf_ll_canon_have())
+            n = snprintf(eis, sizeof eis, " srgb(style %02x)", wf_style_raw());   /* Film 1 chosen, not User Def. 1 */
         if (ei)
             n += snprintf(eis + n, sizeof eis - n, " ei%+d/3", ei);
         if (wf_ll_tabs->pad[1] == WF_LL_AUTO_MARK) {
