@@ -133,7 +133,56 @@ còn nguyên trong RAM hay không, và mỗi nửa ảnh nằm ở đâu trong R
 - Probe tự tắt mỗi lần bật máy (không lưu vào cấu hình).
 
 
-5. FILE TRÊN THẺ
+5. RAW DEVELOP "B" (CHẬM): BẢN THỬ, ĐÃ PROBE, CHƯA THỬ DEVELOP TRÊN MÁY
+------------------------------------------------------------------------
+Mục đích: màu phim làm từ chính file RAW 14-bit của Canon thay cho JPEG 8-bit.
+Mỗi ảnh khoảng 35-45 giây (nửa trên rồi nửa dưới). Develop chưa chạy trên máy
+thật.
+
+RAW probe trên máy (14/11, thư mục 5D2_probe_ketqua): ở cả nửa trên và nửa
+dưới, RAM có đúng RAW của tấm vừa chụp. Địa chỉ cũ lệch một hàng (đọc từ hàng
+1 của CR2); thẻ RAWB3 đọc từ hàng 0 nên đã đúng. RAW develop trên thẻ này thử
+được, nhưng chưa ai thử trên máy. Thẻ 5D2_WindyFilm_RAWB2 còn địa chỉ cũ:
+dùng thẻ đó thì để RAW develop Off.
+Mỗi ảnh module vẫn so RAW với JPEG của Canon trước khi develop; không khớp thì
+ảnh ra màu phim thường (8-bit) và log ghi "rawb: 8-bit (buffer nomatch ...)"
+kèm điểm số.
+
+Trình chọn phim (mới từ thẻ RAWB3): mở được cả khi ngắm qua kính, không cần
+LiveView (mục 2). Bấm TRASH mà không mở thì log ghi "ui: TRASH not taken: ...".
+
+Bật:
+- Shoot > WindyFilm > RAW develop: "On (slow)". Mỗi lần bật máy nó tự về Off.
+- Chất lượng ảnh RAW + L (JPEG L Fine). Drive: chụp đơn hoặc hẹn giờ. Chụp liên
+  tục, M / S RAW, chỉ JPEG: màu phim thường như cũ.
+
+Chụp:
+- Chụp từng tấm, chờ hết thông báo "RAW develop NN%" (hiện hai lần: nửa trên,
+  nửa dưới). Trong lúc đó máy bận, chưa chụp tấm sau được: bình thường.
+- 8 điểm ảnh sát mép trái và phải mỗi ảnh vẫn là ảnh của Canon (màu phim
+  thường); phần còn lại là RAW develop.
+- Dừng: giữ nửa nút chụp khoảng 2 giây. Nửa trên dừng giữa chừng thì cả ảnh
+  không có màu phim (phần đã develop + phần JPEG gốc). CR2 không bao giờ bị đổi.
+- Tắt máy giữa chừng: module dừng trong khoảng 1 giây. CHƯA thử trên máy thật;
+  nếu máy treo thì tháo pin, và ghi lại lúc đó đang ở bao nhiêu %.
+- Highlights / Shadows có tác dụng với phim; với Log + LUT khi bật RAW develop
+  thì chưa.
+- Lon Leica Vivid (mới từ thẻ RAWB3): RAW develop cũng develop Leica từ RAW:
+  RAW ra sRGB rồi áp thẳng cube gốc "L Leica 2" 33^3 lên mã sRGB, không qua
+  V-Log. Cần file ML/DATA/LEICAVSR.CUB (cube gốc, đã có trên thẻ).
+  Highlights / Shadows có tác dụng; grain / halation như phim.
+- Bảng RAW develop của lon Log + LUT / Leica (mới): lần đầu dựng từ cube (cube
+  65^3 của CinePrint lâu hơn, có thể vài chục giây), rồi lưu ở ML/DATA/<tên
+  cube>.RBT (356 KB). Những lần sau (bật máy, đổi phim, xem ảnh xong) đọc file
+  đó, khoảng 1 giây. Log ghi "... .RBT hit" hoặc lý do dựng lại. Xoá file .RBT
+  thì lần sau dựng lại, không sao.
+
+Gửi lại: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG (kèm 1 tấm cùng cảnh với
+RAW develop Off). Log có các dòng "rawb: ..." cho từng nửa ảnh: địa chỉ RAW,
+điểm khớp, mức đen / trắng, thời gian từng bước.
+
+
+6. FILE TRÊN THẺ
 ----------------
 ML/modules/windyflm.mo    module
 ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper)

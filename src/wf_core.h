@@ -94,6 +94,7 @@ void wf_status_set(const char *s);                /* wf_status() text ("" = fine
 void wf_gen_bump(void);                           /* wf_gen() + 1 (UI redraw) */
 void wf_log_flush(void);                          /* wf_task: append the log ring to ML/LOGS/WINDYFLM.LOG */
 int wf_job_state(void);                           /* wf_menu.c: ML lens_info.job_state (Canon busy with a shot when != 0) */
+int wf_iso_now(void);                             /* wf_menu.c: the ISO now (lens_info.iso, or iso_auto under Auto ISO) */
 void wf_ui_request(void);                         /* menu: open the browser from wf_task after the ML menu closed */
 
 /* ------------------------------------------------------------------ camera layer (wf_cam_eosm.c / wf_cam_5d2.c) */
@@ -137,7 +138,7 @@ extern volatile int wf_half_h, wf_half_g, wf_half_m;
 extern volatile int wf_pv_busy;
 /* shot status (log, the 5D2 pairing) */
 enum { WF_ST_NONE = 0, WF_ST_FILM, WF_ST_NOTAB, WF_ST_LOG, WF_ST_LLUT, WF_ST_NOLUT, WF_ST_OFF, WF_ST_NOFILM,
-       WF_ST_GATE, WF_ST_ASPECT, WF_ST_NOSTAGE, WF_ST_N };
+       WF_ST_GATE, WF_ST_ASPECT, WF_ST_NOSTAGE, WF_ST_RBSTOP, WF_ST_N };   /* RBSTOP: RAW develop stopped part way */
 #define WF_ST_TOUCHED(st) ((st) == WF_ST_FILM || (st) == WF_ST_LOG || (st) == WF_ST_LLUT)
 
 /* ------------------------------------------------------------------ wf_menu.c */

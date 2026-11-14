@@ -10,6 +10,7 @@
  * Both hooks run at task priority 0x14; between the load and the store of wf_owed there is no call that can block. */
 #include "wf_core.h"
 #include "wf_probe.h"
+#include "wf_rawb.h"
 
 extern char __camera_model_short[];
 extern char firmware_version[];
@@ -187,6 +188,74 @@ static const struct wf_prb_cam prb_5d2 = {
 };
 #define PRB_ENTER(k, regs) wf_prb_enter(regs, k)
 #define PRB_LEAVE(on, k, rc, t) do { if (on) wf_prb_leave(k, rc, t); } while (0)
+
+#if WF_RAWB_CAN
+/* ------------------------------------------------------------------ RAW develop "B" (wf_rawb.c): the raw of the shot
+ * raw-path P0_5D2_SPEC.md [code, not yet probed on the camera]: each half's develop state holds the job handle H
+ * (TOP [0x369C + 0x3C], BOT [0x3630 + 0x2C]); a live job has H[0] = 0xFFCD0761, P = H[1], MEM1 = [P + 0xC68], and the
+ * capture EDMAC wrote the raw at MEM1 + 0x76C8: 5792 x 3804, pitch 10136, 14-bit packed, GBRG at (0, 0) and at the JPEG
+ * crop (168, 56), black 1024. The owner's probe run (11-14, 8 records, TOP and BOT, IMG_4467..4476) found MEM1 + 0x76C8 =
+ * CR2 row 1 (byte-exact or NCC 1.0000, 0..1 LSB): CR2 row 0, where these coordinates start, is one pitch before it. MEM1 is freed only after the BOT hook returns. Every pointer is read only where prb_ok
+ * says it cannot fault, the raw only inside the RscMgr pool; the worker then checks its content against Canon's TOP
+ * half (wf_rsrc.c) before anything is developed, and the BOT continues only the same raw, unchanged (wf_rawb.c).
+ * Only RAW + L fine single shots (drive single / self-timer). */
+#define RB_PICQ      0x3070000                   /* PICQ_RAW_JPG_LARGE_FINE */
+#define RB_PITCH     10136
+#define RB_RW        5792
+#define RB_RH        3804
+extern int drive_mode;
+
+/* the white when the raw has no clip pile-up to measure: ISO 640 clipped at 13318 (raw-path measurements); the other
+   1/3-stop-down ISOs are taken as the same family, the full stops as 15600 (ISO 2000 >= 15674 measured) */
+static int rb_white(int iso)
+{
+    switch (iso) {
+    case 160: case 320: case 640: case 1250: case 2500: case 5000: return 13300;
+    }
+    return 15600;
+}
+
+static void rawb_fill(struct wf_frame *f, int k)
+{
+    int dm = drive_mode;
+    if (pic_quality != RB_PICQ) {
+        f->rb_skip = WF_RBS_QUALITY;
+        f->rb_arg = pic_quality;
+        return;
+    }
+    if (dm != 0 && dm != 0x10 && dm != 0x11) {  /* DRIVE_SINGLE, DRIVE_SELFTIMER_REMOTE, DRIVE_SELFTIMER_2SEC */
+        f->rb_skip = WF_RBS_DRIVE;
+        f->rb_arg = dm;
+        return;
+    }
+    uint32_t h = PRB_RD32(k == K_BOT ? PRB_ST_BOT + 0x2C : PRB_ST_TOP + 0x3C), p = 0, m1 = 0, b = 0;
+    if (prb_ok(h, 8) && PRB_RD32(h) == PRB_JOB_MAGIC) {
+        p = PRB_RD32(h + 4);
+        if (prb_ok(p, 0xC6C))
+            m1 = PRB_RD32(p + 0xC68);
+    }
+    if (m1 && m1 + PRB_MEM1_RAW > m1)
+        b = check_buf(m1 + PRB_MEM1_RAW - RB_PITCH, (uint32_t)RB_PITCH * RB_RH);   /* CR2 row 0 (probe 11-14) */
+    if (b > PRB_POOL_HI - (uint32_t)RB_PITCH * RB_RH)
+        b = 0;                                   /* past the RscMgr pool's end */
+    if (!b) {
+        f->rb_skip = WF_RBS_NOADDR;
+        f->rb_arg = (int)(m1 ? m1 : p ? p : h);
+        return;
+    }
+    f->rawc[0] = b;
+    f->nrawc = 1;
+    f->fmt = WF_FMT_RAW14;
+    f->bpp = 14;
+    f->cfa = 2;                                  /* GBRG at (168, 56) */
+    f->black = 1024;
+    f->white = (uint16_t)rb_white(wf_iso_now());
+    f->rpitch = RB_PITCH;
+    f->rax0 = 160; f->ray0 = 52; f->rax1 = RB_RW; f->ray1 = RB_RH;
+    f->rx0 = 168; f->ry0 = 56;
+    f->rbx0 = 16; f->rbx1 = 144;                 /* masked columns (the lit area starts at 158) */
+}
+#endif
 #else
 #define PRB_ENTER(k, regs) 0
 #define PRB_LEAVE(on, k, rc, t) do { (void)(on); (void)(t); } while (0)
@@ -274,6 +343,10 @@ static void wf_hook_5d2(uint32_t *regs, uint32_t *stack, uint32_t pc)
     f.pitch = FRAME_W * 2;
     f.data = f.dst = (void *)(uintptr_t)buf;
     f.raw = raw;
+#if WF_PRB_CAN && WF_RAWB_CAN
+    if (wf_rawb)
+        rawb_fill(&f, k);                     /* RAW develop on: this half's raw and the gates */
+#endif
     f.t_post = get_ms_clock();
     int st = -1;
     if (wf_shot_run(&f, &st) != 0) {

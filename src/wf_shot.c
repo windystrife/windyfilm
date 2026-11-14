@@ -19,13 +19,15 @@
  *   effect state: wf_fx.c, the same protocol (fx_wait).
  *   A worker waiting for wf_task (film table, effect keys) sits "parked" (wf_parked): wf_task's wait loops count it idle.
  *
- * RAW input (docs/DESIGN.md 3.1, not implemented): a develop stage takes a WF_FMT_RAW14 frame and writes either UYVY8
- * into frame.dst (then every look path below runs unchanged on dst) or a WF_FMT_LOG16 buffer for a 16-bit look path.
- * It plugs in at wf_dispatch(): one more case per (fmt, output) pair; the UYVY8 kernels, rows and UI do not change. */
+ * RAW input (docs/DESIGN.md 3.1): RAW develop "B" (wf_rawb.c) takes a WF_FMT_RAW14 frame at wf_dispatch() and writes
+ * UYVY8 into frame.dst; the look's own stage then runs on dst (films: the film table + effects on the sRGB base
+ * develop; Log + LUT: the effects only, the cube is in the develop; plain log: nothing). A WF_FMT_LOG16 buffer for a
+ * 16-bit look path stays reserved. */
 #include "wf_core.h"
 #include "wf_film.h"
 #include "wf_loglut.h"
 #include "wf_fx.h"
+#include "wf_rawb.h"
 
 extern int  task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg);
 extern void *create_named_semaphore(const char *name, int initial);
@@ -602,6 +604,7 @@ struct wf_ev {
     char evs;
     int16_t ev8;
     uint8_t llut; int8_t lei;
+    uint8_t rb;                                  /* RAW develop: 0 not asked / 8-bit, 1 developed, 2 stopped part way */
     uint32_t buf, raw;
     int ms, q, h_ms, g_ms, m_ms, wait;
     struct wf_look lk;
@@ -609,7 +612,7 @@ struct wf_ev {
 static struct wf_ev wf_ev[WF_EV_N];
 static volatile unsigned wf_ev_head, wf_ev_tail, wf_ev_lost, wf_ev_lost_said;
 static const char *const wf_stname[WF_ST_N] = { "none", "film", "notab", "log", "lut", "nolut", "off", "nofilm",
-                                               "gate", "aspect", "nostage" };
+                                               "gate", "aspect", "nostage", "rbstop" };
 const char *wf_status_name(int st) { return st >= 0 && st < WF_ST_N ? wf_stname[st] : "?"; }
 
 /* ------------------------------------------------------------------ effects around the colour pass (worker) */
@@ -624,6 +627,8 @@ static uint32_t wf_fx_shots, wf_half_seed;
  * pass 2 = halation apply + grain. The halation drive is gathered from the camera's words before the colour pass (clipped
  * highlights are still 255 there). NN / TOP decide (keys read once, waiting parked up to 2 s while wf_task is still to
  * publish a wanted key, films only); a BOT repeats its TOP with the same seed. */
+static void wf_nop_words(uint32_t *p, int n, int arg) { (void)p; (void)n; (void)arg; }   /* RAW develop: colour done */
+
 static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look *lk, wf_words_fn *fn, int arg)
 {
     uint32_t *buf = wf_frame_words(f);
@@ -672,7 +677,8 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
     wf_fx_st[1] = (fx & WF_FX_GRN) ? 1 : gk ? 2 : 0;
     wf_fx_st[2] = (fx & WF_FX_MST) ? 1 : mk ? 2 : 0;
     if (!fx) {
-        wf_chunks(buf, nw, fn, arg);
+        if (fn != wf_nop_words)
+            wf_chunks(buf, nw, fn, arg);
         return;
     }
     wf_fx_begin(k, fx, seed);
@@ -741,17 +747,67 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
 /* ------------------------------------------------------------------ the worker */
 static struct wf_look wf_half_look;              /* the TOP's look, for its BOT */
 
-/* one (format, output) -> stage. Today only UYVY8 has stages; a RAW develop stage goes here (see the top). */
+static int wf_rb_res;                            /* this request's RAW develop: 0 none / 8-bit, 1 developed, 2 stopped */
+
+/* RAW14: the develop, then the look's stage on its result (Log + LUT: effects only, plain log: nothing). 1 = handled
+ * (*st set), 0 = not developed: the 8-bit path runs on Canon's frame. Films come here after their table is in. */
+static int wf_rawb_run(struct wf_frame *f, int bot, struct wf_look *lk, int *llut, int *lei, int *st)
+{
+    int r = wf_rawb_stage(f, lk);
+    if (r == 0)
+        return 0;
+    if (r < 0) {
+        wf_rb_res = 2;
+        *st = WF_ST_RBSTOP;                      /* stopped part way: no look stage on a half developed frame */
+        return 1;
+    }
+    wf_rb_res = 1;
+    switch (lk->output) {
+    case WF_OUT_FILM:
+        wf_colour_fx(f, bot, lk, wf_film_words, 0);
+        *st = WF_ST_FILM;
+        break;
+    case WF_OUT_LLUT:
+        *llut = lk->flut;                        /* the develop's own cube (wf_rawb.c tables key) */
+        *lei = lk->lei;
+        wf_colour_fx(f, bot, lk, wf_nop_words, 0);
+        *st = WF_ST_LLUT;
+        break;
+    default:
+        *st = WF_ST_LOG;                         /* flat: no effects */
+        break;
+    }
+    return 1;
+}
+
+/* one (format, output) -> stage. UYVY8: the 8-bit look; RAW14 (RAW develop on, EOS M NN): the develop first, Canon's
+ * frame back to the 8-bit look when the develop cannot run (wf_rawb.c logs why). */
 static int wf_dispatch(struct wf_frame *f, int bot, struct wf_look *lk, int *llut, int *lei)
 {
-    if (f->fmt != WF_FMT_UYVY8)
+    int raw = f->fmt == WF_FMT_RAW14, st;
+    wf_rb_res = 0;
+    if (raw)
+        f->fmt = WF_FMT_UYVY8;                   /* dst holds Canon's UYVY8 frame until the develop writes it */
+    else if (f->fmt != WF_FMT_UYVY8)
         return WF_ST_NOSTAGE;                    /* no stage for this input format: untouched */
+    else if (f->rb_skip)
+        wf_rawb_note(f, WF_RBW_CAM);             /* RAW develop on, the camera layer's gate said no */
+    if (raw && lk->output != WF_OUT_FILM) {
+        if (lk->output != WF_OUT_LOG && lk->output != WF_OUT_LLUT)
+            wf_rawb_note(f, WF_RBW_LOOK);        /* Off: nothing to develop to */
+        else if (wf_rawb_run(f, bot, lk, llut, lei, &st))
+            return st;
+    }
     switch (lk->output) {
     case WF_OUT_FILM:
         if (wf_ws_shot(f->part, bot, lk->row, lk->variant, lk->ftflags)) {
+            if (raw && wf_rawb_run(f, bot, lk, llut, lei, &st))
+                return st;
             wf_colour_fx(f, bot, lk, wf_film_words, 0);
             return WF_ST_FILM;
         }
+        if (raw)
+            wf_rawb_note(f, WF_RBW_FILMTAB);
         return WF_ST_NOTAB;                      /* no table within ~1 s, or none in the pack: untouched */
     case WF_OUT_LLUT: {
         int use = bot ? wf_half_ll == lk->curve : wf_ll_have == lk->curve;
@@ -822,6 +878,7 @@ static void wf_run(void)
     e->llut = (uint8_t)llut;
     e->lei = (int8_t)lei;
     e->fxp = (uint8_t)wf_fx_pend;
+    e->rb = (uint8_t)wf_rb_res;
     e->wait = wf_ws_waited + wf_fx_waited;
     e->lk = lk;
     WF_BARRIER();
@@ -1013,7 +1070,8 @@ static void wf_report(void)
         if ((e->lk.hl || e->lk.sh) && cl >= 0 && cl < (int)sizeof code)
             snprintf(code + cl, sizeof code - cl, " hl%s sh%s", wf_hs_text(e->lk.hl), wf_hs_text(e->lk.sh));
         n = 0;
-        if (e->fxp) n += snprintf(ex + n, sizeof ex - n, " fx pending");
+        if (e->rb) n += snprintf(ex + n, sizeof ex - n, e->rb == 1 ? " raw" : " raw-stop");
+        if (e->fxp && n < (int)sizeof ex) n += snprintf(ex + n, sizeof ex - n, " fx pending");
         if (e->wait > 0 && n < (int)sizeof ex) snprintf(ex + n, sizeof ex - n, " w%d", e->wait);
         wf_log("yuv %s %x/%x: %s%s %dms%s q%d a%d%s", wf_kname[e->kind < 3 ? e->kind : 0], (unsigned)e->buf,
                (unsigned)e->raw, wf_status_name(e->status), code, e->ms, fx, e->q, e->aspect, ex);

@@ -82,6 +82,7 @@ extern int wf_ll_incurve;
 extern int wf_ll_disp;
 int wf_ll_curve_have(int k);                     /* slot k built in (0, sRGB: always; out of range: 0) */
 const char *wf_ll_curve_src(int k);              /* slot k's CSV first comment line, "" without */
+const uint32_t *wf_ll_dec_of(int k);             /* slot k's decode (code i/4 -> linear Q24, 1022 entries), 0 = sRGB */
 
 /* results (distinct, for the log line and the menu warning) */
 enum {
@@ -131,6 +132,20 @@ int wf_loglut_load(const char *path, int mode, struct wf_lltabs *out, struct wf_
  * on a cache hit. wf_task only. */
 int wf_loglut_load_cached(const char *cube, const char *cache, int mode, struct wf_lltabs *out,
                           struct wf_ll_info *info);
+
+/* table cache files of other builders (RAW develop B's .RBT, wf_rawb.c), on the .FRT's helpers and FIO rules: file =
+ * the caller's nkey key words (its own magic, version, build and look words, the cube's id), the blob of n bytes, FNV-1a
+ * (u32) of both. wf_task only; the DMA buffer is an 8 KB temporary allocation (no shoot memory).
+ *   wf_llb_cube_id  the cube's size, time stamp and content hash as the .FRT key takes them: 0 = id[0..3] filled
+ *   wf_llb_read     WF_LLB_HIT (blob filled), _NONE (no file), _KEY (another key: blob untouched), _BAD (wrong size, cut,
+ *                   hash: the blob may be partly overwritten)
+ *   wf_llb_write    a new file through wf_fcreate (only while Canon is idle; the old file removed first): 0 or the
+ *                   WF_FE_* step that failed (WF_FE_BUSY: Canon busy, try again later); a cut file is removed */
+enum { WF_LLB_HIT, WF_LLB_NONE, WF_LLB_KEY, WF_LLB_BAD };
+#define WF_LLB_MAXKEY 16
+int wf_llb_cube_id(const char *cube, uint32_t id[4]);
+int wf_llb_read(const char *path, const uint32_t *key, int nkey, void *blob, uint32_t n);
+int wf_llb_write(const char *path, const uint32_t *key, int nkey, const void *blob, uint32_t n);
 
 /* card path for a mode ("ML/DATA/SLOG3.CUB", .. "ML/DATA/CLOG3.CUB"), 0 for a bad mode */
 const char *wf_loglut_path(int mode);

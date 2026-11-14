@@ -14,6 +14,7 @@
 #include "wf_expsim.h"
 #include "wf_film.h"
 #include "wf_fx.h"
+#include "wf_rawb.h"
 
 extern int  task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg);
 extern void *create_named_semaphore(const char *name, int initial);
@@ -338,6 +339,7 @@ static void wf_task(void *arg)
             wf_pv_poll();                        /* before the effects: a film switch shows its look first */
             wf_fx_poll();                        /* halation / grain / mist state: load / switch / free */
             wf_exp_poll();
+            wf_rawb_poll();                      /* RAW develop: tables, memory, progress box, the shot's lines */
         }
         wf_menu_poll();                          /* config save, EXIF writer, Light */
         wf_ui_poll();
@@ -348,6 +350,8 @@ static void wf_task(void *arg)
                 wf_ws_poll();                    /* a parked shot may wait for its film table */
         }
     }
+    if (wf_cam_ok)
+        wf_rawb_end();                           /* a develop stops at its next band (wf_unloading); then the memory goes */
     wf_log("unload");
     wf_log_flush();
     wf_task_up = 0;

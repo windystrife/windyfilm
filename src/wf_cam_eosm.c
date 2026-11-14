@@ -15,6 +15,7 @@
  *   is packed at the aspect's size inside the max-size buffer. */
 #include "wf_core.h"
 #include "wf_probe.h"
+#include "wf_rawb.h"
 
 static const struct wf_prb_cam prb_eosm;          /* RAW probe P0, defined below */
 
@@ -194,6 +195,86 @@ static const struct wf_prb_cam prb_eosm = {
     .rname = prb_rname, .sname = prb_sname, .cwin = prb_cwin, .read = prb_read_eosm,
 };
 
+/* ------------------------------------------------------------------ RAW develop "B" (wf_rawb.c): the raw of the NN shot
+ * P0 (raw-path BAOCAO section 7, CORE-NOTES 10): the 14-bit raw (pitch 9240, 5280 x 3528, RGGB, black 2048) sits in one of
+ * two buffers 32 MB apart (0x48004894 / 0x46004894 in the probe runs). Its origin S comes from the parameter block's +0x50
+ * (S = (+0x50 | uncached) - 480242) or, when that is 0 (the first shot after power on), from EDMAC WR0 (S = (WR0 | uncached)
+ * - 32626440). Neither is trusted: the pointer names the previous shot at the end of a burst. So the worker gets S, S - 32 MB
+ * and S + 32 MB (those inside the pool) and checks each against Canon's frame (wf_rsrc.c). JPEG pixel (x, y) = raw pixel
+ * (84 + x, 64 + y) in the L 3:2 frame (Day09 CR2s). Only RAW + L fine single shots (drive single / self-timer): a burst
+ * would hold every frame 30 s, MRAW / SRAW are other buffers. */
+#define RB_PICQ      0x3070000                   /* PICQ_RAW_JPG_LARGE_FINE (MRAW + L 0x3070001, SRAW + L 0x3070002) */
+#define RB_PITCH     9240
+#define RB_RW        5280
+#define RB_RH        3528
+#define RB_PB_OFF    480242u
+#define RB_WR0_OFF   32626440u
+#define RB_STEP      0x2000000u
+#define RB_WR0       0xC0F04008u
+extern int drive_mode;
+
+/* the white of the shot's ISO when the raw has no clip pile-up to measure (Day09 / Day10 CR2s: the 1/3-stop ISOs clip
+   lower) */
+static int rb_white(int iso)
+{
+    switch (iso) {
+    case 100: return 13582;
+    case 160: case 320: return 12636;
+    case 200: return 15303;
+    }
+    return 15200;
+}
+
+static void rawb_fill(struct wf_frame *f, int ga)
+{
+    int dm = drive_mode;
+    if (pic_quality != RB_PICQ) {
+        f->rb_skip = WF_RBS_QUALITY;
+        f->rb_arg = pic_quality;
+        return;
+    }
+    if (ga != 0) {
+        f->rb_skip = WF_RBS_ASPECT;
+        f->rb_arg = ga;
+        return;
+    }
+    if (dm != 0 && dm != 0x10 && dm != 0x11) {  /* DRIVE_SINGLE, DRIVE_SELFTIMER_REMOTE, DRIVE_SELFTIMER_2SEC */
+        f->rb_skip = WF_RBS_DRIVE;
+        f->rb_arg = dm;
+        return;
+    }
+    uint32_t pbv = PRB_RD32(PRB_PB + 0x50), wr0 = PRB_RD32(RB_WR0), s = 0;
+    if (pbv)
+        s = (pbv | 0x40000000u) - RB_PB_OFF;
+    else if (wr0)
+        s = (wr0 | 0x40000000u) - RB_WR0_OFF;
+    uint32_t c[3] = { s, s - RB_STEP, s + RB_STEP };
+    int n = 0;
+    for (int i = 0; i < 3 && s; i++) {
+        uint32_t b = check_buf(c[i], (uint32_t)RB_PITCH * RB_RH);
+        int dup = 0;
+        for (int j = 0; j < n; j++)
+            dup |= f->rawc[j] == b;
+        if (b && !dup)
+            f->rawc[n++] = b;
+    }
+    if (!n) {
+        f->rb_skip = WF_RBS_NOADDR;
+        f->rb_arg = (int)(pbv ? pbv : wr0);
+        return;
+    }
+    f->nrawc = (uint8_t)n;
+    f->fmt = WF_FMT_RAW14;
+    f->bpp = 14;
+    f->cfa = 0;
+    f->black = 2048;
+    f->white = (uint16_t)rb_white(wf_iso_now());
+    f->rpitch = RB_PITCH;
+    f->rax0 = 72; f->ray0 = 52; f->rax1 = RB_RW; f->ray1 = RB_RH;
+    f->rx0 = 84; f->ry0 = 64;
+    f->rbx0 = 16; f->rbx1 = 64;
+}
+
 /* Canon task (ShootSsDevelop / DianaFront / DianaRear): gates, then the worker. No logging, no file I/O here. */
 static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
 {
@@ -233,6 +314,8 @@ static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
     f.pitch = w * 2;
     f.data = f.dst = (void *)(uintptr_t)buf;
     f.raw = raw;
+    if (k == K_NN && wf_rawb)
+        rawb_fill(&f, ga);
     f.t_post = get_ms_clock();
     int rc = wf_shot_run(&f, 0);
     if (rc != 0)

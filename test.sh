@@ -23,9 +23,9 @@ S=$R/src
 H=$R/tests/host
 case $CAM in
   EOSM) ML=/root/ml/expsim/mls; PLAT=EOSM.202; CAMDEF=; CAMSRC=wf_cam_eosm.c
-        ALL="SHOT SHOT:nocam SHOT:busy FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA CLOG2 CUBE65 PROBE PROBE:boot LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA CLOG2 CUBE65 PROBE PROBE:boot RAWB LOG LOG:big LOG:new LOGCHK" ;;
   5D2)  ML=/root/ml/q5d2/ml; PLAT=5D2.212; CAMDEF=-DWF_BUILD_5D2; CAMSRC=wf_cam_5d2.c
-        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA CLOG2 CUBE65 LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA CLOG2 CUBE65 RAWB LOG LOG:big LOG:new LOGCHK" ;;
   *) echo "CAM must be EOSM or 5D2"; exit 2 ;;
 esac
 MODES=${MODES:-$ALL}
@@ -37,7 +37,7 @@ T=$B/test
 PACKCASES="ok missing magic index top fnv code dup flags real"
 REAL=${WF_PACK_REAL:-/root/ml/wf_data/out/WFFILMS.DAT}
 
-if [ ! -f $O/wf_shot.o ] || [ ! -f $O/wf_logout.o ]; then
+if [ ! -f $O/wf_shot.o ] || [ ! -f $O/wf_logout.o ] || [ ! -f $O/wf_rawb.o ]; then
   echo "== build.sh CAM=$CAM (module objects missing)"
   CAM=$CAM PACKS=0 OUT=$B bash $R/build.sh > $B.build.log 2>&1
   [ -f $O/wf_shot.o ] || { tail -30 $B.build.log; echo "build failed"; exit 1; }
@@ -59,8 +59,9 @@ HCC="arm-linux-gnueabi-gcc -O1 -marm -march=armv5te -Wall -Wno-unused-function -
 $HCC -c -o $T/obj/host_ml.o $H/host_ml.c
 $HCC -c -o $T/obj/wf_test.o $H/wf_test.c
 MOD="wf_main.o wf_menu.o wf_shot.o wf_pv.o wf_probe.o wf_loglut.o wf_llk.o wf_llk_arm.o wf_film.o yh_halo.o wf_mist.o yg_grain.o yg_stocks.o
- wf_fx.o wf_expsim.o wf_catalog.o wf_logout.o"
+ wf_fx.o wf_expsim.o wf_catalog.o wf_logout.o wf_rawb.o"
 [ -f $O/wf_expk.o ] && MOD="$MOD wf_expk.o"
+MOD="$MOD wf_dev.o wf_rsrc.o"                                     # RAW develop "B": the develop and the buffer check
 arm-linux-gnueabi-gcc -static -pthread -o $T/wf_test $T/obj/wf_test.o $T/obj/host_ml.o $(for o in $MOD; do echo $O/$o; done) \
   $T/obj/wf_cam_host.o $T/obj/wf_ui_stub.o $T/obj/wf_expoff.o -lm -Wl,--no-enum-size-warning -Wl,--no-wchar-size-warning -Wl,--no-warn-execstack
 set +e
