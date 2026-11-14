@@ -67,7 +67,7 @@ int  wf_dark_eta_s(const struct wf_dark_view *v);   /* seconds left for the roll
 #define WF_UI_SCR_DARK 2
 void wf_ui_open_scr(int scr);                    /* open the UI on a screen (WF_UI_SCR_*), wf_ui.c */
 /* the HUD over LiveView (src/ui/wf_dark_ui.c; wf_task draws it while a roll is in the camera): wfdr_hud_fonts(1) loads
-   the font pack once (0 frees it), wfdr_hud draws into ML's bitmap with ML's own colour indices; blink = the "wind on"
+   the font pack once (0 frees it, 2 reads it again; 1 back = the read may pass later: card busy), wfdr_hud draws into ML's bitmap with ML's own colour indices; blink = the "wind on"
    cue. mode: FULL = roll + film chip, big counter, ladder (2.5 s); FADE = the same, dimmed and dithered (0.4 s);
    SMALL = only a small dim counter; CLEAR = SMALL after clearing the rectangles FULL drew (to 0, LiveView shows) */
 enum { WF_HUD_FULL = 0, WF_HUD_FADE, WF_HUD_SMALL, WF_HUD_CLEAR };

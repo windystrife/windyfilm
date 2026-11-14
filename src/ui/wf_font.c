@@ -22,9 +22,16 @@ static struct wff wff[3];
 static int wff_ok[3];
 static font *rbf[3];                    /* argnor23, argnor28, term12 (fallback for the small text) */
 static int fstat, fwhy;                         /* fwhy: why our pack is not used (WFF_W_*) */
-enum { WFF_W_OK, WFF_W_FILE, WFF_W_HEADER, WFF_W_MEM, WFF_W_READ, WFF_W_PARSE, WFF_W_N };
+enum { WFF_W_OK, WFF_W_FILE, WFF_W_HEADER, WFF_W_MEM, WFF_W_READ, WFF_W_PARSE, WFF_W_BUSY, WFF_W_N };
 static const char *const fwhy_names[WFF_W_N] = { "ok", "not on the card", "bad header", "no memory", "read failed",
-                                                 "bad font table" };
+                                                 "bad font table", "card busy" };
+
+/* a failed pack read (WF_RD_*) in WFF_W_* words */
+static int why_of(int rc)
+{
+    return rc == WF_RD_MISSING ? WFF_W_FILE : rc == WF_RD_BUSY ? WFF_W_BUSY : rc == WF_RD_NOMEM ? WFF_W_MEM
+         : rc == WF_RD_SHORT ? WFF_W_HEADER : WFF_W_READ;
+}
 
 static inline unsigned rd16(const uint8_t *p) { return p[0] | (p[1] << 8); }
 static inline uint32_t rd32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }
@@ -91,9 +98,27 @@ static int wff_parse(void)
 }
 
 static int wff_refs;                                        /* the UI and the roll HUD share the pack */
+static void wff_free(void)
+{
+    if (wff_buf) free(wff_buf);
+    wff_buf = 0;
+    wff_len = 0;
+    for (int i = 0; i < 3; i++) wff_ok[i] = 0;
+}
+
+/* one more user (the UI or the roll HUD): read only when nobody has it yet, or the last read may pass now (card busy,
+ * memory); a pack that is there, or missing for good, is shared as it is */
 int wff_open(void)
 {
-    if (wff_refs++ > 0 && wff_buf) return 0;
+    if (wff_refs++ > 0 && !wff_again()) return fstat;
+    return wff_reload();
+}
+
+/* also again while open (the UI task tries a pack that Canon's card kept from it again): starts from nothing, the
+ * users stay */
+int wff_reload(void)
+{
+    wff_free();
     fstat = 0;
     rbf[0] = rbf_lookup("argnor23");
     rbf[1] = rbf_lookup("argnor28");
@@ -103,9 +128,9 @@ int wff_open(void)
 
     uint8_t hdr[16];
     uint32_t size = 0;
-    wff_len = 0;
-    fwhy = WFF_W_FILE;
-    if (wf_card_read(WFF_PATH, 0, hdr, 16, &size) == 0)
+    int rc = wfui_read(WFF_PATH, 0, hdr, 16, &size);
+    fwhy = why_of(rc);
+    if (rc == WF_RD_OK)
     {
         uint32_t n = rd32(hdr + 8);
         fwhy = WFF_W_HEADER;
@@ -115,8 +140,9 @@ int wff_open(void)
             wff_buf = malloc(n);
             if (wff_buf)
             {
-                fwhy = WFF_W_READ;
-                if (wf_card_read(WFF_PATH, 0, wff_buf, n, &size) == 0)
+                rc = wfui_read(WFF_PATH, 0, wff_buf, n, &size);
+                fwhy = why_of(rc);
+                if (rc == WF_RD_OK)
                 {
                     wff_len = n;
                     fwhy = wff_parse() ? WFF_W_PARSE : WFF_W_OK;
@@ -129,19 +155,24 @@ int wff_open(void)
         fstat |= 1;
         if (fwhy == WFF_W_OK)
             fwhy = WFF_W_PARSE;                     /* a size slot missing or bad */
-        rbf[2] = rbf_lookup("term12");
+        if (!wff_ok[0] && !wff_ok[1] && !wff_ok[2])
+        {
+            if (wff_buf) free(wff_buf);             /* nothing usable in it: no buffer held for nothing */
+            wff_buf = 0;
+            wff_len = 0;
+        }
+        rbf[2] = rbf_lookup("term12");              /* 0 when ML has none: that text is left out, nothing else */
     }
     return fstat;
 }
 const char *wff_why(void) { return fwhy >= 0 && fwhy < WFF_W_N ? fwhy_names[fwhy] : "?"; }
+int wff_again(void) { return (fstat & 1) && (fwhy == WFF_W_BUSY || fwhy == WFF_W_READ || fwhy == WFF_W_MEM); }
 
 void wff_close(void)
 {
     if (wff_refs > 0 && --wff_refs > 0) return;
-    if (wff_buf) free(wff_buf);
-    wff_buf = 0;
-    wff_len = 0;
-    for (int i = 0; i < 3; i++) wff_ok[i] = 0;
+    wff_refs = 0;
+    wff_free();
 }
 
 int wff_status(void) { return fstat; }

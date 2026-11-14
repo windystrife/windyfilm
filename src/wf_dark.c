@@ -76,6 +76,7 @@ static volatile int req_kind, req_film, req_exp;  /* 1 load, 2 rewind, 3 close *
 static int poll_F = -1, poll_D = -1, poll_stable, wind_t = -100000;
 static int pq_old = -1, rv_old = -1, prop_t;
 static int hud_on, hud_fonts_on, hud_t, hud_mode = -1, info_t = -100000, hud_sig, hud_job;
+static int hud_font_again, hud_font_t, hud_font_n;  /* the font pack read again while Canon held the card */
 static volatile int dk_running;                   /* the darkroom task owns the roll */
 
 const struct wf_roll *wf_roll_now(void) { return &roll; }
@@ -229,14 +230,23 @@ static void roll_props(int idle)
 static void roll_hud(void)
 {
     int want = wf_roll_open(&roll) && !dk_running && lv && !gui_menu_shown() && !wf_ui_is_open() && !is_play_mode();
+    int now = get_ms_clock();
     if (wf_roll_open(&roll) && !hud_fonts_on && !wf_ui_is_open()) {
-        wfdr_hud_fonts(1);
+        hud_font_again = wfdr_hud_fonts(1) == 1;
         hud_fonts_on = 1;
+        hud_font_t = now;
+        hud_font_n = 0;
     } else if (!wf_roll_open(&roll) && hud_fonts_on && !wf_ui_is_open()) {
         wfdr_hud_fonts(0);
         hud_fonts_on = 0;
+    } else if (hud_fonts_on && hud_font_again && !wf_ui_is_open() && now - hud_font_t >= 2000) {
+        hud_font_t = now;                        /* (the UI reads it again itself while it is open) */
+        hud_font_again = wfdr_hud_fonts(2) == 1;
+        if (++hud_font_n >= 5 || !hud_font_again) {
+            wf_log("roll: HUD fonts %s after %d reads again", hud_font_again ? "still not read" : "read", hud_font_n);
+            hud_font_again = 0;
+        }
     }
-    int now = get_ms_clock();
     int sig = (int)(roll.num * 4099u + roll.film * 37u + roll.exp * 5u + roll.state) ^ (wf_loaded() << 20);
     if (sig != hud_sig) {                        /* a new roll, film or state */
         hud_sig = sig;

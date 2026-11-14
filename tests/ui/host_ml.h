@@ -125,6 +125,7 @@ int  host_bmp_muted_at_req(void);       /* muted at the last SetGUIRequestMode(n
 int  host_lv_starts(void);              /* force_liveview() calls since host_gui_set */
 int  host_tasks(void);                  /* task_create() calls */
 void host_task_fail(int fail);          /* task_create returns an odd (error) handle */
+void host_hide_font(const char *name);  /* font_by_name does not find this ML font (0: all found again) */
 int  host_palette_is_canon(void);               /* every entry 0x50..0xFE back to Canon's value */
 int  host_front_is_clear(void);
 long host_live_allocs(void);

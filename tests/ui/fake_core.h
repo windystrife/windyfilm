@@ -10,4 +10,8 @@ void fake_set_missing(int id);             /* film id not on the card */
 void fake_set_status(const char *s);
 void fake_set_card(const char *dir);       /* root that ML/DATA/... paths are read from */
 int  fake_row_value(int row);
+void fake_card_busy(int n, int from_pos);  /* the next n card reads at pos >= from_pos fail as WF_RD_BUSY (-1: all) */
+int  fake_card_reads(void);                /* wf_card_read calls so far */
+void fake_log_clear(void);
+int  fake_log_has(const char *s);          /* a wf_log line since fake_log_clear contains s */
 #endif

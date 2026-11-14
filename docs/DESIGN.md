@@ -399,6 +399,9 @@ Stocks keep their Windy names, and there are no brand logos.
     full), so the frames left are always in view.
   - The info shows again for 2.5 s when LiveView comes back (or the ML menu, the UI or PLAY goes away), after each
     shot (Canon's job ends), when a frame counts, and when the roll, its film or its state changes.
+  - The HUD shares the UI's font pack `WFFONTS.DAT` (`wff_open` counts its users; `wff_reload` reads it again for a
+    user that has it). A pack Canon's card kept from the HUD (card busy, as at boot) is read again every 2 s, at most 5
+    times, while the UI is closed (the UI retries its own, main c114bfe).
 - **End / close.** "End roll now" (menu) ends the roll early (the roll is rewound: no more frames); starting the darkroom rewinds a loaded roll first.
   "Close roll" gives up on the frames not yet developed: they become K and their CR2s stay untouched.
 
@@ -582,12 +585,19 @@ The layout, 720x480 (the ML bitmap):
   half-press closes without LiveView. "Already loaded" and the errors keep the browser open with their message.
 - **Never a dead camera (owner 11-14, EOS M: sometimes neither the film menu nor the ML menu opened):** the browser
   takes every key, so a UI task that does not run left both menus dead. The film worker (prio 0x1C) develops a shot for
-  seconds (RAW develop 35-45 s) and starved the prio-0x1E UI task a TRASH had just started. The UI task now runs at
-  0x1B, above the worker and below ML's menu_task (0x1A) and Canon's GUI. It beats at every step; a key that finds no
+  seconds (RAW develop 35-45 s), and wf_task (0x1E) builds the grain tables for 2-19 s without sleeping; the owner's
+  RAWB2 log shows the old prio-0x1E UI task waiting out that build (DryOS does not time-slice equal priorities). The UI
+  task now runs at 0x1B, above both and below ML's menu_task (0x1A) and Canon's GUI. It beats at every step; a key that finds no
   beat for 2 s goes to Canon / ML and asks the task to close when it runs (log `ui: no beat for N ms (state, phase)`;
   phases listed at the top of `src/ui/wf_ui.c`). The EOS M two-finger tap then opens the ML menu (no module took MENU).
   The open is claimed under `cli` (TRASH in the GUI task and the menu entry in wf_task cannot start two tasks), a failed
   `task_create` leaves the browser closed, and keys pass on while the task starts LiveView after a load.
+- **Pack reads while Canon holds the card** (owner's RAWB2 log, EOS M 10 s after boot: "fonts WFFONTS.DAT not on the
+  card, cans WFCANS.DAT read failed" with both files there). `wf_card_read` returns `WF_RD_*` (wf_api.h); a file it
+  cannot size is `MISSING` only when the card answers for `AUTOEXEC.BIN`, else `BUSY`. At open the pack reads are tried
+  again for up to 1.5 s (beating); a pack still not read is read again every 2 s while the browser is up (5 times) and
+  drawn when it loads; until then the small text is ML's term12 and every can is the plain one (16 colours; no pack
+  state is kept after a failure). A can image whose read fails is not cached: plain for now, read again after 1 s.
 - **INFO** toggles a details overlay: full description, ISO, kelvin, prints, table source.
 
 ## 6. Build and tests

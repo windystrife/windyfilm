@@ -713,9 +713,10 @@ static int dark_tick(int now)
 static int hud_fonts;
 int wfdr_hud_fonts(int on)
 {
-    if (on && !hud_fonts) { hud_fonts = 1; return wff_open(); }
-    if (!on && hud_fonts) { hud_fonts = 0; wff_close(); }
-    return 0;
+    if (on == 1 && !hud_fonts) { hud_fonts = 1; wff_open(); }
+    else if (on == 0 && hud_fonts) { hud_fonts = 0; wff_close(); }
+    else if (on == 2 && hud_fonts && wff_again()) wff_reload();   /* Canon held the card: read it again */
+    return hud_fonts && wff_again();
 }
 
 /* the HUD's rectangles go back to 0 (LiveView shows through): every pixel (CLEAR), or every other one (FADE: a dither,

@@ -12,8 +12,10 @@
  *
  * Never a dead camera (owner 11-14, EOS M: "sometimes neither the film menu nor the ML menu opens"). While the browser is
  * up it takes every key, so a UI task that does not run would leave both menus dead: the film worker (film_yuv, prio
- * 0x1C) develops a shot for seconds (RAW develop 35-45 s) and starved the old prio-0x1E UI task, which a TRASH had just
- * started. Now the UI task runs above the worker, and it beats (hb, phase) at every step; a key that finds no beat for
+ * 0x1C) develops a shot for seconds (RAW develop 35-45 s), and wf_task (0x1E) builds the grain tables for 2-19 s
+ * without sleeping (the owner's RAWB2 log: a TRASH during that build, "ui: closed" right after "fx grain ... ready",
+ * no "ui: open"; DryOS does not time-slice equal priorities, so the old prio-0x1E UI task waited the whole build).
+ * Now the UI task runs above both, and it beats (hb, phase) at every step; a key that finds no beat for
  * STALE_MS goes to Canon / ML and asks the task to close when it runs again (the EOS M two-finger tap then opens the ML
  * menu: no module took MENU). The task is never declared dead from outside: it may still run and give the screen back.
  * Phases in the log: 1 created, 2 ML menu away, 3 film list, 4 fonts, 5 cans, 6 Canon dialog, 7 screen, 8 palette,
@@ -49,6 +51,31 @@ static volatile int scr_req = -1;       /* a switch asked for while open (the UI
 static volatile int hb, phase;          /* the UI task's last sign of life (ms clock) and where it was */
 static volatile int stale_said;
 static inline void beat(int p) { phase = p; hb = get_ms_clock(); }
+
+/* Pack reads (fonts, cans). Canon may hold the card for a while (owner's log 11-14, EOS M 10 s after boot: "fonts
+ * WFFONTS.DAT not on the card, cans WFCANS.DAT read failed" with both files there). At open a busy read is tried again
+ * until PACK_WAIT_MS (beating; a close request stops it). A pack still not read is tried again every PACK_RETRY_MS
+ * while the browser is up, PACK_TRIES times, and drawn as soon as it loads; until then the small text is ML's term12
+ * and the cans are the plain ones. A file the card says is not there is not tried again. */
+#define PACK_WAIT_MS    1500
+#define PACK_RETRY_MS   2000
+#define PACK_TRIES      5
+static int rd_until, rd_tries;          /* wfui_read: no more waiting after rd_until (ms clock); reads tried again */
+static int pack_again, pack_n, t_pack;  /* bit 0 fonts, bit 1 cans still to read; retries made; the last one */
+
+int wfui_read(const char *path, uint32_t pos, void *p, uint32_t n, uint32_t *size)
+{
+    int ph = phase;
+    for (;;)
+    {
+        beat(ph);
+        int rc = wf_card_read(path, pos, p, n, size);
+        if (rc == WF_RD_OK || rc == WF_RD_MISSING || rc == WF_RD_SHORT || close_req || get_ms_clock() - rd_until >= 0)
+            return rc;
+        rd_tries++;
+        msleep(100);
+    }
+}
 
 /* 5D2: a Canon dialog under the browser, as ML's own menu does (menu.c piggyback_canon_menu, GUIMODE_ML_MENU =
  * lv ? 38 : 2 on the 5D2; mode 0 while recording).
@@ -701,12 +728,17 @@ void wfui_task_begin(void)
     msg = 0;
     glow_id = -1;
 
+    rd_until = get_ms_clock() + PACK_WAIT_MS;
+    rd_tries = 0;
     beat(PH_FONTS);
     int fs = wff_open();
     wfp_init_fixed();
     beat(PH_CANS);
     int cs = wfc_open();
-    if (scr != WFUI_SCR_BROWSER) wfdr_enter(scr);
+    rd_until = get_ms_clock();                              /* while open: one try per read, no waiting */
+    pack_again = (fs & 1 && wff_again() ? 1 : 0) | (cs && wfc_again() ? 2 : 0);
+    pack_n = 0;
+    if (scr != WFUI_SCR_BROWSER) wfdr_enter(scr);           /* after the cans: the darkroom's print tones use their entries */
     if (close_req) return;
     beat(PH_DIALOG);
     dlg_take();
@@ -721,14 +753,16 @@ void wfui_task_begin(void)
     }
     beat(PH_PAL);
     wfp_take();
-    char fw[96];                                /* wff_open / wfc_open return codes in words (0 = loaded) */
+    char fw[96], rt[48];                        /* wff_open / wfc_open return codes in words (0 = loaded) */
     snprintf(fw, sizeof fw, "%s%s%s", fs & 1 ? wff_why() : "ok", fs & 2 ? ", no argnor23" : "",
              fs & 4 ? ", no argnor28" : "");
-    wf_log("ui: open, %d films, fonts WFFONTS.DAT %s, cans WFCANS.DAT %s (%d colours)", nlist, fw, wfc_why(cs),
-           wfc_pal_used());
-    wfp_log();
+    rt[0] = 0;
+    if (rd_tries) snprintf(rt, sizeof rt, ", %d reads tried again", rd_tries);
+    wf_log("ui: open, %d films, fonts WFFONTS.DAT %s, cans WFCANS.DAT %s (%s%d colours)%s%s", nlist, fw, wfc_why(cs),
+           cs ? "plain cans, " : "", wfc_pal_used(), rt, pack_again ? ", packs tried again while open" : "");
+    wfp_log(wfc_pal_used());
     int now = get_ms_clock();
-    t_probe = t_force = t_heal = now;
+    t_probe = t_force = t_heal = t_pack = now;
     dirty = 1;
     beat(PH_TICK);
     st = ST_OPEN;
@@ -757,6 +791,39 @@ static int anim_tick(int now)
     return 0;
 }
 
+/* a pack Canon's card kept from the open, read again (one try per read); drawn at once when it loads */
+static void pack_retry(int now)
+{
+    t_pack = now;
+    pack_n++;
+    if (pack_again & 1)
+    {
+        beat(PH_FONTS);
+        int fs = wff_reload();                              /* the UI's own use stays counted (the roll HUD shares it) */
+        if (!(fs & 1)) wf_log("ui: fonts WFFONTS.DAT ok, read again %d", pack_n);
+        else if (!wff_again()) wf_log("ui: fonts WFFONTS.DAT %s, read again %d", wff_why(), pack_n);
+        if (!(fs & 1) || !wff_again()) pack_again &= ~1;
+        dirty = 1;
+    }
+    if ((pack_again & 2) && scr != WFUI_SCR_DARK)          /* the darkroom draws no cans: its print tones hold those */
+    {                                                       /* palette entries */
+        beat(PH_CANS);
+        int cs = wfc_open();
+        if (!cs) wf_log("ui: cans WFCANS.DAT ok (%d colours), read again %d", wfc_pal_used(), pack_n);
+        else if (!wfc_again()) wf_log("ui: cans WFCANS.DAT %s, read again %d", wfc_why(cs), pack_n);
+        if (!cs || !wfc_again()) pack_again &= ~2;
+        glow_id = -1;                                       /* the glow of the selected film from the pack now */
+        dirty = 1;
+    }
+    if (pack_again && pack_n >= PACK_TRIES)
+    {
+        wf_log("ui: packs read again %d times: fonts %s, cans %s; plain until the next open", pack_n,
+               pack_again & 1 ? wff_why() : "ok", pack_again & 2 ? wfc_why(wfc_status()) : "ok");
+        pack_again = 0;
+    }
+    beat(PH_TICK);
+}
+
 int wfui_task_tick(void)
 {
     beat(PH_TICK);
@@ -772,6 +839,7 @@ int wfui_task_tick(void)
     if (dlg_lost()) return 1;
     int now = get_ms_clock();
     if (anim_on) return anim_tick(now);
+    if (pack_again && now - t_pack >= PACK_RETRY_MS) pack_retry(now);
     uint32_t gen = wf_gen();
     if (gen != drawn_gen) dirty = 1;
     if (msg && now - msg_until >= 0) { msg = 0; dirty = 1; }

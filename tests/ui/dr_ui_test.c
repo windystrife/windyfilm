@@ -93,6 +93,7 @@ static void roll_of(int film, int exp, int n, int state)
 }
 
 static uint8_t hv[480 * 720];
+#define MLC_W COLOR_WHITE                                   /* ML's white index in the HUD dump */
 static void hud_dump(const char *name, int blink, int mode, int keep)   /* keep: draw over the last dump (CLEAR) */
 {
     uint8_t *v = hv;
@@ -253,6 +254,26 @@ int main(int argc, char **argv)
     roll_of(colour, 36, 7, WF_RS_REWOUND);
     hud_dump("rewound", 0, WF_HUD_FULL, 0);
     wfdr_hud_fonts(0);
+    CHECK(host_live_allocs() == 0, "HUD fonts freed: %ld allocations left", host_live_allocs());
+
+    /* 11. the font pack shared by the HUD and the UI (wff_open counts its users): the UI's open finds it, its close
+     * leaves it to the HUD, the HUD's close frees it */
+    wfdr_hud_fonts(1);
+    long a0 = host_live_allocs();
+    CHECK(a0 > 0, "HUD fonts: no pack held");
+    roll_of(bw, 12, 5, WF_RS_LOADED);
+    open_scr(WFUI_SCR_ROLL);
+    key(MODULE_KEY_MENU);
+    tick(2);
+    CHECK(closed, "MENU did not close (shared pack)");
+    wfui_task_end();
+    CHECK(host_live_allocs() == a0, "the UI's close took the HUD's pack (%ld -> %ld allocations)", a0, host_live_allocs());
+    hud_dump("after_ui", 0, WF_HUD_FULL, 0);
+    int px = 0;
+    for (int i = 0; i < 480 * 720; i++) px += hv[i] == MLC_W;
+    CHECK(px > 100, "HUD text after the UI closed: %d white pixels", px);
+    wfdr_hud_fonts(0);
+    CHECK(host_live_allocs() == 0, "the HUD's close: %ld allocations left", host_live_allocs());
 
     printf("peak UI heap %ld bytes\n", host_peak_bytes());
     printf("%s: %d failure(s)\n", fails ? "FAIL" : "PASS", fails);
