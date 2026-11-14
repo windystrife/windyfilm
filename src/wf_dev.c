@@ -329,6 +329,31 @@ int wf_dev_build_disp(struct wf_dev_tabs *t, int cam, const char *cube, int ei, 
     return rc;
 }
 
+static uint32_t wf_dv_fnv(uint32_t h, const void *p, uint32_t n)
+{
+    const uint8_t *b = p;
+    while (n--)
+        h = (h ^ *b++) * 16777619u;
+    return h;
+}
+
+uint32_t wf_dev_tabs_id(int cam, int src, int curve)
+{
+    uint32_t w[5] = { WF_DEV_TABS_VER, (uint32_t)sizeof(struct wf_dev_tabs), (uint32_t)src, (uint32_t)curve, (uint32_t)cam };
+    uint32_t h = wf_dv_fnv(2166136261u, w, sizeof w);
+    if (cam >= 0 && cam < WF_DEV_NCAM)
+        h = wf_dv_fnv(h, wf_dev_rgbcam[cam], sizeof wf_dev_rgbcam[cam]);
+    h = wf_dv_fnv(h, wf_dv_eik, sizeof wf_dv_eik);
+    h = wf_dv_fnv(h, wf_ll_dec, sizeof wf_ll_dec);           /* the auto exposure's neutral axis */
+    if (curve >= 1 && curve <= WF_LL_NCURVE) {
+        h = wf_dv_fnv(h, wf_ll_mat[curve - 1], sizeof wf_ll_mat[curve - 1]);
+        h = wf_dv_fnv(h, wf_ll_enc[curve - 1], sizeof wf_ll_enc[curve - 1]);
+        h = wf_dv_fnv(h, &wf_dv_eib[curve - 1], 4);
+        h = wf_dv_fnv(h, &wf_dv_eid[curve - 1], 4);
+    }
+    return h ? h : 1;
+}
+
 int wf_dev_build(struct wf_dev_tabs *t, int src, int curve, int cam, const char *cube, int ei, int autoexp,
                  struct wf_ll_info *info)
 {

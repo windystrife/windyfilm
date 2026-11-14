@@ -156,6 +156,11 @@ Bật:
   RAW ra sRGB rồi áp thẳng cube gốc "L Leica 2" 33^3 lên mã sRGB, không qua
   V-Log. Cần file ML/DATA/LEICAVSR.CUB (cube gốc, đã có trên thẻ).
   Highlights / Shadows có tác dụng; grain / halation như phim.
+- Bảng RAW develop của lon Log + LUT / Leica (mới): lần đầu dựng từ cube (cube
+  65^3 của CinePrint lâu hơn, có thể vài chục giây), rồi lưu ở ML/DATA/<tên
+  cube>.RBT (356 KB). Những lần sau (bật máy, đổi phim, xem ảnh xong) đọc file
+  đó, khoảng 1 giây. Log ghi "... .RBT hit" hoặc lý do dựng lại. Xoá file .RBT
+  thì lần sau dựng lại, không sao.
 - Khi RAW develop Off, thẻ này chạy giống thẻ EOSM_WindyFilm (cùng bản main,
   có RAW probe v2 và Highlights / Shadows).
 - Dòng menu báo trạng thái: đang nạp bảng, sẵn sàng ("About 30 s per shot"),

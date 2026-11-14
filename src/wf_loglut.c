@@ -1103,6 +1103,88 @@ int wf_loglut_load_cached(const char *cube, const char *cache, int mode, struct 
     return rc;
 }
 
+/* ------------------------------------------------------------------ cache files of other builders (wf_loglut.h) */
+int wf_llb_cube_id(const char *cube, uint32_t id[4])
+{
+    struct wf_llc_hdr k;
+    char *z = (char *)&k;
+    for (unsigned i = 0; i < sizeof k; i++) z[i] = 0;
+    if (!cube || !id)
+        return -1;
+    char *dma = __mem_malloc(WF_LL_BUF, WF_MEM_DMA | WF_MEM_TMP, "wf_loglut.c", 0);
+    if (!dma)
+        return -1;
+    int rc = -1;
+    if (wf_llc_stat(cube, &k) == 0 && (k.chash = wf_llc_key(cube, k.csize, dma)) != 0) {
+        id[0] = k.csize;
+        id[1] = k.ctlo;
+        id[2] = k.cthi;
+        id[3] = k.chash;
+        rc = 0;
+    }
+    __mem_free(dma);
+    return rc;
+}
+
+int wf_llb_read(const char *path, const uint32_t *key, int nkey, void *blob, uint32_t n)
+{
+    uint32_t sz = 0, hash = 2166136261u, tail = 0, kb[WF_LLB_MAXKEY];
+    if (!path || !key || nkey < 1 || nkey > WF_LLB_MAXKEY || !blob || FIO_GetFileSize(path, &sz) != 0)
+        return WF_LLB_NONE;
+    if (sz != 4u * (uint32_t)nkey + n + 4u)
+        return WF_LLB_BAD;
+    char *dma = __mem_malloc(WF_LL_BUF, WF_MEM_DMA | WF_MEM_TMP, "wf_loglut.c", 0);
+    if (!dma)
+        return WF_LLB_NONE;
+    void *f = FIO_OpenFile(path, WF_O_RDONLY);
+    int rc = f ? WF_LLB_HIT : WF_LLB_BAD;
+    if (!rc && wf_llc_io(f, dma, (uint8_t *)kb, 4u * (uint32_t)nkey, &hash, 0))
+        rc = WF_LLB_BAD;
+    for (int i = 0; !rc && i < nkey; i++)
+        if (kb[i] != key[i])
+            rc = WF_LLB_KEY;
+    if (!rc && wf_llc_io(f, dma, (uint8_t *)blob, n, &hash, 0))
+        rc = WF_LLB_BAD;
+    if (!rc && (wf_llc_io(f, dma, (uint8_t *)&tail, 4, 0, 0) || tail != hash))
+        rc = WF_LLB_BAD;
+    if (f)
+        FIO_CloseFile(f);
+    __mem_free(dma);
+    return rc;
+}
+
+int wf_llb_write(const char *path, const uint32_t *key, int nkey, const void *blob, uint32_t n)
+{
+    uint32_t hash = 2166136261u, kb[WF_LLB_MAXKEY];
+    if (!path || !key || nkey < 1 || nkey > WF_LLB_MAXKEY || !blob)
+        return WF_FE_OPEN;
+    for (int i = 0; i < nkey; i++)
+        kb[i] = key[i];
+    char *dma = __mem_malloc(WF_LL_BUF, WF_MEM_DMA | WF_MEM_TMP, "wf_loglut.c", 0);
+    if (!dma)
+        return WF_FE_OPEN;
+    struct wf_fe e;
+    e.step = WF_FE_OK;
+    e.rc = 0;
+    void *f = wf_fcreate(path, &e);              /* only while Canon is idle, never over the old file (wf_fio.h) */
+    if (!f) {
+        __mem_free(dma);
+        return e.step != WF_FE_OK ? e.step : WF_FE_CREATE;
+    }
+    int rc = wf_llc_io(f, dma, (uint8_t *)kb, 4u * (uint32_t)nkey, &hash, 1);
+    if (!rc)
+        rc = wf_llc_io(f, dma, (uint8_t *)(uintptr_t)blob, n, &hash, 1);
+    if (!rc)
+        rc = wf_llc_io(f, dma, (uint8_t *)&hash, 4, 0, 1);
+    FIO_CloseFile(f);
+    __mem_free(dma);
+    if (rc) {
+        wf_fremove(path, &e);                    /* a cut file would fail its size check anyway */
+        return WF_FE_WRITE;
+    }
+    return WF_FE_OK;
+}
+
 const char *wf_flut_name[WF_FLUT_N] = { "Technical", "Vision3 250D", "Vision3 500T", "Portra 400", "Pro 400H",
                                        "Fuji 3513", "Kodak 2383 v3", "Kodak 2383 v5", "Kodak Ektar", "Windy Neutral", "Luca Bono",
                                        "Windy EKTA P", "Windy 250D P", "Windy 250D M", "Windy 500T P", "Windy 500T M", "Windy EKTA M",

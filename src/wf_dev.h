@@ -127,6 +127,12 @@ struct wf_dev_stat {
 int wf_dev_build_disp(struct wf_dev_tabs *t, int cam, const char *cube, int ei, int h, int s, struct wf_ll_info *info);
 int wf_dev_build(struct wf_dev_tabs *t, int src, int curve, int cam, const char *cube, int ei, int autoexp,
                  struct wf_ll_info *info);
+/* identity of the builder for a table cache (wf_rawb.c's .RBT): FNV-1a of WF_DEV_TABS_VER, the table size, src, curve,
+ * cam and every constant table wf_dev_build reads for them (camera matrix, LUT EI gains, the sRGB decode, the curve's gamut
+ * matrix, log encode and EI constants). Cached tables of another build id are rebuilt. Bump WF_DEV_TABS_VER whenever
+ * wf_dev_build's arithmetic changes the tables of a cube (a change of the constants alone changes the id by itself). */
+#define WF_DEV_TABS_VER 1
+uint32_t wf_dev_tabs_id(int cam, int src, int curve);
 
 /* ------------------------------------------------------------------ the shot (worker) */
 size_t wf_dev_scratch_bytes(int w, int h);       /* cacheable scratch for a frame of w x h (aligned to 32 inside) */
