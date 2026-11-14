@@ -57,9 +57,43 @@ uint32_t wf_host_rom_read(uint32_t a)
 /* ------------------------------------------------------------------ RAW probe (wf_cam_eosm.c): Canon memory, ROM lookup */
 uint32_t h_pb[56], h_edmac[5], h_nav_a[5];
 volatile int h_nav_calls;
+/* other Canon words (the 5D2 probe: job handles, develop blocks, shadows, registers): set one by one */
+static struct { uint32_t a, v; } h_mem[256];
+static int h_mem_n;
+void h_mem_set(uint32_t a, uint32_t v)
+{
+    for (int i = 0; i < h_mem_n; i++)
+        if (h_mem[i].a == a) {
+            h_mem[i].v = v;
+            return;
+        }
+    if (h_mem_n < (int)(sizeof h_mem / sizeof *h_mem)) {
+        h_mem[h_mem_n].a = a;
+        h_mem[h_mem_n++].v = v;
+    }
+}
+/* the 5D2 probe's ROM getters: GetImageBuffer, GetJobID, GetShootParam, GetFileContainer, shamem_read */
+uint32_t h_romcall_ret[5], h_romcall_fn[16], h_romcall_arg[16];
+volatile int h_romcalls;
+uint32_t wf_host_romcall(uint32_t fn, uint32_t arg)
+{
+    static const uint32_t g[5] = { 0xFF8AC4B8u, 0xFF8AA9D4u, 0xFF8AC4F8u, 0xFF8AEB84u, 0xFF9A550Cu };
+    int n = h_romcalls++;
+    if (n < 16) {
+        h_romcall_fn[n] = fn;
+        h_romcall_arg[n] = arg;
+    }
+    for (int i = 0; i < 5; i++)
+        if (fn == g[i])
+            return h_romcall_ret[i];
+    return 0xDEADBEEFu;
+}
 uint32_t wf_host_mem_read(uint32_t a)
 {
     static const uint32_t ed[5] = { 0xC0F04008u, 0xC0F26308u, 0xC0F26408u, 0xC0F26A08u, 0xC0F26B08u };
+    for (int i = 0; i < h_mem_n; i++)
+        if (h_mem[i].a == a)
+            return h_mem[i].v;
     if (a >= 0x41E82CECu && a < 0x41E82CECu + sizeof h_pb && !(a & 3))
         return h_pb[(a - 0x41E82CECu) / 4];
     for (int i = 0; i < 5; i++)

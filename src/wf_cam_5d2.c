@@ -80,21 +80,116 @@ static uint32_t check_buf(uint32_t b, uint32_t bytes)
 
 /* ------------------------------------------------------------------ RAW probe P0 (DESIGN 3.2), the 5D2 part
  * Same record, log and file as the EOS M (wf_probe.c), taken at the entry of the TOP and the BOT hook (kind K_TOP /
- * K_BOT in the record's mode bits 8-15). What is read (block, registers, ROM call, sources, the safe address range)
- * comes from raw-path/P0_5D2_SPEC.md; until then WF_PRB_CAN is 0 and nothing of it is built. Hook rules as on the
- * EOS M: no logging, no file I/O, only reads inside the spec's range, the frame is never written. */
+ * K_BOT in the record's mode bits 8-15, one record slot each), record version 0x0102. What is read comes from
+ * raw-path/P0_5D2_SPEC.md (WindyStrife's ROM analysis of the owner's dump):
+ *   pb[0..1]   the job handle H and the job id word of this half's develop state (TOP 0x369C, BOT 0x3630)
+ *   pb[2..6]   H[0..4] when H is a readable pointer; P = H[1] only when H[0] is the live-job magic
+ *   pb[7]      the Mem1ToRaw source (CR2 compression input)
+ *   pb[8..14]  P+0x4C job id, +0x48 stage count, +0x6C flags, +0x538 done mask (halfword), +0xBE8 done bits,
+ *              +0xBE0 file container, +0xC68 MEM1 (the raw buffer; freed when the done bits reach the mask)
+ *   pb[15..29] P[0..14]
+ *   pb[30..39] the engio shadow base SH and the shadows of 9 EDMAC registers (capture write 208/20C/210, CRAW read
+ *              A08/A0C/A10, YUV write 308, YUV read 4D08, JPEG write 408), read inline as shamem_read does
+ *   pb[40..55] this half's Mem1ToYuv block +0x38 .. +0x74 (TOP 0x2AB14, BOT 0x2A9F4)
+ *   edmac      the live address registers 208 / a08 / 308 / d08 / 408
+ *   nav        "On + ROM call", for a live job only (the getters' error branch logs): GetImageBuffer, GetJobID,
+ *              GetShootParam (+ its 8 words), GetFileContainer (all of H), shamem_read(0xC0F04208)
+ *   sources    raw0 = MEM1 + 0x76C8 (5792 x 3804, pitch 10136, 14-bit packed), qr = the capture write shadow (ML's
+ *              QR source), a08 = where this half's develop started reading, m2r = the Mem1ToRaw source; copies from
+ *              +16 MB (inside the raw)
+ * Pointers are read only when word aligned and inside RAM (cached 0x1000.. or uncached 0x40001000..0x5FFFFFFF, 512 MB:
+ * no read can fault); sources only inside 0x44000000..0x5C000000 (tighter than the hook's range on purpose). Hook rules
+ * as on the EOS M: no logging, no file I/O, the frame is never written. */
 #if WF_PRB_CAN
+#ifdef WF_HOST
+extern uint32_t wf_host_mem_read(uint32_t addr);
+extern uint32_t wf_host_romcall(uint32_t fn, uint32_t arg);
+#define PRB_RD32(a) wf_host_mem_read(a)
+#define PRB_CALL(fn, a) wf_host_romcall(fn, a)
+#else
+#define PRB_RD32(a) (*(volatile uint32_t *)(a))
+#define PRB_CALL(fn, a) ((uint32_t (*)(uint32_t))(fn))(a)
+#endif
+#define PRB_ST_TOP    0x369Cu                    /* FrontDevelop state: +0x3C H, +0x40 job id */
+#define PRB_ST_BOT    0x3630u                    /* RearDevelop state: +0x2C H, +0x30 job id */
+#define PRB_M2Y_TOP   0x2AB14u                   /* Mem1ToYuv block of the half */
+#define PRB_M2Y_BOT   0x2A9F4u
+#define PRB_M2R       0x2AC34u                   /* Mem1ToRaw block: +0x54 the source */
+#define PRB_SHADOW    0x8FBCu                    /* engio shadow base SH: shamem_read(r) = *(SH | (r & 0x3FFFF)) */
+#define PRB_JOB_MAGIC 0xFFCD0761u                /* H[0] of a live job (= [0xFFC77B04]) */
+#define PRB_MEM1_RAW  0x76C8u                    /* the capture EDMAC writes the raw at MEM1 + this */
+#define PRB_POOL_HI   0x5C000000u                /* RscMgr MEMORY_MGR end */
+static const uint32_t prb_edmac[PRB_NREG] = { 0xC0F04208u, 0xC0F04A08u, 0xC0F04308u, 0xC0F04D08u, 0xC0F04408u };
+static const uint16_t prb_shreg[9] = { 0x4208, 0x420C, 0x4210, 0x4A08, 0x4A0C, 0x4A10, 0x4308, 0x4D08, 0x4408 };
+static const uint16_t prb_poff[7] = { 0x4C, 0x48, 0x6C, 0x538, 0xBE8, 0xBE0, 0xC68 };
+static const uint32_t prb_getter[PRB_NNAV] = { 0xFF8AC4B8u, 0xFF8AA9D4u, 0xFF8AC4F8u, 0xFF8AEB84u, 0xFF9A550Cu };
 static const char *const prb_kname[K_N] = { "TOP", "BOT" };
-static void prb_read_5d2(struct wf_prb *p, int mode, uint32_t *s);     /* from the spec */
+static const char *const prb_rname[PRB_NREG] = { "208", "a08", "308", "d08", "408" };
+static const char *const prb_sname[PRB_NSRC] = { "raw0", "qr", "a08", "m2r" };
+
+/* a pointer that may be read for n bytes: word aligned, inside cached RAM or its uncached alias */
+static int prb_ok(uint32_t a, uint32_t n)
+{
+    if (a & 3)
+        return 0;
+    return (a >= 0x1000u && a <= 0x20000000u - n) || (a >= 0x40001000u && a <= 0x60000000u - n);
+}
+
+/* hook context (wf_prb_enter): the job, the shadows, this half's block, the registers, the ROM calls, the sources */
+static void prb_read_5d2(struct wf_prb *p, int mode, uint32_t *s)
+{
+    int bot = (int)(p->mode >> 8 & 0xff) == K_BOT;
+    uint32_t st = bot ? PRB_ST_BOT : PRB_ST_TOP, h = PRB_RD32(st + (bot ? 0x2C : 0x3C)), pp = 0;
+    p->pb[0] = h;
+    p->pb[1] = PRB_RD32(st + (bot ? 0x30 : 0x40));
+    if (prb_ok(h, 20)) {
+        for (int i = 0; i < 5; i++)
+            p->pb[2 + i] = PRB_RD32(h + 4 * i);
+        if (p->pb[2] == PRB_JOB_MAGIC && prb_ok(p->pb[3], 0xC6C))
+            pp = p->pb[3];
+    }
+    p->pb[7] = PRB_RD32(PRB_M2R + 0x54);
+    if (pp) {
+        for (int i = 0; i < 7; i++)
+            p->pb[8 + i] = PRB_RD32(pp + prb_poff[i]);
+        p->pb[11] &= 0xFFFFu;                    /* the done mask is the halfword at P+0x538 */
+        for (int i = 0; i < 15; i++)
+            p->pb[15 + i] = PRB_RD32(pp + 4 * i);
+    }
+    uint32_t sh = PRB_RD32(PRB_SHADOW);
+    p->pb[30] = sh;
+    if (prb_ok(sh, 4) && prb_ok(sh | 0x3FFFCu, 4))
+        for (int i = 0; i < 9; i++)
+            p->pb[31 + i] = PRB_RD32(sh | prb_shreg[i]);
+    uint32_t blk = (bot ? PRB_M2Y_BOT : PRB_M2Y_TOP) + 0x38;
+    for (int i = 0; i < 16; i++)
+        p->pb[40 + i] = PRB_RD32(blk + 4 * i);
+    for (int i = 0; i < PRB_NREG; i++)
+        p->edmac[i] = PRB_RD32(prb_edmac[i]);
+    if (mode == WF_PRB_NAV && p->pb[2] == PRB_JOB_MAGIC) {
+        for (int i = 0; i < PRB_NNAV - 1; i++)
+            p->nav_rc[i] = (int32_t)PRB_CALL(prb_getter[i], h);
+        p->nav_rc[PRB_NNAV - 1] = (int32_t)PRB_CALL(prb_getter[PRB_NNAV - 1], prb_edmac[0]);
+        uint32_t sp = (uint32_t)p->nav_rc[2];
+        if (prb_ok(sp, 32))
+            for (int i = 0; i < 8; i++)
+                p->nav[2][i] = PRB_RD32(sp + 4 * i);
+    }
+    s[0] = p->pb[14] ? p->pb[14] + PRB_MEM1_RAW : 0;
+    s[1] = p->pb[31];
+    s[2] = p->pb[34];
+    s[3] = p->pb[7];
+}
+
 static const struct wf_prb_cam prb_5d2 = {
-    .ver = 0x0102, .what = "TOP/BOT", .kname = prb_kname, .pool_lo = POOL_LO, .pool_hi = POOL_HI,
-    /* .npb, .rname, .sname, .read: from the spec */
+    .ver = 0x0102, .what = "TOP/BOT", .kname = prb_kname, .pool_lo = POOL_LO, .pool_hi = PRB_POOL_HI, .npb = PRB_PBW,
+    .rname = prb_rname, .sname = prb_sname, .read = prb_read_5d2,
 };
 #define PRB_ENTER(k, regs) wf_prb_enter(regs, k)
-#define PRB_LEAVE(on, rc, t) do { if (on) wf_prb_leave(rc, t); } while (0)
+#define PRB_LEAVE(on, k, rc, t) do { if (on) wf_prb_leave(k, rc, t); } while (0)
 #else
 #define PRB_ENTER(k, regs) 0
-#define PRB_LEAVE(on, rc, t) do { (void)(on); (void)(t); } while (0)
+#define PRB_LEAVE(on, k, rc, t) do { (void)(on); (void)(t); } while (0)
 #endif
 
 int wf_cam_init(void)
@@ -163,7 +258,7 @@ static void wf_hook_5d2(uint32_t *regs, uint32_t *stack, uint32_t pc)
     }
     if (why >= 0) {
         reject(k, why, regs);
-        PRB_LEAVE(probe, why == R_WORKER ? 2 : 1, t_shot);
+        PRB_LEAVE(probe, k, why == R_WORKER ? 2 : 1, t_shot);
         return;
     }
     struct wf_frame f;
@@ -183,14 +278,14 @@ static void wf_hook_5d2(uint32_t *regs, uint32_t *stack, uint32_t pc)
     int st = -1;
     if (wf_shot_run(&f, &st) != 0) {
         reject(k, R_WORKER, regs);
-        PRB_LEAVE(probe, 2, t_shot);
+        PRB_LEAVE(probe, k, 2, t_shot);
         return;
     }
     if (k == K_TOP) {
         wf_owed_t = get_ms_clock();
         wf_owed = st < 0 || WF_ST_TOUCHED(st);   /* the worker changed the half (or the result is unknown) */
     }
-    PRB_LEAVE(probe, 0, t_shot);
+    PRB_LEAVE(probe, k, 0, t_shot);
 }
 
 int wf_cam_start(void)
@@ -226,7 +321,7 @@ int wf_cam_start(void)
 void wf_cam_poll(void)
 {
     static int said;
-    wf_prb_flush();                              /* RAW probe record (nothing while the 5D2 part is not built) */
+    wf_prb_flush();                              /* RAW probe records */
     if (!said && bad_a) {
         said = 1;
         wf_log("5D2: ROM %x = %08x, not %08x: unsupported", (unsigned)bad_a, (unsigned)bad_w, (unsigned)bad_x);

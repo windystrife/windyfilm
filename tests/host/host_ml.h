@@ -61,6 +61,12 @@ uint32_t wf_host_rom_read(uint32_t addr);
  * MEMNAVI_GetReadMemory lookup (out[0] = h_nav_a[layer]); other addresses read 0xDEADBEEF */
 extern uint32_t h_pb[56], h_edmac[5], h_nav_a[5];
 extern volatile int h_nav_calls;
+/* 5D2 probe: Canon words by address (read by wf_host_mem_read before the EOS M ones; unset words read 0xDEADBEEF),
+   the getters' return values (GetImageBuffer, GetJobID, GetShootParam, GetFileContainer, shamem_read) and the calls */
+void h_mem_set(uint32_t a, uint32_t v);
+extern uint32_t h_romcall_ret[5], h_romcall_fn[16], h_romcall_arg[16];
+extern volatile int h_romcalls;
+uint32_t wf_host_romcall(uint32_t fn, uint32_t arg);
 uint32_t wf_host_mem_read(uint32_t addr);
 int wf_host_memnavi(uint32_t *out, uint32_t *tmp, int a, int layer);
 

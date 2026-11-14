@@ -46,6 +46,10 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 - Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
   WB của bạn được trả lại khi về Auto hoặc khi tắt module.
 - Hàng Print: Scan / Cine print / Paper (chỉ với phim có mô hình in).
+- Hàng Highlights / Shadows: -5 .. +5, mặc định 0. Dương làm sáng vùng sáng /
+  nâng vùng tối, âm làm tối. Áp cho phim và Log + LUT (cả lon Film LUT), không
+  áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 9 hàng: hiện 7,
+  danh sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.
 - Input curve (cho Log + LUT và lon Film LUT): sRGB, Canon Film 1 hoặc Canon
@@ -83,9 +87,13 @@ Mục đích: biết lúc module xử lý ảnh, RAW 14-bit của Canon còn ngu
 hay không (cần cho đường RAW sau này). Probe chỉ ghi lại, KHÔNG đổi ảnh.
 
 - Shoot > WindyFilm > RAW probe: On. "On + ROM call" gọi thêm một hàm tra cứu
-  của Canon; chỉ thử sau khi On đã chạy ổn.
-- Đặt chất lượng RAW+L. Chụp 3 ảnh đơn, rồi một loạt chụp liên tục 3-4 ảnh.
-  Lặp lại với "On + ROM call".
+  của Canon (lần chạy 14/11 cho thấy an toàn).
+- Bật một phim (Output = phim, không phải Off) để module xử lý ảnh với thời
+  gian thật. Đặt chất lượng RAW+L.
+- Ngay sau khi bật máy: 1 ảnh đơn. Rồi thêm 2 ảnh đơn, một loạt chụp liên tục
+  5 ảnh, một loạt 2 ảnh. Có thể lặp lại với "On + ROM call".
+- Bản này ghi thêm buffer RAW thứ hai (ảnh cuối của loạt chụp nằm ở đó) và
+  ảnh đầu sau khi bật máy.
 - Gửi lại: ML/LOGS/WINDYFLM.LOG, ML/LOGS/WFPROBE.BIN và các file CR2 + JPG của
   những ảnh đó. Log giờ ghi nối tiếp, không cần xoá trước; WFPROBE.BIN vẫn làm
   mới ở ảnh probe đầu tiên của mỗi lần bật máy (ngay khi máy ghi xong ảnh đó),
@@ -108,6 +116,10 @@ Bật:
   không develop (ảnh có màu phim thường như cũ).
 - Tỉ lệ khung 3:2. Drive: chụp đơn hoặc hẹn giờ. Chụp liên tục thì mọi ảnh
   có màu phim thường (8-bit), log ghi lý do.
+- Highlights / Shadows có tác dụng với phim. Với Log + LUT khi RAW develop
+  đang bật thì chưa có tác dụng (bản thử này).
+- Khi RAW develop Off, thẻ này chạy giống thẻ EOSM_WindyFilm (cùng bản main,
+  có RAW probe v2 và Highlights / Shadows).
 - Dòng menu báo trạng thái: đang nạp bảng, sẵn sàng ("About 30 s per shot"),
   thiếu bộ nhớ, hoặc chất lượng / drive chưa đúng.
 

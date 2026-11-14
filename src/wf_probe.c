@@ -1,5 +1,6 @@
 /* wf_probe.c - RAW probe P0, the camera-independent part (wf_probe.h). Moved out of wf_cam_eosm.c (a675c8a) without a
- * change of the EOS M record or log lines, so the 5D2 layer can use the same record, hashes, log and file. */
+ * change of the EOS M record or log lines, so the 5D2 layer can use the same record, hashes, log and file. One record
+ * slot per probed call kind (the 5D2 BOT comes a few hundred ms after its TOP, often before wf_task flushed the TOP). */
 #include "wf_core.h"
 #include "wf_probe.h"
 
@@ -8,10 +9,17 @@ extern void  FIO_CloseFile(void *f);
 
 static const uint32_t prb_woff[PRB_NWIN] = { 0, 0x800000u, 0x1000000u };
 
+/* a slot: the hook fills it while `full` is 0 and sets `full` last (wf_prb_leave); wf_task logs it, copies it to
+   prb_out and clears `full`. A call of a kind whose slot is still full is skipped and counted. */
+struct prb_slot {
+    struct wf_prb r;
+    uint32_t s[PRB_NSRC];                        /* the raw source addresses the camera named (for the log) */
+    volatile int full;
+    int logged;
+};
 static const struct wf_prb_cam *prb_cam;
-static struct wf_prb prb;
-static uint32_t prb_s[PRB_NSRC];                 /* the record's raw source addresses (for the log) */
-static volatile int prb_full, prb_skipped;
+static struct prb_slot prb_sl[PRB_NK];
+static volatile int prb_skipped;
 static int prb_n, prb_written, prb_skip_said;
 int wf_probe_mode;
 /* wf_task: the record on its way to WFPROBE.BIN. The flush copies a taken record here (the hook may take the next one
@@ -20,7 +28,7 @@ int wf_probe_mode;
 #define PRB_RETRY  200
 #define PRB_GIVEUP 30000
 static struct wf_prb prb_out;
-static int prb_out_busy, prb_out_tries, prb_out_t0, prb_out_last, prb_logged;
+static int prb_out_busy, prb_out_tries, prb_out_t0, prb_out_last;
 
 void wf_prb_setup(const struct wf_prb_cam *c) { prb_cam = c; }
 int wf_prb_can(void) { return prb_cam != 0; }
@@ -43,12 +51,13 @@ static uint32_t prb_fnv(uint32_t a)
     }
     return h;
 }
-static void prb_sums(uint32_t (*f)[PRB_NWIN])
+static void prb_sums(const struct wf_prb *p, uint32_t (*f)[PRB_NWIN])
 {
     for (int k = 0; k < PRB_NSRC; k++)
         for (int w = 0; w < PRB_NWIN; w++)
-            f[k][w] = prb_win_ok(prb.src[k], w) ? prb_fnv(prb.src[k] + prb_woff[w]) : 0;
+            f[k][w] = prb_win_ok(p->src[k], w) ? prb_fnv(p->src[k] + prb_woff[w]) : 0;
 }
+static int prb_slot_of(int kind) { return prb_cam && prb_cam->kname && kind >= 0 && kind < PRB_NK ? kind : 0; }
 
 /* hook context: the camera layer calls this at the entry of the call it probes */
 int wf_prb_enter(const uint32_t *regs, int kind)
@@ -56,43 +65,48 @@ int wf_prb_enter(const uint32_t *regs, int kind)
     int mode = *(volatile int *)&wf_probe_mode;
     if (!prb_cam || mode <= WF_PRB_OFF || mode >= WF_PRB_N)
         return 0;
-    if (prb_full) {
+    struct prb_slot *sl = &prb_sl[prb_slot_of(kind)];
+    if (sl->full) {
         prb_skipped++;
         return 0;
     }
+    struct wf_prb *p = &sl->r;
     int t0 = get_ms_clock();
-    memset(&prb, 0, sizeof prb);
-    prb.magic = PRB_MAGIC;
-    prb.ver = prb_cam->ver;
-    prb.seq = ++prb_n;
-    prb.t_ms = t0;
-    prb.r0 = regs[0];
-    prb.r1 = regs[1];
-    prb.r2 = regs[2];
-    prb.mode = (uint32_t)mode | (uint32_t)(kind & 0xff) << 8;
-    prb_cam->read(&prb, mode, prb_s);
+    memset(p, 0, sizeof *p);
+    p->magic = PRB_MAGIC;
+    p->ver = prb_cam->ver;
+    p->seq = ++prb_n;
+    p->t_ms = t0;
+    p->r0 = regs[0];
+    p->r1 = regs[1];
+    p->r2 = regs[2];
+    p->mode = (uint32_t)mode | (uint32_t)(kind & 0xff) << 8;
+    memset(sl->s, 0, sizeof sl->s);
+    prb_cam->read(p, mode, sl->s);
     for (int k = 0; k < PRB_NSRC; k++)
-        prb.src[k] = prb_addr(prb_s[k]);
-    prb_sums(prb.fnv);
+        p->src[k] = prb_addr(sl->s[k]);
+    prb_sums(p, p->fnv);
     for (int k = 0; k < PRB_NSRC; k++) {
-        if (!prb.src[k])
+        if (!p->src[k])
             continue;
-        uint32_t c = prb.src[k] + (prb_win_ok(prb.src[k], PRB_NWIN - 1) ? prb_woff[PRB_NWIN - 1] : 0);
-        const volatile uint8_t *p = (const volatile uint8_t *)(uintptr_t)c;
+        int w = prb_cam->cwin ? prb_cam->cwin[k] : PRB_NWIN - 1;
+        uint32_t c = p->src[k] + (w > 0 && w < PRB_NWIN && prb_win_ok(p->src[k], w) ? prb_woff[w] : 0);
+        const volatile uint8_t *q = (const volatile uint8_t *)(uintptr_t)c;
         for (int i = 0; i < PRB_CPY; i++)
-            prb.cpy[k][i] = p[i];
+            p->cpy[k][i] = q[i];
     }
-    prb.t_probe_ms = get_ms_clock() - t0;
+    p->t_probe_ms = get_ms_clock() - t0;
     return 1;
 }
 
-void wf_prb_leave(int rc, int t_shot)
+void wf_prb_leave(int kind, int rc, int t_shot)
 {
-    prb.t_shot_ms = get_ms_clock() - t_shot;
-    prb.shot_rc = rc;
-    prb_sums(prb.fnv2);
+    struct prb_slot *sl = &prb_sl[prb_slot_of(kind)];
+    sl->r.t_shot_ms = get_ms_clock() - t_shot;
+    sl->r.shot_rc = rc;
+    prb_sums(&sl->r, sl->r.fnv2);
     WF_BARRIER();
-    prb_full = 1;
+    sl->full = 1;
 }
 
 /* n words as " xxxxxxxx" each, built word by word (one short format, no long repeated format strings in .rodata) */
@@ -140,28 +154,29 @@ static void prb_out_try(void)
     }
 }
 
-/* wf_task: the record the hook took to the log at once; to WFPROBE.BIN through prb_out (when that is free) */
-static void prb_log(const struct wf_prb *p)
+/* wf_task: a taken record to the log at once */
+static void prb_log(const struct prb_slot *sl)
 {
     char hx[80];
     const struct wf_prb_cam *c = prb_cam;
+    const struct wf_prb *p = &sl->r;
     int mode = p->mode & 0xff, kind = (p->mode >> 8) & 0xff;
     wf_log("probe #%d%s%s r0 %08x r1 %08x r2 %x mode %d: probe %d ms, shot %d ms rc %d", (int)p->seq,
-           c->kname ? " " : "", c->kname ? c->kname[kind] : "", (unsigned)p->r0, (unsigned)p->r1, (unsigned)p->r2,
-           mode, (int)p->t_probe_ms, (int)p->t_shot_ms, (int)p->shot_rc);
+           c->kname ? " " : "", c->kname ? c->kname[kind < PRB_NK ? kind : 0] : "", (unsigned)p->r0,
+           (unsigned)p->r1, (unsigned)p->r2, mode, (int)p->t_probe_ms, (int)p->t_shot_ms, (int)p->shot_rc);
     for (int i = 0; i < c->npb && i < PRB_PBW; i += 8)
-        wf_log("probe pb+%02x%s", i * 4, prb_hex(hx, sizeof hx, p->pb + i, 8));
+        wf_log("probe pb+%02x%s", i * 4, prb_hex(hx, sizeof hx, p->pb + i, c->npb - i < 8 ? c->npb - i : 8));
     int o = 0;
     for (int i = 0; i < PRB_NREG && o < (int)sizeof hx - 16; i++)
         o += snprintf(hx + o, sizeof hx - o, " %s %08x", c->rname[i], (unsigned)p->edmac[i]);
     wf_log("probe edmac%s", hx);
     if (mode == WF_PRB_NAV)
         for (int i = 0; i < PRB_NNAV; i++)
-            wf_log("probe nav %d: rc %d tmp %08x |%s", i, (int)p->nav_rc[i], (unsigned)p->nav_tmp[i],
+            wf_log("probe nav %d: rc %x tmp %08x |%s", i, (unsigned)p->nav_rc[i], (unsigned)p->nav_tmp[i],
                    prb_hex(hx, sizeof hx, p->nav[i], 8));
     for (int k = 0; k < PRB_NSRC; k++) {
         if (!p->src[k]) {
-            wf_log("probe %s %08x: outside the shoot pool, not read", c->sname[k], (unsigned)prb_s[k]);
+            wf_log("probe %s %08x: outside the shoot pool, not read", c->sname[k], (unsigned)sl->s[k]);
             continue;
         }
         int same = 1;
@@ -173,6 +188,7 @@ static void prb_log(const struct wf_prb *p)
     }
 }
 
+/* wf_task (wf_cam_poll): the full slots to the log (in seq order), then one by one through prb_out to WFPROBE.BIN */
 void wf_prb_flush(void)
 {
     if (!prb_cam)
@@ -184,27 +200,40 @@ void wf_prb_flush(void)
     }
     if (prb_out_busy)
         prb_out_try();
-    if (!prb_full)
-        return;
-    WF_BARRIER();
-    if (!prb_logged) {
-        prb_log(&prb);
-        prb_logged = 1;
+    int ord[PRB_NK];
+    for (int i = 0; i < PRB_NK; i++)
+        ord[i] = i;
+    if (prb_sl[0].full && prb_sl[1].full && prb_sl[1].r.seq < prb_sl[0].r.seq) {
+        ord[0] = 1;
+        ord[1] = 0;
     }
-    if (prb_out_busy)
-        return;                                  /* the previous record still waits for the card */
-    if (prb_written < PRB_MAX) {
-        memcpy(&prb_out, &prb, sizeof prb_out);
-        prb_out_busy = 1;
-        prb_out_tries = 0;
-        prb_out_t0 = get_ms_clock();
-    } else if (prb_written == PRB_MAX) {
-        wf_log("probe: %s holds %d records, later ones are only logged", PRB_PATH, PRB_MAX);
-        prb_written++;
-    }
-    prb_logged = 0;
     WF_BARRIER();
-    prb_full = 0;                                /* the hook may take the next record */
-    if (prb_out_busy)
-        prb_out_try();
+    for (int i = 0; i < PRB_NK; i++) {
+        struct prb_slot *sl = &prb_sl[ord[i]];
+        if (sl->full && !sl->logged) {
+            prb_log(sl);
+            sl->logged = 1;
+        }
+    }
+    for (int i = 0; i < PRB_NK; i++) {
+        struct prb_slot *sl = &prb_sl[ord[i]];
+        if (!sl->full || !sl->logged)
+            continue;
+        if (prb_out_busy)
+            return;                              /* the previous record still waits for the card */
+        if (prb_written < PRB_MAX) {
+            memcpy(&prb_out, &sl->r, sizeof prb_out);
+            prb_out_busy = 1;
+            prb_out_tries = 0;
+            prb_out_t0 = get_ms_clock();
+        } else if (prb_written == PRB_MAX) {
+            wf_log("probe: %s holds %d records, later ones are only logged", PRB_PATH, PRB_MAX);
+            prb_written++;
+        }
+        sl->logged = 0;
+        WF_BARRIER();
+        sl->full = 0;                            /* the hook may take the next record of this kind */
+        if (prb_out_busy)
+            prb_out_try();
+    }
 }

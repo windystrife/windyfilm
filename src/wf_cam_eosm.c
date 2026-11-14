@@ -139,18 +139,39 @@ static void reject(int k, uint32_t raw, int nojpg)
 /* ------------------------------------------------------------------ RAW probe P0 (DESIGN 3.2), the EOS M part
  * At the NN entry (CompleteSsrawToYuv, before Canon releases the SS resource) the hook takes one record (wf_probe.c):
  * the Eeko copy of the 0xE0 parameter block (+0x50 raw input, +0x64.. SSRAW A[0..4]), five EDMAC address registers,
- * optionally MEMNAVI_GetReadMemory(.., 1, layer) for layers 0..4, and for four candidate sources (raw, EDMAC WR0,
- * A[0], A[1]) FNV-1a of 4 KB windows at +0 / +8 MB / +16 MB, at entry and again after the worker, plus 1 KB copied
- * from the last window. Only shoot-pool addresses are read, through the uncached alias. The frame is never written.
- * wf_task (wf_cam_poll -> wf_prb_flush) logs the record and appends it to ML/LOGS/WFPROBE.BIN. */
+ * optionally MEMNAVI_GetReadMemory(.., 1, layer) for layers 0..4, and for four candidate sources (raw, raw2 = the same
+ * place in the other raw buffer, A[0], A[1]) FNV-1a of 4 KB windows at +0 / +8 MB / +16 MB, at entry and again after
+ * the worker, plus 1 KB copied (raw, raw2 from +16 MB; A[0], A[1] from +0: their +16 MB fell in the YUV frame). Only
+ * shoot-pool addresses are read, through the uncached alias. The frame is never written. Record version 2.
+ * wf_task (wf_cam_poll -> wf_prb_flush) logs the record and appends it to ML/LOGS/WFPROBE.BIN.
+ * The two raw buffers (raw-film-engine, the 11-14 run): starts S 32 MB apart, pb+0x50 = S + PRB_RAW_OFF, EDMAC WR0 at
+ * the NN entry = S + PRB_RAW_WR0 (3531 rows x 9240). The last frame of a burst finds pb+0x50 still on the previous shot
+ * (its raw is in the other buffer); the first shot after power-on finds pb+0x50 = 0 (the raw is then taken from WR0). */
 #define PRB_PB      0x41E82CECu                  /* the parameter block's Eeko copy, uncached alias */
 #define PRB_NAV     0xFF234680u                  /* MEMNAVI_GetReadMemory(out, tmp, 1, layer) */
+#define PRB_RAW_S0   0x46004894u                 /* raw buffer starts S */
+#define PRB_RAW_S1   0x48004894u
+#define PRB_RAW_STEP 0x02000000u
+#define PRB_RAW_OFF  480242u                     /* pb+0x50 = S + this */
+#define PRB_RAW_WR0  32626440u                   /* EDMAC WR0 at the NN entry = S + this */
 
 static const uint32_t prb_edmac[PRB_NREG] = { 0xC0F04008u, 0xC0F26308u, 0xC0F26408u, 0xC0F26A08u, 0xC0F26B08u };
 static const char *const prb_rname[PRB_NREG] = { "wr0", "308", "408", "a08", "b08" };
-static const char *const prb_sname[PRB_NSRC] = { "raw", "wr0", "A0", "A1" };
+static const char *const prb_sname[PRB_NSRC] = { "raw", "raw2", "A0", "A1" };
+static const uint8_t prb_cwin[PRB_NSRC] = { 2, 2, 0, 0 };
 
-/* hook context (wf_prb_enter): the block, the registers, the ROM call; sources raw, EDMAC WR0, SSRAW A[0], A[1] */
+/* the same place in the other raw buffer, 0 = in neither */
+static uint32_t prb_other(uint32_t a)
+{
+    a = a ? a | 0x40000000u : 0;
+    if (a >= PRB_RAW_S0 && a < PRB_RAW_S1)
+        return a + PRB_RAW_STEP;
+    if (a >= PRB_RAW_S1 && a < PRB_RAW_S1 + PRB_RAW_STEP)
+        return a - PRB_RAW_STEP;
+    return 0;
+}
+
+/* hook context (wf_prb_enter): the block, the registers, the ROM call; sources raw, raw2, SSRAW A[0], A[1] */
 static void prb_read_eosm(struct wf_prb *p, int mode, uint32_t *s)
 {
     for (int i = 0; i < PRB_PBW; i++)
@@ -160,15 +181,18 @@ static void prb_read_eosm(struct wf_prb *p, int mode, uint32_t *s)
     if (mode == WF_PRB_NAV)
         for (int i = 0; i < PRB_NNAV; i++)
             p->nav_rc[i] = PRB_NAVCALL(&p->nav[i][2], &p->nav_tmp[i], 1, i);
-    s[0] = p->pb[0x50 / 4];
-    s[1] = p->edmac[0];
+    uint32_t raw = p->pb[0x50 / 4], wr0 = p->edmac[0] ? p->edmac[0] | 0x40000000u : 0;
+    if (!raw && wr0 >= PRB_RAW_S0 + PRB_RAW_WR0 && wr0 < PRB_RAW_S1 + PRB_RAW_STEP + PRB_RAW_WR0)
+        raw = wr0 - PRB_RAW_WR0 + PRB_RAW_OFF;   /* the block not filled yet (first shot after power-on) */
+    s[0] = raw;
+    s[1] = prb_other(raw);
     s[2] = p->pb[0x64 / 4];
     s[3] = p->pb[0x68 / 4];
 }
 
 static const struct wf_prb_cam prb_eosm = {
-    .ver = 1, .what = "NN", .pool_lo = POOL_LO, .pool_hi = POOL_HI, .npb = PRB_PBW,
-    .rname = prb_rname, .sname = prb_sname, .read = prb_read_eosm,
+    .ver = 2, .what = "NN", .pool_lo = POOL_LO, .pool_hi = POOL_HI, .npb = PRB_PBW,
+    .rname = prb_rname, .sname = prb_sname, .cwin = prb_cwin, .read = prb_read_eosm,
 };
 
 /* ------------------------------------------------------------------ RAW develop "B" (wf_rawb.c): the raw of the NN shot
@@ -274,7 +298,7 @@ static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
     if (!buf || (k == K_NN && regs[2] != 0) || nojpg || (pic_quality & PICQ_SIZE_MASK) || !geom(ga, &w, &h)) {
         reject(k, raw, nojpg);
         if (probe)
-            wf_prb_leave(1, t_shot);
+            wf_prb_leave(0, 1, t_shot);
         return;
     }
     struct wf_frame f;
@@ -297,7 +321,7 @@ static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
     if (rc != 0)
         reject(k, raw, 0);                       /* worker busy / not up: the JPEG stays plain */
     if (probe)
-        wf_prb_leave(rc != 0 ? 2 : 0, t_shot);
+        wf_prb_leave(0, rc != 0 ? 2 : 0, t_shot);
 }
 
 int wf_cam_start(void)

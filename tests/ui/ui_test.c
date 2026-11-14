@@ -10,6 +10,7 @@
 int wfui_host_sel_id(void);
 int wfui_host_group(void);
 int wfui_host_focus(void);
+int wfui_host_rtop(void);
 int wfui_host_info(void);
 
 static const char *outdir;
@@ -154,8 +155,39 @@ int main(int argc, char **argv)
     go_to("LV500T");
     key(MODULE_KEY_PRESS_UP);                                       /* wraps from Light to Film LUT */
     CHECK(wfui_host_focus() == WF_ROW_FLUT, "UP from Light not on Film LUT");
+    CHECK(wfui_host_rtop() == WF_NROWS - 7, "Film LUT focused: the list shows its last 7 rows (top %d)", wfui_host_rtop());
     shot("b2s_lut");
     close_ui(MODULE_KEY_TRASH, 0);
+
+    /* 2b. Highlights / Shadows: 9 rows, 7 shown, the list scrolls with the focus (the font keeps its size) */
+    fake_reset();
+    fake_set_card(card);
+    fake_set_loaded(id_of("PRT160"));
+    open_ui();
+    go_to("SUN200");
+    CHECK(wfui_host_rtop() == 0, "open: the list starts at Light");
+    for (int i = 0; i < WF_ROW_HL; i++) key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_HL && wfui_host_rtop() == WF_ROW_HL - 6, "DOWN to Highlights: focus %d top %d",
+          wfui_host_focus(), wfui_host_rtop());
+    key(MODULE_KEY_WHEEL_RIGHT);
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(fake_row_value(WF_ROW_HL) == 7, "Highlights +2 (value %d)", fake_row_value(WF_ROW_HL));
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wfui_host_focus() == WF_ROW_SH && fake_row_value(WF_ROW_SH) == 4, "Shadows -1 (value %d)", fake_row_value(WF_ROW_SH));
+    shot("b2s_hs");
+    for (int i = 0; i < 6; i++) key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(fake_row_value(WF_ROW_SH) == 0, "Shadows stops at -5 (value %d)", fake_row_value(WF_ROW_SH));
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_FLUT && wfui_host_rtop() == WF_NROWS - 7, "DOWN to Film LUT: top %d", wfui_host_rtop());
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_LIGHT && wfui_host_rtop() == 0, "DOWN from Film LUT wraps to Light (top %d)",
+          wfui_host_rtop());
+    for (int i = 0; i < 3; i++) key(MODULE_KEY_PRESS_UP);
+    CHECK(wfui_host_focus() == WF_ROW_HL && wfui_host_rtop() == WF_NROWS - 7, "UP x3 from Light: Highlights, top %d",
+          wfui_host_rtop());
+    shot("b2s_hs_top");
+    close_ui(MODULE_KEY_MENU, 0);
 
     /* 3. INFO overlay, EOS M and 5D2 */
     fake_reset();

@@ -30,6 +30,20 @@ typedef char wf_ftabs_layout[(__builtin_offsetof(struct wf_ftabs, E) == 2048
 #define WF_FT_MONO  0x02
 #define WF_FT_S(s)  ((s) == 100 ? 0 : (s) << 8)
 #define WF_FT_SOF(f) (((f) >> 8 & 255) ? ((f) >> 8 & 255) : 100)
+/* WF_FT_HS(h, s): Highlights h / Shadows s, WF_HS_MIN..WF_HS_MAX each, as two signed 4-bit fields (bits 16-19, 20-23);
+ * 0 / 0 adds no bit, so the flags (and the set) of a build without the setting stay as they were */
+#define WF_HS_MIN   (-5)
+#define WF_HS_MAX   5
+#define WF_FT_HS(h, s) ((int)(((unsigned)(h) & 15u) << 16 | ((unsigned)(s) & 15u) << 20))
+#define WF_FT_HOF(f)   ((int)((unsigned)(f) << 12) >> 28)
+#define WF_FT_SHOF(f)  ((int)((unsigned)(f) << 8) >> 28)
+
+/* Highlights h / Shadows s on a neutral-axis curve N (the film set's N, the Log + LUT tables' N), in place:
+ *   N'[y] = N[y] + round((h x^2 (255 - x) + s x (255 - x)^2) / 385341), x = N[y]
+ * (two cubic humps, peaks at x = 170 (h) and 85 (s), 0 at black and white, about 6.4 codes a step), rounded half away
+ * from zero, kept non-decreasing and inside 0..255 (p = clamp(x + d, p, 255)). h = s = 0 leaves N as it is. The divisor
+ * is a constant: a multiply on the camera, no __aeabi_uidiv. Build time only, never per pixel. */
+void wf_hs_bend(uint8_t *N, int h, int s);
 
 /* builds set t from the film's raw 17^3 table T (4913 words); ~8.7 M qemu instructions, ~45 ms at 200 MHz
  * (estimate, not measured on the camera) */

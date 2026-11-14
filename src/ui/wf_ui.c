@@ -40,6 +40,18 @@ static int gsel[WF_NGROUPS], gfirst[WF_NGROUPS];
 static int last_id;                     /* selection kept between opens */
 static int dirty;
 static uint32_t drawn_gen;
+/* the rows: WF_NROWS (9) do not fit above the tabs, so ROWS_VIS of them show at 19 px and the list scrolls with the
+   focus (the font keeps its size); rtop = the first row shown */
+#define ROWS_VIS 7
+static int rtop;
+typedef char rows_vis_check[ROWS_VIS <= WF_NROWS && sizeof wf_icons / sizeof *wf_icons == WF_NROWS ? 1 : -1];
+static void focus_to(int f)
+{
+    focus = (f + WF_NROWS) % WF_NROWS;
+    if (focus < rtop) rtop = focus;
+    if (focus >= rtop + ROWS_VIS) rtop = focus - ROWS_VIS + 1;
+    dirty = 1;
+}
 static int glow_id;
 static const char *msg;
 static int msg_until;
@@ -156,8 +168,8 @@ static void act(int k)
     {
     case MODULE_KEY_PRESS_LEFT:   select_film(sel - 1); break;
     case MODULE_KEY_PRESS_RIGHT:  select_film(sel + 1); break;
-    case MODULE_KEY_PRESS_UP:     focus = (focus + WF_NROWS - 1) % WF_NROWS; dirty = 1; break;
-    case MODULE_KEY_PRESS_DOWN:   focus = (focus + 1) % WF_NROWS; dirty = 1; break;
+    case MODULE_KEY_PRESS_UP:     focus_to(focus - 1); break;
+    case MODULE_KEY_PRESS_DOWN:   focus_to(focus + 1); break;
     case MODULE_KEY_WHEEL_LEFT:
     case MODULE_KEY_WHEEL_UP:     step_row(-1); break;
     case MODULE_KEY_WHEEL_RIGHT:
@@ -275,9 +287,9 @@ static void draw_info_column(const struct wf_film *f, int g)
     if (f->line1) ui_text_clip(F_15, 264, 96, f->line1, C_TXT2, 712);
     if (f->line2) ui_text_clip(F_15, 264, 113, f->line2, C_TXT2, 712);
 
-    for (int r = 0; r < WF_NROWS; r++)
+    for (int r = rtop; r < rtop + ROWS_VIS && r < WF_NROWS; r++)
     {
-        int y = 136 + r * 19;
+        int y = 136 + (r - rtop) * 19;
         int foc = r == focus, av = wf_row_avail(r);
         if (foc)
         {
@@ -308,7 +320,14 @@ static void draw_info_column(const struct wf_film *f, int g)
             wfg_tri(694, y + 4, 699, y + 9, 694, y + 14, A);
             wfg_tri(xl - 7, y + 4, xl - 12, y + 9, xl - 7, y + 14, A);
         }
-        if (!foc && r != WF_NROWS - 1) wfg_rect(294, y + 18, 700, y + 18, C_SEP);
+        if (!foc && r != rtop + ROWS_VIS - 1) wfg_rect(294, y + 18, 700, y + 18, C_SEP);
+    }
+    if (WF_NROWS > ROWS_VIS)                                /* scroll bar: where the 7 shown rows sit among all */
+    {
+        int y0 = 136, h = ROWS_VIS * 19 - 1;
+        int t0 = y0 + h * rtop / WF_NROWS, t1 = y0 + h * (rtop + ROWS_VIS) / WF_NROWS - 1;
+        wfg_rect(712, y0, 713, y0 + h - 1, C_SEP);
+        wfg_rect(712, t0, 713, t1, C_TXT3);
     }
 }
 
@@ -513,6 +532,7 @@ void wfui_task_begin(void)
     sel = 0;
     if (nlist) select_film(i);
     focus = WF_ROW_LIGHT;
+    rtop = 0;
     info = 0;
     msg = 0;
     glow_id = -1;
@@ -604,6 +624,7 @@ static void ui_task(void *arg)
 int wfui_host_sel_id(void) { const struct wf_film *f = film_at(sel); return f ? f->id : 0; }
 int wfui_host_group(void) { return group_of_sel(); }
 int wfui_host_focus(void) { return focus; }
+int wfui_host_rtop(void) { return rtop; }
 int wfui_host_info(void) { return info; }
 #endif
 

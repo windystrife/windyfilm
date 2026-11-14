@@ -135,7 +135,9 @@ int wf_look_now(struct wf_look *lk)
         lk->output = WF_OUT_FILM;
         lk->row = (int16_t)k;
         lk->variant = (uint8_t)wf_variant_eff(k, wf_print);
-        lk->ftflags = wf_cat_ftflags[k] | WF_FT_S(wf_strength_pct(lk->strength));
+        lk->hl = (int8_t)wf_hl_t();
+        lk->sh = (int8_t)wf_sh_t();
+        lk->ftflags = wf_cat_ftflags[k] | WF_FT_S(wf_strength_pct(lk->strength)) | WF_FT_HS(lk->hl, lk->sh);
         lk->post = WF_POST_FILM + k;
         break;
     case WF_OUT_LOG:
@@ -144,6 +146,8 @@ int wf_look_now(struct wf_look *lk)
     case WF_OUT_LLUT:
         lk->output = WF_OUT_LLUT;
         lk->post = WF_POST_LLUT;
+        lk->hl = (int8_t)wf_hl_t();               /* the menu's; a shot gets the tables' (wf_dispatch) */
+        lk->sh = (int8_t)wf_sh_t();
         if (k >= 0 && wf_cat_lut[k] && wf_cat_lut[k] == lk->flut)
             lk->row = (int16_t)k;                /* its Film LUT can is loaded: the shot is titled by the can */
         break;
@@ -164,8 +168,12 @@ int wf_post_now(void)
 /* ------------------------------------------------------------------ Log + LUT tables (wf_task writes, worker reads) */
 static struct wf_lltabs *wf_ll_tabs;             /* 181,356 B, malloc'd only while Log + LUT is the output */
 static volatile int wf_ll_have, wf_ll_loading;
-static volatile int wf_ll_have_lut, wf_ll_have_ei, wf_ll_have_inc;
-static int wf_ll_tried, wf_ll_tried_lut, wf_ll_tried_ei, wf_ll_tried_inc;
+static volatile int wf_ll_have_lut, wf_ll_have_ei, wf_ll_have_inc, wf_ll_have_hs;
+static int wf_ll_tried, wf_ll_tried_lut, wf_ll_tried_ei, wf_ll_tried_inc, wf_ll_tried_hs;
+/* Highlights / Shadows on Log + LUT: the loaded tables' N before the bend (the .FRT cache holds the tables unbent), so a
+   change of only Highlights / Shadows bends N again without a card read; WF_FT_HS packing (0 = 0 / 0) */
+static uint8_t wf_ll_n0[256];
+static int wf_ll_hs_now(void) { return WF_FT_HS(wf_hl_t(), wf_sh_t()); }
 static volatile int wf_half_ll;                  /* curve the TOP half was graded with, 0 = plain */
 static int wf_ll_rc[WF_NCURVE] = { -1, -1, -1, -1, -1 };
 static struct wf_ll_info wf_ll_inf[WF_NCURVE];
@@ -193,7 +201,7 @@ int wf_ll_state(int curve)
         return -1;
     if (wf_ll_loading == curve || (wf_out == WF_OUT_LLUT && wf_curve == curve
                                    && (wf_ll_tried != curve || wf_ll_tried_lut != wf_flut || wf_ll_tried_ei != wf_lut_ei_t()
-                                       || wf_ll_tried_inc != wf_incurve_t())))
+                                       || wf_ll_tried_inc != wf_incurve_t() || wf_ll_tried_hs != wf_ll_hs_now())))
         return -2;
     return wf_ll_rc[curve - 1];
 }
@@ -203,8 +211,9 @@ static void wf_ll_poll(void)
     int c = wf_curve, l = wf_flut;
     int want = wf_yuv_active() && wf_out == WF_OUT_LLUT && c >= 1 && c <= WF_NCURVE ? c : 0;
     int lut = want && l > 0 && l < WF_FLUT_N ? l : 0;
-    int ei = want ? wf_lut_ei_t() : 0, inc = want ? wf_incurve_t() : 0;
-    if (want == wf_ll_tried && lut == wf_ll_tried_lut && ei == wf_ll_tried_ei && inc == wf_ll_tried_inc)
+    int ei = want ? wf_lut_ei_t() : 0, inc = want ? wf_incurve_t() : 0, hs = want ? wf_ll_hs_now() : 0;
+    int same = want == wf_ll_tried && lut == wf_ll_tried_lut && ei == wf_ll_tried_ei && inc == wf_ll_tried_inc;
+    if (same && hs == wf_ll_tried_hs)
         return;
     int had = wf_ll_have;
     wf_ll_have = 0;                              /* new shots stop using the tables */
@@ -234,6 +243,17 @@ static void wf_ll_poll(void)
         wf_ws_poll();
         msleep(10);
     }
+    wf_ll_tried_hs = hs;
+    if (same && want && had == want && wf_ll_tabs) {   /* only Highlights / Shadows changed: bend N again, no load */
+        memcpy(wf_ll_tabs->N, wf_ll_n0, sizeof wf_ll_n0);
+        wf_hs_bend(wf_ll_tabs->N, WF_FT_HOF(hs), WF_FT_SHOF(hs));
+        wf_log("lut: highlights %s shadows %s", wf_hs_text(WF_FT_HOF(hs)), wf_hs_text(WF_FT_SHOF(hs)));
+        wf_ll_have_hs = hs;
+        WF_BARRIER();
+        wf_ll_have = want;
+        wf_gen_bump();
+        return;
+    }
     wf_ll_tried = want;
     wf_ll_tried_lut = lut;
     wf_ll_tried_ei = ei;
@@ -262,7 +282,9 @@ static void wf_ll_poll(void)
     wf_ll_rc[want - 1] = rc;
     wf_ll_loading = 0;
     if (rc == WF_LL_OK) {
-        char eis[48] = "";
+        memcpy(wf_ll_n0, wf_ll_tabs->N, sizeof wf_ll_n0);
+        wf_hs_bend(wf_ll_tabs->N, WF_FT_HOF(hs), WF_FT_SHOF(hs));   /* after the cache write: the .FRT stays unbent */
+        char eis[64] = "";
         int n = 0, av = (int8_t)wf_ll_tabs->pad[0];
         int ch = wf_incurve > WF_INC_SRGB && wf_incurve < WF_INC_N && wf_ll_curve_have(wf_incurve) ? wf_incurve : 0;
         int why = wf_style_why(ch);
@@ -280,13 +302,16 @@ static void wf_ll_poll(void)
         if (wf_ll_tabs->pad[1] == WF_LL_AUTO_MARK) {
             int a = av < 0 ? -av : av, u = 0;
             while (a >= 10) { a -= 10; u++; }
-            snprintf(eis + n, sizeof eis - n, " auto%s%d.%dEV", av < 0 ? "-" : "+", u, a);
+            n += snprintf(eis + n, sizeof eis - n, " auto%s%d.%dEV", av < 0 ? "-" : "+", u, a);
         }
+        if (hs && n < (int)sizeof eis)
+            snprintf(eis + n, sizeof eis - n, " hl%s sh%s", wf_hs_text(WF_FT_HOF(hs)), wf_hs_text(WF_FT_SHOF(hs)));
         wf_log("lut %s %d^3 %s %dms c%d s%d%s%s '%s'", nm, in->n, in->cached ? "cache" : "ok", ms,
                in->clamped, in->skipped, in->domain ? " dom" : "", eis, in->title);
         wf_ll_have_lut = lut;
         wf_ll_have_ei = ei;
         wf_ll_have_inc = inc;
+        wf_ll_have_hs = hs;
         WF_BARRIER();
         wf_ll_have = want;                       /* published last */
     } else {
@@ -794,6 +819,8 @@ static int wf_dispatch(struct wf_frame *f, int bot, struct wf_look *lk, int *llu
         lk->flut = (uint8_t)*llut;               /* the tables' cube is what the shot got */
         lk->lei = (int8_t)*lei;
         lk->incurve = (uint8_t)wf_ll_have_inc;
+        lk->hl = (int8_t)WF_FT_HOF(wf_ll_have_hs);
+        lk->sh = (int8_t)WF_FT_SHOF(wf_ll_have_hs);
         wf_colour_fx(f, bot, lk, wf_ll_words, (int)(uintptr_t)wf_ll_tabs);
         return WF_ST_LLUT;
     }
@@ -954,6 +981,10 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
     line[0] = 0;
     wf_ap(line, sizeof line, &l, nb);
     wf_ap(line, sizeof line, &l, wf_look_title(lk, title, sizeof title));
+    if (lk->hl || lk->sh) {
+        snprintf(nb, sizeof nb, " hl%s sh%s", wf_hs_text(lk->hl), wf_hs_text(lk->sh));
+        wf_ap(line, sizeof line, &l, nb);
+    }
     wf_ap(line, sizeof line, &l, ": ");
     wf_apt(line, sizeof line, &l, a->ms + (b ? b->ms : 0));
     wf_ap(line, sizeof line, &l, " s = look ");
@@ -1015,7 +1046,7 @@ static void wf_report(void)
 {
     while (wf_ev_tail != wf_ev_head) {
         const struct wf_ev *e = &wf_ev[wf_ev_tail % WF_EV_N];
-        char fx[40], ex[40], code[24];
+        char fx[40], ex[40], code[40];
         int n = 0;
         fx[0] = ex[0] = 0;
         if (e->hst) n += snprintf(fx + n, sizeof fx - n, e->hst == 1 ? " h%d" : e->hst == 3 ? " har" : " h-", e->h_ms);
@@ -1026,14 +1057,17 @@ static void wf_report(void)
             char es[2] = { e->evs, 0 };          /* no %c: Canon's vsnprintf prints it wrong */
             snprintf(fx + n, sizeof fx - n, " ev%d%s", (e->ev8 + 4) >> 3, es);
         }
+        int cl = 0;
         if (e->lk.output == WF_OUT_FILM && e->lk.row >= 0)
-            snprintf(code, sizeof code, " %s v%d s%d", wf_films[e->lk.row].code, e->lk.variant,
+            cl = snprintf(code, sizeof code, " %s v%d s%d", wf_films[e->lk.row].code, e->lk.variant,
                      wf_strength_pct(e->lk.strength));
         else if (e->lk.output == WF_OUT_LLUT || e->lk.output == WF_OUT_LOG)
-            snprintf(code, sizeof code, " c%d%s%s", e->lk.curve, e->lk.output == WF_OUT_LLUT ? " " : "",
+            cl = snprintf(code, sizeof code, " c%d%s%s", e->lk.curve, e->lk.output == WF_OUT_LLUT ? " " : "",
                      e->lk.output == WF_OUT_LLUT ? wf_flut_code[e->llut < WF_FLUT_N ? e->llut : 0] : "");
         else
             code[0] = 0;
+        if ((e->lk.hl || e->lk.sh) && cl >= 0 && cl < (int)sizeof code)
+            snprintf(code + cl, sizeof code - cl, " hl%s sh%s", wf_hs_text(e->lk.hl), wf_hs_text(e->lk.sh));
         n = 0;
         if (e->rb) n += snprintf(ex + n, sizeof ex - n, e->rb == 1 ? " raw" : " raw-stop");
         if (e->fxp && n < (int)sizeof ex) n += snprintf(ex + n, sizeof ex - n, " fx pending");

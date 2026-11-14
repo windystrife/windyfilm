@@ -44,10 +44,13 @@ extern const int wf_nfilms;
 const struct wf_film *wf_film_by_id(int id);   /* 0 when unknown */
 
 /* ------------------------------------------------------------------ state the browser shows and changes (core) */
-enum { WF_ROW_LIGHT = 0, WF_ROW_PRINT, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_MIST, WF_ROW_STRENGTH, WF_ROW_FLUT, WF_NROWS };
+enum { WF_ROW_LIGHT = 0, WF_ROW_PRINT, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_MIST, WF_ROW_STRENGTH, WF_ROW_HL, WF_ROW_SH,
+       WF_ROW_FLUT, WF_NROWS };
 
-const char *wf_row_name(int row);         /* "Light", "Print", "Grain", "Halation", "Mist", "Strength", "Film LUT" */
-const char *wf_row_text(int row);         /* the current value as text: "Day", "Scan", "Normal", "Neg", "Off", "100%", ... */
+const char *wf_row_name(int row);         /* "Light", "Print", "Grain", "Halation", "Mist", "Strength", "Highlights",
+                                             "Shadows", "Film LUT" */
+const char *wf_row_text(int row);         /* the current value as text: "Day", "Scan", "Normal", "Neg", "Off", "100%", "+2",
+                                             ... (Highlights / Shadows: "-5" .. "0" .. "+5", no wrap at the ends) */
 int  wf_row_avail(int row);               /* 0 = has no effect with the current output or camera: the UI greys it */
 int  wf_row_step(int row, int delta);     /* delta -1 / +1; 1 = the value changed (and was saved) */
 int  wf_row_level(int row, int *max);     /* bar rows (Strength): the level 0..*max */

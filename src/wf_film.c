@@ -24,7 +24,11 @@
  * once per call (per chunk of rows), never per pixel.
  *
  * Strength (the browser row, 30 / 100 / 125 %): 30 % / 125 % scale every builder value's deviation from the identity
- * mapping once at build time (wf_d12); 100 % takes the unscaled path. */
+ * mapping once at build time (wf_d12); 100 % takes the unscaled path.
+ *
+ * Highlights / Shadows (WF_FT_HS, the browser rows and the ML menu, -5..+5): wf_hs_bend bends N last, after the Strong
+ * pass. E and C keep the values relative to the unbent N, so every colour at a luma moves with its grey: Y' = N'[y] + E.
+ * 0 / 0 = no flag bit, nothing bent: the set is bit-identical to a build without the setting. */
 #include <stdint.h>
 #include "wf_film.h"
 
@@ -43,6 +47,25 @@ static int wf_d12(int v, int i, int s)
     int d = v - i;
     return d >= 0 ? i + (int)(((unsigned)d * (unsigned)s + 50u) / 100u)
                   : i - (int)(((unsigned)-d * (unsigned)s + 50u) / 100u);
+}
+
+/* Highlights h / Shadows s on N (wf_film.h) */
+void wf_hs_bend(uint8_t *N, int h, int s)
+{
+    if (!h && !s)
+        return;
+    int p = 0;
+    for (int y = 0; y < 256; y++) {
+        int x = N[y], w = 255 - x;
+        int d = h * (x * x * w) + s * (x * w * w);   /* |d| <= 5 x 2,456,500 x 2 < 2^31 */
+        unsigned m = (unsigned)(d < 0 ? -d : d);
+        int q = (int)((m + 192670u) / 385341u);
+        int v = x + (d < 0 ? -q : q);
+        if (v > 255) v = 255;
+        if (v < p) v = p;
+        N[y] = (uint8_t)v;
+        p = v;
+    }
 }
 
 /* exact tetrahedral value x16 of byte lane `sh` (0 U, 8 Y, 16 V; U/V signed) at (y, u, v) */
@@ -182,6 +205,7 @@ void wf_film_build(struct wf_ftabs *t, const uint32_t *T, int flags)
         for (int y = 1; y < 256; y++)
             if (t->N[y] < t->N[y - 1])
                 t->N[y] = t->N[y - 1];
+    wf_hs_bend(t->N, WF_FT_HOF(flags), WF_FT_SHOF(flags));   /* Highlights / Shadows: N only, last */
     __asm__ __volatile__("" ::: "memory");          /* tables complete before src says so */
     t->src = T;
 }
