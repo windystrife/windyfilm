@@ -319,6 +319,10 @@ too), never flat Log. The math is WindyStrife's own (the V14U spec); WindyFilm h
   - Highlights / Shadows bend it like any Log + LUT output (3.3).
   - Can art: our house layout, graphite body, champagne accent, the name in our font. No logo, red dot, script lettering
     or other mark of the camera maker.
+  - Labels say it is a look on the Standard picture, not a log look (owner 11-14 14:00): can foot "STD + LUT", lip text
+    "digital look" without "35mm" (gen_cans `side` / `side35`), chip "Standard" (catalog `fmt`, FMTS), info page "Look on
+    the Standard picture", ML menu Output "Look on Standard" and title "Leica Vivid (look on Standard)". The colour path is
+    unchanged (V-Log inside, into the cube).
 - **Windy names:** the 12 cans of the owner's film pack and his neutral cube (Film LUT 9, 11..22; can ids 66, 71,
   73..83) are named "Windy ..." instead of "Tung ..." (catalogue, `wf_flut_name`, cans with "Windy" on the body). Cube
   file names and config codes stay the same (`TUNGNTVL.CUB`, `flut=TUNGNT`, ...); `flut=leicav` selects Leica Vivid.
