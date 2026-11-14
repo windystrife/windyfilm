@@ -107,15 +107,23 @@ còn nguyên trong RAM hay không, và mỗi nửa ảnh nằm ở đâu trong R
 - Probe tự tắt mỗi lần bật máy (không lưu vào cấu hình).
 
 
-5. RAW DEVELOP "B" (CHẬM): BẢN THỬ, CHƯA CÓ PROBE TRÊN 5D2
-----------------------------------------------------------
+5. RAW DEVELOP "B" (CHẬM): BẢN THỬ, ĐÃ PROBE, CHƯA THỬ DEVELOP TRÊN MÁY
+------------------------------------------------------------------------
 Mục đích: màu phim làm từ chính file RAW 14-bit của Canon thay cho JPEG 8-bit.
-Mỗi ảnh khoảng 35-45 giây (nửa trên rồi nửa dưới). Chưa chạy trên máy thật.
+Mỗi ảnh khoảng 35-45 giây (nửa trên rồi nửa dưới). Develop chưa chạy trên máy
+thật.
 
-QUAN TRỌNG: địa chỉ RAW của 5D2 lấy từ phân tích firmware, CHƯA được RAW probe
-kiểm trên máy (mục 4). Vì vậy mỗi ảnh module đều so RAW với JPEG của Canon
-trước khi develop; không khớp thì ảnh ra màu phim thường (8-bit) và log ghi
-"rawb: 8-bit (buffer nomatch ...)" kèm điểm số. Nên chạy RAW probe (mục 4) trước.
+RAW probe trên máy (14/11, thư mục 5D2_probe_ketqua): ở cả nửa trên và nửa
+dưới, RAM có đúng RAW của tấm vừa chụp. Địa chỉ cũ lệch một hàng (đọc từ hàng
+1 của CR2); thẻ RAWB3 đọc từ hàng 0 nên đã đúng. RAW develop trên thẻ này thử
+được, nhưng chưa ai thử trên máy. Thẻ 5D2_WindyFilm_RAWB2 còn địa chỉ cũ:
+dùng thẻ đó thì để RAW develop Off.
+Mỗi ảnh module vẫn so RAW với JPEG của Canon trước khi develop; không khớp thì
+ảnh ra màu phim thường (8-bit) và log ghi "rawb: 8-bit (buffer nomatch ...)"
+kèm điểm số.
+
+Trình chọn phim (mới từ thẻ RAWB3): mở được cả khi ngắm qua kính, không cần
+LiveView (mục 2). Bấm TRASH mà không mở thì log ghi "ui: TRASH not taken: ...".
 
 Bật:
 - Shoot > WindyFilm > RAW develop: "On (slow)". Mỗi lần bật máy nó tự về Off.
@@ -133,9 +141,10 @@ Chụp:
   nếu máy treo thì tháo pin, và ghi lại lúc đó đang ở bao nhiêu %.
 - Highlights / Shadows có tác dụng với phim; với Log + LUT khi bật RAW develop
   thì chưa.
-- Lon Leica Vivid với RAW develop: develop RAW ra sRGB rồi áp thẳng cube gốc
-  "L Leica 2" 33^3 lên mã sRGB, không qua V-Log. Cần file ML/DATA/LEICAVSR.CUB
-  (cube gốc) trên thẻ. Highlights / Shadows có tác dụng; grain / halation như phim.
+- Lon Leica Vivid (mới từ thẻ RAWB3): RAW develop cũng develop Leica từ RAW:
+  RAW ra sRGB rồi áp thẳng cube gốc "L Leica 2" 33^3 lên mã sRGB, không qua
+  V-Log. Cần file ML/DATA/LEICAVSR.CUB (cube gốc, đã có trên thẻ).
+  Highlights / Shadows có tác dụng; grain / halation như phim.
 
 Gửi lại: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG (kèm 1 tấm cùng cảnh với
 RAW develop Off). Log có các dòng "rawb: ..." cho từng nửa ảnh: địa chỉ RAW,

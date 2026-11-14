@@ -129,9 +129,10 @@ Bật:
   có màu phim thường (8-bit), log ghi lý do.
 - Highlights / Shadows có tác dụng với phim. Với Log + LUT khi RAW develop
   đang bật thì chưa có tác dụng (bản thử này).
-- Lon Leica Vivid với RAW develop: develop RAW ra sRGB rồi áp thẳng cube gốc
-  "L Leica 2" 33^3 lên mã sRGB, không qua V-Log. Cần file ML/DATA/LEICAVSR.CUB
-  (cube gốc) trên thẻ. Highlights / Shadows có tác dụng; grain / halation như phim.
+- Lon Leica Vivid (mới từ thẻ RAWB3): RAW develop cũng develop Leica từ RAW:
+  RAW ra sRGB rồi áp thẳng cube gốc "L Leica 2" 33^3 lên mã sRGB, không qua
+  V-Log. Cần file ML/DATA/LEICAVSR.CUB (cube gốc, đã có trên thẻ).
+  Highlights / Shadows có tác dụng; grain / halation như phim.
 - Khi RAW develop Off, thẻ này chạy giống thẻ EOSM_WindyFilm (cùng bản main,
   có RAW probe v2 và Highlights / Shadows).
 - Dòng menu báo trạng thái: đang nạp bảng, sẵn sàng ("About 30 s per shot"),
@@ -156,6 +157,7 @@ Cần thử và gửi lại:
 2. 1-2 tấm với Output Log và Log + LUT.
 3. Một lần dừng bằng nửa nút chụp, và (nếu dám) một lần tắt máy giữa chừng.
 4. Một loạt chụp liên tục 3 tấm khi RAW develop On (phải ra màu phim thường).
+5. 1-2 tấm lon Leica Vivid với RAW develop On, kèm cùng cảnh với RAW develop Off.
 Gửi: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG của những tấm đó (cả tấm Off).
 Mỗi tấm có các dòng "rawb: ..." trong log: bộ đệm RAW đã chọn, điểm khớp,
 mức đen / trắng và thời gian từng bước.
