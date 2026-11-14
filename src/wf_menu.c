@@ -90,6 +90,7 @@ static void wf_ps_base_prop(unsigned property, void *priv, uint32_t *buf, unsign
         wf_ps_base = (int)(buf[0] & 0xff);
 }
 int wf_style_raw(void) { return lens_info.raw_picstyle; }
+int wf_job_state(void) { return (int)lens_info.job_state; }
 int wf_style_base(void) { return wf_ps_base; }
 int wf_style_con(void) { int c = picstyle_get_current_contrast(); return c >= -4 && c <= 4 ? c : -10; }
 /* why input curve `inc` is not usable under the camera's Picture Style: WF_PSW_OK, or the first thing that differs.
@@ -651,12 +652,13 @@ static int wf_cfg_save(void)
         n += snprintf(b + n, sizeof b - n, "userwb=%d,%d,%d,%d\n", wf_wb_mode, wf_wb_kelvin, wf_wb_gm, wf_wb_ba);
     if (n <= 0 || n >= (int)sizeof b)
         return 1;
-    FILE *f = FIO_CreateFile(WF_CFG);
+    struct wf_fe e;
+    FILE *f = wf_fcreate(WF_CFG, &e);            /* only while Canon is idle, never over the old file (wf_fio.h) */
     int ok = f && FIO_WriteFile(f, b, n) == n;
     if (f)
         FIO_CloseFile(f);
     if (!ok) {
-        wf_cfg_t = get_ms_clock();               /* card busy: again in 1.5 s */
+        wf_cfg_t = get_ms_clock();               /* Canon / the card busy: again in 1.5 s */
         wf_cfg_dirty = 1;
     }
     return ok;

@@ -44,9 +44,12 @@ extern volatile int h_arena_live;                /* blocks handed out and not fr
 /* clocks: h_clock_add_ms shifts get_ms_clock / get_us_clock forward (time jumps without waiting) */
 extern volatile int h_clock_add_ms;
 
-/* FIO: a path that refuses to open (EXIF busy test), "" none; counts */
-extern char h_fio_busy[128];
-extern volatile int h_fio_opens;
+/* FIO: a path that refuses to open, to be created, removed or renamed (EXIF busy test, the log / WFPROBE.BIN on a busy
+   card), "*" every path, "" none; counts; h_fio_wmax > 0: the next write to a file of the path h_fio_wpath stops after
+   that many bytes. h_fio_dup: creates on an existing name (two entries of one name on the camera), h_fio_dir_busy:
+   creates / removes / renames while lens_info.job_state != 0; main() fails every run on either. */
+extern char h_fio_busy[128], h_fio_wpath[128];
+extern volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy;
 
 /* the menu entries menu_add got */
 extern void *h_menu;

@@ -71,6 +71,7 @@ enum { F_ML23 = 0, F_ML28, F_15, F_13, F_13C, F_NFONTS };
 int  wff_open(void);                    /* load WFFONTS.DAT and look up ML's argnor23 / argnor28; 0 = all there */
 void wff_close(void);
 int  wff_status(void);                  /* bit 0: own pack missing, bit 1: argnor23 missing, bit 2: argnor28 */
+const char *wff_why(void);              /* why the own pack is not used ("ok", "not on the card", ...) */
 int  ui_text(int font, int x, int y, const char *s, int c);                   /* returns the advance */
 int  ui_textw(int font, const char *s);
 int  ui_text_clip(int font, int x, int y, const char *s, int c, int xmax);    /* stops before xmax */
@@ -82,6 +83,7 @@ extern const uint8_t wfc_size[CAN_NSIZES][2];
 int  wfc_open(void);                    /* read the header, palette, index of WFCANS.DAT; 0 = ok */
 void wfc_close(void);
 int  wfc_status(void);                  /* 0 ok, else the reason (WFC_E_*) */
+const char *wfc_why(int st);            /* a WFC_E_* code in words ("ok", "not on the card", ...) */
 int  wfc_glow(const struct wf_film *f, uint8_t rgb[3]);   /* 1 = from the pack, 0 = group colour */
 void wfc_draw(const struct wf_film *f, int size, int x, int y, int bg);   /* pack image or the plain can */
 int  wfc_pal_used(void);                /* can colours placed in the palette */

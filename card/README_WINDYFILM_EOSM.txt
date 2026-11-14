@@ -5,8 +5,14 @@ Module Magic Lantern tạo màu phim cho ảnh JPEG ngay lúc chụp.
 Tác giả: WindyStrife. Giấy phép GPL-2.0 (LICENSE_WINDYFILM.txt).
 Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 
-Đây là bản CHƯA từng chạy trên máy thật. Lần chạy đầu để kiểm tra; mọi lỗi đều
-được ghi vào ML/LOGS/WINDYFLM.LOG.
+Bản này sửa các lỗi thấy ở lần chạy thật đầu tiên (14/11, RAW probe): giờ
+trong log hiện "u.u", dòng log bị mất khi thẻ bận, WFPROBE.BIN thiếu một bản
+ghi, và hai file cùng tên WINDYFLM.LOG trong ML/LOGS. Module giờ chỉ tạo /
+xoá / đổi tên file khi máy đã ghi xong ảnh, và chỉ tạo khi chắc chắn tên đó
+không còn trên thẻ. Mọi lỗi đều được ghi vào ML/LOGS/WINDYFLM.LOG.
+
+Thẻ cũ còn WINDYFLM2.LOG (bản trùng tên đã đổi tên) thì xoá được; module không
+dùng tên đó.
 
 
 1. CÀI LÊN THẺ
@@ -81,7 +87,12 @@ hay không (cần cho đường RAW sau này). Probe chỉ ghi lại, KHÔNG đ�
 - Đặt chất lượng RAW+L. Chụp 3 ảnh đơn, rồi một loạt chụp liên tục 3-4 ảnh.
   Lặp lại với "On + ROM call".
 - Gửi lại: ML/LOGS/WINDYFLM.LOG, ML/LOGS/WFPROBE.BIN và các file CR2 + JPG của
-  những ảnh đó.
+  những ảnh đó. Log giờ ghi nối tiếp, không cần xoá trước; WFPROBE.BIN vẫn làm
+  mới ở ảnh probe đầu tiên của mỗi lần bật máy (ngay khi máy ghi xong ảnh đó),
+  nên gửi nó trước khi tắt / bật lại máy để thử tiếp.
+- Khi thẻ đang bận ghi ảnh, module chờ và ghi lại sau; log có dòng "probe:
+  record #N not written ... yet: <bước> rc <mã>" rồi "written ... on try K".
+  Bước "busy" nghĩa là máy còn đang ghi ảnh; đó là bình thường.
 - Probe tự tắt mỗi lần bật máy (không lưu vào cấu hình).
 
 
@@ -93,5 +104,7 @@ ML/data/WFCANS.DAT        hình lon phim
 ML/data/WFFONTS.DAT       font chữ của giao diện (Ubuntu Sans, UBUNTU_FONT_LICENCE.txt)
 ML/data/*.CUB             cube Film LUT (README_FILMLUT.txt)
 ML/SETTINGS/WINDYFLM.CFG  cấu hình (module tự ghi)
-ML/LOGS/WINDYFLM.LOG      nhật ký (mỗi lần bật máy một file mới)
+ML/LOGS/WINDYFLM.LOG      nhật ký, ghi nối tiếp qua các lần bật máy; mỗi lần
+                          bật máy bắt đầu bằng dòng "WindyFilm <ngày>: camera ..."
+ML/LOGS/WINDYFLM.OLD      nhật ký cũ (khi WINDYFLM.LOG quá 512 KB lúc bật máy)
 MD5SUMS.txt               md5 của mọi file khi làm thẻ

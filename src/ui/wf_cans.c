@@ -140,6 +140,12 @@ void wfc_close(void)
 }
 
 int wfc_status(void) { return P.st; }
+const char *wfc_why(int st)
+{
+    static const char *const n[] = { "ok", "not on the card", "bad header", "other can sizes", "no memory",
+                                     "read failed" };
+    return st >= 0 && st < (int)(sizeof n / sizeof n[0]) ? n[st] : "?";
+}
 int wfc_pal_used(void) { return P.st ? 0 : P.used; }
 
 static int entry_of(const struct wf_film *f)

@@ -31,8 +31,9 @@ int h_change_val[256];
 volatile int h_kelvin_n, h_kelvin_last, h_gm_last, h_ba_last;
 volatile int h_shoot_fail, h_heap_free = 8 << 20, h_arena_live;
 volatile int h_clock_add_ms;
-char h_fio_busy[128];
-volatile int h_fio_opens;
+char h_fio_busy[128], h_fio_wpath[128];
+static void *h_wf;                                  /* the open file of h_fio_wpath */
+volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy;
 void *h_menu;
 volatile int h_menu_count;
 
@@ -218,18 +219,56 @@ static const char *h_path(const char *p)
         p += 3;
     return p;
 }
+static int h_busy(const char *path)              /* h_fio_busy: that path, or "*" = every path (card busy) */
+{
+    return h_fio_busy[0] && (!strcmp(h_fio_busy, "*") || !strcmp(h_path(path), h_fio_busy));
+}
 void *FIO_OpenFile(const char *path, unsigned mode)
 {
     h_fio_opens++;
-    if (h_fio_busy[0] && !strcmp(h_path(path), h_fio_busy))
+    if (h_busy(path))
         return 0;
-    return fopen(h_path(path), (mode & 3) == 2 ? "r+b" : "rb");
+    void *f = fopen(h_path(path), (mode & 3) == 2 ? "r+b" : "rb");
+    if (f && h_fio_wpath[0] && !strcmp(h_path(path), h_fio_wpath))
+        h_wf = f;
+    return f;
 }
-void *FIO_CreateFile(const char *path) { return fopen(h_path(path), "w+b"); }
-void *FIO_CreateFileOrAppend(const char *path) { return fopen(h_path(path), "ab"); }
+static int h_exists(const char *path) { struct stat st; return stat(h_path(path), &st) == 0; }
+/* a directory change (create / remove / rename) while Canon saves a shot (lens_info.job_state != 0): counted in
+   h_fio_dir_busy, main() fails the run on any */
+static void h_dir_change(void) { if (h_li_get("job")) h_fio_dir_busy++; }
+/* ML's FIO_CreateFile = _FIO_RemoveFile + _FIO_CreateFile. On the camera a create over a name the card did not let go
+   of leaves a second entry of that name (two WINDYFLM.LOG on the 11-14 card), so the module must have removed the file
+   and seen it gone first: a create on an existing name is counted in h_fio_dup (main() fails the run on any). A busy
+   path refuses the create. */
+void *FIO_CreateFile(const char *path)
+{
+    h_fio_creates++;
+    h_dir_change();
+    if (h_exists(path))
+        h_fio_dup++;
+    if (h_busy(path))
+        return 0;
+    void *f = fopen(h_path(path), "w+b");
+    if (f && h_fio_wpath[0] && !strcmp(h_path(path), h_fio_wpath))
+        h_wf = f;
+    return f;
+}
 int FIO_ReadFile(void *f, void *p, size_t n) { return (int)fread(p, 1, n, f); }
-int FIO_WriteFile(void *f, const void *p, size_t n) { int k = (int)fwrite(p, 1, n, f); fflush(f); return k; }
-void FIO_CloseFile(void *f) { if (f) fclose(f); }
+/* h_fio_wmax > 0: the next write to a file opened by the path h_fio_wpath stops after that many bytes (a short write),
+   then writes are whole again */
+int FIO_WriteFile(void *f, const void *p, size_t n)
+{
+    int m = h_fio_wmax;
+    if (m > 0 && (size_t)m < n && f == h_wf) {
+        h_fio_wmax = 0;
+        n = (size_t)m;
+    }
+    int k = (int)fwrite(p, 1, n, f);
+    fflush(f);
+    return k;
+}
+void FIO_CloseFile(void *f) { if (f == h_wf) h_wf = 0; if (f) fclose(f); }
 int FIO_GetFileSize(const char *path, uint32_t *size)
 {
     struct stat st;
@@ -244,7 +283,20 @@ int64_t FIO_SeekSkipFile(void *f, int64_t pos, int whence)
         return -1;
     return (int64_t)ftello(f);
 }
-int FIO_RemoveFile(const char *path) { return unlink(h_path(path)) == 0 ? 0 : -1; }
+int FIO_RemoveFile(const char *path)             /* a busy path: the card refuses, the file stays */
+{
+    h_dir_change();
+    return !h_busy(path) && unlink(h_path(path)) == 0 ? 0 : -1;
+}
+int FIO_RenameFile(const char *src, const char *dst)
+{
+    h_dir_change();
+    if (h_busy(src) || h_busy(dst))
+        return -1;
+    char s[256];
+    snprintf(s, sizeof s, "%s", h_path(src));
+    return rename(s, h_path(dst)) == 0 ? 0 : -1;
+}
 
 /* directory listing: alloc_fio_file + FIO_FindFirstEx / NextEx + convert_fio_file_info (layout of wf_loglut.c) */
 struct wf_file_info { uint16_t mode; uint32_t size; uint64_t timestamp; char name[0x80]; };

@@ -6,7 +6,9 @@ Tác giả: WindyStrife. Giấy phép GPL-2.0 (LICENSE_WINDYFILM.txt).
 Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 
 Đây là bản CHƯA từng chạy trên máy thật. Lần chạy đầu để kiểm tra; mọi lỗi đều
-được ghi vào ML/LOGS/WINDYFLM.LOG.
+được ghi vào ML/LOGS/WINDYFLM.LOG. Đã gồm các sửa từ lần chạy thật đầu tiên trên
+EOS M (14/11): log ghi nối tiếp và không mất dòng khi thẻ bận, module chỉ tạo /
+xoá / đổi tên file khi máy đã ghi xong ảnh (tránh hai file cùng tên).
 
 
 1. CÀI LÊN THẺ
@@ -70,5 +72,7 @@ ML/data/WFCANS.DAT        hình lon phim
 ML/data/WFFONTS.DAT       font chữ của giao diện (Ubuntu Sans, UBUNTU_FONT_LICENCE.txt)
 ML/data/*.CUB             cube Film LUT (README_FILMLUT.txt)
 ML/SETTINGS/WINDYFLM.CFG  cấu hình (module tự ghi)
-ML/LOGS/WINDYFLM.LOG      nhật ký (mỗi lần bật máy một file mới)
+ML/LOGS/WINDYFLM.LOG      nhật ký, ghi nối tiếp qua các lần bật máy; mỗi lần
+                          bật máy bắt đầu bằng dòng "WindyFilm <ngày>: camera ..."
+ML/LOGS/WINDYFLM.OLD      nhật ký cũ (khi WINDYFLM.LOG quá 512 KB lúc bật máy)
 MD5SUMS.txt               md5 của mọi file khi làm thẻ

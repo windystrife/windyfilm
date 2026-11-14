@@ -11,10 +11,12 @@
 #      (films/catalog.py -> wf_catalog.c)
 #   2. compile: src/*.c src/*.S (one camera layer), src/ui/*.c (src/wf_ui_stub.c when src/ui/wf_ui.c is not there),
 #      the catalogue; checks: CPU arch tags, no LDRD / STRD, no 64-bit division helper
-#   3. ld -r, strip debug, objcopy --keep-global-symbols (only ML's __module_*_windyflm stay global)
+#   3. ld -r, strip debug, objcopy --keep-global-symbols (only ML's __module_*_windyflm stay global); printf format
+#      check (tools/fmt_check.py: only %d %x %X %s, Canon's vsnprintf has no %u / %lu / %zu / %+d and breaks %c)
 #   4. checksyms against the camera's card .sym; TCC link check with the camera's own loader object (image size)
 #   5. card packs (tools/mk_wfpack.py, mk_wfcans.py, mk_wffont.py; a failing pack tool is reported, not fatal)
-#   6. provenance gate (tools/provenance_gate.py): any finding fails the build
+#   6. provenance gate (tools/provenance_gate.py): any finding fails the build (check 5: card files are made / removed /
+#      renamed only through src/wf_fio.h)
 set -e
 for a in "$@"; do case $a in CAM=*) CAM=${a#CAM=} ;; *) echo "unknown argument $a"; exit 2 ;; esac; done
 CAM=${CAM:-EOSM}
@@ -141,6 +143,8 @@ grep -qx __module_info_windyflm keep.txt || { echo "no __module_info_windyflm"; 
 arm-none-eabi-objcopy --keep-global-symbols=keep.txt windyflm_r.o $B/windyflm.mo
 echo "global: $(tr '\n' ' ' < keep.txt)"
 arm-none-eabi-size -A $B/windyflm.mo | awk '$1 ~ /^\./ && $2 > 0 {printf "  %-18s %7d\n", $1, $2}'
+# printf formats: Canon's vsnprintf has no %u / %lu / %zu / %+d / floats and prints %c wrong (tools/fmt_check.py)
+$PY $R/tools/fmt_check.py $B/windyflm.mo || { echo "format check FAILED (tools/fmt_check.py)"; exit 1; }
 
 # ---------------------------------------------------------------- 4. checksyms + TCC link check
 $PY $R/tools/wf_checksyms.py $SYM $B/windyflm.mo windyflm --tcc-syms tcc_syms.c

@@ -274,7 +274,7 @@ static void wf_ll_poll(void)
         else if (ch)
             n = snprintf(eis, sizeof eis, " srgb(style %02x)", wf_style_raw());
         if (ei)
-            n += snprintf(eis + n, sizeof eis - n, " ei%+d/3", ei);
+            n += snprintf(eis + n, sizeof eis - n, " ei%s%d/3", ei < 0 ? "-" : "+", ei < 0 ? -ei : ei);   /* no %+d */
         if (wf_ll_tabs->pad[1] == WF_LL_AUTO_MARK) {
             int a = av < 0 ? -av : av, u = 0;
             while (a >= 10) { a -= 10; u++; }
@@ -965,7 +965,10 @@ static void wf_report(void)
         if (e->gst && n < (int)sizeof fx) n += snprintf(fx + n, sizeof fx - n, e->gst == 1 ? " g%d" : " g-", e->g_ms);
         if (e->mst && n < (int)sizeof fx) n += snprintf(fx + n, sizeof fx - n, e->mst == 1 ? " m%d" : " m-", e->m_ms);
         if (e->evs == '?' && n < (int)sizeof fx) snprintf(fx + n, sizeof fx - n, " ev?");
-        else if (e->evs && n < (int)sizeof fx) snprintf(fx + n, sizeof fx - n, " ev%d%c", (e->ev8 + 4) >> 3, e->evs);
+        else if (e->evs && n < (int)sizeof fx) {
+            char es[2] = { e->evs, 0 };          /* no %c: Canon's vsnprintf prints it wrong */
+            snprintf(fx + n, sizeof fx - n, " ev%d%s", (e->ev8 + 4) >> 3, es);
+        }
         if (e->lk.output == WF_OUT_FILM && e->lk.row >= 0)
             snprintf(code, sizeof code, " %s v%d s%d", wf_films[e->lk.row].code, e->lk.variant,
                      wf_strength_pct(e->lk.strength));

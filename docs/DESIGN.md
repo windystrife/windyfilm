@@ -87,8 +87,9 @@ shot: Canon YUV conversion site ─ hook (patch_hook_function) ─ gate ─ sema
 - **Preview:** LiveView display filter, the same kernels on the preview tables. Preview exposure (`wf_expsim`) needs ML
   core patch 0004. It is already in the EOS M card core; on the 5D2, check and gate.
 - **EXIF:** UserComment `WindyFilm <film> <print> <light> G<n> H<n> M<n> S<n> EV<x>` (core decides the exact text).
-- **Log:** `ML/LOGS/WINDYFLM.LOG`: boot line (camera, ROM check, hook result, pack and can status), and per shot: film,
-  variant, timings.
+- **Log:** `ML/LOGS/WINDYFLM.LOG`, appended across boots (over 512 KB at boot: kept as `WINDYFLM.OLD`): boot line
+  (camera, ROM check, hook result, pack and can status), and per shot: film, variant, timings. Lines wait in a ring
+  while the card is busy; lost lines are counted in the log.
 - **Config:** `ML/SETTINGS/WINDYFLM.CFG`, plain `key=value` lines: film id, print, light, grain, halation, mist,
   strength, output, curve, Film LUT, LUT EI, preview, preview exposure, EXIF.
 - **Coexistence:** do not load together with `filmroll.mo`. Symbols: everything except ML's `__module_*_windyflm` is
@@ -221,7 +222,8 @@ intact at the hook. It is implemented in commit a675c8a (`wf_cam_eosm.c`, host t
   - an FNV-1a over the first 4 KB at the raw address and at A[0] / A[1], plus a copy of the first 1 KB of layers 0 and 1.
     Read an address only if it lies in the shoot pool 0x40D6C000..0x60000000.
 - `wf_task` writes the lines to `WINDYFLM.LOG` and the 1 KB copies to `ML/LOGS/WFPROBE.BIN` after the shot. Hooks never
-  log.
+  log. A record the card refuses (busy with the shot) is retried at its own offset; the log names the failing step.
+  The first record of a boot makes a new file only once Canon is idle (card writes: `src/wf_fio.h`).
 - **Run it with RAW+L, single and continuous drive.** Compare the raw checksum with the CR2. The open risk: after
   `DelayCompleteRawToSsraw`, Canon calls `ReallocateMemory` / `sssCompleteMemShrinkCB`, so in burst the raw may already
   be reused. SSRAW layer 0 is released only inside 0xFF169414, after our entry hook, which makes it the fallback.

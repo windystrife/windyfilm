@@ -118,7 +118,17 @@ Deny input: the old module's binary (path assembled inside the script, read only
   `grain=off|fine|normal|strong`, `halation=off|halation|bloom|spk|spkbloom`, `mist=off|w8|w4|w2|w1|b8|b4|b2|b1`,
   `preview=off|on|fast`, `exposure=camera|smooth`, `exptrim=-16..16`, `exif=on|off`, `userwb=mode,kelvin,gm,ba`
   (only while Light holds the WB). Written by `wf_task` 1.5 s after a change, at most 600 B.
-- `ML/LOGS/WINDYFLM.LOG`: new file each boot. Useful lines: `hook NN ff169414 rom e92d41fc err 0`, `pack ok: N tables`,
+- `ML/LOGS/WINDYFLM.LOG`: appended across boots. A boot starts with `WindyFilm <date>: camera ..` (logged in
+  `wf_init`); at the first write of a boot a log over 512 KB becomes `WINDYFLM.OLD`. Lines wait in a 16 KB byte ring
+  until the card takes them (a refused open / a short write is retried every 200 ms, logged once as `log: card refused N
+  writes in .. ms (first: <step> rc <rc>, job <j>), lines kept`); a line that finds the ring full is counted
+  (`log: N lines lost so far`). Card files are written through `src/wf_fio.h` (wf_main.c): a create, remove or
+  rename only while Canon is idle (`lens_info.job_state` 0), a create only once the name is verified gone, since a
+  create over an existing name leaves two entries of that name (the 11-14 card: two `WINDYFLM.LOG`, trap W24); appends
+  and writes at an offset open the existing file. The log, WFPROBE.BIN, WINDYFLM.CFG and the `.FRT` caches all use it;
+  gate check 5 fails the build on a direct `FIO_CreateFile` / `FIO_RemoveFile` / `FIO_RenameFile` anywhere else.
+  Formats: only `%d %x %X %s` (+ `-` / `0`, width); `tools/fmt_check.py` fails the build otherwise (trap W23).
+  Useful lines: `hook NN ff169414 rom e92d41fc err 0`, `pack ok: N tables`,
   `pack <code> v<variant> loaded`, `yuv NN <buf>/<raw>: film <code> v0 s100 <ms> h<ms> g<ms> m<ms> q<ms> a<aspect>`,
   `shot #n <title>: <s> = look .. + mist .. (TOP .., BOT ..) EV..`, `lut <cube> 33^3 ok|cache ..`, `exif IMG_nnnn.JPG ok`,
   `fx halation|grain|mist .. ready`, `light Day: 5500K`, `expsim: ..`.
@@ -172,8 +182,11 @@ plan, the numbers and the traps. Exact touch points per step:
   - 5D2: `wf_cam_5d2.c` calls `PRB_ENTER` / `PRB_LEAVE` in both hooks (TOP, BOT), empty while `WF_PRB_CAN` is 0
     (wf_cam.h); `prb_5d2` waits for the spec's block, registers, sources and safe range.
 
-  `wf_cam_poll()` (wf_task) calls `wf_prb_flush()`, which writes the lines and appends the record to
-  `ML/LOGS/WFPROBE.BIN`; calls that arrive before that are counted as skipped. The menu entry "RAW probe" is Off / On / On + ROM call and is not in the config. The
+  `wf_cam_poll()` (wf_task) calls `wf_prb_flush()`: the lines of a taken record go to the log at once; the record is
+  copied to `prb_out` (the hook may take the next one) and written at its own offset (`prb_written` x 4696; the first
+  record of a boot makes a new file, once Canon is idle and the old file is verified gone), so a retry after a refused open or a short write never shifts the file. Retries every
+  200 ms for 30 s, logged as `probe: record #N not written .. yet: <step> rc <rc> (shot job <j>)` / `.. written .. on
+  try K`. A call that comes while one record waits for the card and another is taken is skipped and counted. The menu entry "RAW probe" is Off / On / On + ROM call and is not in the config. The
   host shim fakes the parameter block, the EDMAC words and the ROM lookup (`wf_host_mem_read`, `wf_host_memnavi`).
   The probe's own `" %08x"` lines are built word by word: a long repeated format string matched the old binary in the
   gate.

@@ -14,6 +14,7 @@
 #include "wf_api.h"
 #include "wf_frame.h"
 #include "wf_cam.h"
+#include "wf_fio.h"                              /* card writes: wf_fopen_w, wf_fcreate, wf_fremove, wf_frename */
 
 /* ------------------------------------------------------------------ DryOS / ML imports (both cameras' .sym have them)
  * A file that includes ML's own headers first (wf_menu.c, wf_pv.c) defines WF_ML_HEADERS and takes ML's prototypes. */
@@ -90,7 +91,8 @@ extern volatile int wf_cam_ok;                    /* 1 = ROM words matched (wf_c
 extern volatile int wf_unloading;                 /* module deinit started: hooks return, task ends */
 void wf_status_set(const char *s);                /* wf_status() text ("" = fine) */
 void wf_gen_bump(void);                           /* wf_gen() + 1 (UI redraw) */
-void wf_log_flush(void);                          /* wf_task: write the log ring to ML/LOGS/WINDYFLM.LOG */
+void wf_log_flush(void);                          /* wf_task: append the log ring to ML/LOGS/WINDYFLM.LOG */
+int wf_job_state(void);                           /* wf_menu.c: ML lens_info.job_state (Canon busy with a shot when != 0) */
 void wf_ui_request(void);                         /* menu: open the browser from wf_task after the ML menu closed */
 
 /* ------------------------------------------------------------------ camera layer (wf_cam_eosm.c / wf_cam_5d2.c) */

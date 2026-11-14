@@ -23,11 +23,12 @@ extern int  vsnprintf(char *b, size_t n, const char *fmt, __builtin_va_list ap);
 extern void *FIO_OpenFile(const char *name, unsigned mode);
 extern int   FIO_ReadFile(void *f, void *buf, size_t n);
 extern void *FIO_CreateFile(const char *name);
-extern void *FIO_CreateFileOrAppend(const char *name);
 extern int   FIO_WriteFile(void *f, const void *buf, size_t n);
 extern void  FIO_CloseFile(void *f);
 extern int   FIO_GetFileSize(const char *name, uint32_t *size);
 extern int64_t FIO_SeekSkipFile(void *f, int64_t pos, int whence);
+extern int   FIO_RemoveFile(const char *name);
+extern int   FIO_RenameFile(const char *src, const char *dst);
 extern int  gui_menu_shown(void);
 extern void gui_stop_menu(void);
 extern void wf_film_shot_set_mem(void *mem);
@@ -56,67 +57,181 @@ void wf_status_set(const char *s) { wf_status_s = s ? s : ""; wf_gen_bump(); }
 uint32_t wf_gen(void) { return wf_gen_n; }
 void wf_gen_bump(void) { wf_gen_n++; }
 
+/* ------------------------------------------------------------------ card writes (wf_fio.h)
+ * The only code that creates, removes or renames a card file. Canon's FIO makes a second directory entry of the same
+ * name when a file is created over an existing one; ML's FIO_CreateFile removes the file first, but a remove the card
+ * refuses while it saves a shot goes unnoticed (the 11-14 EOS M run: two WINDYFLM.LOG entries, trap W24). So a
+ * directory change waits until Canon is idle (lens_info.job_state 0), and a create follows only a verified absence. */
+#define WF_O_RDWR_SYNC 0x1002                    /* ML fio-ml.h O_RDWR | O_SYNC (what ML's own append uses) */
+#define WF_RM_TRIES    4                         /* removes while the name is still there (an old duplicate entry) */
+static const char *const wf_fe_names[WF_FE_N] = { "ok", "busy", "remove", "create", "open", "seek", "write", "rename" };
+const char *wf_fe_name(int step) { return step >= 0 && step < WF_FE_N ? wf_fe_names[step] : "?"; }
+static int wf_fexists(const char *path) { uint32_t size; return FIO_GetFileSize(path, &size) == 0; }
+static int wf_fset(struct wf_fe *e, int step, int rc) { e->step = step; e->rc = rc; return step == WF_FE_OK ? 0 : -1; }
+
+int wf_fremove(const char *path, struct wf_fe *e)
+{
+    int job = wf_job_state(), rc = 0;
+    if (job)
+        return wf_fset(e, WF_FE_BUSY, job);
+    for (int i = 0; i < WF_RM_TRIES && wf_fexists(path); i++)
+        rc = FIO_RemoveFile(path);
+    return wf_fset(e, wf_fexists(path) ? WF_FE_REMOVE : WF_FE_OK, rc);
+}
+
+void *wf_fcreate(const char *path, struct wf_fe *e)
+{
+    if (wf_fremove(path, e))
+        return 0;
+    void *f = FIO_CreateFile(path);              /* ML: _FIO_RemoveFile (nothing there now) + _FIO_CreateFile */
+    if (!f || !DRY_OK(f)) {
+        wf_fset(e, WF_FE_CREATE, (int)(uintptr_t)f);
+        return 0;
+    }
+    return f;
+}
+
+int wf_frename(const char *src, const char *dst, struct wf_fe *e)
+{
+    if (wf_fremove(dst, e))
+        return -1;
+    int rc = FIO_RenameFile(src, dst);
+    return wf_fset(e, wf_fexists(src) || !wf_fexists(dst) ? WF_FE_RENAME : WF_FE_OK, rc);
+}
+
+void *wf_fopen_w(const char *path, int how, uint32_t pos, struct wf_fe *e)
+{
+    wf_fset(e, WF_FE_OK, 0);
+    if (how == WF_FO_NEW || (how == WF_FO_END_OR_NEW && !wf_fexists(path)))
+        return wf_fcreate(path, e);
+    void *f = FIO_OpenFile(path, WF_O_RDWR_SYNC);  /* an open never changes the directory: fine while Canon is busy */
+    if (!f || !DRY_OK(f)) {
+        wf_fset(e, WF_FE_OPEN, (int)(uintptr_t)f);
+        return 0;
+    }
+    int64_t at = how == WF_FO_AT ? FIO_SeekSkipFile(f, pos, 0) : FIO_SeekSkipFile(f, 0, 2);
+    if (at < 0 || (how == WF_FO_AT && at != (int64_t)pos)) {
+        FIO_CloseFile(f);
+        wf_fset(e, WF_FE_SEEK, (int)at);
+        return 0;
+    }
+    return f;
+}
+
 /* ------------------------------------------------------------------ the log
- * A ring of lines written by any task but the worker / hooks (wf_task, the GUI task: menu, browser), flushed to the
- * card by wf_task. A line is "<seconds>.<tenths> text", at most WF_LOG_W - 1 chars. One semaphore guards the ring;
- * a writer that cannot get it within 50 ms drops its line (counted). */
-#define WF_LOG_PATH "ML/LOGS/WINDYFLM.LOG"
-#define WF_LOG_N 48
-#define WF_LOG_W 120
-static char wf_log_ring[WF_LOG_N][WF_LOG_W];
-static volatile unsigned wf_log_h, wf_log_t, wf_log_lost;
+ * Text lines from any task but the worker / hooks (wf_task, the GUI task: menu, browser) go to a byte ring that only
+ * wf_task writes to the card, appended to ML/LOGS/WINDYFLM.LOG. A line is "<seconds>.<tenths> text\n", at most
+ * WF_LOG_W - 1 chars. Lines leave the ring only once the card took them: while the card refuses (busy with a shot)
+ * they wait and the flush retries every WF_LOG_RETRY ms ("log: card refused N writes .. lines kept" once the card took
+ * them); a line that finds the ring full, or the semaphore taken for
+ * 50 ms, is dropped and counted ("log: N lines lost"). The log is appended across boots (the first line of a boot is
+ * "WindyFilm <date>: camera ..."); at the first write of a boot a log over WF_LOG_MAX becomes WINDYFLM.OLD. */
+#define WF_LOG_PATH  "ML/LOGS/WINDYFLM.LOG"
+#define WF_LOG_OLD   "ML/LOGS/WINDYFLM.OLD"
+#define WF_LOG_MAX   (512 * 1024)
+#define WF_LOG_RING  16384                       /* a power of two */
+#define WF_LOG_W     120
+#define WF_LOG_RETRY 200
+static char wf_log_ring[WF_LOG_RING];
+static volatile unsigned wf_log_h, wf_log_t, wf_log_lost;    /* byte counters, h - t <= WF_LOG_RING */
 static void *wf_log_sem;
-static int wf_log_started, wf_log_lost_said;
+static int wf_log_opened, wf_log_lost_said;
+static int wf_log_fails, wf_log_fail_t0, wf_log_fail_last, wf_log_fail_job;
+static struct wf_fe wf_log_fe;
 
 void wf_log(const char *fmt, ...)
 {
+    char d[WF_LOG_W + 1];
+    int ms = get_ms_clock(), n;
+    n = snprintf(d, WF_LOG_W, "%5d.%d ", ms / 1000, ms % 1000 / 100);
+    if (n < 0 || n >= WF_LOG_W)
+        n = 0;
+    d[n] = 0;
+    __builtin_va_list ap;
+    __builtin_va_start(ap, fmt);
+    vsnprintf(d + n, WF_LOG_W - 1 - n, fmt, ap);  /* Canon's vsnprintf writes max + 1 bytes (ML stdio.c) */
+    __builtin_va_end(ap);
+    d[WF_LOG_W - 1] = 0;
+    while (n < WF_LOG_W - 1 && d[n])
+        n++;
+    d[n++] = '\n';
     if (!wf_log_sem || take_semaphore(wf_log_sem, 50) != 0) {
         wf_log_lost++;
         return;
     }
-    if (wf_log_h - wf_log_t >= WF_LOG_N) {
+    unsigned h = wf_log_h;
+    if (WF_LOG_RING - (h - wf_log_t) < (unsigned)n) {
         wf_log_lost++;
     } else {
-        char *d = wf_log_ring[wf_log_h % WF_LOG_N];
-        int ms = get_ms_clock(), n;
-        unsigned s = (unsigned)ms / 1000u, t = ((unsigned)ms - s * 1000u) / 100u;
-        n = snprintf(d, WF_LOG_W, "%5u.%u ", s, t);
-        if (n < 0 || n >= WF_LOG_W)
-            n = 0;
-        __builtin_va_list ap;
-        __builtin_va_start(ap, fmt);
-        vsnprintf(d + n, WF_LOG_W - n, fmt, ap);
-        __builtin_va_end(ap);
-        wf_log_h++;
+        for (int i = 0; i < n; i++)
+            wf_log_ring[(h + i) & (WF_LOG_RING - 1)] = d[i];
+        WF_BARRIER();
+        wf_log_h = h + n;
     }
     give_semaphore(wf_log_sem);
 }
 
-/* wf_task only: the ring to the card. The first flush of a boot starts a new file. */
+/* wf_task only: the first write of a boot appends to the log (renamed to WINDYFLM.OLD first when it is over WF_LOG_MAX,
+ * a new file when there is none: both only while Canon is idle, wf_fio.h); later writes only ever append */
+static void *wf_log_open(struct wf_fe *e)
+{
+    if (wf_log_opened)
+        return wf_fopen_w(WF_LOG_PATH, WF_FO_END, 0, e);
+    uint32_t size = 0;
+    if (FIO_GetFileSize(WF_LOG_PATH, &size) == 0 && size > WF_LOG_MAX && wf_frename(WF_LOG_PATH, WF_LOG_OLD, e) &&
+        e->step == WF_FE_BUSY)
+        return 0;                                /* Canon busy: rotated at a later try (any other failure: appended) */
+    void *f = wf_fopen_w(WF_LOG_PATH, WF_FO_END_OR_NEW, 0, e);
+    if (f)
+        wf_log_opened = 1;
+    return f;
+}
+
+/* wf_task only: the ring to the card (two writes when the text wraps round the ring's end) */
 void wf_log_flush(void)
 {
     if (wf_log_lost != (unsigned)wf_log_lost_said) {
         wf_log_lost_said = wf_log_lost;
-        wf_log("log: %d lines lost (ring full or busy)", wf_log_lost_said);
+        wf_log("log: %d lines lost so far (the log ring was full or busy)", wf_log_lost_said);
     }
-    if (wf_log_t == wf_log_h)
+    unsigned t = wf_log_t, h = wf_log_h;
+    if (t == h)
         return;
-    static char buf[WF_LOG_N * WF_LOG_W];
-    int n = 0;
-    while (wf_log_t != wf_log_h) {
-        const char *s = wf_log_ring[wf_log_t % WF_LOG_N];
-        for (int i = 0; s[i] && i < WF_LOG_W - 1 && n < (int)sizeof buf - 2; i++)
-            buf[n++] = s[i];
-        buf[n++] = '\n';
-        WF_BARRIER();
-        wf_log_t++;
+    int now = get_ms_clock();
+    if (wf_log_fails && now - wf_log_fail_last < WF_LOG_RETRY && !wf_unloading)
+        return;
+    struct wf_fe e;
+    void *f = wf_log_open(&e);
+    while (f && t != h) {
+        unsigned a = t & (WF_LOG_RING - 1), n = h - t;
+        if (n > WF_LOG_RING - a)
+            n = WF_LOG_RING - a;
+        int w = FIO_WriteFile(f, wf_log_ring + a, n);
+        if (w > 0)
+            t += (unsigned)w > n ? n : (unsigned)w;
+        if (w != (int)n) {
+            e.step = WF_FE_WRITE;
+            e.rc = w;
+            break;
+        }
     }
-    void *f = wf_log_started ? FIO_CreateFileOrAppend(WF_LOG_PATH) : FIO_CreateFile(WF_LOG_PATH);
-    if (!f || (uint32_t)f & 1)
-        return;                                  /* card busy: these lines are gone, the next flush tries again */
-    wf_log_started = 1;
-    FIO_WriteFile(f, buf, n);
-    FIO_CloseFile(f);
+    if (f)
+        FIO_CloseFile(f);
+    WF_BARRIER();
+    wf_log_t = t;                                /* what the card took leaves the ring */
+    if (t == h) {
+        if (wf_log_fails)
+            wf_log("log: card refused %d writes in %d ms (first: %s rc %d, job %d), lines kept", wf_log_fails,
+                   now - wf_log_fail_t0, wf_fe_name(wf_log_fe.step), wf_log_fe.rc, wf_log_fail_job);
+        wf_log_fails = 0;
+        return;
+    }
+    if (!wf_log_fails++) {
+        wf_log_fail_t0 = now;
+        wf_log_fe = e;
+        wf_log_fail_job = wf_job_state();
+    }
+    wf_log_fail_last = now;
 }
 
 /* ------------------------------------------------------------------ card reads (UI: can / font packs) */
@@ -202,7 +317,6 @@ static void wf_task(void *arg)
 {
     (void)arg;
     wf_task_up = 1;
-    wf_log("WindyFilm %s: camera %s, ROM check %s", __DATE__, wf_cam_name(), wf_cam_ok ? "ok" : "failed");
     if (wf_cam_ok) {
         void *m = __mem_malloc(sizeof(struct wf_ftabs), 0, "wf_main.c", __LINE__);
         wf_film_shot_set_mem(m);                 /* the shot set of the film kernel (wf_film.c), kept */
@@ -240,6 +354,7 @@ static unsigned int wf_init(void)
     if (!DRY_SEM(wf_log_sem))
         wf_log_sem = 0;
     wf_cam_ok = wf_cam_init();                   /* ROM words only */
+    wf_log("WindyFilm %s: camera %s, ROM check %s", __DATE__, wf_cam_name(), wf_cam_ok ? "ok" : "failed");   /* a boot's 1st line */
     if (!wf_cam_ok)
         wf_status_set("Unsupported firmware");
     wf_ui_init();

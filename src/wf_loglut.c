@@ -4,9 +4,10 @@
  * 64-bit products are SMULL/UMULL; the one 64-bit division per channel (domain scale) is
  * __aeabi_uldivmod; the node index divisions use exact reciprocals (no __aeabi_uidiv). Every symbol
  * used is exported by the EOS M 2.0.2 core (FIO_GetFileSize, FIO_OpenFile, FIO_ReadFile,
- * FIO_CloseFile, FIO_SeekSkipFile, FIO_CreateFile, FIO_WriteFile, FIO_RemoveFile, FIO_FindFirstEx,
- * FIO_FindNextEx, FIO_FindClose, alloc_fio_file, convert_fio_file_info, __mem_malloc, __mem_free,
- * memcpy, memmove, __aeabi_uldivmod): checked with fxlab/checksyms.py against EOSM_202.sym.
+ * FIO_CloseFile, FIO_SeekSkipFile, FIO_WriteFile, FIO_FindFirstEx, FIO_FindNextEx, FIO_FindClose,
+ * alloc_fio_file, convert_fio_file_info, __mem_malloc, __mem_free, memcpy, memmove,
+ * __aeabi_uldivmod): checked with fxlab/checksyms.py against EOSM_202.sym. The cache file is made
+ * and removed through wf_fcreate / wf_fremove (wf_fio.h, wf_main.c): only while Canon is idle.
  *
  * .cube rules (decided here, see INTEGRATION.md):
  *  - 3D only: LUT_3D_SIZE 2..65 (plain integer), given once, before the data.
@@ -49,6 +50,7 @@
 #include <stddef.h>
 #include "wf_loglut.h"
 #include "wf_loglut_tab.h"
+#include "wf_fio.h"
 
 /* ML / DryOS API (ML/src/fio-ml.h, mem.h; declared here so the file builds without ML headers) */
 extern void *FIO_OpenFile(const char *name, unsigned mode);   /* 0 on error */
@@ -848,9 +850,7 @@ extern struct wf_file_info convert_fio_file_info(struct fio_file *f);
 extern void *FIO_FindFirstEx(const char *dir, struct fio_file *f);   /* error: 0 or odd */
 extern int   FIO_FindNextEx(void *d, struct fio_file *f);             /* 0 = next entry */
 extern void  FIO_FindClose(void *d);
-extern void *FIO_CreateFile(const char *name);                        /* 0 on error */
 extern int   FIO_WriteFile(void *f, const void *buf, size_t n);
-extern int   FIO_RemoveFile(const char *name);
 extern int64_t FIO_SeekSkipFile(void *f, int64_t pos, int whence);    /* new position, < 0 on error */
 #define WF_SEEK_SET  0
 
@@ -1008,10 +1008,10 @@ static void __attribute__((noinline)) wf_llc_write(const char *cache, struct wf_
     h->skipped = info->skipped;
     h->domain = info->domain;
     memcpy(h->title, info->title, sizeof h->title);
-    FIO_RemoveFile(cache);
-    void *f = FIO_CreateFile(cache);
+    struct wf_fe e;
+    void *f = wf_fcreate(cache, &e);             /* only while Canon is idle, never over the old file (wf_fio.h) */
     if (!f)
-        return;
+        return;                                  /* no cache this time: a later load writes it */
     int rc = wf_llc_io(f, dma, (uint8_t *)h, sizeof *h, &hash, 1);
     if (!rc)
         rc = wf_llc_io(f, dma, (uint8_t *)t, sizeof *t, &hash, 1);
@@ -1019,7 +1019,7 @@ static void __attribute__((noinline)) wf_llc_write(const char *cache, struct wf_
         rc = wf_llc_io(f, dma, (uint8_t *)&hash, 4, 0, 1);
     FIO_CloseFile(f);
     if (rc)
-        FIO_RemoveFile(cache);                   /* a cut file would fail its size check anyway */
+        wf_fremove(cache, &e);                   /* a cut file would fail its size check anyway */
 }
 
 int wf_loglut_load_cached(const char *cube, const char *cache, int mode, struct wf_lltabs *out,
