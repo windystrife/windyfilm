@@ -2,7 +2,7 @@
 """check_chain_grey.py - the chain films' mid-grey against the catalogue films' (DESIGN 1a, branch film-stage).
 WindyStrife's own check, run by test.sh (mode GREY) on both cameras.
 
-  check_chain_grey.py [TABLES_DIR]       default films/tables
+  check_chain_grey.py [TABLES_DIR [LOG_DIR]]     default films/tables, films/tables/log
 
 A grey patch at 18 % - sRGB code 118, the code the catalogue films are built around (DESIGN A1) - is read through
 every table on the neutral axis (U = V = 0, linear between the nodes Y 112 and 128). The catalogue films (every .T17
@@ -15,6 +15,12 @@ sRGB-decoded output. Until 15/11/2026 the chain was placed with grey at display 
 as a code: two stops under the catalogue (owner's sweep IMG_6844 / IMG_6856). The film-stage composition at default
 knobs is the shipped table: `mk_wfstage dat` (run by the WFSTAGE pack build) holds it to the shipped grey nodes within 3
 codes, so this check covers that path too.
+The log family (option (c), the RAW develop: <GnnPpp>.L33 in LOG_DIR, tools/mk_genesis_films.py log) is read the same
+way on its own grid: scene-linear 0.18 is the log code of its curve (LOG_DIR/domain.txt: S-Log3 0.4106, LogC3 EI800
+0.3910, V-Log 0.4233; a neutral is the same in every gamut), linear between the two neutral nodes around it, and its
+output luma (BT.601 of R'G'B') must land within 1/8 stop of the 8-bit table of the same pair, every offered pair must have one,
+and the log family's median must sit within 1/16 stop of the 8-bit chain median. No log tables: not checked (they are
+made on demand).
 Output: "PASS ..." / "FAIL ..." lines, then "RESULT: <n> pass <m> fail"; exit 1 on a failure.
 Run in WSL: python3 -I -B tools/check_chain_grey.py
 """
@@ -26,6 +32,14 @@ sys.path.insert(0, os.path.join(REPO, "films"))
 import catalog
 
 TABLES = sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, "films", "tables")
+LOGS = sys.argv[2] if len(sys.argv) > 2 else os.path.join(TABLES, "log")
+LOG_N = 33
+LOG_GREYS = {"slog3": 420.0 / 1023.0,                                                  # 0.4106
+             "logc3": 0.247190 * math.log10(5.555556 * 0.18 + 0.052272) + 0.385537,     # 0.3910
+             "vlog": 0.241514 * math.log10(0.18 + 0.00873) + 0.598206}                  # 0.4233
+_dt = os.path.join(LOGS, "domain.txt")
+LOG_CURVE = open(_dt).read().split()[1] if os.path.exists(_dt) else "slog3"
+LOG_GREY = LOG_GREYS.get(LOG_CURVE)                 # log code of scene-linear 0.18 on the family's curve
 GREY_IN = 118                      # sRGB code of 18 % grey
 CHAIN = re.compile(r"(G\d\dP\d\d|GX[0-9A-Z]+)\.T17")
 NP = 0
@@ -48,6 +62,20 @@ def grey_out(path):
     c, t = divmod(GREY_IN, 16)
     a, b = ((w[k * 289 + 8 * 17 + 8] >> 8) & 255 for k in (c, c + 1))
     return a + (b - a) * t / 16.0
+
+
+def log_grey_out(path):
+    # output luma code of scene-linear 0.18 on the .L33 neutral axis (linear between the two nodes, as the develop's
+    # tetrahedral interpolation is on that axis)
+    d = open(path, "rb").read()
+    if len(d) != 6 * LOG_N ** 3:
+        return None
+    c, t = divmod(LOG_GREY * (LOG_N - 1), 1.0)
+    c = int(c)
+    def y(k):
+        r, g, b = struct.unpack_from("<3H", d, 6 * (k + LOG_N * k + LOG_N * LOG_N * k))
+        return (0.299 * r + 0.587 * g + 0.114 * b) * 255.0 / 65535.0
+    return y(c) + (y(c + 1) - y(c)) * t
 
 
 def lin(code):
@@ -90,6 +118,33 @@ else:
     under = [n[:-4] for n, v in chain.items() if stops(v, cat[lo]) < -0.25]
     check(not under, "no chain table is over 1/4 stop under the darkest catalogue film (%s %.1f)%s"
           % (lo[:-4], cat[lo], "; under: " + " ".join(under[:8]) if under else ""))
+
+logs = sorted(n for n in os.listdir(LOGS) if n.endswith(".L33")) if os.path.isdir(LOGS) else []
+if not logs:
+    print("note: %s holds no log tables (option (c), made on demand): the log family is not checked" % LOGS)
+elif not chain:
+    print("note: log tables but no 8-bit chain tables in %s: the log family is not checked" % TABLES)
+elif LOG_GREY is None:
+    check(False, "log family curve %r (%s) is one of %s" % (LOG_CURVE, _dt, sorted(LOG_GREYS)))
+else:
+    lg = {n[:-4]: log_grey_out(os.path.join(LOGS, n)) for n in logs}
+    bad = sorted(n for n, v in lg.items() if v is None)
+    check(not bad, "every log table is %d bytes%s" % (6 * LOG_N ** 3, "; bad: " + " ".join(bad[:8]) if bad else ""))
+    lg = {n: v for n, v in lg.items() if v is not None}
+    want = sorted(n[:-4] for n in set(offered))
+    miss = [n for n in want if n not in lg]
+    check(not miss, "every offered chain pair has a log table (%d of %d)%s" % (len(want) - len(miss), len(want),
+          "; missing: " + " ".join(miss[:8]) if miss else ""))
+    pairs = [(n, v, chain[n + ".T17"]) for n, v in lg.items() if n + ".T17" in chain]
+    dd = sorted(stops(v, e) for _, v, e in pairs)
+    far = sorted((abs(stops(v, e)), n, v, e) for n, v, e in pairs if abs(stops(v, e)) > 0.125)
+    lm, em = statistics.median(v for _, v, _ in pairs), statistics.median(e for _, _, e in pairs)
+    print("note: log family (%s, %d tables) grey median %.1f against the 8-bit %.1f; log - 8-bit per pair %+.3f..%+.3f "
+          "stops" % (LOG_CURVE, len(pairs), lm, em, dd[0], dd[-1]))
+    check(not far, "every log table's grey is within 1/8 stop of its 8-bit table%s"
+          % ("; out: " + " ".join("%s %.1f/%.1f" % (n, v, e) for _, n, v, e in far[:8]) if far else ""))
+    check(abs(stops(lm, em)) <= 0.0625, "log median grey %.1f is within 1/16 stop of the 8-bit chain's %.1f (%+.3f "
+          "stops)" % (lm, em, stops(lm, em)))
 
 print("RESULT: %d pass %d fail" % (NP, len(fails)))
 sys.exit(1 if fails else 0)

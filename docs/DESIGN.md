@@ -138,6 +138,28 @@ table per pair cannot move with them, so the generator also writes the chain **i
 - `WFSTAGE.DAT` (22.6 MB, 44 negative and 16 print halves) is card data like the tables: Genesis-derived, never
   committed; without it the seven rows stay greyed and every film behaves as before.
 
+**The RAW develop's log family (option (c), 15 Nov 2026, generator on `film-stage`, module work on `chain-log`).**
+
+- **What it is:** a second derived family, one table per offered pair (643). `tools/mk_genesis_films.py log` writes
+  `films/tables/log/<GnnPpp>.L33`: 33^3 nodes, R'G'B' uint16 each, 215,622 B; card data, never committed.
+- **How it is sampled:** `tools/mk_genesis_cube.c` DOMAIN `slog3:<Q20 matrix>` samples the chain on the Darkroom's
+  WF_DEV_CUBE grid for curve 1, S-Log3 / S-Gamut3.Cine, the chain's own input curve (`gl_log_to_lin(GL_SLOG3)`).
+  Path: S-Log3 code -> S-Gamut3.Cine linear -> the inverse of the develop's own Rec.709 -> S-Gamut3.Cine matrix
+  (wf_ll_mat[0], from `tools/mk_loglut_tab.py`) -> the chain. The develop's cube input is a Log + LUT can's, so on a RAW
+  shot the develop's film shoulder (job.roll) folds the sensor's stops above the print's white into it.
+- **Why Rec.709 goes into the chain, not the camera gamut:** the plugin's chain is S-Log3 -> linear -> XYZ ->
+  XYZ_to_Neg; the port drops both matrices (fr_glook_film.c), so its chain takes whatever primaries it is given.
+  Every 8-bit chain table is made from Rec.709. Fed S-Gamut3.Cine as it is (LOG_GAMUT=native), colours come out
+  paler and a blue sky under Eterna / 3523XD turns pink (owner's IMG_6849, 15 Nov 2026). LogC3 (curve 3, AWG3) and
+  V-Log (curve 2) domains exist for tests (LOG_CURVE); the family on the card is one curve, named in `domain.txt`.
+- **Stored once:** the chain's dye tables are byte-identical for five print pairs. This is in the source dump
+  `fr_glook_print.bin` (chain prints {0,1,2}, {3,8}, {4,6}, {9,10}, {11,12}); `check_print_slots.py` pins it. So
+  643 offered pairs hold 428 distinct tables. The packs store each distinct table once (WFSTAGE halves, WFFILMS
+  entries, the log pack) and point every alias at it. The menu keeps its 15 print names.
+- **Placement:** the same as the 8-bit family. Scene-linear 0.18 lands on the 8-bit table's grey code
+  (`check_chain_grey.py`), with a 1/400-stop scan.
+- **What does not change:** the 8-bit tables, the 8-bit path and the JPEG path.
+
 
 ## 2. Repo layout and who owns what
 
