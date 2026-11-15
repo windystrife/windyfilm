@@ -16,7 +16,8 @@ WindyFilm's own converter, so the module and mk_wtab.py stay as they are and the
 
 A PAIR is NAME:NEG:PRINT[:PUSHPULL[:BLEACH[:PBLEACH[:NEUTRAL]]]], e.g. `vision3-250d-2383:0:1`.
 ENV: FR_SRC (the Film Roll tree), CUBE_N (default 33), CC (default gcc), GREY / WHITE (the two display anchors,
-default 0.18 / 0.95), FORCE=1 (re-make tables that are already there).
+GREY default: 18 % grey's own display code, tools/mk_genesis_place.h; WHITE is not read, the tool pins white),
+FORCE=1 (re-make tables that are already there).
 """
 import os, subprocess, sys
 
@@ -25,7 +26,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # scans tools/ and the module is built from a tree that must not carry the word.
 FR_SRC = os.environ.get("FR_SRC", "/mnt/f/MagicLatern/_port_v15/" + "film" + "roll" + "_eosm_yuv")
 CUBE_N = os.environ.get("CUBE_N", "33")
-GREY = os.environ.get("GREY", "0.18")                   # display value 18 % grey is placed at
+GREY = os.environ.get("GREY", "")                       # display code 18 % grey is placed at; empty = the
+                                                        # tool's GENESIS_GREY_CODE (tools/mk_genesis_place.h)
 WHITE = os.environ.get("WHITE", "0.95")                 # display value white is placed at
 CC = os.environ.get("CC", "gcc")
 TOOL = os.path.join("/tmp", "mk_genesis_cube")

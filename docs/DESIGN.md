@@ -56,10 +56,14 @@ What this branch adds on top (14 Nov 2026, same day):
   400 2383, `GXE100` Ektar 100 3513 (a negative stock and a print stock of the chain per film). They are plain
   WindyFilm films: one 17^3 table each, grain and halation from their rows, no code of the chain in the module.
 - **Placement**: the chain ends on the print's dye density, so its own black is the print's base fog (~0.03) and its
-  white whatever that print reaches (0.43..0.60 for these four). Stretching the *input* to fill the display crushed
+  white whatever that print reaches (0.43..0.60 for these four as measured on 14 Nov 2026, 0.45 for every pair
+  in the 15 Nov tables). Stretching the *input* to fill the display crushed
   everything below code 0.35 into the toe (measured), so the two ends are pinned on the **output** instead - base fog
-  to 0, print white to 1, i.e. printer points - and the exposure offset is fitted so 18 % grey lands on 0.18. What is
-  left in between is the film's own curve.
+  to 0, print white to 1, i.e. printer points - and the exposure offset is fitted so the JPEG's 18 % grey code
+  (sRGB 0.461, code 118) comes out on itself (`tools/mk_genesis_place.h`). What is left in between is the film's own
+  curve. Until 15 Nov 2026 the target was 0.18 itself, a linear value used as a
+  code: grey came out near code 46, two stops under the catalogue films (owner's sweep); `tools/check_chain_grey.py`
+  (test.sh GREY) now holds every chain table within half a stop of the catalogue films' grey.
 - **One module.** The films are part of `windyflm.mo` like every other film: no second build, no second module, no
   separate settings file (owner 14 Nov 2026: "code tiếp từ windyfilm, rồi dùng đường RAW của windyfilm"). The tables
   ride on the WindyFilm the camera already has.

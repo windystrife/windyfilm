@@ -16,7 +16,8 @@
  *   mk_wfstage shipped NEG PRN NEGFILE PRNFILE T17
  *                               one line: the default composition against a shipped table
  *   mk_wfstage dat DAT LIST     WFSTAGE.DAT read back as the module reads it; every entry at default knobs against
- *                               its shipped table (LIST: the .T17 paths in index order), Film exp +1 lifts grey
+ *                               its shipped table (LIST: the .T17 paths in index order; the grey nodes Y 112 / 128
+ *                               within 3 codes), Film exp +1 lifts grey (a node already at white counts)
  *
  * How each half is measured (the chain's axes, in its own terms):
  *   A1   density per channel over the exposure axis x 0..1: linear input 0 (x = 0) and an exposure sweep (x = stops/20).
@@ -38,6 +39,7 @@
 #include <math.h>
 #include "fr_glook.h"
 #include "wf_stagek.h"
+#include "mk_genesis_place.h"
 
 static uint16_t mk_pd[WF_SG_NODES * 3];             /* wf_sg_compose scratch */
 
@@ -92,19 +94,22 @@ static double i1inv(const double *t, int n, double v)   /* monotonic, either dir
 static uint16_t u16q(double v) { long r = lround(v); return r < 0 ? 0 : r > 65535 ? 65535 : (uint16_t)r; }
 static int16_t s16q(double v) { long r = lround(v); return r < -32768 ? -32768 : r > 32767 ? 32767 : (int16_t)r; }
 
-/* ---- the placement of tools/mk_genesis_cube.c: exposure for 18 % grey -> 0.18 between the pinned ends ---- */
+/* ---- the placement of tools/mk_genesis_cube.c: the 18 % grey code lands on itself (GENESIS_GREY_CODE) between the pinned ends
+ *      (tools/mk_genesis_place.h; the cubes' GREY override is not followed here, `dat` would show the mismatch) ---- */
 static void place(gl_film_params p, int32_t *fit, int32_t *bk, int32_t *wt)
 {
     int32_t in[3], out[3], wl = gl_disp_to_lin(GL_ONE) < 0 ? 0 : gl_disp_to_lin(GL_ONE);
+    int32_t gl = gl_disp_to_lin((int32_t)(GENESIS_GREY_CODE * GL_ONE));
+    if (gl < 0) gl = 0;
     double b, w, bestd = 1e9;
     int e, best = 0;
     in[0] = in[1] = in[2] = 0; gl_film_lin(in, &p, out); b = out[1] / (double)GL_ONE;
     for (e = -600; e <= 600; e += 5) {
         double gv, pos, d;
         p.exposure = (int32_t)((int64_t)e * GL_ONE / 100);
-        in[0] = in[1] = in[2] = (int32_t)(0.18 * GL_ONE); gl_film_lin(in, &p, out); gv = out[1] / (double)GL_ONE;
+        in[0] = in[1] = in[2] = gl; gl_film_lin(in, &p, out); gv = out[1] / (double)GL_ONE;
         in[0] = in[1] = in[2] = wl; gl_film_lin(in, &p, out); w = out[1] / (double)GL_ONE;
-        pos = w > b ? (gv - b) / (w - b) : 0; d = fabs(pos - 0.18);
+        pos = w > b ? (gv - b) / (w - b) : 0; d = fabs(pos - GENESIS_GREY_CODE);
         if (d < bestd) { bestd = d; best = p.exposure; }
     }
     p.exposure = best;
@@ -437,22 +442,30 @@ static int dat(const char *path, const char *list)
         wf_sg_compose(N, P, &pr, &k0, 0, mk_pd, T);
         wf_sg_compose(N, P, &pr, &k1, 0, mk_pd, T1);
         double s = 0;
-        int mx = 0, up = 0, c, q;
+        int mx = 0, up = 0, gd = 0, c, q;
         for (q = 0; q < 4913; q++) {
             int a[3] = { (T[q] >> 8) & 255, (int8_t)(T[q] & 255), (int8_t)((T[q] >> 16) & 255) };
             int d3[3] = { (S[q] >> 8) & 255, (int8_t)(S[q] & 255), (int8_t)((S[q] >> 16) & 255) };
             for (c = 0; c < 3; c++) { int d = abs(a[c] - d3[c]); s += d; if (d > mx) mx = d; }
         }
         for (q = 2; q < 15; q++) {                     /* neutral nodes Y 32..224, U = V = 128 */
-            int nd = q * 289 + 8 * 17 + 8;
-            up += ((T1[nd] >> 8) & 255) > ((T[nd] >> 8) & 255);
+            int nd = q * 289 + 8 * 17 + 8, y0 = (T[nd] >> 8) & 255;
+            up += y0 >= 250 || ((T1[nd] >> 8) & 255) > y0;   /* a node already at white has nothing to lift */
+        }
+        for (q = 7; q <= 8; q++) {                     /* the nodes around 18 % grey (Y 112, 128): default = shipped */
+            int nd = q * 289 + 8 * 17 + 8, d = abs((int)((T[nd] >> 8) & 255) - (int)((S[nd] >> 8) & 255));
+            if (d > gd) gd = d;
         }
         s /= 3 * 4913.0;
         smean += s;
         if (s > wmean) { wmean = s; snprintf(wname, sizeof wname, "%s", t17); }
         if (mx > wmax) wmax = mx;
         if (s > 1.0) nbig++;
-        if (s > 1.0 || mx > 40 || up < 10) { printf("dat: %s mean %.3f max %d, Film exp +1 lifts %d of 13 grey nodes\n", t17, s, mx, up); fail = 1; }
+        if (s > 1.0 || mx > 40 || up < 10 || gd > 3) {
+            printf("dat: %s mean %.3f max %d, grey nodes off by %d, Film exp +1 lifts %d of 13 grey nodes (or they sit at white)\n",
+                   t17, s, mx, gd, up);
+            fail = 1;
+        }
         free(S);
     }
     printf("dat: %d entries (%d negatives, %d prints): default vs shipped mean of means %.3f, worst mean %.3f (%s), worst max %d, %d over 1.0\n",

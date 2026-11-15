@@ -351,7 +351,8 @@ FILMS = [
            "owner's Lumix L Leica 2 display cube (sRGB in, sRGB out, 33^3) as LEICAVSR.CUB, not in the repo"), fmt="Standard"),
     # ---- 14/11/2026, branch film-stage: four film pairs baked out of the Genesis 1.6.6 chain under the declared
     # exception (docs/DESIGN.md 1a). The tables are card data made on a PC by tools/mk_genesis_cube.c (samples the chain,
-    # pins its print base fog to 0 and its print white to 1, so 18 % grey lands where sRGB puts it) and converted by
+    # pins its print base fog to 0 and its print white to 1 and keeps the JPEG's 18 % grey code, 118, where it is:
+    # tools/mk_genesis_place.h, pinned by tools/check_chain_grey.py since 15/11/2026) and converted by
     # tools/mk_wtab.py; no code of the chain is in the module and nothing of it is linked at run time. The camera shows a
     # stock, not a tool, so the names are the stocks; where the numbers come from is in `prov` and in the DESIGN note.
     F(85, "GX500T", "Vision3 500T 2393", "neg", 500, 91, 3200, 0, "cine", 55, ("Neg 800T", 256), ("C800T", 256),
