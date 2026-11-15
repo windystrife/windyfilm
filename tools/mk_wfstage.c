@@ -16,7 +16,8 @@
  *   mk_wfstage shipped NEG PRN NEGFILE PRNFILE T17
  *                               one line: the default composition against a shipped table
  *   mk_wfstage dat DAT LIST     WFSTAGE.DAT read back as the module reads it; every entry at default knobs against
- *                               its shipped table (LIST: the .T17 paths in index order; the grey nodes Y 112 / 128
+ *                               its shipped table (LIST: the .T17 paths in index order, " bw" after a B&W film's,
+ *                               composed Y only as the module does for WF_F_BW; the grey nodes Y 112 / 128
  *                               within 3 codes), Film exp +1 lifts grey (a node already at white counts)
  *
  * How each half is measured (the chain's axes, in its own terms):
@@ -434,13 +435,16 @@ static int dat(const char *path, const char *list)
         static uint32_t T[4913], T1[4913];
         if (!fgets(t17, sizeof t17, l)) { printf("dat: list short\n"); return 1; }
         t17[strcspn(t17, "\r\n")] = 0;
+        int bw = 0;                                    /* "<path> bw": a B&W film (WF_F_BW), composed Y only */
+        char *sp = strchr(t17, ' ');
+        if (sp) { bw = !strcmp(sp + 1, "bw"); *sp = 0; }
         uint32_t *S = rd(t17, 4913 * 4);
         memcpy(&pr.fit, x + 12, 4); memcpy(&pr.bk, x + 16, 4); memcpy(&pr.inv, x + 20, 4);
         if (*(uint32_t *)(x + 24) != dat_fnv((const uint8_t *)S, 4913 * 4)) { printf("dat: %s is not the table entry %d names\n", t17, e); return 1; }
         const struct wf_sg_neg *N = (const void *)(b + dof + x[2] * u[0]);
         const struct wf_sg_prn *P = (const void *)(b + pof + x[3] * u[1]);
-        wf_sg_compose(N, P, &pr, &k0, 0, mk_pd, T);
-        wf_sg_compose(N, P, &pr, &k1, 0, mk_pd, T1);
+        wf_sg_compose(N, P, &pr, &k0, bw, mk_pd, T);
+        wf_sg_compose(N, P, &pr, &k1, bw, mk_pd, T1);
         double s = 0;
         int mx = 0, up = 0, gd = 0, c, q;
         for (q = 0; q < 4913; q++) {

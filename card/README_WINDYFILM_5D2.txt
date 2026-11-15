@@ -121,8 +121,8 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
 3. LẦN CHẠY ĐẦU: CẦN XEM
 ------------------------
 1. ML/LOGS/WINDYFLM.LOG sau khi bật máy phải có dòng hook TOP / BOT với err 0,
-   "hooks: installed (0)", "pack ok: 706 tables, index NNms, catalog 97 films" và
-   "stage ok: 657 of 657 pairs match the pack (44 negatives, 15 prints), index NNms"
+   "hooks: installed (0)", "pack ok: 692 tables, index NNms, catalog 97 films" và
+   "stage ok: 643 of 643 pairs match the pack (44 negatives, 15 prints), index NNms"
    (dòng "stage ok" là của Film stage, xem mục 7).
 2. Chụp một ảnh mỗi chế độ: phim (Print Scan / Cine / Paper), Log, Log + LUT,
    một lon Film LUT. Mỗi nửa ảnh có dòng "yuv TOP ..." / "yuv BOT ..." trong log.
@@ -240,6 +240,9 @@ Hàng Print stock: 15 print:
 - Mặc định là 2383 (bản in rạp phổ biến nhất): lon Film stage không có Scan. Khi
   hàng Print stock đang là Scan (mặc định của mọi phim) hoặc là print mà âm bản đó
   không có, máy dùng Kodak Vision Color 2383. Chỉ 2302 là bản in đen trắng.
+- Double-X 5222 (G09) là âm bản đen trắng: chỉ in lên 2302 (hàng Print stock chỉ có
+  2302 và đứng sẵn ở đó), nhãn B&W NEG, ảnh đen trắng, hạt và halation kiểu phim đen
+  trắng. 43 lon còn lại là âm bản màu.
 - Không có Fuji Eterna-CP Type 3513D: chuỗi không có bảng của print này.
 - Năm cặp cho ảnh giống hệt nhau trên mọi âm bản (cùng một bảng): 2383 = 2393,
   5380 = 5381/72, 2395 = 5384/82, 5384/92 = 5385/93, 5385/62 = 5386. Cả hai tên được
@@ -282,10 +285,10 @@ Sửa bằng bánh xe, hoặc nhấn joystick ("JOY Edit") rồi trái / phải.
 
 7. FILM STAGE: LẦN CHẠY ĐẦU
 ---------------------------
-1. Thẻ phải có ML/DATA/WFSTAGE.DAT (22 410 240 B; md5 trong MD5SUMS.txt). Bật máy,
+1. Thẻ phải có ML/DATA/WFSTAGE.DAT (22 409 848 B; md5 trong MD5SUMS.txt). Bật máy,
    WINDYFLM.LOG phải có:
-     pack ok: 706 tables, index NNms, catalog 97 films
-     stage ok: 657 of 657 pairs match the pack (44 negatives, 15 prints), index NNms
+     pack ok: 692 tables, index NNms, catalog 97 films
+     stage ok: 643 of 643 pairs match the pack (44 negatives, 15 prints), index NNms
    Ghi lại hai số "index NNms" (thời gian đọc mục lục; thẻ CF). Nếu thay vào đó là
    "stage ML/DATA/WFSTAGE.DAT missing (-1): film-stage knob rows hidden" thì thẻ thiếu
    file; "... bad (-N) ..." là file hỏng hoặc khác bản: chép lại và kiểm MD5SUMS.txt.
@@ -296,7 +299,8 @@ Sửa bằng bánh xe, hoặc nhấn joystick ("JOY Edit") rồi trái / phải.
    "yuv TOP ..." / "yuv BOT ...".
 3. Print stock 2302: chụp, ảnh ĐEN TRẮNG, log "pack G08 v3 loaded". Rồi 2393, cùng cảnh
    với tấm ở bước 2: ảnh phải giống hệt tấm 2383 (cặp trùng). Trong hàng Print stock
-   không có 3513D.
+   không có 3513D. Nạp G09 Double-X 5222: hàng Print stock chỉ có 2302, ảnh đen trắng,
+   log "pack G09 v3 loaded". Nạp lại G08 cho các bước sau.
 4. Print stock về 2383, Film exp +1, chụp. Log
    "stage G08 v4 composed NNms k...": ghi lại NN (dự tính
    khoảng 40 ms tính + thời gian đọc khoảng 650 KB từ thẻ). Ảnh sáng hơn tấm ở bước 2,
@@ -320,8 +324,8 @@ Gửi: ML/LOGS/WINDYFLM.LOG, ML/SETTINGS/WINDYFLM.CFG và các JPG (kèm CR2 n�
 8. FILE TRÊN THẺ
 ----------------
 ML/modules/windyflm.mo    module
-ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper, và 657 cặp Film stage)
-ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 657 cặp Film stage (22,4 MB),
+ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper, và 643 cặp Film stage)
+ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 643 cặp Film stage (22,4 MB),
                           cho 7 hàng knob (mục 6); thiếu thì các hàng đó mờ.
                           Dữ liệu dẫn xuất, chỉ dùng riêng
 ML/data/WFCANS.DAT        hình lon phim

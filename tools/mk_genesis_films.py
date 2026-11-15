@@ -149,6 +149,8 @@ def matrix(outdir, negs=None, prns=None):
     work = os.path.join(outdir, ".genesis")
     os.makedirs(work, exist_ok=True)
     todo = [(n, p) for n in negs for p in prns if PRINT_CHAIN[p] is not None]
+    sys.path.insert(0, os.path.join(os.path.dirname(HERE), "films"))
+    import catalog                                      # GX_BW: the B&W negatives, converted with --bw (U / V = 0)
     csv = os.path.join(outdir, "fit.csv")
     rows = {}
     if os.path.exists(csv):
@@ -163,8 +165,8 @@ def matrix(outdir, negs=None, prns=None):
         if code in done and os.path.exists(out) and not force:
             continue
         cub, fit = cube(work, "%s:%d:%d" % (code, neg, PRINT_CHAIN[prn]), quiet=True)
-        r = subprocess.run([sys.executable, os.path.join(HERE, "mk_wtab.py"), "cube", cub, out],
-                           capture_output=True, text=True)
+        r = subprocess.run([sys.executable, os.path.join(HERE, "mk_wtab.py"), "cube", cub, out]
+                           + (["--bw"] if neg in catalog.GX_BW else []), capture_output=True, text=True)
         os.remove(cub)
         if r.returncode:
             sys.exit("mk_wtab failed for %s:\n%s" % (code, r.stderr[-1500:]))
