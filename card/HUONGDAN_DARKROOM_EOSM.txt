@@ -11,7 +11,7 @@ Thay đổi 15/11 (sau log RAWB9):
   Bấm SET: màn hình "Getting ready / Mixing the chemistry" vài giây (dựng bảng phim,
   halation, grain) rồi mới tới kiểu 1.
 - Lúc có cuộn, module không dựng bảng LUT / grain / halation nữa: bật máy là cuộn hiện ngay.
-- (15/11 tối) Cuộn bằng lon Film stage (âm bản x print stock) và 7 hàng knob: mục 4
+- (15/11 tối) Cuộn bằng lon Film stage (âm bản x print stock) và các hàng knob (11 hàng từ 16/11): mục 4
   "CUỘN PHIM FILM STAGE", thử ở 5s.
 
 Ý tưởng: chụp một cuộn phim (3 / 6 / 12 / 24 / 36 kiểu RAW + L, không xem lại ảnh), rồi
@@ -150,8 +150,9 @@ VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như
 
 CUỘN PHIM FILM STAGE (15/11)
 - Cuộn nạp bằng lon Film stage được in bằng đúng bảng âm bản x print stock, cùng các
-  hàng Print stock, 7 hàng knob (Film exp, Push / pull, Exp comp, Printer R / G / B,
-  Interlayer), Gauge, Grain, Halation, Bloom như khi chụp thường (README mục 6).
+  hàng Print stock, 11 hàng knob (Film exp, Push / pull, Exp comp, Printer R / G / B,
+  Interlayer, Bleach bypass, Print bleach, Neutral neg, Neutral print), Gauge, Grain,
+  Halation, Bloom như khi chụp thường (README mục 6).
 - Bản in dùng các hàng đang đặt LÚC BẤM SET trong Darkroom, không phải lúc chụp. Muốn
   so với ảnh chụp thường thì đừng đổi các hàng đó giữa lúc chụp và lúc tráng.
 - Print stock để mặc định (Scan) thì lon Film stage in bằng 2383 (màu). Chỉ 2302 là

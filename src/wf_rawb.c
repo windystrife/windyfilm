@@ -171,6 +171,9 @@ struct rb_sl {
     struct wf_sg_knobs k0, k;                    /* k.fexp: the knobs' exposure offset in thirds (wf_sg_unkey) */
     uint16_t pos[WF_SG_LG];                      /* its shift row (k.fexp != 0) */
     uint16_t *pd0, *pd, *rgb;                    /* rgb: the residual pass's slab (RB_SL_SLAB nodes) */
+    uint16_t *gn;                                /* the residual's weight per node, one blue plane (0 = none:
+                                                    wf_sg_res_w, Print bleach / Bleach bypass) */
+    const struct wf_sg_kd *kd;
     int8_t *r;
     struct wf_sg_prn *P;
 };
@@ -269,8 +272,8 @@ static int rb_sl_neg(struct rb_sl *s, const struct wf_sg_neg *N)
             return WF_LL_E_TRUNC;
         x = rb_fnv(x, s->buf, m);
         int nn = (int)(m / 6);
-        wf_sg_neg_pass_x(N, &s->pr, &s->k0, (const uint16_t *)s->buf, nn, s->pd0 + node * 3);
-        wf_sg_neg_pass_x(N, &s->pr, &s->k, (const uint16_t *)s->buf, nn, s->pd + node * 3);
+        wf_sg_neg_pass_x(N, &s->pr, &s->k0, s->kd, (const uint16_t *)s->buf, nn, s->pd0 + node * 3);
+        wf_sg_neg_pass_x(N, &s->pr, &s->k, s->kd, (const uint16_t *)s->buf, nn, s->pd + node * 3);
         node += nn;
         left -= m;
     }
@@ -283,7 +286,7 @@ static int rb_sl_res(void *ctx, const uint8_t *le, int n)
     struct rb_sl *s = ctx;
     if (n > RB_SL_SLAB || s->node + n > WF_SG_LNODES)
         return WF_LL_E_EXTRA;
-    wf_sg_prn_pass_rgb(s->P, &s->pr, s->pd0 + s->node * 3, n, s->bw, s->rgb);
+    wf_sg_prn_pass_rgb(s->P, &s->pr, &s->k0, s->kd, s->pd0 + s->node * 3, n, s->bw, s->rgb, 0);
     s->clip += wf_sg_res_quant(le, s->rgb, n, s->r + s->node * 3);
     s->node += n;
     return WF_LL_OK;
@@ -293,10 +296,11 @@ static int rb_sl_res(void *ctx, const uint8_t *le, int n)
 static int rb_sl_fill(void *ctx, uint16_t *rgb, int n)
 {
     struct rb_sl *s = ctx;
-    if (s->node + n > WF_SG_LNODES)
+    if (s->node + n > WF_SG_LNODES || (s->gn && n > WF_SG_LG * WF_SG_LG))
         return WF_LL_E_EXTRA;
-    wf_sg_prn_pass_rgb(s->P, &s->pr, s->pd + s->node * 3, n, s->bw, rgb);
-    wf_sg_res_add(s->r, s->k.fexp ? s->pos : 0, s->node, n, rgb);   /* r moved by the exposure offset */
+    wf_sg_prn_pass_rgb(s->P, &s->pr, &s->k, s->kd, s->pd + s->node * 3, n, s->bw, rgb, s->gn);
+    wf_sg_res_add(s->r, s->k.fexp ? s->pos : 0, s->gn, s->node, n, rgb);   /* r moved by the exposure offset, scaled
+                                                                              by the Print bleach gain */
     s->node += n;
     return WF_LL_OK;
 }
@@ -322,6 +326,7 @@ static int rb_sl_build(struct wf_dev_tabs *t, void *scr, size_t scr_n, const str
     s.pd0 = (uint16_t *)t;
     wf_sg_unkey(lk->stk, &s.k);
     s.k0.iie = WF_SG_IIE_DEF;
+    s.kd = wf_sg_kdata();
     s.dma = __mem_malloc(RB_SL_CH + 4, WF_MEM_DMA | WF_MEM_TMP, "wf_rawb.c", __LINE__);
     s.buf = __mem_malloc(RB_SL_CH + 4, WF_MEM_TMP, "wf_rawb.c", __LINE__);
     rc = s.dma && s.buf ? rb_sl_find(&s, f->id, lk->variant, f->code) : WF_LL_E_NOMEM;
@@ -349,8 +354,12 @@ static int rb_sl_build(struct wf_dev_tabs *t, void *scr, size_t scr_n, const str
         rc = RB_SL_E_MATCH;                      /* the log table it was made for, on its curve */
     if (s.rgb) __mem_free(s.rgb);
     s.node = 0;
+    if (!rc && wf_sg_res_w(&s.k, s.kd)
+        && !(s.gn = __mem_malloc(WF_SG_LG * WF_SG_LG * sizeof(uint16_t), WF_MEM_TMP, "wf_rawb.c", __LINE__)))
+        rc = WF_LL_E_NOMEM;
     if (!rc)
         rc = wf_dev_build_gen(t, RB_CAM, pi->curve, 0, rb_sl_fill, &s, li);
+    if (s.gn) __mem_free(s.gn);
     if (s.P) __mem_free(s.P);
     int k = 0;                                   /* the log line's title: the table code */
     for (; k < 8 && f->code[k]; k++) li->title[k] = f->code[k];
@@ -856,9 +865,10 @@ void wf_rawb_poll(void)
             if (wstk) {
                 struct wf_sg_knobs kk;
                 wf_sg_unkey(wstk, &kk);
-                wf_log("rawb: tables knobs %s v%d k%x exp %d prn %d %d %d interlayer %d c%d %dms (sum %x, %d KB shoot "
-                       "memory)", wf_films[lk.row].code, lk.variant, (unsigned)wstk, kk.fexp, kk.prn[0], kk.prn[1],
-                       kk.prn[2], kk.iie * 25, pi.curve, rb_build_ms, (unsigned)pi.sum,
+                wf_log("rawb: tables knobs %s v%d k%x exp %d prn %d %d %d interlayer %d bleach %d %d neutral %d %d c%d "
+                       "%dms (sum %x, %d KB shoot memory)", wf_films[lk.row].code, lk.variant, (unsigned)wstk, kk.fexp,
+                       kk.prn[0], kk.prn[1], kk.prn[2], kk.iie * 25, kk.bleach * 25, kk.pbleach * 25, kk.nneg * 25,
+                       kk.nprn * 25, pi.curve, rb_build_ms, (unsigned)pi.sum,
                        (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10));
             } else
                 wf_log("rawb: tables log pack %s v%d c%d %dms (offset %d, %d entries, sum %x, %d KB shoot memory)",

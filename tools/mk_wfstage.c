@@ -15,6 +15,7 @@
  *                               knob set also composed from its key alone (as the module does) must give the same words
  *   mk_wfstage shipped NEG PRN NEGFILE PRNFILE T17
  *                               one line: the default composition against a shipped table
+ *   mk_wfstage kd OUT           the knob data of the last four rows (struct wf_sg_kd), measured on the chain
  *   mk_wfstage dat DAT LIST     WFSTAGE.DAT read back as the module reads it; every entry at default knobs against
  *                               its shipped table (LIST: the .T17 paths in index order, " bw" after a B&W film's,
  *                               composed Y only as the module does for WF_F_BW; the grey nodes Y 112 / 128
@@ -32,6 +33,10 @@
  *        offsets.
  *   B2   for each node of a 33^3 grid over the print density each channel reaches: B1 inverted, set by the printer
  *        offsets, the chain's raw output.
+ *   kd   Bleach bypass: the printing density the trace prints at bleach 100 % less at 0 is the sum the bleach adds; the
+ *        printing density at 0 summed over R G B less that sum is bs, what A2's base holds beyond it (every negative,
+ *        they must agree). Print bleach: the raw output at amount a over the output at 0, a set so that a x the sum of
+ *        the three print densities the trace prints is s = 16 k / 256 (a bright neutral input, checked at grey).
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -298,6 +303,108 @@ static void *rd(const char *path, size_t n)
     return p;
 }
 
+/* ---- the knob data of the last four rows (struct wf_sg_kd) ---- */
+static struct wf_sg_kd mk_kd;
+static int mk_kd_done;
+static int measure_kd(struct wf_sg_kd *kd, int verbose)
+{
+    gl_film_params p;
+    double li[3], o0[3], o1[3], pd0[3], d1[3], dh[3], S0;
+    int c, neg, k, fail = 0, nb = 0;
+    int32_t bs0 = 0, bsd = 0;
+    memset(kd, 0, sizeof *kd);
+    for (neg = 0; neg < 46; neg++) {
+        int32_t q;
+        gl_film_defaults(&p);
+        gl_film_stock(neg);
+        gl_print_stock(0);
+        li[0] = li[1] = li[2] = 0.18;
+        run(li, &p, o0);
+        for (c = 0; c < 3; c++) pd0[c] = cap_pd[c];
+        p.bleach = GL_ONE;
+        run(li, &p, o1);
+        for (c = 0; c < 3; c++) d1[c] = cap_pd[c] - pd0[c];
+        p.bleach = GL_ONE / 2;
+        run(li, &p, o1);
+        for (c = 0; c < 3; c++) dh[c] = cap_pd[c] - pd0[c];
+        q = Q(pd0[0] + pd0[1] + pd0[2] - d1[0]);
+        if (!neg) bs0 = q;
+        if (abs(q - bs0) > bsd) bsd = abs(q - bs0);
+        for (c = 0; c < 3; c++)                  /* the same sum to every channel, half of it at 50 % */
+            if (fabs(d1[c] - d1[0]) * GL_ONE > 0.5 || fabs(dh[c] - d1[0] / 2) * GL_ONE > 1.0)
+                nb++;
+    }
+    kd->bs = bs0;
+    if (bsd > 1 || nb) {
+        fprintf(stderr, "kd: bleach bypass is not one sum (bs differs by %d Q16 across negatives, %d channels off)\n", bsd, nb);
+        fail = 1;
+    }
+    gl_film_defaults(&p);
+    gl_film_stock(0);
+    gl_print_stock(0);
+    li[0] = li[1] = li[2] = dlin(1.0);           /* display white: the most output digits */
+    run(li, &p, o0);
+    S0 = cap_d[0] + cap_d[1] + cap_d[2];
+    for (k = 0; k < WF_SG_N1; k++) {
+        p.print_bleach = Q(16.0 * k / (WF_SG_N1 - 1) / S0);
+        run(li, &p, o1);
+        kd->g[k] = u16q(o1[1] / o0[1] * 65536);
+    }
+    {
+        /* the same gain at a grey input (another print density sum), read from the table as the composer reads it */
+        double gw = 0, ow[3], S1;
+        li[0] = li[1] = li[2] = 0.18;
+        p.print_bleach = 0;
+        run(li, &p, ow);
+        S1 = cap_d[0] + cap_d[1] + cap_d[2];
+        for (k = 1; k <= 8; k++) {
+            int32_t a = k * GL_ONE / 8;
+            p.print_bleach = a;
+            run(li, &p, o1);
+            int x = (int)llround(S1 * a / GL_ONE * 4096), i = x >> 8;
+            double t = x >= 65536 ? kd->g[WF_SG_N1 - 1] : kd->g[i] + (kd->g[i + 1] - kd->g[i]) * (x & 255) / 256.0;
+            for (c = 0; c < 3; c++)
+                if (fabs(o1[c] / ow[c] * 65536 - t) > gw) gw = fabs(o1[c] / ow[c] * 65536 - t);
+        }
+        if (verbose)
+            fprintf(stderr, "kd: bs %d (%.5f printing density), print bleach gain at white (density sum %.3f) and grey "
+                    "(%.3f) differ by %.2f of 65536 at most; g(1) %u g(4) %u g(12) %u\n", (int)kd->bs, kd->bs / 65536.0,
+                    S0, S1, gw, kd->g[16], kd->g[64], kd->g[192]);
+        if (gw > 40) { fprintf(stderr, "kd: print bleach is not one gain on the output (%.1f)\n", gw); fail = 1; }
+    }
+    return fail;
+}
+static const struct wf_sg_kd *kd_now(void)
+{
+    if (!mk_kd_done) {
+        if (measure_kd(&mk_kd, 0)) exit(1);
+        mk_kd_done = 1;
+    }
+    return &mk_kd;
+}
+/* the chain's parameters for these knobs on top of p (exposure: the fitted placement, Exp comp keeps only that) */
+static void knob_params(gl_film_params *p, int32_t fit, const struct wf_sg_knobs *k)
+{
+    int c;
+    p->exposure = fit + (k->comp ? 0 : Q(k->fexp / 3.0));
+    p->push_pull = k->comp ? 0 : k->push * 6554;
+    for (c = 0; c < 3; c++) p->printer[c] = (k->prn[c] * 104858) >> 6;
+    p->iie = k->iie * 16384;
+    p->bleach = k->bleach << (16 - WF_SG_BL_SHIFT);              /* step / 64 (wf_stagek.h WF_SG_BL_SHIFT) */
+    p->print_bleach = k->pbleach << (16 - WF_SG_BL_SHIFT);
+    p->neutral_tonescale = k->nneg * 16384;
+    p->neutral_density = k->nprn * 16384;
+}
+/* knob arguments: FEXP PUSH COMP PRNR PRNG PRNB IIE [BLEACH PBLEACH NNEG NPRN] (0..4 = 0..100 %) */
+static void knob_args(char **a, int n, struct wf_sg_knobs *k)
+{
+    memset(k, 0, sizeof *k);
+    k->fexp = atoi(a[0]); k->push = atoi(a[1]); k->comp = atoi(a[2]);
+    for (int c = 0; c < 3; c++) k->prn[c] = atoi(a[3 + c]);
+    k->iie = atoi(a[6]);
+    if (n == 11) { k->bleach = atoi(a[7]); k->pbleach = atoi(a[8]); k->nneg = atoi(a[9]); k->nprn = atoi(a[10]); }
+}
+
 /* ---- check: the module's composition against the chain ---- */
 static void ycc(double r, double g, double b, double *o)
 {
@@ -327,7 +434,17 @@ static int check(int neg, int prn, const char *nf, const char *pf, const char *t
         { "interlayer 0", { 0, 0, 0, { 0, 0, 0 }, 0 } },
         { "interlayer 200", { 0, 0, 0, { 0, 0, 0 }, 8 } },
         { "mixed", { 2, -1, 0, { 3, -2, 4 }, 6 } },
+        { "bleach 50", { 0, 0, 0, { 0, 0, 0 }, 4, 2 } },
+        { "bleach 100", { 0, 0, 0, { 0, 0, 0 }, 4, 4 } },
+        { "print bl 50", { 0, 0, 0, { 0, 0, 0 }, 4, 0, 2 } },
+        { "print bl 100", { 0, 0, 0, { 0, 0, 0 }, 4, 0, 4 } },
+        { "neutral neg 100", { 0, 0, 0, { 0, 0, 0 }, 4, 0, 0, 4 } },
+        { "neutral prn 100", { 0, 0, 0, { 0, 0, 0 }, 4, 0, 0, 0, 4 } },
+        { "neutral both", { 0, 0, 0, { 0, 0, 0 }, 4, 0, 0, 4, 4 } },
+        { "four mixed", { 2, 0, 0, { 2, 0, -2 }, 4, 1, 3, 2, 1 } },
+        { "four exp +2", { 6, 0, 0, { 0, 0, 0 }, 4, 4, 0, 4, 0 } },
     };
+    const struct wf_sg_kd *kd = kd_now();
     gl_film_defaults(&p0);
     gl_film_stock(neg);
     gl_print_stock(prn);
@@ -336,15 +453,15 @@ static int check(int neg, int prn, const char *nf, const char *pf, const char *t
     printf("pair neg %d print %d: fit %+.2f stops, ends %.4f %.4f\n", neg, prn, fit / 65536.0, bk / 65536.0, wt / 65536.0);
     for (ki = 0; ki < (int)(sizeof ks / sizeof ks[0]); ki++) {
         const struct wf_sg_knobs *k = &ks[ki].k;
-        double mx[3] = { 0, 0, 0 }, sum = 0, gmx = 0;
-        int n, hist[41] = { 0 }, cnt = 0, p99 = 0, acc = 0;
-        wf_sg_compose(N, P, &pr, k, 0, mk_pd, T);
+        double mx[3] = { 0, 0, 0 }, sum = 0, gmx = 0, wpd[6] = { 0 }, wy[6] = { 0 };
+        int n, hist[41] = { 0 }, cnt = 0, p99 = 0, acc = 0, wn = -1;
+        wf_sg_compose(N, P, &pr, k, kd, 0, mk_pd, T);
         {
             /* the module composes from the key alone (wf_sg_unkey): it must give the very same words */
             static uint32_t T2[4913];
             struct wf_sg_knobs ku;
             wf_sg_unkey(wf_sg_key(k), &ku);
-            wf_sg_compose(N, P, &pr, &ku, 0, mk_pd, T2);
+            wf_sg_compose(N, P, &pr, &ku, kd, 0, mk_pd, T2);
             if (memcmp(T, T2, sizeof T2)) {
                 printf("  %-15s: the key's knobs compose to other words\n", ks[ki].name);
                 fail = 1;
@@ -353,10 +470,7 @@ static int check(int neg, int prn, const char *nf, const char *pf, const char *t
         p = p0;
         /* Exp comp: the chain's exposure becomes -push, which would also drop the fitted placement (it rides on the
          * exposure); the module keeps the placement, so the reference is the placement alone */
-        p.exposure = fit + (k->comp ? 0 : Q(k->fexp / 3.0));
-        p.push_pull = k->comp ? 0 : k->push * 6554;
-        for (c = 0; c < 3; c++) p.printer[c] = (k->prn[c] * 104858) >> 6;
-        p.iie = k->iie * 16384;
+        knob_params(&p, fit, k);
         for (n = 0; n < 4913; n++) {
             int Y = n / 289 * 16, U = n / 17 % 17 * 16, V = n % 17 * 16, ing = 1;
             double rgb[3], o[3], ref[3], got[3];
@@ -379,7 +493,13 @@ static int check(int neg, int prn, const char *nf, const char *pf, const char *t
             for (c = 0; c < 3; c++) {
                 double d = fabs(got[c] - ref[c]);
                 if (d > mx[c]) mx[c] = d;
-                if (ing && d > gmx) gmx = d;
+                if (ing && d > gmx) {
+                    gmx = d; wn = n;
+                    for (int j = 0; j < 3; j++) {
+                        wpd[j] = cap_pd[j] / 4; wpd[3 + j] = mk_pd[n * 3 + j] / 65536.0;
+                        wy[j] = ref[j]; wy[3 + j] = got[j];
+                    }
+                }
                 sum += d; cnt++;
                 hist[d > 40 ? 40 : (int)d]++;
             }
@@ -387,6 +507,10 @@ static int check(int neg, int prn, const char *nf, const char *pf, const char *t
         for (n = 0; n <= 40; n++) { acc += hist[n]; if (acc >= 0.99 * cnt) { p99 = n + 1; break; } }
         printf("  %-15s vs chain: Y max %5.2f  U max %5.2f  V max %5.2f  mean %.3f  p99 < %d  in-gamut max %.2f\n",
                ks[ki].name, mx[0], mx[1], mx[2], sum / cnt, p99, gmx);
+        if (gmx > 12 && wn >= 0)                     /* where: the printing density / 4 the chain traced and the composer's */
+            printf("    worst in-gamut node Y %d U %d V %d: chain YUV %.1f %.1f %.1f composed %.0f %.0f %.0f; printing "
+                   "density / 4 chain %.4f %.4f %.4f composed %.4f %.4f %.4f\n", wn / 289 * 16, wn / 17 % 17 * 16,
+                   wn % 17 * 16, wy[0], wy[1], wy[2], wy[3], wy[4], wy[5], wpd[0], wpd[1], wpd[2], wpd[3], wpd[4], wpd[5]);
         if (ki == 0 && S) {
             double sm = 0, m2[3] = { 0, 0, 0 };
             for (n = 0; n < 4913; n++) {
@@ -536,21 +660,22 @@ static int logpairs(const char *out)
 
 /* logcompose NEG PRN NEGFILE PRNFILE XNFILE DOMAIN OUT.L33 FEXP PUSH COMP PRNR PRNG PRNB IIE [bw]: the log table the
  * module composes for these knobs, as a .L33 (host renders and sheets: the darkroom develops it like a pack table) */
-static int logcompose(char **a, int bw)
+static int logcompose(char **a, int nk, int bw)
 {
     struct wf_sg_neg *N = rd(a[2], sizeof *N);
     struct wf_sg_prn *P = rd(a[3], sizeof *P);
     uint16_t *XN = rd(a[4], WF_SG_LNODES * 6);
     static uint16_t pd[WF_SG_LNODES * 3], O[WF_SG_LNODES * 3];
-    struct wf_sg_knobs k = { atoi(a[7]), atoi(a[8]), atoi(a[9]), { atoi(a[10]), atoi(a[11]), atoi(a[12]) }, atoi(a[13]) };
+    struct wf_sg_knobs k;
+    knob_args(a + 7, nk, &k);
     gl_film_params p0;
     struct wf_sg_pair pr;
     int32_t fit, bk, wt;
     lg_params(&p0, atoi(a[0]), atoi(a[1]));
     lg_place(p0, &fit, &bk, &wt);
     pr.fit = fit; pr.bk = bk; pr.inv = (uint32_t)llround(4294967296.0 / (wt - bk));
-    wf_sg_neg_pass_x(N, &pr, &k, XN, WF_SG_LNODES, pd);
-    wf_sg_prn_pass_rgb(P, &pr, pd, WF_SG_LNODES, bw, O);
+    wf_sg_neg_pass_x(N, &pr, &k, kd_now(), XN, WF_SG_LNODES, pd);
+    wf_sg_prn_pass_rgb(P, &pr, &k, kd_now(), pd, WF_SG_LNODES, bw, O, 0);
     return wr(a[6], O, sizeof O);
 }
 
@@ -622,6 +747,7 @@ static int lg_module(const struct wf_sg_neg *N, const struct wf_sg_prn *P, const
     static uint16_t pd[WF_SG_LNODES * 3], O0[WF_SG_LNODES * 3];
     static int8_t r[WF_SG_LNODES * 3];
     struct wf_sg_knobs k0 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF }, ku;
+    const struct wf_sg_kd *kd = kd_now();
     uint16_t pos[WF_SG_LG];
     uint32_t key = wf_sg_key(k);
     if (!key) {
@@ -629,14 +755,15 @@ static int lg_module(const struct wf_sg_neg *N, const struct wf_sg_prn *P, const
         return 0;
     }
     wf_sg_unkey(key, &ku);                       /* the knobs as the module has them: the offset whole in fexp */
-    wf_sg_neg_pass_x(N, pr, &k0, XN, WF_SG_LNODES, pd);
-    wf_sg_prn_pass_rgb(P, pr, pd, WF_SG_LNODES, bw, O0);
+    wf_sg_neg_pass_x(N, pr, &k0, kd, XN, WF_SG_LNODES, pd);
+    wf_sg_prn_pass_rgb(P, pr, &k0, kd, pd, WF_SG_LNODES, bw, O0, 0);
     int clip = wf_sg_res_quant((const uint8_t *)S, O0, WF_SG_LNODES, r);   /* little-endian host */
-    wf_sg_neg_pass_x(N, pr, &ku, XN, WF_SG_LNODES, pd);
-    wf_sg_prn_pass_rgb(P, pr, pd, WF_SG_LNODES, bw, out);
+    wf_sg_neg_pass_x(N, pr, &ku, kd, XN, WF_SG_LNODES, pd);
+    static uint16_t gn[WF_SG_LNODES];
+    wf_sg_prn_pass_rgb(P, pr, &ku, kd, pd, WF_SG_LNODES, bw, out, gn);
     if (ku.fexp)
         lg_shift_row(ku.fexp, pos);
-    wf_sg_res_add(r, ku.fexp ? pos : 0, 0, WF_SG_LNODES, out);
+    wf_sg_res_add(r, ku.fexp ? pos : 0, wf_sg_res_w(&ku, kd) ? gn : 0, 0, WF_SG_LNODES, out);
     return clip;
 }
 
@@ -651,15 +778,17 @@ static int logshift(const char *out)
     return wr(out, t, sizeof t);
 }
 
-/* logknob NEG PRN NEGFILE PRNFILE XNFILE DOMAIN L33 OUT.L33 FEXP PUSH COMP PRNR PRNG PRNB IIE [bw]: the knob table the
- * module builds on RAW for these knobs (lg_module), as a .L33 (owner sheets: the darkroom develops it directly) */
-static int logknob(char **a, int bw)
+/* logknob NEG PRN NEGFILE PRNFILE XNFILE DOMAIN L33 OUT.L33 FEXP PUSH COMP PRNR PRNG PRNB IIE [BLEACH PBLEACH NNEG
+ * NPRN] [bw]: the knob table the module builds on RAW for these knobs (lg_module), as a .L33 (owner sheets: the
+ * darkroom develops it directly) */
+static int logknob(char **a, int nk, int bw)
 {
     struct wf_sg_neg *N = rd(a[2], sizeof *N);
     struct wf_sg_prn *P = rd(a[3], sizeof *P);
     uint16_t *XN = rd(a[4], WF_SG_LNODES * 6), *S = rd(a[6], WF_SG_LNODES * 6);
     static uint16_t O[WF_SG_LNODES * 3];
-    struct wf_sg_knobs k = { atoi(a[8]), atoi(a[9]), atoi(a[10]), { atoi(a[11]), atoi(a[12]), atoi(a[13]) }, atoi(a[14]) };
+    struct wf_sg_knobs k;
+    knob_args(a + 8, nk, &k);
     gl_film_params p0;
     struct wf_sg_pair pr;
     int32_t fit, bk, wt;
@@ -700,7 +829,16 @@ static int logcheck(int neg, int prn, const char *nf, const char *pf, const char
         { "printer G -12", { 0, 0, 0, { 0, -12, 0 }, 4 } },
         { "printer B +6", { 0, 0, 0, { 0, 0, 6 }, 4 } },
         { "mixed", { 2, -1, 0, { 3, -2, 4 }, 6 } },
+        { "bleach 50", { 0, 0, 0, { 0, 0, 0 }, 4, 2 } },
+        { "bleach 100", { 0, 0, 0, { 0, 0, 0 }, 4, 4 } },
+        { "print bl 50", { 0, 0, 0, { 0, 0, 0 }, 4, 0, 2 } },
+        { "print bl 100", { 0, 0, 0, { 0, 0, 0 }, 4, 0, 4 } },
+        { "neutral neg 100", { 0, 0, 0, { 0, 0, 0 }, 4, 0, 0, 4 } },
+        { "neutral prn 100", { 0, 0, 0, { 0, 0, 0 }, 4, 0, 0, 0, 4 } },
+        { "neutral both", { 0, 0, 0, { 0, 0, 0 }, 4, 0, 0, 4, 4 } },
+        { "four mixed", { 2, 0, 0, { 2, 0, -2 }, 4, 1, 3, 2, 1 } },
     };
+    const struct wf_sg_kd *kd = kd_now();
     lg_params(&p0, neg, prn);
     gl_film_defaults(&p);
     if (p.push_pull || p.bleach || p.print_bleach || p.neutral_tonescale || p.neutral_density)
@@ -712,9 +850,11 @@ static int logcheck(int neg, int prn, const char *nf, const char *pf, const char
     for (ki = 0; ki < (int)(sizeof ks / sizeof ks[0]); ki++) {
         const struct wf_sg_knobs *k = &ks[ki].k;
         struct lg_stat sc = { { 0 } }, ss = { { 0 } }, sd = { { 0 } }, sh = { { 0 } }, sm = { { 0 } };
+        double mw = 0, mref[3] = { 0 };
+        int mwn = -1;
         int mclip = lg_module(N, P, &pr, XN, S, k, bw, DM);
-        wf_sg_neg_pass_x(N, &pr, k, XN, WF_SG_LNODES, pd);
-        wf_sg_prn_pass_rgb(P, &pr, pd, WF_SG_LNODES, bw, O);
+        wf_sg_neg_pass_x(N, &pr, k, kd, XN, WF_SG_LNODES, pd);
+        wf_sg_prn_pass_rgb(P, &pr, k, kd, pd, WF_SG_LNODES, bw, O, 0);
         if (ki == 0) memcpy(O0, O, sizeof O);
         for (n = 0; n < WF_SG_LNODES * 3; n++) {
             int v = O[n] + S[n] - O0[n];
@@ -745,10 +885,7 @@ static int logcheck(int neg, int prn, const char *nf, const char *pf, const char
             }
         }
         p = p0;
-        p.exposure = fit + (k->comp ? 0 : Q(k->fexp / 3.0));
-        p.push_pull = k->comp ? 0 : k->push * 6554;
-        for (c = 0; c < 3; c++) p.printer[c] = (k->prn[c] * 104858) >> 6;
-        p.iie = k->iie * 16384;
+        knob_params(&p, fit, k);
         for (n = 0; n < WF_SG_LNODES; n++) {
             int kk[3] = { n % WF_SG_LG, n / WF_SG_LG % WF_SG_LG, n / (WF_SG_LG * WF_SG_LG) };
             int32_t in[3], out[3];
@@ -765,6 +902,12 @@ static int logcheck(int neg, int prn, const char *nf, const char *pf, const char
             lg_acc(&sd, DL + n * 3, ref);
             lg_acc(&sh, DS + n * 3, ref);
             lg_acc(&sm, DM + n * 3, ref);
+            for (c = 0; c < 3; c++)
+                if (fabs(DM[n * 3 + c] - ref[c]) > mw) {
+                    mw = fabs(DM[n * 3 + c] - ref[c]);
+                    mwn = n;
+                    for (int j = 0; j < 3; j++) mref[j] = ref[j];
+                }
             if (kk[0] == kk[1] && kk[1] == kk[2]) {
                 ysh[kk[0]] = lg_y(DS + n * 3);
                 ymd[kk[0]] = lg_y(DM + n * 3);
@@ -793,6 +936,15 @@ static int logcheck(int neg, int prn, const char *nf, const char *pf, const char
                sm.mx[1], sm.mx[2], sm.sum / sm.cnt, lg_p99(&sm), mclip ? " (residual clipped)" : "", lg_knee(yc),
                lg_knee(yo), lg_knee(yd), lg_knee(ysh), lg_knee(ymd));
         if (ki == 0) printf("  %-15s knee node of the .L33 %.2f\n", "", lg_knee(ys));
+        if (mw / 257.0 > 20 && mwn >= 0) {          /* where the module's table misses most: the node and its input */
+            int kk[3] = { mwn % WF_SG_LG, mwn / WF_SG_LG % WF_SG_LG, mwn / (WF_SG_LG * WF_SG_LG) };
+            int32_t in[3];
+            lg_lin(kk, WF_SG_LG, in);
+            printf("    module's worst node codes %d %d %d / 32 (linear %.4f %.4f %.4f): chain %.1f %.1f %.1f module "
+                   "%.1f %.1f %.1f (8-bit)\n", kk[0], kk[1], kk[2], in[0] / 65536.0, in[1] / 65536.0, in[2] / 65536.0,
+                   mref[0] / 257, mref[1] / 257, mref[2] / 257, DM[mwn * 3] / 257.0, DM[mwn * 3 + 1] / 257.0,
+                   DM[mwn * 3 + 2] / 257.0);
+        }
         if (ki == 0) {
             int32_t in[3];
             int kk[3] = { wn % WF_SG_LG, wn / WF_SG_LG % WF_SG_LG, wn / (WF_SG_LG * WF_SG_LG) };
@@ -838,14 +990,23 @@ static int dat(const char *path, const char *list)
     memcpy(h, b + 4, 16);
     memcpy(u, b + 20, 44);
     int n = h[1], nn = h[2], np = h[3], fail = 0, nbig = 0, e;
-    uint32_t io = u[2], no = u[3], po = u[4], dof = u[5], pof = u[6];
-    if (memcmp(b, "WFSG", 4) || h[0] != 1 || h[4] != WF_SG_NA || h[5] != WF_SG_NB || h[6] != WF_SG_N1 || h[7] != WF_SG_NX
-        || u[0] != sizeof(struct wf_sg_neg) || u[1] != sizeof(struct wf_sg_prn) || io != 64 || no != io + 28u * n
-        || po != no + 4u * nn || dof % 4 || pof != dof + nn * u[0] || u[8] != (uint32_t)sz
-        || u[7] != dat_fnv(b + io, po + 4u * np - io)) {
+    uint32_t io = u[2], no = u[3], po = u[4], dof = u[5], pof = u[6], kof = u[9];
+    const struct wf_sg_kd *kd = h[0] == 2 ? (const void *)(b + kof) : 0;
+    if (memcmp(b, "WFSG", 4) || (h[0] != 1 && h[0] != 2) || h[4] != WF_SG_NA || h[5] != WF_SG_NB || h[6] != WF_SG_N1
+        || h[7] != WF_SG_NX || u[0] != sizeof(struct wf_sg_neg) || u[1] != sizeof(struct wf_sg_prn) || io != 64
+        || no != io + 28u * n || po != no + 4u * nn || dof % 4 || pof != dof + nn * u[0] || u[8] != (uint32_t)sz
+        || u[7] != dat_fnv(b + io, po + 4u * np - io)
+        || (h[0] == 1 && (sz != (long)(pof + np * u[1]) || u[9] || u[10]))
+        || (h[0] == 2 && (kof != pof + np * u[1] || sz != (long)(kof + sizeof(struct wf_sg_kd))
+                          || u[10] != dat_fnv(b + kof, sizeof(struct wf_sg_kd))))) {
         printf("dat: header / index checksum bad\n");
         return 1;
     }
+    if (kd) {                                     /* the knob data is the chain's, as measured here */
+        if (memcmp(kd, kd_now(), sizeof *kd)) { printf("dat: the knob data is not what the chain measures now\n"); return 1; }
+        printf("dat: version 2, knob data bs %d, print bleach gain g(4) %u\n", (int)kd->bs, kd->g[64]);
+    } else
+        printf("dat: version 1, no knob data (the last four rows stay hidden)\n");
     for (e = 0; e < nn; e++)
         if (dat_fnv(b + dof + e * u[0], u[0]) != *(uint32_t *)(b + no + 4 * e)) { printf("dat: negative %d bad\n", e); return 1; }
     for (e = 0; e < np; e++)
@@ -857,7 +1018,8 @@ static int dat(const char *path, const char *list)
         const uint8_t *x = b + io + 28 * e;
         struct wf_sg_pair pr;
         struct wf_sg_knobs k0 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF }, k1 = { 3, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF };
-        static uint32_t T[4913], T1[4913];
+        struct wf_sg_knobs k2 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF, 0, 4, 0, 0 };
+        static uint32_t T[4913], T1[4913], T2[4913];
         if (!fgets(t17, sizeof t17, l)) { printf("dat: list short\n"); return 1; }
         t17[strcspn(t17, "\r\n")] = 0;
         int bw = 0;                                    /* "<path> bw": a B&W film (WF_F_BW), composed Y only */
@@ -868,10 +1030,11 @@ static int dat(const char *path, const char *list)
         if (*(uint32_t *)(x + 24) != dat_fnv((const uint8_t *)S, 4913 * 4)) { printf("dat: %s is not the table entry %d names\n", t17, e); return 1; }
         const struct wf_sg_neg *N = (const void *)(b + dof + x[2] * u[0]);
         const struct wf_sg_prn *P = (const void *)(b + pof + x[3] * u[1]);
-        wf_sg_compose(N, P, &pr, &k0, bw, mk_pd, T);
-        wf_sg_compose(N, P, &pr, &k1, bw, mk_pd, T1);
+        wf_sg_compose(N, P, &pr, &k0, kd, bw, mk_pd, T);
+        wf_sg_compose(N, P, &pr, &k1, kd, bw, mk_pd, T1);
+        wf_sg_compose(N, P, &pr, &k2, kd, bw, mk_pd, T2);
         double s = 0;
-        int mx = 0, up = 0, gd = 0, c, q;
+        int mx = 0, up = 0, gd = 0, c, q, dn = 0;
         for (q = 0; q < 4913; q++) {
             int a[3] = { (T[q] >> 8) & 255, (int8_t)(T[q] & 255), (int8_t)((T[q] >> 16) & 255) };
             int d3[3] = { (S[q] >> 8) & 255, (int8_t)(S[q] & 255), (int8_t)((S[q] >> 16) & 255) };
@@ -880,6 +1043,14 @@ static int dat(const char *path, const char *list)
         for (q = 2; q < 15; q++) {                     /* neutral nodes Y 32..224, U = V = 128 */
             int nd = q * 289 + 8 * 17 + 8, y0 = (T[nd] >> 8) & 255;
             up += y0 >= 250 || ((T1[nd] >> 8) & 255) > y0;   /* a node already at white has nothing to lift */
+        }
+        for (q = 2; q < 15 && kd; q++) {               /* Print bleach 100 %: grey goes darker (silver kept) */
+            int nd = q * 289 + 8 * 17 + 8;
+            dn += ((T2[nd] >> 8) & 255) < ((T[nd] >> 8) & 255) || ((T[nd] >> 8) & 255) == 0;
+        }
+        if (kd && dn < 10) {
+            printf("dat: %s Print bleach 100 %% darkens only %d of 13 grey nodes\n", t17, dn);
+            fail = 1;
         }
         for (q = 7; q <= 8; q++) {                     /* the nodes around 18 % grey (Y 112, 128): default = shipped */
             int nd = q * 289 + 8 * 17 + 8, d = abs((int)((T[nd] >> 8) & 255) - (int)((S[nd] >> 8) & 255));
@@ -954,8 +1125,11 @@ static int logdat(const char *slp, const char *stp, const char *lgp)
     memcpy(up3, s + so + (3 - omin) * WF_SG_LG * 2, sizeof up3);   /* Film exp +1 */
     int tn = t[6] | t[7] << 8;
     uint32_t tio = le32(t + 28), tno = le32(t + 32), tpo = le32(t + 36), tdo = le32(t + 40), tpd = le32(t + 44);
-    if (memcmp(t, "WFSG", 4) || (t[4] | t[5] << 8) != 1 || le32(t + 20) != sizeof(struct wf_sg_neg)
-        || le32(t + 24) != sizeof(struct wf_sg_prn) || le32(t + 52) != (uint32_t)tsz) {
+    int tver = t[4] | t[5] << 8;
+    const struct wf_sg_kd *kd = tver == 2 ? (const void *)(t + le32(t + 56)) : 0;
+    if (memcmp(t, "WFSG", 4) || (tver != 1 && tver != 2) || le32(t + 20) != sizeof(struct wf_sg_neg)
+        || le32(t + 24) != sizeof(struct wf_sg_prn) || le32(t + 52) != (uint32_t)tsz
+        || (tver == 2 && le32(t + 56) + sizeof(struct wf_sg_kd) != (uint32_t)tsz)) {
         printf("logdat: %s is not a stage pack of this version\n", stp);
         return 1;
     }
@@ -1007,10 +1181,10 @@ static int logdat(const char *slp, const char *stp, const char *lgp)
         const struct wf_sg_neg *N = (const void *)(t + tdo + nb * sizeof(struct wf_sg_neg));
         const struct wf_sg_prn *P = (const void *)(t + tpd + pb * sizeof(struct wf_sg_prn));
         struct wf_sg_knobs k0 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF }, k1 = { 3, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF };
-        wf_sg_neg_pass_x(N, &pr, &k0, XN, WF_SG_LNODES, pd);
-        wf_sg_prn_pass_rgb(P, &pr, pd, WF_SG_LNODES, bw, O);
-        wf_sg_neg_pass_x(N, &pr, &k1, XN, WF_SG_LNODES, pd);
-        wf_sg_prn_pass_rgb(P, &pr, pd, WF_SG_LNODES, bw, O1);
+        wf_sg_neg_pass_x(N, &pr, &k0, kd, XN, WF_SG_LNODES, pd);
+        wf_sg_prn_pass_rgb(P, &pr, &k0, kd, pd, WF_SG_LNODES, bw, O, 0);
+        wf_sg_neg_pass_x(N, &pr, &k1, kd, XN, WF_SG_LNODES, pd);
+        wf_sg_prn_pass_rgb(P, &pr, &k1, kd, pd, WF_SG_LNODES, bw, O1, 0);
         double sum = 0;
         int mx = 0;
         for (q = 0; q < WF_SG_LNODES * 3; q++) {
@@ -1026,7 +1200,7 @@ static int logdat(const char *slp, const char *stp, const char *lgp)
         nclip += ec;
         for (q = 0; q < WF_SG_LNODES * 3; q++)
             if (abs(rq[q]) > rmax) rmax = abs(rq[q]);
-        wf_sg_res_add(rq, up3, 0, WF_SG_LNODES, O1);
+        wf_sg_res_add(rq, up3, 0, 0, WF_SG_LNODES, O1);
         for (q = 8; q <= 24; q++) {
             int nd = 3 * (q + WF_SG_LG * q + WF_SG_LG * WF_SG_LG * q) + 1, sv = tb[2 * nd] | tb[2 * nd + 1] << 8;
             mup += sv >= 64250 || O1[nd] > sv;
@@ -1061,8 +1235,8 @@ static int logdat(const char *slp, const char *stp, const char *lgp)
 int main(int argc, char **argv)
 {
     if (argc < 3) {
-        fprintf(stderr, "use: mk_wfstage neg NEG OUT | print PRN OUT | pairs OUT | check NEG PRN NEGFILE PRNFILE [T17]"
-                        " | shipped NEG PRN NEGFILE PRNFILE T17 | dat DAT LIST\n");
+        fprintf(stderr, "use: mk_wfstage neg NEG OUT | print PRN OUT | kd OUT | pairs OUT | check NEG PRN NEGFILE PRNFILE"
+                        " [T17] | shipped NEG PRN NEGFILE PRNFILE T17 | dat DAT LIST\n");
         return 2;
     }
     gl_init();
@@ -1073,6 +1247,10 @@ int main(int argc, char **argv)
     if (!strcmp(argv[1], "print") && argc == 4) {
         static struct wf_sg_prn P;
         return make_prn(atoi(argv[2]), &P) || wr(argv[3], &P, sizeof P);
+    }
+    if (!strcmp(argv[1], "kd") && argc == 3) {
+        static struct wf_sg_kd kd;
+        return measure_kd(&kd, 1) || wr(argv[2], &kd, sizeof kd);
     }
     if (!strcmp(argv[1], "pairs") && argc == 3) {
         static int32_t rec[46 * 16 * 3];
@@ -1105,7 +1283,7 @@ int main(int argc, char **argv)
         gl_print_stock(atoi(argv[3]));
         place(p0, &fit, &bk, &wt);
         pr.fit = fit; pr.bk = bk; pr.inv = (uint32_t)llround(4294967296.0 / (wt - bk));
-        wf_sg_compose(N, P, &pr, &k, 0, mk_pd, T);
+        wf_sg_compose(N, P, &pr, &k, 0, 0, mk_pd, T);
         for (n = 0; n < 4913; n++) {
             int a[3] = { (T[n] >> 8) & 255, (int8_t)(T[n] & 255), (int8_t)((T[n] >> 16) & 255) };
             int b[3] = { (S[n] >> 8) & 255, (int8_t)(S[n] & 255), (int8_t)((S[n] >> 16) & 255) };
@@ -1122,12 +1300,18 @@ int main(int argc, char **argv)
         return lg_dom(argv[2]) || logpairs(argv[3]);
     if (!strcmp(argv[1], "logdat") && argc == 5)
         return logdat(argv[2], argv[3], argv[4]);
-    if (!strcmp(argv[1], "logcompose") && (argc == 16 || argc == 17))
-        return lg_dom(argv[7]) || logcompose(argv + 2, argc == 17 && !strcmp(argv[16], "bw"));
+    if (!strcmp(argv[1], "logcompose")) {
+        int bw = !strcmp(argv[argc - 1], "bw"), nk = argc - 9 - bw;
+        if (nk == 7 || nk == 11)
+            return lg_dom(argv[7]) || logcompose(argv + 2, nk, bw);
+    }
     if (!strcmp(argv[1], "logshift") && argc == 3)
         return logshift(argv[2]);
-    if (!strcmp(argv[1], "logknob") && (argc == 17 || argc == 18))
-        return lg_dom(argv[7]) || logknob(argv + 2, argc == 18 && !strcmp(argv[17], "bw"));
+    if (!strcmp(argv[1], "logknob")) {
+        int bw = !strcmp(argv[argc - 1], "bw"), nk = argc - 10 - bw;
+        if (nk == 7 || nk == 11)
+            return lg_dom(argv[7]) || logknob(argv + 2, nk, bw);
+    }
     if (!strcmp(argv[1], "logcheck") && (argc == 9 || argc == 10))
         return lg_dom(argv[7]) || logcheck(atoi(argv[2]), atoi(argv[3]), argv[4], argv[5], argv[6], argv[8],
                                            argc == 10 && !strcmp(argv[9], "bw"));

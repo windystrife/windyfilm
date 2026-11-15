@@ -19,7 +19,7 @@ WFFONTS.DAT v1 (little endian, own format):
   bitmaps       rows top to bottom, MSB first, rows padded to whole bytes
 Pen positions are 26.6 fixed point; a glyph is drawn at ((pen + 32) >> 6) + x, as PIL places mono glyphs.
 
---icons OUT.h  also writes the 18 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
+--icons OUT.h  also writes the 22 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
                as the mockup's icon() (Light, Print, Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights, Shadows,
                Film LUT, and the film-stage knobs Film exp, Push, Exp comp, Printer R / G / B, Interlayer), and the 3
                Darkroom print rows' icons (Frame, Info, Date) as wf_picons.
@@ -233,7 +233,8 @@ def check(fonts):
 
 # ------------------------------------------------------------------ row icons (mockup.py icon(), our own drawing)
 ICONS = ('Light', 'Print', 'Grain', 'Halation', 'Bloom', 'Gauge', 'Mist', 'Strength', 'Highlights', 'Shadows', 'Film LUT',
-         'Film exp', 'Push', 'Exp comp', 'Printer R', 'Printer G', 'Printer B', 'Interlayer')
+         'Film exp', 'Push', 'Exp comp', 'Printer R', 'Printer G', 'Printer B', 'Interlayer',
+         'Bleach', 'Print bl', 'Neutral N', 'Neutral P')
 
 
 def icon_img(k):
@@ -322,6 +323,27 @@ def icon_img(k):
         for xx in (5, 10):
             d.line([x + xx, y + 5, x + xx, y + 6], fill=col)
             d.line([x + xx, y + 10, x + xx, y + 11], fill=col)
+    elif k == 'Bleach':                            # the three layers, the silver kept: one solid band through them all
+        for yy in (2, 7, 12):
+            d.rectangle([x + 1, y + yy, x + 14, y + yy + 2], outline=col)
+        d.rectangle([x + 6, y + 1, x + 9, y + 15], fill=col)
+    elif k == 'Print bl':                          # a print, its picture greyed: a dither over the lower half
+        d.rectangle([x + 2, y + 1, x + 13, y + 14], outline=col)
+        d.polygon([(x + 9, y + 1), (x + 13, y + 5), (x + 9, y + 5)], fill=col)
+        for yy in range(7, 13):
+            for xx in range(4, 12):
+                if (xx + yy) % 2 == 0:
+                    d.point((x + xx, y + yy), fill=col)
+    elif k == 'Neutral N':                         # three curves meeting on one, on a strip of film (perforations)
+        for y0 in (4, 8, 12):
+            d.line([x + 1, y + y0, x + 13, y + 8], fill=col)
+        for xx in (2, 6, 10, 14):
+            d.point((x + xx, y + 1), fill=col)
+            d.point((x + xx, y + 15), fill=col)
+    elif k == 'Neutral P':                         # three curves meeting on one, on a print
+        d.rectangle([x + 1, y + 1, x + 14, y + 14], outline=col)
+        for y0 in (4, 8, 11):
+            d.line([x + 3, y + y0, x + 12, y + 8], fill=col)
     return im
 
 

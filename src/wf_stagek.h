@@ -57,22 +57,52 @@ struct wf_sg_pair {
 #define WF_SG_IIE_MAX 8                    /* Interlayer: 0..8 = 0..200 % in 25 % steps */
 #define WF_SG_IIE_DEF 4                    /* 100 %, the chain's default */
 #define WF_SG_OFF_MAX (WF_SG_FEXP_MAX + WF_SG_PUSH_MAX)   /* Film exp + Push / pull, thirds of a stop */
-struct wf_sg_knobs { int fexp, push, comp, prn[3], iie; };
+#define WF_SG_AMT_MAX 4                    /* Bleach bypass, Print bleach, Neutral neg, Neutral print: 0..4 = 0..100 %
+                                              in 25 % steps (the chain's bleach, print_bleach, neutral_tonescale,
+                                              neutral_density; 0 is the chain's default) */
+#define WF_SG_BL_SHIFT 6                   /* the two bleach rows: the chain's amount = step / 64, 100 % = 1/16. The
+                                              chain takes 0..1, but its 0.25 already lifts mid grey from L* 55 to 85
+                                              (Bleach bypass) or drops it to 21 (Print bleach); at 1/16: 68 / 43, the
+                                              colour -18 / -22 % (C*), 2 chain films x 16 frames. The neutral rows
+                                              blend 0..1 (step / 4) */
+struct wf_sg_knobs { int fexp, push, comp, prn[3], iie, bleach, pbleach, nneg, nprn; };
 
-/* 1 = these knobs give the shipped table (no offset left after Exp comp, printer 0, interlayer 100 %) */
+/* The knob data of the last four rows (WFSTAGE.DAT version 2, tools/mk_wfstage.c kd): measured on the chain like the
+ * halves, one set for every pair.
+ *   Bleach bypass (negative): the chain adds amount (step / 64) x the sum of the three printing densities to each channel, after
+ *     the interlayer and before the timing. A2's base was measured with the auto-balance inside, so the sum the bleach
+ *     reads is the sum of the A2 values less bs (Q16 printing density, the three auto-balance offsets).
+ *   Print bleach: the chain scales the print's linear light by 10^(-amount x the sum of the three print densities)
+ *     before its gamut map (which keeps ratios) and its encode (a power): on the raw output that is one gain, g[] over
+ *     s = amount x the sum of B1's three outputs, s = 0..16 on the 1D axis (Q12 s), Q16 (65535 = 1); amount = step / 64
+ *     (at 1/16 the rows reach s < 1, the first 17 entries; g holds the chain's whole range).
+ *   Neutral neg / Neutral print: R's and B's curves move toward green's at the same input (A1, B1), no data. */
+struct wf_sg_kd {
+    int32_t bs;
+    uint16_t g[WF_SG_N1];
+    uint16_t pad;
+};
+
+/* 1 = these knobs give the shipped table (no offset left after Exp comp, printer 0, interlayer 100 %, the last four
+ * rows at 0) */
 int wf_sg_default(const struct wf_sg_knobs *k);
 /* a nonzero key for knob values that need a composed table (0 = default knobs), so two equal sets share one table;
- * the table depends on the key alone: wf_sg_unkey gives knobs that compose to the very same words */
+ * the table depends on the key alone: wf_sg_unkey gives knobs that compose to the very same words. key = 1 + 2 x idx,
+ * idx mixed radix over offset (19) x printer R G B (25 each) x interlayer (9) x the last four rows (5 each):
+ * idx < 1 669 921 875, the key < 2^32 */
 uint32_t wf_sg_key(const struct wf_sg_knobs *k);
 void wf_sg_unkey(uint32_t key, struct wf_sg_knobs *k);
 /* the composed table in two passes, so the camera holds one half at a time (wf_shot.c reads the negative half, runs
  * pass 1, frees it, then reads the print half): pd = WF_SG_NODES x 3 printing densities / 4 (B1's axis, Q16, 65535
- * standing for the top end), T = the 4913 words; bw: U and V bytes 0 (a B&W film) */
+ * standing for the top end), T = the 4913 words; bw: U and V bytes 0 (a B&W film). kd: the knob data, or 0 (a version
+ * 1 pack): the last four rows are then read as 0 */
 #define WF_SG_NODES 4913
-void wf_sg_neg_pass(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k, uint16_t *pd);
-void wf_sg_prn_pass(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int bw, uint32_t *T);
+void wf_sg_neg_pass(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k,
+                    const struct wf_sg_kd *kd, uint16_t *pd);
+void wf_sg_prn_pass(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k,
+                    const struct wf_sg_kd *kd, const uint16_t *pd, int bw, uint32_t *T);
 void wf_sg_compose(const struct wf_sg_neg *n, const struct wf_sg_prn *p, const struct wf_sg_pair *pr,
-                   const struct wf_sg_knobs *k, int bw, uint16_t *pd, uint32_t *T);
+                   const struct wf_sg_knobs *k, const struct wf_sg_kd *kd, int bw, uint16_t *pd, uint32_t *T);
 
 /* The RAW develop's log grid (chain films on RAW, option (c), wf_rawb.h): the same two passes over the 33^3 nodes of a
  * chain film's log table (ML/DATA/WFLOG.DAT, the .cube order, red fastest), so the knob rows reach B and the Darkroom.
@@ -88,9 +118,9 @@ void wf_sg_compose(const struct wf_sg_neg *n, const struct wf_sg_prn *p, const s
 #define WF_SG_LG 33
 #define WF_SG_LNODES (WF_SG_LG * WF_SG_LG * WF_SG_LG)
 void wf_sg_neg_pass_x(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k,
-                      const uint16_t *xn, int nodes, uint16_t *pd);
-void wf_sg_prn_pass_rgb(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int nodes, int bw,
-                        uint16_t *rgb);
+                      const struct wf_sg_kd *kd, const uint16_t *xn, int nodes, uint16_t *pd);
+void wf_sg_prn_pass_rgb(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k,
+                        const struct wf_sg_kd *kd, const uint16_t *pd, int nodes, int bw, uint16_t *rgb, uint16_t *gn);
 
 /* The RAW knob table's residual (wf_rawb.c rb_sl_build; tools/mk_wfstage.c logcheck / logdat run the same code):
  * wf_sg_res_quant: r = the shipped log table's samples (le: u16 little-endian) less the default composition's (rgb),
@@ -98,9 +128,17 @@ void wf_sg_prn_pass_rgb(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, 
  * wf_sg_res_add: rgb (the knobs' samples of nodes node0 .. node0 + n - 1) += r x 64 read at the node the knobs' exposure
  * offset moves it to. pos: WFSTLOG.DAT's shift row for the offset (WF_SG_LG axis positions, node units Q8: where the
  * S-Log3 linear is 2^(offset / 3) times the node's), or 0 for none (r at the node itself, Interlayer / printer).
+ * gn: the residual's weight at each node (Q16, wf_sg_prn_pass_rgb's gn), r x 64 x gn rounded >> 16; 0 when
+ * wf_sg_res_w() is 0 (r as it is). The weight is the Print bleach gain (it scales the print's output, so it scales the
+ * composition's error the residual stands for) x (4 - Bleach bypass step) / 4: Bleach bypass moves the knee (100 %:
+ * 2.7 nodes down on G03P01) and the shipped table's residual sits at the old one, so it fades out; at 100 % the RAW
+ * table is the composition alone, as the 8-bit table always is (tools/mk_wfstage.c logcheck: the knee then within
+ * 0.05 node of the chain on 5 pairs, where the residual at the node put it up to 0.63 node late).
+ * wf_sg_prn_pass_rgb writes gn[i] for each node when gn is not 0 (65535 when both rows are 0).
  * Per axis i0 = min(p >> 8, WF_SG_LG - 2), f = p - 256 i0; lerp(a, b) = a + (((b - a) f + 128) >> 8) on r x 64, over R,
  * then G, then B; the sum clamped to 0 .. 65535. r holds all WF_SG_LNODES nodes (the moved read reaches any of them). */
 #define WF_SG_SHIFT_Q 8
 int  wf_sg_res_quant(const uint8_t *le, const uint16_t *rgb, int n, int8_t *r);
-void wf_sg_res_add(const int8_t *r, const uint16_t *pos, int node0, int n, uint16_t *rgb);
+int  wf_sg_res_w(const struct wf_sg_knobs *k, const struct wf_sg_kd *kd);   /* 1 = the residual takes gn */
+void wf_sg_res_add(const int8_t *r, const uint16_t *pos, const uint16_t *gn, int node0, int n, uint16_t *rgb);
 #endif

@@ -6,6 +6,7 @@
 
 typedef char wf_sg_neg_size[sizeof(struct wf_sg_neg) == 24 + 2 * (WF_SG_NX + 1) + 2 * 3 * WF_SG_N1 + 2 + 12 * WF_SG_A3 ? 1 : -1];
 typedef char wf_sg_prn_size[sizeof(struct wf_sg_prn) == 24 + 2 * 3 * WF_SG_N1 + 2 + 6 * WF_SG_B3 + 2 ? 1 : -1];
+typedef char wf_sg_kd_size[sizeof(struct wf_sg_kd) == 4 + 2 * WF_SG_N1 + 2 ? 1 : -1];
 
 static int wf_sg_clamp(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
 
@@ -18,29 +19,55 @@ static int wf_sg_off(const struct wf_sg_knobs *k)
                          + wf_sg_clamp(k->push, -WF_SG_PUSH_MAX, WF_SG_PUSH_MAX);
 }
 
+static int wf_sg_amt(int v) { return wf_sg_clamp(v, 0, WF_SG_AMT_MAX); }
+
 int wf_sg_default(const struct wf_sg_knobs *k)
 {
-    return wf_sg_off(k) == 0 && !k->prn[0] && !k->prn[1] && !k->prn[2] && k->iie == WF_SG_IIE_DEF;
+    return wf_sg_off(k) == 0 && !k->prn[0] && !k->prn[1] && !k->prn[2] && k->iie == WF_SG_IIE_DEF
+           && !wf_sg_amt(k->bleach) && !wf_sg_amt(k->pbleach) && !wf_sg_amt(k->nneg) && !wf_sg_amt(k->nprn);
 }
 
+/* mixed radix, most significant first: offset, printer R, G, B, interlayer, bleach, print bleach, neutral neg, neutral
+ * print (wf_stagek.h); unsigned division by constants only (multiply-high, no __aeabi_uidiv) */
+#define WF_SG_NR (2 * WF_SG_PRN_MAX + 1)
+#define WF_SG_NAMT (WF_SG_AMT_MAX + 1)
 uint32_t wf_sg_key(const struct wf_sg_knobs *k)
 {
     if (wf_sg_default(k))
         return 0;
-    uint32_t key = 1u | (uint32_t)(wf_sg_off(k) + 16) << 1 | (uint32_t)wf_sg_clamp(k->iie, 0, WF_SG_IIE_MAX) << 21;
+    uint32_t i = (uint32_t)(wf_sg_off(k) + WF_SG_OFF_MAX);
     for (int c = 0; c < 3; c++)
-        key |= (uint32_t)(wf_sg_clamp(k->prn[c], -WF_SG_PRN_MAX, WF_SG_PRN_MAX) + 16) << (6 + 5 * c);
-    return key;
+        i = i * WF_SG_NR + (uint32_t)(wf_sg_clamp(k->prn[c], -WF_SG_PRN_MAX, WF_SG_PRN_MAX) + WF_SG_PRN_MAX);
+    i = i * (WF_SG_IIE_MAX + 1) + (uint32_t)wf_sg_clamp(k->iie, 0, WF_SG_IIE_MAX);
+    i = i * WF_SG_NAMT + (uint32_t)wf_sg_amt(k->bleach);
+    i = i * WF_SG_NAMT + (uint32_t)wf_sg_amt(k->pbleach);
+    i = i * WF_SG_NAMT + (uint32_t)wf_sg_amt(k->nneg);
+    i = i * WF_SG_NAMT + (uint32_t)wf_sg_amt(k->nprn);
+    return 1u + 2u * i;
 }
 
 void wf_sg_unkey(uint32_t key, struct wf_sg_knobs *k)
 {
+    uint32_t i = key >> 1, q;
     k->comp = 0;
     k->push = 0;
-    k->fexp = key ? (int)(key >> 1 & 31) - 16 : 0;          /* the offset's sum; wf_sg_neg_pass reads it whole */
-    for (int c = 0; c < 3; c++)
-        k->prn[c] = key ? (int)(key >> (6 + 5 * c) & 31) - 16 : 0;
-    k->iie = key ? (int)(key >> 21 & 15) : WF_SG_IIE_DEF;
+    if (!key) {
+        k->fexp = k->prn[0] = k->prn[1] = k->prn[2] = 0;
+        k->iie = WF_SG_IIE_DEF;
+        k->bleach = k->pbleach = k->nneg = k->nprn = 0;
+        return;
+    }
+    q = i / WF_SG_NAMT; k->nprn = (int)(i - q * WF_SG_NAMT); i = q;
+    q = i / WF_SG_NAMT; k->nneg = (int)(i - q * WF_SG_NAMT); i = q;
+    q = i / WF_SG_NAMT; k->pbleach = (int)(i - q * WF_SG_NAMT); i = q;
+    q = i / WF_SG_NAMT; k->bleach = (int)(i - q * WF_SG_NAMT); i = q;
+    q = i / (WF_SG_IIE_MAX + 1); k->iie = (int)(i - q * (WF_SG_IIE_MAX + 1)); i = q;
+    for (int c = 2; c >= 0; c--) {
+        q = i / WF_SG_NR;
+        k->prn[c] = (int)(i - q * WF_SG_NR) - WF_SG_PRN_MAX;
+        i = q;
+    }
+    k->fexp = (int)i - WF_SG_OFF_MAX;                    /* the offset's sum; wf_sg_neg_pass reads it whole */
 }
 
 /* 1D table of WF_SG_N1 entries over 0..65536 (Q8 fraction: a step times 255 stays inside 32 bits) */
@@ -93,8 +120,9 @@ static void wf_sg_node(int yc, int uc, int vc, int *rgb)
 }
 
 /* the negative pass's per-table part */
-struct wf_sg_np { int sx, iie, tim[3]; };
-static void wf_sg_np_set(const struct wf_sg_pair *pr, const struct wf_sg_knobs *k, struct wf_sg_np *q)
+struct wf_sg_np { int sx, iie, tim[3], bl, bs, nn; };
+static void wf_sg_np_set(const struct wf_sg_pair *pr, const struct wf_sg_knobs *k, const struct wf_sg_kd *kd,
+                         struct wf_sg_np *q)
 {
     /* exposure axis offset, as the chain adds it: (push + exposure x 0.3) / 6 in Q16 logE, the fitted exposure inside;
      * the knobs' offset (wf_sg_off, thirds of a stop) on top. Exp comp: only the fitted placement is left. A key's
@@ -107,31 +135,57 @@ static void wf_sg_np_set(const struct wf_sg_pair *pr, const struct wf_sg_knobs *
     q->iie = wf_sg_clamp(k->iie, 0, WF_SG_IIE_MAX);
     for (int c = 0; c < 3; c++)
         q->tim[c] = -((wf_sg_clamp(k->prn[c], -WF_SG_PRN_MAX, WF_SG_PRN_MAX) * 104858) >> 6);
+    /* the last four rows need the knob data (a version 1 pack has none: read as 0) */
+    q->bl = kd ? wf_sg_amt(k->bleach) : 0;
+    q->bs = kd ? kd->bs : 0;
+    q->nn = kd ? wf_sg_amt(k->nneg) : 0;
 }
 
-/* one node of the negative pass: the exposure axis x of each channel (Q16) -> A1 -> A2 -> printing density / 4 */
-static inline void wf_sg_nnode(const struct wf_sg_neg *n, const struct wf_sg_np *q, const int *x, uint16_t *pd)
+/* one node of the negative pass: the exposure axis x of each channel (Q16) -> A1 -> A2 -> printing density / 4.
+ * kn = 0: Bleach bypass and Neutral neg are 0, the node as it was before those rows (wf_sg_nnode0, the common case:
+ * the extra work and registers cost 8 % of the pass otherwise); kn = 1: wf_sg_nnodek */
+static inline __attribute__((always_inline)) void wf_sg_nnode_t(const struct wf_sg_neg *n, const struct wf_sg_np *q,
+                                                                const int *x, uint16_t *pd, const int kn)
 {
     int cell[3], fr[3];
     struct wf_sg_tet t;
     for (int c = 0; c < 3; c++) {
-        int d = wf_sg_1d(n->A1[c], x[c] + q->sx);
+        int xc = x[c] + q->sx, d = wf_sg_1d(n->A1[c], xc);
+        if (kn && q->nn && c != 1)                             /* Neutral neg: toward green's curve at this input */
+            d += ((wf_sg_1d(n->A1[1], xc) - d) * q->nn) >> 2;
         wf_sg_cell(((int64_t)(d - n->lo[c]) * n->sc[c]) >> 14, WF_SG_NA, &cell[c], &fr[c]);
     }
     wf_sg_tetw(cell, fr, WF_SG_NA, &t);
     const int16_t *a0 = n->A2[t.i0], *a1 = n->A2[t.i1], *a2 = n->A2[t.i2], *a3 = n->A2[t.i3];
+    int v[3], bl = 0;
     for (int c = 0; c < 3; c++) {
         int base = (a0[c] * t.w0 + a1[c] * t.w1 + a2[c] * t.w2 + a3[c] * t.w3 + 8192) >> 14;
         int quad = (a0[3 + c] * t.w0 + a1[3 + c] * t.w1 + a2[3 + c] * t.w2 + a3[3 + c] * t.w3 + 8192) >> 14;
-        int v = (base * 16 + ((quad * 16 * q->iie) >> 2) + q->tim[c]) >> 2;   /* Q16 printing density / 4: B1's axis */
-        pd[c] = (uint16_t)wf_sg_clamp(v, 0, 65535);                         /* 65535 stands for the top end */
+        v[c] = base * 16 + ((quad * 16 * q->iie) >> 2);                      /* Q16 printing density */
     }
+    if (kn && q->bl)                                           /* Bleach bypass: amount x the sum, to every channel */
+        bl = ((v[0] + v[1] + v[2] - q->bs) * q->bl) >> WF_SG_BL_SHIFT;
+    for (int c = 0; c < 3; c++)                                /* Q16 printing density / 4: B1's axis */
+        pd[c] = (uint16_t)wf_sg_clamp((v[c] + bl + q->tim[c]) >> 2, 0, 65535);   /* 65535 stands for the top end */
+}
+static void __attribute__((noinline)) wf_sg_nnode0(const struct wf_sg_neg *n, const struct wf_sg_np *q, const int *x,
+                                                   uint16_t *pd)
+{
+    wf_sg_nnode_t(n, q, x, pd, 0);
+}
+static void __attribute__((noinline)) wf_sg_nnodek(const struct wf_sg_neg *n, const struct wf_sg_np *q, const int *x,
+                                                   uint16_t *pd)
+{
+    wf_sg_nnode_t(n, q, x, pd, 1);
 }
 
-void wf_sg_neg_pass(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k, uint16_t *pd)
+void wf_sg_neg_pass(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k,
+                    const struct wf_sg_kd *kd, uint16_t *pd)
 {
     struct wf_sg_np q;
-    wf_sg_np_set(pr, k, &q);
+    wf_sg_np_set(pr, k, kd, &q);
+    void (*nnode)(const struct wf_sg_neg *, const struct wf_sg_np *, const int *, uint16_t *) =
+        q.nn || q.bl ? wf_sg_nnodek : wf_sg_nnode0;
     for (int node = 0, yc = 0, uc = 0, vc = 0; node < WF_SG_NODES; node++) {   /* node = (yc * 17 + uc) * 17 + vc */
         int rgb[3], x[3];
         wf_sg_node(yc, uc, vc, rgb);
@@ -141,46 +195,88 @@ void wf_sg_neg_pass(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, cons
             int r = rgb[c], i = r >> 14;
             x[c] = i >= WF_SG_NX - 1 ? n->X[WF_SG_NX - 1] : n->X[i] + (((n->X[i + 1] - n->X[i]) * (r & 0x3fff)) >> 14);
         }
-        wf_sg_nnode(n, &q, x, pd + node * 3);
+        nnode(n, &q, x, pd + node * 3);
     }
 }
 
 void wf_sg_neg_pass_x(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k,
-                      const uint16_t *xn, int nodes, uint16_t *pd)
+                      const struct wf_sg_kd *kd, const uint16_t *xn, int nodes, uint16_t *pd)
 {
     struct wf_sg_np q;
-    wf_sg_np_set(pr, k, &q);
+    wf_sg_np_set(pr, k, kd, &q);
+    void (*nnode)(const struct wf_sg_neg *, const struct wf_sg_np *, const int *, uint16_t *) =
+        q.nn || q.bl ? wf_sg_nnodek : wf_sg_nnode0;
     for (int i = 0; i < nodes; i++, xn += 3, pd += 3) {
         int x[3] = { xn[0], xn[1], xn[2] };
-        wf_sg_nnode(n, &q, x, pd);
+        nnode(n, &q, x, pd);
     }
 }
 
-/* one node of the print pass: printing density / 4 -> B1 -> B2 -> the pinned ends, Q16 (black 0, white 65536) */
-static inline void wf_sg_pnode(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int64_t *lv)
+/* the print pass's per-table part: Neutral print and Print bleach amounts, the gain table (0 when either is unused) */
+struct wf_sg_pp { int np, pb; const uint16_t *g; };
+static void wf_sg_pp_set(const struct wf_sg_knobs *k, const struct wf_sg_kd *kd, struct wf_sg_pp *q)
 {
-    int cell[3], fr[3];
+    q->np = kd ? wf_sg_amt(k->nprn) : 0;
+    q->pb = kd ? wf_sg_amt(k->pbleach) : 0;
+    q->g = kd ? kd->g : 0;
+}
+
+/* one node of the print pass: printing density / 4 -> B1 -> B2 -> the pinned ends, Q16 (black 0, white 65536);
+ * returns the Print bleach gain (Q16, 65535 when it is 0). kn = 0: Neutral print and Print bleach are 0, the node as it
+ * was before those rows (wf_sg_pnode0); kn = 1: wf_sg_pnodek */
+static inline __attribute__((always_inline)) int wf_sg_pnode_t(const struct wf_sg_prn *p, const struct wf_sg_pair *pr,
+                                                               const struct wf_sg_pp *pq, const uint16_t *pd,
+                                                               int64_t *lv, const int kn)
+{
+    int cell[3], fr[3], s = 0, g = 65535;
     struct wf_sg_tet t;
     for (int c = 0; c < 3; c++) {
-        int x = pd[c];
-        int q = wf_sg_1d(p->B1[c], x == 65535 ? 65536 : x);
+        int x = pd[c] == 65535 ? 65536 : pd[c];
+        int q = wf_sg_1d(p->B1[c], x);
+        if (kn && pq->np && c != 1)                            /* Neutral print: toward green's curve at this input */
+            q += ((wf_sg_1d(p->B1[1], x) - q) * pq->np) >> 2;
+        if (kn)
+            s += q;
         wf_sg_cell(((int64_t)(q - p->lo[c]) * p->sc[c]) >> 12, WF_SG_NB, &cell[c], &fr[c]);
     }
+    if (kn && pq->pb)                                          /* Print bleach: one gain on the raw output */
+        g = wf_sg_1d(pq->g, (s * pq->pb) >> WF_SG_BL_SHIFT);
     wf_sg_tetw(cell, fr, WF_SG_NB, &t);
     for (int c = 0; c < 3; c++) {
         int raw = (p->B2[t.i0][c] * t.w0 + p->B2[t.i1][c] * t.w1 + p->B2[t.i2][c] * t.w2
                    + p->B2[t.i3][c] * t.w3 + 8192) >> 14;
+        if (kn && pq->pb)
+            raw = (int)(((int64_t)raw * g + 32768) >> 16);
         int64_t v = ((int64_t)(raw - pr->bk) * pr->inv) >> 16;        /* pinned ends: black 0, white 65536 */
         lv[c] = v < 0 ? 0 : v > 65536 ? 65536 : v;
     }
+    return g;
 }
-
-void wf_sg_prn_pass_rgb(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int nodes, int bw,
-                        uint16_t *rgb)
+static int __attribute__((noinline)) wf_sg_pnode0(const struct wf_sg_prn *p, const struct wf_sg_pair *pr,
+                                                  const struct wf_sg_pp *pq, const uint16_t *pd, int64_t *lv)
 {
+    return wf_sg_pnode_t(p, pr, pq, pd, lv, 0);
+}
+static int __attribute__((noinline)) wf_sg_pnodek(const struct wf_sg_prn *p, const struct wf_sg_pair *pr,
+                                                  const struct wf_sg_pp *pq, const uint16_t *pd, int64_t *lv)
+{
+    return wf_sg_pnode_t(p, pr, pq, pd, lv, 1);
+}
+typedef int (*wf_sg_pnode_f)(const struct wf_sg_prn *, const struct wf_sg_pair *, const struct wf_sg_pp *,
+                             const uint16_t *, int64_t *);
+
+void wf_sg_prn_pass_rgb(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k,
+                        const struct wf_sg_kd *kd, const uint16_t *pd, int nodes, int bw, uint16_t *rgb, uint16_t *gn)
+{
+    struct wf_sg_pp pq;
+    wf_sg_pp_set(k, kd, &pq);
+    wf_sg_pnode_f pnode = pq.np || pq.pb ? wf_sg_pnodek : wf_sg_pnode0;
+    int fw = WF_SG_AMT_MAX - (kd ? wf_sg_amt(k->bleach) : 0);   /* the residual fades out with Bleach bypass */
     for (int i = 0; i < nodes; i++, pd += 3, rgb += 3) {
         int64_t lv[3];
-        wf_sg_pnode(p, pr, pd, lv);
+        int g = pnode(p, pr, &pq, pd, lv);
+        if (gn)
+            gn[i] = (uint16_t)((g * fw) >> 2);
         if (bw)                                                       /* BT.601 luma in all three, as a B&W .L33 */
             lv[0] = lv[1] = lv[2] = (lv[0] * 19595 + lv[1] * 38470 + lv[2] * 7471 + 32768) >> 16;
         for (int c = 0; c < 3; c++)
@@ -188,11 +284,15 @@ void wf_sg_prn_pass_rgb(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, 
     }
 }
 
-void wf_sg_prn_pass(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int bw, uint32_t *T)
+void wf_sg_prn_pass(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k,
+                    const struct wf_sg_kd *kd, const uint16_t *pd, int bw, uint32_t *T)
 {
+    struct wf_sg_pp pq;
+    wf_sg_pp_set(k, kd, &pq);
+    wf_sg_pnode_f pnode = pq.np || pq.pb ? wf_sg_pnodek : wf_sg_pnode0;
     for (int node = 0; node < WF_SG_NODES; node++) {
         int64_t o[3];
-        wf_sg_pnode(p, pr, pd + node * 3, o);
+        pnode(p, pr, &pq, pd + node * 3, o);
         for (int c = 0; c < 3; c++)
             o[c] *= 255;                                              /* Q16 code */
         int oy = (int)((o[0] * 19595 + o[1] * 38470 + o[2] * 7471 + ((int64_t)1 << 31)) >> 32);
@@ -206,10 +306,15 @@ void wf_sg_prn_pass(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, cons
 }
 
 void wf_sg_compose(const struct wf_sg_neg *n, const struct wf_sg_prn *p, const struct wf_sg_pair *pr,
-                   const struct wf_sg_knobs *k, int bw, uint16_t *pd, uint32_t *T)
+                   const struct wf_sg_knobs *k, const struct wf_sg_kd *kd, int bw, uint16_t *pd, uint32_t *T)
 {
-    wf_sg_neg_pass(n, pr, k, pd);
-    wf_sg_prn_pass(p, pr, pd, bw, T);
+    wf_sg_neg_pass(n, pr, k, kd, pd);
+    wf_sg_prn_pass(p, pr, k, kd, pd, bw, T);
+}
+
+int wf_sg_res_w(const struct wf_sg_knobs *k, const struct wf_sg_kd *kd)
+{
+    return kd && (wf_sg_amt(k->pbleach) || wf_sg_amt(k->bleach));
 }
 
 int wf_sg_res_quant(const uint8_t *le, const uint16_t *rgb, int n, int8_t *r)
@@ -229,7 +334,7 @@ int wf_sg_res_quant(const uint8_t *le, const uint16_t *rgb, int n, int8_t *r)
 
 static inline int wf_sg_lerp(int a, int b, int f) { return a + (((b - a) * f + 128) >> WF_SG_SHIFT_Q); }
 
-void wf_sg_res_add(const int8_t *r, const uint16_t *pos, int node0, int n, uint16_t *rgb)
+void wf_sg_res_add(const int8_t *r, const uint16_t *pos, const uint16_t *gn, int node0, int n, uint16_t *rgb)
 {
     const int G = WF_SG_LG, dr = 3, dg = 3 * WF_SG_LG, db = 3 * WF_SG_LG * WF_SG_LG;
     unsigned u = (unsigned)node0;
@@ -256,6 +361,9 @@ void wf_sg_res_add(const int8_t *r, const uint16_t *pos, int node0, int n, uint1
                 v[c] = wf_sg_lerp(wf_sg_lerp(x00, x10, f[1]), wf_sg_lerp(x01, x11, f[1]), f[2]);
             }
         }
+        if (gn)                                                /* the Print bleach gain scales the error too */
+            for (int c = 0; c < 3; c++)
+                v[c] = (v[c] * gn[i] + 32768) >> 16;
         for (int c = 0; c < 3; c++)
             rgb[c] = (uint16_t)wf_sg_clamp(rgb[c] + v[c], 0, 65535);
         if (++kr == G) {

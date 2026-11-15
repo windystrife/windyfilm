@@ -54,6 +54,7 @@ const struct wf_film *wf_film_by_id(int id);   /* 0 when unknown */
 enum { WF_ROW_LIGHT = 0, WF_ROW_PRINT, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_BLOOM, WF_ROW_GAUGE, WF_ROW_MIST,
        WF_ROW_STRENGTH, WF_ROW_HL, WF_ROW_SH, WF_ROW_FLUT,
        WF_ROW_SEXP, WF_ROW_SPUSH, WF_ROW_SCOMP, WF_ROW_SPR, WF_ROW_SPG, WF_ROW_SPB, WF_ROW_SIIE,   /* film-stage knobs */
+       WF_ROW_SBL, WF_ROW_SPBL, WF_ROW_SNN, WF_ROW_SNP,   /* Bleach bypass, Print bleach, Neutral neg / print */
        WF_NROWS };
 
 const char *wf_row_name(int row);         /* "Light", "Print stock", "Grain", "Halation", "Bloom", "Gauge", "Mist",
