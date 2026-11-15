@@ -14,19 +14,26 @@ here, measured by tools/mk_wfstage.c (FR_SRC chain, as tools/mk_wfstage.py):
                serves every film
   entries      per (film, print) with both a stage entry and a log table: the log placement the .L33 was made with
                (mk_wfstage logpairs: fit, black, white), and the checksums of the very log table and halves it goes with
+  shift        per exposure offset (Film exp + Push / pull, -9..+9 thirds of a stop) the 33 axis positions where the
+               S-Log3 linear is 2^(offset / 3) times the node's (mk_wfstage logshift): the module reads the shipped
+               table's residual there, so the shoulder's knee moves with the exposure as the chain's does
 
-  header 32 B  "WFSL", u16 version 1, u16 entries, u16 grid 33, u8 curve, u8 feed (WFLOG.DAT's), u32 index offset 32,
-               u32 x offset, u32 file size, u32 FNV-1a of the index, u32 FNV-1a of the x section
+  header 48 B  "WFSL", u16 version 2, u16 entries, u16 grid 33, u8 curve, u8 feed (WFLOG.DAT's), u32 index offset 48,
+               u32 x offset, u32 file size, u32 FNV-1a of the index, u32 FNV-1a of the x section, u32 shift offset
+               (right after the index), u16 shift rows (19), s16 first row's offset (-9), u32 FNV-1a of the shift
+               section, u32 0
   index  36 B  u8 id, u8 variant (catalog.PRINTS order), u8 flags (WFLOG's: bit 1 B&W), u8 0, char code[8] (NUL padded),
                s32 fit (Q16 stops), s32 black (Q16), u32 2^32 / (white - black), u32 Adler-32 of the log table (as
                WFLOG.DAT's index names it), u32 FNV-1a of the negative half, u32 FNV-1a of the print half (as
                WFSTAGE.DAT's checksum lists name them)
+  shift        rows x 33 u16: node units Q8 (0 .. 8192), offset -9 first
   x            at a 512-byte boundary: 35937 nodes (red fastest) x R G B, u16 Q16
 Entries are sorted by id, then variant, as both packs. The module takes an entry only when WFSTAGE.DAT's entry of the
 same id, variant and code names those halves and WFLOG.DAT holds that table, so the knobs never compose against packs
 of another build. A self-test re-reads the file; then mk_wfstage logdat reads all three packs the module's way and
-composes every entry at default knobs against its log table.
-ENV: FR_SRC, FORCE=1 (re-measure films/tables/.stage/logx.bin and logpairs.bin), CC.
+composes every entry at default knobs against its log table, checks the shift section against its own and the
+residual's range, and runs Film exp +1 through the module's knob table.
+ENV: FR_SRC, FORCE=1 (re-measure films/tables/.stage/logx.bin, logpairs.bin and logshift.bin), CC.
 """
 import os, struct, sys, zlib
 
@@ -39,6 +46,9 @@ LG = 33
 NODES = LG ** 3
 XB = NODES * 6
 ALIGN = 512
+HDR = 48
+NSH, OMIN = 19, -9                                   # wf_stagek.h WF_SG_OFF_MAX = 9
+SB = NSH * LG * 2
 
 
 def rd_stage(path):
@@ -108,6 +118,7 @@ def main():
         sys.exit("no pair has both a stage entry and a log table")
     xs = cached("logx.bin", [S.TOOL, "logx", str(min(e[3] for e in ents)), dom], XB, dom)
     pr = struct.unpack("<%di" % (46 * 16 * 3), cached("logpairs.bin", [S.TOOL, "logpairs", dom], 46 * 16 * 12, dom))
+    sh = cached("logshift.bin", [S.TOOL, "logshift"], SB, dom)
     idx = b""
     flat = 0
     for i, v, code, n, p, _ in ents:
@@ -120,11 +131,13 @@ def main():
         idx += struct.pack("<BBBx8siiIIII", i, v, fl, code.encode().ljust(8, b"\0"), fit, bk,
                            round(4294967296.0 / (wt - bk)), adl, nf, pf)
     n = len(idx) // 36
-    xo = (32 + len(idx) + ALIGN - 1) // ALIGN * ALIGN
+    so = HDR + len(idx)
+    xo = (so + SB + ALIGN - 1) // ALIGN * ALIGN
     size = xo + XB
-    hdr = b"WFSL" + struct.pack("<HHHBBIIIII", 1, n, LG, curve, feed, 32, xo, size, S.fnv(idx), S.fnv(xs))
-    assert len(hdr) == 32
-    blob = hdr + idx + b"\0" * (xo - 32 - len(idx)) + xs
+    hdr = b"WFSL" + struct.pack("<HHHBBIIIIIIHhII", 2, n, LG, curve, feed, HDR, xo, size, S.fnv(idx), S.fnv(xs), so, NSH,
+                                OMIN, S.fnv(sh), 0)
+    assert len(hdr) == HDR
+    blob = hdr + idx + sh + b"\0" * (xo - so - SB) + xs
     assert len(blob) == size
     open(out, "wb").write(blob)
     selftest(out, stage, logs)
@@ -138,9 +151,18 @@ def main():
 def selftest(path, stage, logs):
     """an independent read of the finished file"""
     b = open(path, "rb").read()
-    magic, ver, n, grid, cv, fd, io, xo, size, ck, xk = struct.unpack_from("<4sHHHBBIIIII", b, 0)
-    assert magic == b"WFSL" and ver == 1 and grid == LG and io == 32 and size == len(b) and xo % ALIGN == 0
-    assert xo >= io + 36 * n and size == xo + XB and ck == S.fnv(b[io:io + 36 * n]) and xk == S.fnv(b[xo:])
+    magic, ver, n, grid, cv, fd, io, xo, size, ck, xk, so, nsh, omin, sk, z = struct.unpack_from("<4sHHHBBIIIIIIHhII", b, 0)
+    assert magic == b"WFSL" and ver == 2 and grid == LG and io == HDR and size == len(b) and xo % ALIGN == 0 and z == 0
+    assert so == io + 36 * n and xo >= so + nsh * LG * 2 and size == xo + XB and ck == S.fnv(b[io:so])
+    assert xk == S.fnv(b[xo:]) and (nsh, omin) == (NSH, OMIN) and sk == S.fnv(b[so:so + SB])
+    rows = memoryview(b[so:so + SB]).cast("H")
+    for o in range(NSH):
+        row = rows[o * LG:(o + 1) * LG]
+        assert all(row[k] <= row[k + 1] for k in range(LG - 1)) and row[-1] <= (LG - 1) * 256, o
+        if o + OMIN == 0:
+            assert list(row) == [k * 256 for k in range(LG)], "offset 0 is no shift"
+        if o + OMIN:                                 # more light: the node reads the residual of a brighter code
+            assert all((row[k] >= k * 256) == (o + OMIN > 0) or row[k] == k * 256 for k in range(LG)), o
     seen, last = set(), (-1, -1)
     for k in range(n):
         i, v, fl, code, fit, bk, inv, adl, nf, pf = struct.unpack_from("<BBBx8siiIIII", b, io + 36 * k)
@@ -151,7 +173,8 @@ def selftest(path, stage, logs):
         assert logs[key] == (fl, adl) and stage[key] == (nf, pf), key
     x = memoryview(b[xo:]).cast("H")
     assert x[0] == x[1] == x[2] == 0, "node 0 (S-Log3 0, linear 0) sits at x 0"
-    print("self-test: %d entries re-read, index + x checksums match, each names its WFLOG table and WFSTAGE halves" % n)
+    print("self-test: %d entries re-read, index + shift + x checksums match, each names its WFLOG table and WFSTAGE "
+          "halves; shift rows monotone, offset 0 none, brighter offsets read higher" % n)
 
 
 if __name__ == "__main__":

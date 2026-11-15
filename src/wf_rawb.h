@@ -39,12 +39,12 @@ int  wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk);
 /* Chain films on RAW (option (c), docs/DESIGN.md 1a): the pair's log table in ML/DATA/WFLOG.DAT (tools/mk_wflog.py) is
  * the develop's WF_DEV_CUBE table on its curve (S-Log3), LUT EI 0, no auto exposure, the film shoulder on: the whole
  * film look comes out of the develop, no sRGB base develop and no 8-bit film table after it. wf_rawb_logpk says whether
- * a look takes that path. The film-stage knob rows (the owner 2026-11-15: on RAW too): a knob set B composes
- * (Interlayer so far) takes a log table composed on the camera from the pair's halves (WFSTAGE.DAT) and
- * ML/DATA/WFSTLOG.DAT (tools/mk_wfstlog.py) plus the shipped table's residual (wf_rawb.c "the knob rows on RAW"); the
- * other knob rows away from neutral keep the 8-bit chain exactly as before, and so do strength other than 100 % and
- * Highlights / Shadows. So does a pair without a usable table (no pack, not a pack, not listed, bad checksum: one log
- * line, then the 8-bit chain until the next boot; a failed knob table drops only that pair's knob tables).
+ * a look takes that path. The film-stage knob rows (the owner 2026-11-15: on RAW too): any knob set away from neutral
+ * takes a log table composed on the camera from the pair's halves (WFSTAGE.DAT) and ML/DATA/WFSTLOG.DAT
+ * (tools/mk_wfstlog.py) plus the shipped table's residual, moved with the exposure offset (wf_rawb.c "the knob rows on
+ * RAW"). Strength other than 100 % and Highlights / Shadows keep the 8-bit chain exactly as before, and so does a pair
+ * without a usable table (no pack, not a pack, not listed, bad checksum: one log line, then the 8-bit chain until the
+ * next boot; a failed knob table drops only that pair's knob tables, no WFSTLOG.DAT all knob tables).
  * wf_rawb_logpk_build (wf_task: file I/O) builds the tables for B and the Darkroom and logs a failure; scr: the develop
  * scratch (a knob table keeps its printing densities and residual there, wf_dev_scratch_bytes of the frame is enough);
  * *ms = the whole SD read + build (+ i's colour trim). */

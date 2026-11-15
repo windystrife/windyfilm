@@ -560,8 +560,9 @@ static int logcompose(char **a, int bw)
  * set three columns: the composition alone; + (.L33 - default composition), the residual at its own node (what the
  * module adds for Interlayer and the printer points: wf_rawb.c rb_sl_build); and "moved", the residual read at the node
  * an exposure offset e = (film exp + push) / 3 stops shifts it to (code' = slog3(2^e slog3^-1(code)) per axis,
- * trilinear: the candidate for milestone 3). The knee line: the neutral axis' knee node (lg_knee) of the chain, the
- * composition and the delta / moved tables, so a shoulder that moves with the knobs shows. */
+ * trilinear), and "module", the table the module builds (lg_module: the key's knobs, the residual in int8 quarter codes,
+ * the Q8 shift row of WFSTLOG.DAT, wf_stagek.c's integer lerps). The knee line: the neutral axis' knee node (lg_knee) of
+ * the chain, the composition and the delta / moved / module tables, so a shoulder that moves with the knobs shows. */
 struct lg_stat { double mx[3], sum; int cnt, hist[41]; };
 static void lg_acc(struct lg_stat *s, const uint16_t *a, const double *ref)
 {
@@ -603,14 +604,81 @@ static double lg_shift(int k, double e)
     double p = 0.5 * (lo + hi) * (WF_SG_LG - 1);
     return p < 0 ? 0 : p > WF_SG_LG - 1 ? WF_SG_LG - 1 : p;
 }
+/* an exposure offset's shift row as WFSTLOG.DAT holds it (offsets LG_OMIN .. -LG_OMIN thirds of a stop): the axis
+ * positions of lg_shift in node units Q8 (wf_stagek.h wf_sg_res_add) */
+#define LG_OMIN (-WF_SG_OFF_MAX)
+#define LG_NSH (2 * WF_SG_OFF_MAX + 1)
+static void lg_shift_row(int off, uint16_t *pos)
+{
+    for (int k = 0; k < WF_SG_LG; k++)
+        pos[k] = (uint16_t)lrint(lg_shift(k, off / 3.0) * (1 << WF_SG_SHIFT_Q));
+}
+/* the knob table the module builds (wf_rawb.c rb_sl_build) from the same halves, placement and x section: default
+ * knobs = the shipped table S itself, else composed(the key's knobs) + S's residual against composed(default), moved by
+ * the exposure offset (wf_sg_res_quant / wf_sg_res_add, the module's own code); returns the residual's clips */
+static int lg_module(const struct wf_sg_neg *N, const struct wf_sg_prn *P, const struct wf_sg_pair *pr,
+                     const uint16_t *XN, const uint16_t *S, const struct wf_sg_knobs *k, int bw, uint16_t *out)
+{
+    static uint16_t pd[WF_SG_LNODES * 3], O0[WF_SG_LNODES * 3];
+    static int8_t r[WF_SG_LNODES * 3];
+    struct wf_sg_knobs k0 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF }, ku;
+    uint16_t pos[WF_SG_LG];
+    uint32_t key = wf_sg_key(k);
+    if (!key) {
+        memcpy(out, S, WF_SG_LNODES * 6);
+        return 0;
+    }
+    wf_sg_unkey(key, &ku);                       /* the knobs as the module has them: the offset whole in fexp */
+    wf_sg_neg_pass_x(N, pr, &k0, XN, WF_SG_LNODES, pd);
+    wf_sg_prn_pass_rgb(P, pr, pd, WF_SG_LNODES, bw, O0);
+    int clip = wf_sg_res_quant((const uint8_t *)S, O0, WF_SG_LNODES, r);   /* little-endian host */
+    wf_sg_neg_pass_x(N, pr, &ku, XN, WF_SG_LNODES, pd);
+    wf_sg_prn_pass_rgb(P, pr, pd, WF_SG_LNODES, bw, out);
+    if (ku.fexp)
+        lg_shift_row(ku.fexp, pos);
+    wf_sg_res_add(r, ku.fexp ? pos : 0, 0, WF_SG_LNODES, out);
+    return clip;
+}
+
+/* logshift OUT: WFSTLOG.DAT's shift section, LG_NSH rows (offset LG_OMIN first) of WF_SG_LG u16 (node units Q8) */
+static int logshift(const char *out)
+{
+    static uint16_t t[LG_NSH * WF_SG_LG];
+    for (int o = 0; o < LG_NSH; o++)
+        lg_shift_row(o + LG_OMIN, t + o * WF_SG_LG);
+    fprintf(stderr, "logshift: %d rows; node 16 at %+d thirds: %.3f, at %+d: %.3f\n", LG_NSH, LG_OMIN,
+            t[16] / 256.0, -LG_OMIN, t[(LG_NSH - 1) * WF_SG_LG + 16] / 256.0);
+    return wr(out, t, sizeof t);
+}
+
+/* logknob NEG PRN NEGFILE PRNFILE XNFILE DOMAIN L33 OUT.L33 FEXP PUSH COMP PRNR PRNG PRNB IIE [bw]: the knob table the
+ * module builds on RAW for these knobs (lg_module), as a .L33 (owner sheets: the darkroom develops it directly) */
+static int logknob(char **a, int bw)
+{
+    struct wf_sg_neg *N = rd(a[2], sizeof *N);
+    struct wf_sg_prn *P = rd(a[3], sizeof *P);
+    uint16_t *XN = rd(a[4], WF_SG_LNODES * 6), *S = rd(a[6], WF_SG_LNODES * 6);
+    static uint16_t O[WF_SG_LNODES * 3];
+    struct wf_sg_knobs k = { atoi(a[8]), atoi(a[9]), atoi(a[10]), { atoi(a[11]), atoi(a[12]), atoi(a[13]) }, atoi(a[14]) };
+    gl_film_params p0;
+    struct wf_sg_pair pr;
+    int32_t fit, bk, wt;
+    lg_params(&p0, atoi(a[0]), atoi(a[1]));
+    lg_place(p0, &fit, &bk, &wt);
+    pr.fit = fit; pr.bk = bk; pr.inv = (uint32_t)llround(4294967296.0 / (wt - bk));
+    int clip = lg_module(N, P, &pr, XN, S, &k, bw, O);
+    if (clip)
+        fprintf(stderr, "logknob: the residual clipped at %d values\n", clip);
+    return wr(a[7], O, sizeof O);
+}
 static int logcheck(int neg, int prn, const char *nf, const char *pf, const char *xf, const char *l33, int bw)
 {
     struct wf_sg_neg *N = rd(nf, sizeof *N);
     struct wf_sg_prn *P = rd(pf, sizeof *P);
     uint16_t *XN = rd(xf, WF_SG_LNODES * 6), *S = rd(l33, WF_SG_LNODES * 6);
     static uint16_t pd[WF_SG_LNODES * 3], O[WF_SG_LNODES * 3], O0[WF_SG_LNODES * 3], DL[WF_SG_LNODES * 3];
-    static uint16_t DS[WF_SG_LNODES * 3];
-    double ysh[WF_SG_LG];
+    static uint16_t DS[WF_SG_LNODES * 3], DM[WF_SG_LNODES * 3];
+    double ysh[WF_SG_LG], ymd[WF_SG_LG];
     gl_film_params p0, p;
     struct wf_sg_pair pr;
     int32_t fit, bk, wt;
@@ -643,7 +711,8 @@ static int logcheck(int neg, int prn, const char *nf, const char *pf, const char
            bk / 65536.0, wt / 65536.0, (int)fit, (int)bk, (int)wt, bw ? " (B&W)" : "");
     for (ki = 0; ki < (int)(sizeof ks / sizeof ks[0]); ki++) {
         const struct wf_sg_knobs *k = &ks[ki].k;
-        struct lg_stat sc = { { 0 } }, ss = { { 0 } }, sd = { { 0 } }, sh = { { 0 } };
+        struct lg_stat sc = { { 0 } }, ss = { { 0 } }, sd = { { 0 } }, sh = { { 0 } }, sm = { { 0 } };
+        int mclip = lg_module(N, P, &pr, XN, S, k, bw, DM);
         wf_sg_neg_pass_x(N, &pr, k, XN, WF_SG_LNODES, pd);
         wf_sg_prn_pass_rgb(P, &pr, pd, WF_SG_LNODES, bw, O);
         if (ki == 0) memcpy(O0, O, sizeof O);
@@ -695,8 +764,10 @@ static int logcheck(int neg, int prn, const char *nf, const char *pf, const char
             lg_acc(&sc, O + n * 3, ref);
             lg_acc(&sd, DL + n * 3, ref);
             lg_acc(&sh, DS + n * 3, ref);
+            lg_acc(&sm, DM + n * 3, ref);
             if (kk[0] == kk[1] && kk[1] == kk[2]) {
                 ysh[kk[0]] = lg_y(DS + n * 3);
+                ymd[kk[0]] = lg_y(DM + n * 3);
                 yc[kk[0]] = 0.2126 * ref[0] + 0.7152 * ref[1] + 0.0722 * ref[2];
                 yo[kk[0]] = lg_y(O + n * 3); yd[kk[0]] = lg_y(DL + n * 3); ys[kk[0]] = lg_y(S + n * 3);
             }
@@ -715,10 +786,12 @@ static int logcheck(int neg, int prn, const char *nf, const char *pf, const char
         }
         printf("  %-15s vs chain: R max %5.2f  G max %5.2f  B max %5.2f  mean %.3f  p99 < %d | + (.L33 - default): "
                "max %5.2f %5.2f %5.2f  mean %.3f  p99 < %d | moved: max %5.2f %5.2f %5.2f  mean %.3f  p99 < %d | "
-               "knee node chain %.2f composed %.2f delta %.2f moved %.2f\n",
+               "module: max %5.2f %5.2f %5.2f  mean %.3f  p99 < %d%s | "
+               "knee node chain %.2f composed %.2f delta %.2f moved %.2f module %.2f\n",
                ks[ki].name, sc.mx[0], sc.mx[1], sc.mx[2], sc.sum / sc.cnt, lg_p99(&sc), sd.mx[0], sd.mx[1], sd.mx[2],
-               sd.sum / sd.cnt, lg_p99(&sd), sh.mx[0], sh.mx[1], sh.mx[2], sh.sum / sh.cnt, lg_p99(&sh), lg_knee(yc),
-               lg_knee(yo), lg_knee(yd), lg_knee(ysh));
+               sd.sum / sd.cnt, lg_p99(&sd), sh.mx[0], sh.mx[1], sh.mx[2], sh.sum / sh.cnt, lg_p99(&sh), sm.mx[0],
+               sm.mx[1], sm.mx[2], sm.sum / sm.cnt, lg_p99(&sm), mclip ? " (residual clipped)" : "", lg_knee(yc),
+               lg_knee(yo), lg_knee(yd), lg_knee(ysh), lg_knee(ymd));
         if (ki == 0) printf("  %-15s knee node of the .L33 %.2f\n", "", lg_knee(ys));
         if (ki == 0) {
             int32_t in[3];
@@ -835,7 +908,8 @@ static int dat(const char *path, const char *list)
  * x checksums), each entry's halves found in WFSTAGE.DAT by id, variant and code and held against the checksums the entry
  * names, its log table found in WFLOG.DAT the same way (the Adler-32 the entry names, and the table's own); every entry
  * composed at default knobs against that table (8-bit codes, value / 257; the nodes around 18 % grey within 3), and Film
- * exp +1 must lift the neutral axis */
+ * exp +1 must lift the neutral axis, composed and as the module's knob table (the residual moved by the pack's own
+ * shift row: the section must equal lg_shift_row here); the residual must fit int8 quarter codes (no clip) */
 static uint8_t *slurp(const char *path, long *sz)
 {
     FILE *f = fopen(path, "rb");
@@ -861,13 +935,23 @@ static int logdat(const char *slp, const char *stp, const char *lgp)
     uint8_t *s = slurp(slp, &ssz), *t = slurp(stp, &tsz), *g = slurp(lgp, &gsz);
     const uint32_t TB = WF_SG_LNODES * 6;
     int n = s[6] | s[7] << 8, grid = s[8] | s[9] << 8, e, fail = 0, nbig = 0, wmax = 0;
-    uint32_t io = le32(s + 12), xo = le32(s + 16);
-    if (memcmp(s, "WFSL", 4) || (s[4] | s[5] << 8) != 1 || grid != WF_SG_LG || io != 32 || xo % 512 || xo < io + 36u * n
-        || le32(s + 20) != (uint32_t)ssz || (uint32_t)ssz != xo + TB || le32(s + 24) != dat_fnv(s + io, 36u * n)
-        || le32(s + 28) != dat_fnv(s + xo, TB)) {
+    uint32_t io = le32(s + 12), xo = le32(s + 16), so = le32(s + 32), nsh = s[36] | s[37] << 8;
+    int omin = (int16_t)(s[38] | s[39] << 8);
+    if (memcmp(s, "WFSL", 4) || (s[4] | s[5] << 8) != 2 || grid != WF_SG_LG || io != 48 || xo % 512 || so != io + 36u * n
+        || so + nsh * WF_SG_LG * 2 > xo || le32(s + 20) != (uint32_t)ssz || (uint32_t)ssz != xo + TB
+        || le32(s + 24) != dat_fnv(s + io, 36u * n) || le32(s + 28) != dat_fnv(s + xo, TB)
+        || le32(s + 40) != dat_fnv(s + so, nsh * WF_SG_LG * 2)) {
         printf("logdat: %s header / checksums bad\n", slp);
         return 1;
     }
+    uint16_t sh[LG_NSH * WF_SG_LG], up3[WF_SG_LG];
+    for (int o = 0; o < LG_NSH; o++)
+        lg_shift_row(o + LG_OMIN, sh + o * WF_SG_LG);
+    if ((int)nsh != LG_NSH || omin != LG_OMIN || memcmp(sh, s + so, sizeof sh)) {
+        printf("logdat: %s shift section (%d rows from %d) is not lg_shift_row's\n", slp, (int)nsh, omin);
+        return 1;
+    }
+    memcpy(up3, s + so + (3 - omin) * WF_SG_LG * 2, sizeof up3);   /* Film exp +1 */
     int tn = t[6] | t[7] << 8;
     uint32_t tio = le32(t + 28), tno = le32(t + 32), tpo = le32(t + 36), tdo = le32(t + 40), tpd = le32(t + 44);
     if (memcmp(t, "WFSG", 4) || (t[4] | t[5] << 8) != 1 || le32(t + 20) != sizeof(struct wf_sg_neg)
@@ -884,9 +968,10 @@ static int logdat(const char *slp, const char *stp, const char *lgp)
     }
     const uint16_t *XN = (const uint16_t *)(s + xo);
     static uint16_t pd[WF_SG_LNODES * 3], O[WF_SG_LNODES * 3], O1[WF_SG_LNODES * 3];
+    static int8_t rq[WF_SG_LNODES * 3];
     double smean = 0, wmean = 0;
     char wname[16] = "", xname[16] = "";
-    int nmx10 = 0;
+    int nmx10 = 0, nclip = 0, rmax = 0, mup_min = 17;
     for (e = 0; e < n; e++) {
         const uint8_t *x = s + io + 36 * e;
         int k, j, nb = -1, pb = -1, q, up = 0, gd = 0, bw = (x[2] & 2) != 0;
@@ -937,6 +1022,16 @@ static int logdat(const char *slp, const char *stp, const char *lgp)
             int nd = 3 * (q + WF_SG_LG * q + WF_SG_LG * WF_SG_LG * q) + 1;
             up += O[nd] >= 64250 || O1[nd] > O[nd];  /* a node already at white has nothing to lift */
         }
+        int ec = wf_sg_res_quant(tb, O, WF_SG_LNODES, rq), mup = 0;   /* the module's residual and Film exp +1 */
+        nclip += ec;
+        for (q = 0; q < WF_SG_LNODES * 3; q++)
+            if (abs(rq[q]) > rmax) rmax = abs(rq[q]);
+        wf_sg_res_add(rq, up3, 0, WF_SG_LNODES, O1);
+        for (q = 8; q <= 24; q++) {
+            int nd = 3 * (q + WF_SG_LG * q + WF_SG_LG * WF_SG_LG * q) + 1, sv = tb[2 * nd] | tb[2 * nd + 1] << 8;
+            mup += sv >= 64250 || O1[nd] > sv;
+        }
+        if (mup < mup_min) mup_min = mup;
         for (q = 13; q <= 14; q++) {                 /* the nodes around linear 0.18 (S-Log3 0.41): default = shipped */
             int nd = 3 * (q + WF_SG_LG * q + WF_SG_LG * WF_SG_LG * q) + 1;
             int d = abs((int)O[nd] - (int)(tb[2 * nd] | tb[2 * nd + 1] << 8));
@@ -948,15 +1043,18 @@ static int logdat(const char *slp, const char *stp, const char *lgp)
         if (mx > wmax) { wmax = mx; snprintf(xname, sizeof xname, "%s v%d", code, x[1]); }
         nmx10 += mx > 10 * 257;
         if (m > 0.25) nbig++;
-        if (m > 0.5 || mx > 32 * 257 || gd > 3 * 257 || up < 17) {
-            printf("logdat: %s v%d mean %.3f max %.1f, grey nodes off by %.1f, Film exp +1 lifts %d of 17 neutral nodes\n",
-                   code, x[1], m, mx / 257.0, gd / 257.0, up);
+        if (m > 0.5 || mx > 32 * 257 || gd > 3 * 257 || up < 17 || mup < 17 || ec) {
+            printf("logdat: %s v%d mean %.3f max %.1f, grey nodes off by %.1f, Film exp +1 lifts %d of 17 neutral nodes "
+                   "(module's table %d), residual clipped at %d\n", code, x[1], m, mx / 257.0, gd / 257.0, up, mup, ec);
             fail = 1;
         }
     }
     printf("logdat: %d entries: default vs WFLOG table mean of means %.3f, worst mean %.3f (%s), worst max %.1f (%s), "
            "%d means over 0.25, %d maxima over 10 (8-bit codes)\n", n, smean / n, wmean, wname, wmax / 257.0, xname, nbig,
            nmx10);
+    printf("logdat: residual |max| %d quarter codes (int8 +-127), %d clipped; shift section = lg_shift_row (%d rows); "
+           "Film exp +1 through the module's table lifts at least %d of 17 neutral nodes in every entry\n", rmax, nclip,
+           LG_NSH, mup_min);
     return fail;
 }
 
@@ -1026,6 +1124,10 @@ int main(int argc, char **argv)
         return logdat(argv[2], argv[3], argv[4]);
     if (!strcmp(argv[1], "logcompose") && (argc == 16 || argc == 17))
         return lg_dom(argv[7]) || logcompose(argv + 2, argc == 17 && !strcmp(argv[16], "bw"));
+    if (!strcmp(argv[1], "logshift") && argc == 3)
+        return logshift(argv[2]);
+    if (!strcmp(argv[1], "logknob") && (argc == 17 || argc == 18))
+        return lg_dom(argv[7]) || logknob(argv + 2, argc == 18 && !strcmp(argv[17], "bw"));
     if (!strcmp(argv[1], "logcheck") && (argc == 9 || argc == 10))
         return lg_dom(argv[7]) || logcheck(atoi(argv[2]), atoi(argv[3]), argv[4], argv[5], argv[6], argv[8],
                                            argc == 10 && !strcmp(argv[9], "bw"));

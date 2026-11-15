@@ -91,4 +91,16 @@ void wf_sg_neg_pass_x(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, co
                       const uint16_t *xn, int nodes, uint16_t *pd);
 void wf_sg_prn_pass_rgb(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int nodes, int bw,
                         uint16_t *rgb);
+
+/* The RAW knob table's residual (wf_rawb.c rb_sl_build; tools/mk_wfstage.c logcheck / logdat run the same code):
+ * wf_sg_res_quant: r = the shipped log table's samples (le: u16 little-endian) less the default composition's (rgb),
+ * n nodes x 3, in quarter 8-bit codes (64 Q16 units, half away from 0), clipped at +-127; returns the clipped count.
+ * wf_sg_res_add: rgb (the knobs' samples of nodes node0 .. node0 + n - 1) += r x 64 read at the node the knobs' exposure
+ * offset moves it to. pos: WFSTLOG.DAT's shift row for the offset (WF_SG_LG axis positions, node units Q8: where the
+ * S-Log3 linear is 2^(offset / 3) times the node's), or 0 for none (r at the node itself, Interlayer / printer).
+ * Per axis i0 = min(p >> 8, WF_SG_LG - 2), f = p - 256 i0; lerp(a, b) = a + (((b - a) f + 128) >> 8) on r x 64, over R,
+ * then G, then B; the sum clamped to 0 .. 65535. r holds all WF_SG_LNODES nodes (the moved read reaches any of them). */
+#define WF_SG_SHIFT_Q 8
+int  wf_sg_res_quant(const uint8_t *le, const uint16_t *rgb, int n, int8_t *r);
+void wf_sg_res_add(const int8_t *r, const uint16_t *pos, int node0, int n, uint16_t *rgb);
 #endif

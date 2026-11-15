@@ -760,7 +760,8 @@ the darkroom devset, i0 and i differ in no Y byte (cmp).
 
 A chain film on the log pack with a film-stage knob row moved used to keep the 8-bit chain (`WF_RLG_KNOBS`). Interlayer
 (0..200 %) now stays on RAW: B (`wf_rawb_logpk_build`) and the Darkroom (`dk_logpk`) build the pair's log table on the
-camera. Film exp, Push, Exp comp and the printer points still keep the 8-bit chain (milestone 3).
+camera. Film exp, Push, Exp comp and the printer points followed in milestone 3 (10.11, which changes the WFSTLOG.DAT
+format, the log lines and `wf_rawb_logpk` described here).
 
 **The table** (`rb_sl_build`, wf_rawb.c): T(k) = composed(k) + r, with r = shipped .L33 - composed(default). Both
 compositions are the log grid's two passes (wf_stagek.h `wf_sg_neg_pass_x` / `wf_sg_prn_pass_rgb`) on the pair's halves
@@ -812,3 +813,77 @@ config lines, e.g. `stage=0,0,0,0,0,0,2`) for sheets with the 8-bit chain at kno
 **Owner sheet** (main's notes `gallery-log/interlayer-m2/`, the 16 raws, real kernels, shoulder i): bright-half C*, mean
 of 16, at Interlayer 100 / 50 / 0 %: G03P01 8-bit 28.5 / 26.1 / 23.8, RAW 24.9 / 23.0 / 21.2; G38P15 8-bit 35.0 / 34.3
 / 33.1, RAW 29.1 / 28.6 / 27.8. Both paths move together; RAW stays paler by i's trim, the detail as before.
+
+### 10.11 Knob rows on RAW, milestone 3: Film exp, Push, Exp comp, Printer R / G / B (chain-log, 2026-11-16)
+
+Every film-stage knob row now composes on RAW. A chain film on the log pack keeps the 8-bit chain only for strength 30 /
+125 %, Highlights / Shadows, a pair whose WFSTLOG.DAT entry fails, or no WFSTLOG.DAT on the card. `rb_sl_knobs` is gone:
+`rb_sl_ok` = a WFSTLOG.DAT was read, the pair has not failed and WFSTAGE.DAT has its halves. Default knobs (key 0: no
+offset left after Exp comp, printer 0, Interlayer 100 %) still take the shipped table through the pack path, so
+shoulder=a stays RAWB15 bit for bit.
+
+**Printer points** move no exposure: T(k) = composed(k) + r at the node itself, as Interlayer.
+
+**Film exp / Push / Exp comp** reach the negative pass as one exposure offset in thirds of a stop (`wf_sg_off`: Exp
+comp on = 0, else Film exp + Push, -9..+9; `wf_sg_unkey` gives it whole as fexp). The offset moves the knee, so the
+residual must move with it: r is read where the node's S-Log3 linear is 2^(offset / 3) times its own, per axis (a
+brighter offset reads a higher node). Milestone 1's `logcheck` "moved" column is that read in doubles; the module's is
+integer:
+- `wf_sg_res_quant(le, rgb, n, r)`: r = shipped - composed(default) in quarter 8-bit codes (64 Q16 units, half away
+  from 0, clipped at +-127, the clips counted). This was inline in rb_sl_res; now one function for the camera and the
+  generator.
+- `wf_sg_res_add(r, pos, node0, n, rgb)`: rgb += r x 64 read at the moved node. pos = the offset's shift row (33 axis
+  positions, node units Q8), or 0 for none. Per axis i0 = min(p >> 8, 31), f = p - 256 i0; lerp(a, b) = a + (((b - a)
+  f + 128) >> 8) over R, then G, then B; the sum clamped to 0..65535. r holds all 35,937 nodes (a moved read can reach
+  any of them), which it already did for the fill.
+
+**WFSTLOG.DAT v2** (tools/mk_wfstlog.py, 240,198 B for 643 entries): header 48 B (`WFSL`, u16 version 2, u16 n, u16
+grid 33, u8 curve, u8 feed, u32 index offset 48, u32 x offset, u32 size, u32 FNV-1a index, u32 FNV-1a x, u32 shift
+offset = 48 + 36 n, u16 rows 19, s16 first offset -9, u32 FNV-1a shift, u32 0), the index (36 B entries, as v1), the
+shift section (19 rows x 33 u16, offset -9 first: `mk_wfstage logshift`, from the same `lg_shift` as logcheck's moved
+column, lrint x 256), the x section at the next 512-byte boundary. A v1 file (milestone 2's card) gives "WFSTLOG.DAT not a
+pack": every knob table falls back to the 8-bit chain, nothing else changes. An offset outside the rows gives
+`RB_SL_E_SHIFT` ("exposure offset not in WFSTLOG.DAT") and the 8-bit chain for that pair.
+
+**On the camera** (B and the Darkroom, the 10.10 order): step 1 reads the shift section after the index (1,254 B,
+FNV-1a) and copies the offset's row into `rb_sl.pos` (66 B in rb_sl_build's frame); step 4's fill calls `wf_sg_res_add`
+with that row when fexp != 0. No new reads beyond those 1,254 B; shoot memory unchanged (790 KB).
+
+**What it fixes** (`mk_wfstage logcheck`, the 5 pairs x 14 knob sets of milestone 1, now with a "module" column = this
+code; module = moved to 0.01 node in every knee): the knee node (`lg_knee`: the neutral axis' fractional node index
+where its luma first reaches its monotone top - 256, where the develop's shoulder finds white) for chain / composed +
+residual at its node / module:
+- G15P10 exp +1: 13.94 / 14.75 / 13.95; exp -2: 20.96 / 21.85 / 20.97; exp +2: 11.77 / 11.94 / 11.88.
+- G03P01 exp -2: 21.59 / 21.88 / 21.75. G09P14 (B&W) exp -2: 20.98 / 21.53 / 20.98.
+- Mean error against the chain, all sets: module <= 0.267 8-bit codes (G15P10 mixed); exp -2 on G15P10 0.283 -> 0.143.
+- **The one knee miss: G38P15 (Eterna 8553 / 3523XD), Film exp +2 (offset +6, printer 0, Interlayer 100 %): chain
+  12.44, composed 12.87, module 12.85.** The composition puts that knee 0.43 node late and the residual read at the
+  moved node takes back 0.02 of it. Mean error 0.099 codes, max 9.0.
+- Two smaller ones, G21P05 (offset +3: Film exp +1 or Push +1): chain 14.02, composed 14.84, module 14.81; G21P05 mixed
+  (Film exp +2/3, Push -1/3 = offset +1, printer +3 / -2 / +4, Interlayer 150 %): chain 15.94, composed 15.99, module 16.16 (the moved residual
+  overshoots by 0.2 node; mean 0.126).
+- Printer R +12 on G21P05: one node 26.8 codes off the chain in R, the same with or without the residual (the
+  composition's own miss at the printer's end; mean 0.148).
+- `logdat` over the 643 entries: residual |max| 79 quarter codes, 0 clipped; the shift section equals `lg_shift_row`;
+  Film exp +1 through the module's table lifts 17 of 17 neutral nodes in every entry.
+
+**Cost** (memsim ARM946E-S, G03 v4 and G38 v18, the module's wf_stagek.o): negative passes 219-220 ms, the residual
+123.6 ms (wf_sg_res_quant, a call per slab: +5.5 ms against the inline loop), the fill 117.8 ms at the node itself
+(Interlayer / printer; +4.7 ms) or 160-163 ms read at the moved node (offset +3, -9 with Printer R +12, +7 mixed): 461
+ms per knob table without an offset, 504 ms with one, plus the build from samples (the pack path's). SD reads about 1.1
+MB as 10.10 + 1,254 B. Host and ARM give the same samples. Code (text + data, against milestone 2): EOS M +1,183 B
+(wf_stagek +832, wf_rawb +235, wf_dark +116), 5D2 +1,067 B; the 5D2 has no WFLOG.DAT / WFSTLOG.DAT, so it never runs.
+
+**Logs:** `rawb: tables knobs <code> v<n> k<key> exp <offset> prn <r> <g> <b> interlayer <%> c<curve> <ms> (sum <x>,
+<n> KB shoot memory)`, the Darkroom's `dark: tables knobs ...` the same; exp is the offset left after Exp comp.
+
+**Tests:** wf_test RAWB:knobs (EOS M, WFSTLOG.DAT v2 written by the test with synthetic shift rows k x 256 + 8 o k, so
+the fractions vary and the top nodes clamp): Interlayer 0 / 50 / 200 %, Film exp +1, Film exp -2 + Push -1 (offset -9,
+the bottom row) with Printer R +12, Exp comp on (offset 0, Printer R +12 at the node), a mixed set (offset +7, printer
++3 / -2 / +4, Interlayer 150 %) and the same again after strength 30 % -> 100 %: each bit-exact against the direct
+develop of the test's own reference (the composer at the knobs + the residual read with the test's integer trilinear),
+the moved read changing 105,000-107,000 of 107,811 residual values; Film exp +1 + Push -1 (offset 0) and every row back
+give the default key and the shipped table's frame bit for bit; strength 30 % with knobs -> the 8-bit chain; other
+halves -> "packs of another build". `mk_wfstlog.py` self-test: v2 header, monotone rows, offset 0 = identity, brighter
+offsets read higher nodes. `mk_wfstage logknob ... FEXP PUSH COMP PRNR PRNG PRNB IIE` writes the module's knob table as
+a .L33 (sheets).

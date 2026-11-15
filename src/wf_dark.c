@@ -627,10 +627,13 @@ static int dk_logpk(const struct wf_look *lk, struct wf_dev_tabs *t, void *scr)
     struct wf_dev_pkinfo pi;
     int ms;
     dk_lgk = wf_rawb_logpk_build(t, scr, wf_dev_scratch_bytes(DK_W, DK_H), lk, &ms, &pi) == WF_LL_OK;
-    if (dk_lgk && lk->stk)
-        wf_log("dark: tables knobs %s v%d k%x interlayer %d c%d %dms (sum %x)", wf_films[lk->row].code, lk->variant,
-               (unsigned)lk->stk, lk->siie * 25, pi.curve, ms, (unsigned)pi.sum);
-    else if (dk_lgk)
+    if (dk_lgk && lk->stk) {
+        struct wf_sg_knobs kk;
+        wf_sg_unkey(lk->stk, &kk);
+        wf_log("dark: tables knobs %s v%d k%x exp %d prn %d %d %d interlayer %d c%d %dms (sum %x)",
+               wf_films[lk->row].code, lk->variant, (unsigned)lk->stk, kk.fexp, kk.prn[0], kk.prn[1], kk.prn[2],
+               kk.iie * 25, pi.curve, ms, (unsigned)pi.sum);
+    } else if (dk_lgk)
         wf_log("dark: tables log pack %s v%d c%d %dms (offset %d, %d entries, sum %x)", wf_films[lk->row].code,
                lk->variant, pi.curve, ms, (int)pi.off, pi.count, (unsigned)pi.sum);
     return dk_lgk;

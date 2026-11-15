@@ -109,40 +109,40 @@ static int rb_lg_none;                           /* the pack is missing or not a
 static const char *const rb_lgname[WF_RLG_N] = { "log pack", "not a chain print", "knob rows", "strength",
                                                   "highlights / shadows", "no log pack", "not in the log pack" };
 
-/* ------------------------------------------------------------------ the knob rows on RAW (option (c), milestone 2)
+/* ------------------------------------------------------------------ the knob rows on RAW (option (c), milestones 2-3)
  * A chain film with film-stage knob rows away from neutral: the develop's log table composed on the camera from the
  * pair's two halves in WFSTAGE.DAT on the 33^3 log grid (wf_stagek.h), with ML/DATA/WFSTLOG.DAT's x section and log
- * placement (tools/mk_wfstlog.py), plus the shipped table's residual: T(k) = composed(k) + (.L33 - composed(default)),
- * node by node (no exposure offset among the knobs B composes so far). At default knobs B keeps the shipped table (the
- * pack path), and the residual makes the first knob step continue it: the composition's own error at default (mean
- * 0.15 codes, but a lag at the white that moved the shoulder's knee by up to 0.9 node) is taken out where the knobs
- * leave it in place (tools/mk_wfstage.c logcheck: the knee then follows the chain at every Interlayer and Printer set).
+ * placement (tools/mk_wfstlog.py), plus the shipped table's residual: T(k) = composed(k) + r, r = .L33 -
+ * composed(default), read at the node the knobs' exposure offset (Film exp + Push / pull, none with Exp comp) moves it
+ * to (WFSTLOG.DAT's shift row: where the S-Log3 linear is 2^(offset / 3) times the node's), at the node itself for
+ * Interlayer and the printer points. At default knobs B keeps the shipped table (the pack path), and the residual makes
+ * a knob step continue it: the composition's own error at default (mean 0.15 codes, but a lag at the white that moved
+ * the shoulder's knee by up to 0.9 node) is taken out where the knobs move it (tools/mk_wfstage.c logcheck: the knee
+ * then follows the chain at every Interlayer, Printer and exposure set but one, G38P15 Film exp +2, no worse there).
  * Memory: the knobs' printing densities (215 622 B) and the residual (int8 quarter codes, 107 811 B) in the develop
  * scratch, the default knobs' densities in the tables' block (dead before the build writes there), the halves from
  * the TMP heap one at a time. Generic interpolation and data only, as wf_stagek.c. */
 #define RB_SL_PACK  "ML/DATA/WFSTLOG.DAT"
+#define RB_SL_HDR   48                           /* WFSTLOG.DAT version 2 */
+#define RB_SL_SROW  (WF_SG_LG * 2)               /* a shift row: 33 u16 axis positions, node units Q8 */
+#define RB_SL_NSH   32                           /* rows at most (the offsets -9..+9 take 19) */
 #define RB_SL_IENT  36
 #define RB_SL_CH    (RB_SL_IENT * 227)           /* read size 8172: whole entries, whole nodes (6 bytes) */
 #define RB_SL_SLAB  1364                         /* nodes per wf_dev_pack_samples call (WF_DV_PKCH / 6) */
 #define RB_SL_PD    (WF_SG_LNODES * 3 * 2)       /* printing densities, u16 */
 #define RB_SL_R     ((WF_SG_LNODES * 3 + 31) & ~31)   /* the residual, int8 */
 _Static_assert(sizeof(struct wf_dev_tabs) >= RB_SL_PD, "the default knobs' densities live in the tables' block");
+_Static_assert(RB_SL_NSH * RB_SL_SROW <= RB_SL_CH, "the shift section is one read");
 enum { RB_SL_E_OPEN = 60, RB_SL_E_FORMAT, RB_SL_E_NOENT, RB_SL_E_MATCH, RB_SL_E_XSUM, RB_SL_E_HALF, RB_SL_E_STAGE,
-       RB_SL_E_SCR };
+       RB_SL_E_SCR, RB_SL_E_SHIFT };
 static int rb_sl_none;                           /* WFSTLOG.DAT missing / not ours: the knob rows keep the 8-bit chain */
 static uint16_t rb_sl_no[RB_LG_NNEG];            /* bit (variant - WF_PRINT_STOCK0): this pair's knob table failed */
 
-/* the knob sets B composes: Interlayer alone so far (milestone 2: no exposure offset, no printer points) */
-static int rb_sl_knobs(uint32_t stk)
-{
-    struct wf_sg_knobs k;
-    wf_sg_unkey(stk, &k);
-    return !k.fexp && !k.prn[0] && !k.prn[1] && !k.prn[2];
-}
+/* every knob set composes (Film exp, Push / pull, Exp comp, Printer R / G / B, Interlayer): the pair needs its stage
+   entry, a WFSTLOG.DAT of this build and no failed knob table since boot */
 static int rb_sl_ok(const struct wf_look *lk, int n)
 {
-    return rb_sl_knobs(lk->stk) && !rb_sl_none && !(rb_sl_no[n] >> (lk->variant - WF_PRINT_STOCK0) & 1)
-        && wf_sg_has(lk->row, lk->variant);
+    return !rb_sl_none && !(rb_sl_no[n] >> (lk->variant - WF_PRINT_STOCK0) & 1) && wf_sg_has(lk->row, lk->variant);
 }
 
 static const char *rb_sl_errstr(int rc)
@@ -154,6 +154,7 @@ static const char *rb_sl_errstr(int rc)
     case RB_SL_E_MATCH:  return "packs of another build";
     case RB_SL_E_XSUM:   return "x section checksum";
     case RB_SL_E_HALF:   return "stage half unreadable";
+    case RB_SL_E_SHIFT:  return "exposure offset not in WFSTLOG.DAT";
     case RB_SL_E_STAGE:  return "no stage pair";
     case RB_SL_E_SCR:    return "scratch too small";
     }
@@ -167,7 +168,8 @@ struct rb_sl {
     struct wf_sg_pair pr;                        /* the log placement */
     uint32_t xoff, xfnv, lgsum, nfnv, pfnv;
     int curve, bw, node, clip;
-    struct wf_sg_knobs k0, k;
+    struct wf_sg_knobs k0, k;                    /* k.fexp: the knobs' exposure offset in thirds (wf_sg_unkey) */
+    uint16_t pos[WF_SG_LG];                      /* its shift row (k.fexp != 0) */
     uint16_t *pd0, *pd, *rgb;                    /* rgb: the residual pass's slab (RB_SL_SLAB nodes) */
     int8_t *r;
     struct wf_sg_prn *P;
@@ -188,19 +190,21 @@ static int rb_sl_read(struct rb_sl *s, uint32_t n)
     return WF_LL_OK;
 }
 
-/* WFSTLOG.DAT's header and the entry (id, variant, code) into s */
+/* WFSTLOG.DAT's header, the entry (id, variant, code) and the shift row of s->k.fexp into s */
 static int rb_sl_find(struct rb_sl *s, int id, int variant, const char *code)
 {
     uint32_t fsz = 0;
     if (FIO_GetFileSize(RB_SL_PACK, &fsz) != 0 || !(s->f = FIO_OpenFile(RB_SL_PACK, 0)))
         return RB_SL_E_OPEN;
-    if (fsz < 32 || rb_sl_read(s, 32))
+    if (fsz < RB_SL_HDR || rb_sl_read(s, RB_SL_HDR))
         return RB_SL_E_FORMAT;
     const uint8_t *h = s->buf;
     uint32_t n = h[6] | h[7] << 8, io = rb_le32(h + 12), xo = rb_le32(h + 16), ixsum = rb_le32(h + 24);
-    if (h[0] != 'W' || h[1] != 'F' || h[2] != 'S' || h[3] != 'L' || (h[4] | h[5] << 8) != 1 || !n
-        || (h[8] | h[9] << 8) != WF_SG_LG || io != 32 || xo < io + n * RB_SL_IENT || (xo & 511)
-        || rb_le32(h + 20) != fsz || fsz != xo + RB_SL_PD)
+    uint32_t so = rb_le32(h + 32), nsh = h[36] | h[37] << 8, shsum = rb_le32(h + 40);
+    int omin = (int16_t)(h[38] | h[39] << 8);
+    if (h[0] != 'W' || h[1] != 'F' || h[2] != 'S' || h[3] != 'L' || (h[4] | h[5] << 8) != 2 || !n
+        || (h[8] | h[9] << 8) != WF_SG_LG || io != RB_SL_HDR || so != io + n * RB_SL_IENT || !nsh || nsh > RB_SL_NSH
+        || so + nsh * RB_SL_SROW > xo || (xo & 511) || rb_le32(h + 20) != fsz || fsz != xo + RB_SL_PD)
         return RB_SL_E_FORMAT;
     s->curve = h[10];
     s->xoff = xo;
@@ -237,7 +241,19 @@ static int rb_sl_find(struct rb_sl *s, int id, int variant, const char *code)
     }
     if (x != ixsum)
         return RB_SL_E_FORMAT;
-    return found ? WF_LL_OK : RB_SL_E_NOENT;
+    if (!found)
+        return RB_SL_E_NOENT;
+    if (rb_sl_read(s, nsh * RB_SL_SROW) || rb_fnv(2166136261u, s->buf, nsh * RB_SL_SROW) != shsum)
+        return RB_SL_E_FORMAT;                   /* the shift section follows the index */
+    if (s->k.fexp) {
+        int o = s->k.fexp - omin;
+        if (o < 0 || o >= (int)nsh)
+            return RB_SL_E_SHIFT;
+        const uint8_t *p = s->buf + o * RB_SL_SROW;
+        for (int k = 0; k < WF_SG_LG; k++)
+            s->pos[k] = (uint16_t)(p[2 * k] | p[2 * k + 1] << 8);
+    }
+    return WF_LL_OK;
 }
 
 /* the negative pass for both knob sets, the x section streamed (its checksum at the end) */
@@ -268,16 +284,7 @@ static int rb_sl_res(void *ctx, const uint8_t *le, int n)
     if (n > RB_SL_SLAB || s->node + n > WF_SG_LNODES)
         return WF_LL_E_EXTRA;
     wf_sg_prn_pass_rgb(s->P, &s->pr, s->pd0 + s->node * 3, n, s->bw, s->rgb);
-    int8_t *r = s->r + s->node * 3;
-    for (int i = 0; i < 3 * n; i++) {
-        int d = (int)(le[2 * i] | le[2 * i + 1] << 8) - s->rgb[i];
-        d = d >= 0 ? (d + 32) >> 6 : -((32 - d) >> 6);   /* quarter 8-bit codes (64 sum units), half away from 0 */
-        if (d > 127 || d < -127) {
-            d = d > 0 ? 127 : -127;
-            s->clip++;
-        }
-        r[i] = (int8_t)d;
-    }
+    s->clip += wf_sg_res_quant(le, s->rgb, n, s->r + s->node * 3);
     s->node += n;
     return WF_LL_OK;
 }
@@ -289,11 +296,7 @@ static int rb_sl_fill(void *ctx, uint16_t *rgb, int n)
     if (s->node + n > WF_SG_LNODES)
         return WF_LL_E_EXTRA;
     wf_sg_prn_pass_rgb(s->P, &s->pr, s->pd + s->node * 3, n, s->bw, rgb);
-    const int8_t *r = s->r + s->node * 3;
-    for (int i = 0; i < 3 * n; i++) {
-        int v = rgb[i] + r[i] * 64;
-        rgb[i] = (uint16_t)(v < 0 ? 0 : v > 65535 ? 65535 : v);
-    }
+    wf_sg_res_add(s->r, s->k.fexp ? s->pos : 0, s->node, n, rgb);   /* r moved by the exposure offset */
     s->node += n;
     return WF_LL_OK;
 }
@@ -364,7 +367,7 @@ int wf_rawb_logpk(const struct wf_look *lk)
     int n = f->id - RB_LG_ID0;
     if (f->group != WF_GRP_STAGE || n < 0 || n >= RB_LG_NNEG)
         return WF_RLG_NOTCHAIN;
-    if (lk->stk && !rb_sl_ok(lk, n))             /* knob rows B does not compose yet (or cannot): the 8-bit chain */
+    if (lk->stk && !rb_sl_ok(lk, n))             /* knob rows B cannot compose (no WFSTLOG.DAT, a failed pair) */
         return WF_RLG_KNOBS;
     if (lk->strength != 1)                       /* 30 / 125 %: wf_film_words' mix, 8-bit only */
         return WF_RLG_STRENGTH;
@@ -850,11 +853,14 @@ void wf_rawb_poll(void)
         if (rb_rc == WF_LL_OK) {
             /* the SD load time: open + header + index + the 215 KB table streamed through the node sampler (a knob
                table: the two halves, the x section and the shipped table read, two compositions, the build) */
-            if (wstk)
-                wf_log("rawb: tables knobs %s v%d k%x interlayer %d c%d %dms (sum %x, %d KB shoot memory)",
-                       wf_films[lk.row].code, lk.variant, (unsigned)wstk, lk.siie * 25, pi.curve, rb_build_ms,
-                       (unsigned)pi.sum, (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10));
-            else
+            if (wstk) {
+                struct wf_sg_knobs kk;
+                wf_sg_unkey(wstk, &kk);
+                wf_log("rawb: tables knobs %s v%d k%x exp %d prn %d %d %d interlayer %d c%d %dms (sum %x, %d KB shoot "
+                       "memory)", wf_films[lk.row].code, lk.variant, (unsigned)wstk, kk.fexp, kk.prn[0], kk.prn[1],
+                       kk.prn[2], kk.iie * 25, pi.curve, rb_build_ms, (unsigned)pi.sum,
+                       (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10));
+            } else
                 wf_log("rawb: tables log pack %s v%d c%d %dms (offset %d, %d entries, sum %x, %d KB shoot memory)",
                        wf_films[lk.row].code, lk.variant, pi.curve, rb_build_ms, (int)pi.off, pi.count, (unsigned)pi.sum,
                        (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10));

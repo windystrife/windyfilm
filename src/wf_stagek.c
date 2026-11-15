@@ -211,3 +211,59 @@ void wf_sg_compose(const struct wf_sg_neg *n, const struct wf_sg_prn *p, const s
     wf_sg_neg_pass(n, pr, k, pd);
     wf_sg_prn_pass(p, pr, pd, bw, T);
 }
+
+int wf_sg_res_quant(const uint8_t *le, const uint16_t *rgb, int n, int8_t *r)
+{
+    int clip = 0;
+    for (int i = 0; i < 3 * n; i++) {
+        int d = (int)(le[2 * i] | le[2 * i + 1] << 8) - rgb[i];
+        d = d >= 0 ? (d + 32) >> 6 : -((32 - d) >> 6);   /* quarter 8-bit codes, half away from 0 */
+        if (d > 127 || d < -127) {
+            d = d > 0 ? 127 : -127;
+            clip++;
+        }
+        r[i] = (int8_t)d;
+    }
+    return clip;
+}
+
+static inline int wf_sg_lerp(int a, int b, int f) { return a + (((b - a) * f + 128) >> WF_SG_SHIFT_Q); }
+
+void wf_sg_res_add(const int8_t *r, const uint16_t *pos, int node0, int n, uint16_t *rgb)
+{
+    const int G = WF_SG_LG, dr = 3, dg = 3 * WF_SG_LG, db = 3 * WF_SG_LG * WF_SG_LG;
+    unsigned u = (unsigned)node0;
+    int kr = (int)(u % WF_SG_LG), kg = (int)(u / WF_SG_LG % WF_SG_LG), kb = (int)(u / (WF_SG_LG * WF_SG_LG));
+    for (int i = 0; i < n; i++, rgb += 3) {
+        int v[3];
+        if (!pos) {
+            const int8_t *q = r + 3 * (node0 + i);
+            for (int c = 0; c < 3; c++)
+                v[c] = q[c] * 64;
+        } else {
+            int k[3] = { kr, kg, kb }, i0[3], f[3];
+            for (int a = 0; a < 3; a++) {
+                int p = pos[k[a]];
+                i0[a] = p >> WF_SG_SHIFT_Q > G - 2 ? G - 2 : p >> WF_SG_SHIFT_Q;
+                f[a] = p - (i0[a] << WF_SG_SHIFT_Q);
+            }
+            const int8_t *q = r + 3 * (i0[0] + G * (i0[1] + G * i0[2]));
+            for (int c = 0; c < 3; c++, q++) {
+                int x00 = wf_sg_lerp(q[0] * 64, q[dr] * 64, f[0]);
+                int x10 = wf_sg_lerp(q[dg] * 64, q[dg + dr] * 64, f[0]);
+                int x01 = wf_sg_lerp(q[db] * 64, q[db + dr] * 64, f[0]);
+                int x11 = wf_sg_lerp(q[db + dg] * 64, q[db + dg + dr] * 64, f[0]);
+                v[c] = wf_sg_lerp(wf_sg_lerp(x00, x10, f[1]), wf_sg_lerp(x01, x11, f[1]), f[2]);
+            }
+        }
+        for (int c = 0; c < 3; c++)
+            rgb[c] = (uint16_t)wf_sg_clamp(rgb[c] + v[c], 0, 65535);
+        if (++kr == G) {
+            kr = 0;
+            if (++kg == G) {
+                kg = 0;
+                kb++;
+            }
+        }
+    }
+}
