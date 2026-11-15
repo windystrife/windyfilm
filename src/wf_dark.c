@@ -24,6 +24,9 @@
 #include "wf_cr2.h"
 #include "wf_dev.h"
 #include "wf_jpe.h"
+#if WF_DK_EV_BAD != WF_EV_BAD
+#error "wf_darkp.h WF_DK_EV_BAD must equal wf_fx.h WF_EV_BAD"
+#endif
 #endif
 
 /* ML core (EOSM_202.sym / 5D2_212.sym both export these) */
@@ -875,6 +878,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     fr.h = fr.fh = DK_H;
     fr.pitch = DK_W * 2;
     fr.data = fr.dst = frm;
+    fr.dev_ev8 = wf_dk_ev8(dk_inf.iso, dk_inf.et_n, dk_inf.et_d, dk_inf.fn_n, dk_inf.fn_d);   /* the shot's EV, not the dials' now */
     int status = -1, tries = 0;
     for (;;) {
         fr.t_post = get_ms_clock();

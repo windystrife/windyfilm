@@ -36,6 +36,27 @@ int wf_dk_trim10(int cam, int iso)
     return best;
 }
 
+/* 256 x log2(v), v >= 1: the top bit's place, then 256 x log2(1 + i / 32) of the next five bits, linear between */
+static int dk_log2q8(uint32_t v)
+{
+    static const uint16_t t[33] = { 0, 11, 22, 33, 44, 54, 63, 73, 82, 92, 100, 109, 118, 126, 134, 142, 150, 157, 165, 172,
+                                    179, 186, 193, 200, 207, 213, 220, 226, 232, 238, 244, 250, 256 };
+    int e = 31 - __builtin_clz(v);
+    uint32_t m = e >= 13 ? v >> (e - 13) : v << (13 - e);   /* 1.13: 8192 .. 16383 */
+    uint32_t i = (m >> 8) & 31, f = m & 255;
+    return 256 * e + t[i] + (int)(((t[i + 1] - t[i]) * f + 128) >> 8);
+}
+
+/* EV100 = log2(N^2 / t) - log2(ISO / 100), N = fn_n / fn_d, t = et_n / et_d: sums of log2 of 32-bit values only */
+int wf_dk_ev8(int iso, uint32_t et_n, uint32_t et_d, uint32_t fn_n, uint32_t fn_d)
+{
+    if (iso <= 0 || !et_n || !et_d || !fn_n || !fn_d)
+        return WF_DK_EV_BAD;
+    int q = 2 * dk_log2q8(fn_n) - 2 * dk_log2q8(fn_d) + dk_log2q8(et_d) - dk_log2q8(et_n) + dk_log2q8(100)
+          - dk_log2q8((uint32_t)iso);
+    return (q + 16) >> 5;                        /* Q8 -> x 8, rounded (an arithmetic shift for EV < 0) */
+}
+
 int wf_dk_scales(int cam, const int wb[4], int black, int white, int iso, int32_t m[3])
 {
     static const int32_t day[2][3] = { { 9892, 4096, 5590 }, { 10542, 4096, 5683 } };   /* = wf_dev.c wf_dev_day */

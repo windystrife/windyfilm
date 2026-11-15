@@ -574,6 +574,11 @@ Stocks keep their Windy names, and there are no brand logos.
      - Log + LUT: effects only (the cube is in the develop tables);
      - plain log: nothing.
 
+     The effects' exposure gain (the halation and mist hot ramps, `fx_hot`) takes the CR2's own EV100: ISO,
+     ExposureTime 0x829A and FNumber 0x829D from the Exif IFD (`wf_dk_ev8`, to 1/8 EV), logged " ev<EV>R". Until
+     11-15 it read the camera's dials at develop time ('M' / 'F' / 'L'), so a daylight frame developed indoors got the
+     night glows. A CR2 without those tags logs " ev?" (the middle gain, no point boost).
+
      Darkroom frames never touch the EXIF ring of the shot path: they are logged as "dark" lines.
   4. **Dry** ("Washing and drying"):
      - encode at q95, 4:2:2, in 16-row bands (`wf_jpe`), with Canon's APP1 copied in and our UserComment ("WindyFilm

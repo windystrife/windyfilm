@@ -563,9 +563,13 @@ int wf_fx_state(int which)
 volatile int wf_fx_ev8 = WF_EV_BAD, wf_fx_evsrc;
 static int fx_hb_q8 = 256, fx_hp_q8 = 256;
 
-static void fx_hot(void)
+static void fx_hot(int ev8)
 {
-    int src = 0, e = wf_shot_ev8(&src);
+    int src = 'R', e = ev8;                      /* a Darkroom frame: the CR2's exposure, not the camera's settings now */
+    if (ev8 == WF_EV_LIVE)
+        e = wf_shot_ev8(&src);
+    else if (ev8 == WF_EV_BAD)
+        src = '?';
     wf_fx_ev8 = e;
     wf_fx_evsrc = src;
     if (e == WF_EV_BAD) {
@@ -577,10 +581,10 @@ static void fx_hot(void)
     }
 }
 
-void wf_fx_begin(int kind, int fx, uint32_t seed)
+void wf_fx_begin(int kind, int fx, uint32_t seed, int ev8)
 {
     if (kind != 2 && (fx & (WF_FX_HAL | WF_FX_MST))) {
-        fx_hot();
+        fx_hot(ev8);
         if (fx & WF_FX_HAL)
             yh_set_hot(fx_yh, fx_hb_q8, fx_hp_q8, fx_h_spk ? 256 : FX_HS_DAY + (((256 - FX_HS_DAY) * fx_hb_q8 + 128) >> 8));   /* Spektra: its own physical strengths, the clipped / point boosts still follow the exposure */
         if (fx & WF_FX_MST)

@@ -96,6 +96,17 @@ int wf_cr2_parse(const uint8_t *head, uint32_t nhead, uint32_t fsize, struct wf_
         uint32_t exif = r32(&r, e + 8);
         uint32_t ei = ifd_tag(&r, exif, 0x8827);
         if (ei) inf->iso = (int)r16(&r, ei + 8);
+        uint32_t et = ifd_tag(&r, exif, 0x829A), fn = ifd_tag(&r, exif, 0x829D);   /* RATIONALs: the Darkroom's EV */
+        if (et && r16(&r, et + 2) == 5) {
+            uint32_t o = r32(&r, et + 8);
+            inf->et_n = r32(&r, o);
+            inf->et_d = r32(&r, o + 4);
+        }
+        if (fn && r16(&r, fn + 2) == 5) {
+            uint32_t o = r32(&r, fn + 8);
+            inf->fn_n = r32(&r, o);
+            inf->fn_d = r32(&r, o + 4);
+        }
         uint32_t em = ifd_tag(&r, exif, 0x927C);
         if (em) {
             uint32_t mn = r32(&r, em + 8);

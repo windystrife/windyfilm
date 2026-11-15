@@ -77,6 +77,29 @@ static void units(void)
     int z[4] = { 0, 0, 0, 0 };
     CHECK(wf_dk_scales(WF_DK_EOSM, z, 2048, 14336, 999, m) == 0, "zero WB = daylight");
 
+    /* the Darkroom print's EV (the effects' highlight gain) from the CR2: within 0.1 EV of log2(N^2 / t) - log2(ISO / 100)
+       (1/8 EV steps) over the shutter, aperture and ISO ranges, and the owner's frames (11-14 set: EV10 1/320 f/2.8 ISO 200, EV14
+       1/1600 f/5.6 ISO 400, EV9 1/250 f/1.6 ISO 100 as the camera logged them) */
+    static const uint32_t ets[][2] = { { 1, 4000 }, { 1, 1600 }, { 1, 320 }, { 1, 250 }, { 1, 30 }, { 1, 1 }, { 30, 1 }, { 10, 13 } };
+    static const uint32_t fns[][2] = { { 10, 10 }, { 12, 10 }, { 16, 10 }, { 28, 10 }, { 56, 10 }, { 8, 1 }, { 22, 1 }, { 63, 10 } };
+    static const int isos[] = { 100, 160, 200, 400, 800, 1600, 3200, 6400, 12800 };
+    double worst = 0;
+    for (int a = 0; a < 8; a++)
+        for (int c = 0; c < 8; c++)
+            for (int s = 0; s < 9; s++) {
+                double n = (double)fns[c][0] / fns[c][1], tt = (double)ets[a][0] / ets[a][1];
+                double want = log2(n * n / tt) - log2(isos[s] / 100.0);
+                double got = wf_dk_ev8(isos[s], ets[a][0], ets[a][1], fns[c][0], fns[c][1]) / 8.0;
+                if (fabs(got - want) > worst) worst = fabs(got - want);
+            }
+    CHECK(worst <= 0.1, "EV from the CR2: worst %.3f EV off", worst);
+    int e1 = wf_dk_ev8(200, 1, 320, 28, 10), e2 = wf_dk_ev8(400, 1, 1600, 56, 10), e3 = wf_dk_ev8(100, 1, 250, 16, 10);
+    CHECK((e1 + 4) >> 3 == 10 && (e2 + 4) >> 3 == 14 && (e3 + 4) >> 3 == 9, "the owner's frames: EV %d %d %d (want 10 14 9)",
+          (e1 + 4) >> 3, (e2 + 4) >> 3, (e3 + 4) >> 3);
+    CHECK(wf_dk_ev8(0, 1, 320, 28, 10) == WF_DK_EV_BAD && wf_dk_ev8(200, 0, 320, 28, 10) == WF_DK_EV_BAD
+          && wf_dk_ev8(200, 1, 0, 28, 10) == WF_DK_EV_BAD && wf_dk_ev8(200, 1, 320, 0, 10) == WF_DK_EV_BAD
+          && wf_dk_ev8(200, 1, 320, 28, 0) == WF_DK_EV_BAD, "EV: a missing value = unknown");
+
     /* thumbnails: a frame whose Y = column / 18 + 10 * (row / 18) (mod 256) gives exact box values */
     int W = 5184, H = 3456;
     uint32_t *rows = malloc((size_t)W * 2 * 64);
@@ -181,8 +204,9 @@ static void frame(const char *cr2, const char *jpg, const char *od, const char *
     struct wf_dev_stat st;
     rc = wf_dev_prepare(scr, &T, &j, &st);
     CHECK(rc == 0 && st.wb_src == 2, "prepare %d src %d", rc, st.wb_src);
-    printf("frame %s: ISO %d %d steps, black %d white %d%s, WB %s R/G %.3f B/G %.3f, trim %+d/10 EV, shoulder %d\n", cr2,
-           inf.iso, steps, j.black, j.white, lw ? " (pile-up)" : " (table)", as ? "as-shot" : "daylight",
+    printf("frame %s: ISO %d EV8 %d, %d steps, black %d white %d%s, WB %s R/G %.3f B/G %.3f, trim %+d/10 EV, shoulder %d\n", cr2,
+           inf.iso, wf_dk_ev8(inf.iso, inf.et_n, inf.et_d, inf.fn_n, inf.fn_d), steps, j.black, j.white,
+           lw ? " (pile-up)" : " (table)", as ? "as-shot" : "daylight",
            (double)st.m_q8[0] / st.m_q8[1], (double)st.m_q8[2] / st.m_q8[1], wf_dk_trim10(WF_DK_EOSM, inf.iso), st.roll);
 
     /* the fit against Canon's own frame (the at-shot B): how far the scene scale is from Canon's exposure */

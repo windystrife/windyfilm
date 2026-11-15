@@ -1672,6 +1672,29 @@ static void ms_ev(int ev8)                       /* the shot's EV100 x 8: lens_i
     h_li_set("shutter", clampi(ev8 - 8 - h_li_get("aperture") + sv, 8, 200));
     vp_bytes[2] = (uint8_t)clampi(ev8 - 8 - vp_bytes[1] + vp_bytes[0] + h_li_get("ae"), 8, 200);
 }
+/* the Darkroom's stage (wf_dark.c step 3) on a developed frame src -> dst, the CR2's EV ev8 (fr.dev_ev8): after a log
+ * mark, its "yuv DARK" line */
+static const char *dk_stage(const uint32_t *src, uint32_t *dst, int ev8)
+{
+    memcpy(dst, src, NW * 4);
+    struct wf_frame fr;
+    memset(&fr, 0, sizeof fr);
+    fr.fmt = WF_FMT_UYVY8;
+    fr.part = WF_PART_FULL;
+    fr.devd = 1;
+    fr.dev_ev8 = ev8;
+    fr.w = fr.fw = FW;
+    fr.h = fr.fh = FH;
+    fr.pitch = FW * 2;
+    fr.data = fr.dst = dst;
+    fr.t_post = get_ms_clock();
+    log_mark();
+    int st = -1, tries = 0;
+    while (wf_shot_run(&fr, &st) != 0 && ++tries < 100)
+        usleep(100000);
+    LOGW("yuv DARK", 5000);
+    return log_line("yuv DARK");
+}
 /* the mist level (halation / bloom as set), after a log mark: its key, then a shot of src; the mist's seconds from the
  * shot line (" + mist 9.2", -1 none) */
 static double ms_shot(int lv, const uint32_t *src, uint32_t *dst)
@@ -1917,6 +1940,30 @@ static void t_mist_levels(void)
     printf("  white 1 gaps: EV15 %+.2f, EV%d %+.2f, EV5 %+.2f (lamp ring at EV5 %+.2f)\n", gday, ev0 / 8, gd[4], gnight, lnight);
     chk(gday < 2.0, "white 1 in daylight: no glowing dots in the leaves' sky gaps (%+.2f codes round a gap)", gday);
     chk(gnight > gday, "at night a gap glows more than in daylight (%+.2f > %+.2f)", gnight, gday);
+
+    /* a Darkroom print: the effects' EV is the CR2's own (fr.dev_ev8), not the dials' at develop time (EV5 here) */
+    {
+        uint32_t *dref = malloc(NW * 4);
+        ms_ev(5 * 8);
+        wf_mist = 0;
+        chk(WAIT(!wf_fx_mk, 60000), "darkroom: mist off, key %d", wf_fx_mk);
+        dk_stage(in, dref, 15 * 8);
+        wf_mist = 4;
+        chk(WAIT(wf_fx_mk == 4, 60000), "darkroom: mist white 1, key %d", wf_fx_mk);
+        const char *dl = dk_stage(in, out, 15 * 8);
+        chk(strstr(dl, " ev15R") != 0, "darkroom, CR2 EV15 under dials at EV5: '%s'", dl);
+        double dday = gap_dots(dref, out);
+        dl = dk_stage(in, out, 5 * 8);
+        chk(strstr(dl, " ev5R") != 0, "darkroom, CR2 EV5: '%s'", dl);
+        double dnight = gap_dots(dref, out);
+        dl = dk_stage(in, out, WF_EV_BAD);
+        chk(strstr(dl, " ev?") != 0, "darkroom, a CR2 without exposure tags: '%s'", dl);
+        ms_ev(ev0);
+        printf("  darkroom white 1 gaps, dials at EV5: CR2 EV15 %+.2f, CR2 EV5 %+.2f\n", dday, dnight);
+        chk(dday < 2.0, "darkroom, a daylight CR2 under night dials: no glowing dots (%+.2f)", dday);
+        chk(dnight > dday, "darkroom: the CR2's night glows more than its day (%+.2f > %+.2f)", dnight, dday);
+        free(dref);
+    }
 
     /* Mist 1/4 + Bloom Normal + Halation Film: the glows add, no white wash */
     double g[4], hi[4];

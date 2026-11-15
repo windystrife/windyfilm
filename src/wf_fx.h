@@ -62,8 +62,11 @@ int  wf_fx_state(int which);                             /* menu: WF_FXS_* of WF
 const char *wf_fx_gstock_name(void);                     /* menu: grain stock of the current mode */
 
 /* worker task only, between a ready key check and the end of the request (kind 0 NN, 1 TOP, 2 BOT) */
-void wf_fx_begin(int kind, int fx, uint32_t seed);    /* NN / TOP: also the shot's exposure -> clipped gain (fx_hot) */
+/* NN / TOP: also the shot's exposure -> clipped gain (fx_hot): ev8 = WF_EV_LIVE takes the camera's (wf_shot_ev8), a
+ * Darkroom frame passes its CR2's own (wf_dk_ev8, log source 'R'; WF_EV_BAD when the CR2 does not tell) */
+void wf_fx_begin(int kind, int fx, uint32_t seed, int ev8);
 #define WF_EV_BAD (-9999)
+#define WF_EV_LIVE (-9998)
 int  wf_shot_ev8(int *src);                              /* wf_menu.c: EV100 x 8 of the shot, WF_EV_BAD; *src 'M' / 'L' / 'F' */
 extern volatile int wf_fx_ev8, wf_fx_evsrc;              /* the last NN / TOP request's (log line " ev<EV><src>") */
 void wf_fx_gather(const uint32_t *w, int nw, int x0, int y);

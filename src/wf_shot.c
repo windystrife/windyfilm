@@ -685,7 +685,7 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
             wf_chunks(buf, nw, fn, arg);
         return;
     }
-    wf_fx_begin(k, fx, seed);
+    wf_fx_begin(k, fx, seed, f->devd ? f->dev_ev8 : WF_EV_LIVE);
     uint32_t th = 0, tg = 0, tm = 0, t, t2;
     int y0 = f->y0, wpr = f->w / 2;
     if (fx & WF_FX_MST) {                        /* the mist's low-res light map: every 2nd row of this request */

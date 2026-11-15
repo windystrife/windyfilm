@@ -52,6 +52,8 @@ struct wf_frame {
     /* bookkeeping for the log (camera layer) */
     uint32_t raw;                 /* the register value the buffer came from */
     int      t_post;              /* get_ms_clock() when the hook posted the request */
+    int      dev_ev8;             /* devd only: the CR2's own EV100 x 8 for the effects' highlight gain (wf_dk_ev8;
+                                     WF_EV_BAD = the CR2 does not tell), never the camera's settings at develop time */
 };
 
 /* the frame's words for the UYVY8 path (pitch == 2 * w for every Canon L frame we hook) */

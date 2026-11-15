@@ -23,6 +23,12 @@ int wf_dk_white(int cam, int iso);
 int wf_dk_scales(int cam, const int wb[4], int black, int white, int iso, int32_t m[3]);
 int wf_dk_trim10(int cam, int iso);              /* the exposure trim in 0.1 EV (+ = brighter) */
 
+/* the shot's EV100 x 8 from its CR2 (ISO, ExposureTime et_n / et_d s, FNumber fn_n / fn_d), to about 1/8 EV: the
+ * effects' highlight gain of a Darkroom print (wf_fx.c fx_hot), as wf_shot_ev8 gives it for a shot. WF_DK_EV_BAD
+ * (= WF_EV_BAD) when a value is missing */
+#define WF_DK_EV_BAD (-9999)
+int wf_dk_ev8(int iso, uint32_t et_n, uint32_t et_d, uint32_t fn_n, uint32_t fn_d);
+
 /* p / n: the first bytes of a JPEG (64 KB holds Canon's whole APP1). 0 = found: *off / *len = the segment from its
    0xFF 0xE1 marker (len includes the marker and the length field); -1 = none */
 int wf_dk_app1(const uint8_t *p, uint32_t n, uint32_t *off, uint32_t *len);
