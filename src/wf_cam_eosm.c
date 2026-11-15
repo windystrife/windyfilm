@@ -67,6 +67,7 @@ static const uint32_t kinstr[K_N] = { INSTR_NN, INSTR_TOP, INSTR_BOT };
 static const uint8_t kreg[K_N] = { REG_NN, REG_TOP, REG_BOT };
 static uint8_t installed[K_N];
 static int calls[K_N], rejects[K_N], rej_logged[K_N], rej_nojpg[K_N], rej_nojpg_seen[K_N], rej_seen[K_N];
+static int rollf[K_N], rollf_logged[K_N], rollf_seen[K_N];   /* frames of a roll: Canon's own JPEG (wf_look_use) */
 static uint32_t last_reject[K_N];
 static int bot_rej_seen;
 
@@ -301,6 +302,12 @@ static void wf_hook_eosm(uint32_t *regs, uint32_t *stack, uint32_t pc)
             wf_prb_leave(0, 1, t_shot);
         return;
     }
+    if (wf_look_use() == WF_LU_NONE) {           /* a roll in the camera (owner RAWB9: 23..36 s a frame): Canon's own */
+        rollf[k]++;                              /* JPEG, only Canon's wait; the Darkroom prints the frame later (RAW */
+        if (probe)                               /* develop B on: WF_LU_SHOTS, B now as before) */
+            wf_prb_leave(0, 1, t_shot);
+        return;
+    }
     struct wf_frame f;
     memset(&f, 0, sizeof f);
     f.fmt = WF_FMT_UYVY8;
@@ -352,12 +359,17 @@ int wf_cam_start(void)
 void wf_cam_poll(void)
 {
     wf_prb_flush();
-    for (int k = 0; k < K_N; k++)
+    for (int k = 0; k < K_N; k++) {
         if (rejects[k] != rej_logged[k]) {
             rej_logged[k] = rejects[k];
             wf_log("yuv %s#%d reject %x pq %x m %d a%d (%d)", kname[k], calls[k], (unsigned)last_reject[k],
                    (unsigned)pic_quality, shooting_mode, wf_aspect, rejects[k]);
         }
+        if (rollf[k] != rollf_logged[k]) {
+            rollf_logged[k] = rollf[k];
+            wf_log("yuv %s#%d roll frame: Canon's JPEG, no look (the Darkroom prints it) (%d)", kname[k], calls[k], rollf[k]);
+        }
+    }
 }
 
 /* wf_shot.c (wf_task): rejected NN / TOP calls since the last ask that still made a JPEG (EXIF ring alignment);
@@ -367,8 +379,10 @@ int wf_cam_rejects_jpeg(int *bot)
     int n = 0;
     for (int k = K_NN; k <= K_TOP; k++) {
         n += (rejects[k] - rej_seen[k]) - (rej_nojpg[k] - rej_nojpg_seen[k]);
+        n += rollf[k] - rollf_seen[k];           /* a roll frame made its JPEG too */
         rej_seen[k] = rejects[k];
         rej_nojpg_seen[k] = rej_nojpg[k];
+        rollf_seen[k] = rollf[k];
     }
     *bot = rejects[K_BOT] != bot_rej_seen;
     bot_rej_seen = rejects[K_BOT];

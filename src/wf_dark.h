@@ -1,8 +1,9 @@
 /* wf_dark.h - WindyFilm Roll + Darkroom: what the core (src/wf_dark.c) offers the UI (src/ui/wf_dark_ui.c) and the
  * menu. docs/DESIGN.md 3.6. WindyStrife's own code.
  *
- * Threads: wf_task owns the roll (frame detection, the roll file); the darkroom task "wf_dark" (own, started by
- * wf_dark_start, ends when the roll is developed or stopped) owns the darkroom; the UI task only reads the snapshots
+ * Threads: wf_task owns the roll (frame detection, the roll file) and runs the darkroom itself (wf_dark_start only asks
+ * for a run; wf_task's next loop carries it out and comes back when the roll is developed or stopped: no task of its
+ * own, DryOS's table is full while the UI is up, owner RAWB9 "dark: no task (5)"); the UI task only reads the snapshots
  * below and posts requests. Snapshots are plain structs rewritten by their owner; the UI re-reads them every tick and
  * redraws when gen changes (a torn read shows one odd frame at worst, never a crash: pointers inside stay valid while
  * the UI is open). */
@@ -30,11 +31,12 @@ int  wf_roll_req_swap(int film, int exp);
 int  wf_roll_shutter_locked(void);
 int  wf_roll_hud(char *line, int n);             /* the HUD text ("ROLL 021  Windy 400  5/12"), 0 = no roll */
 
-/* ------------------------------------------------------------------ darkroom (task "wf_dark") */
+/* ------------------------------------------------------------------ darkroom (inside wf_task: no task of its own) */
 enum { WF_DR_IDLE = 0, WF_DR_RUN, WF_DR_STOPPING, WF_DR_STOPPED, WF_DR_DONE, WF_DR_FAIL, WF_DR_N };
-enum { WF_DP_NONE = 0, WF_DP_LOAD, WF_DP_EXPOSE, WF_DP_FIX, WF_DP_DRY, WF_DP_N };   /* per frame: read + decode the
-                                                    CR2, develop (B) into the frame, look stage (film, halation, grain),
-                                                    encode + write the JPEG */
+enum { WF_DP_NONE = 0, WF_DP_LOAD, WF_DP_EXPOSE, WF_DP_FIX, WF_DP_DRY, WF_DP_MIX, WF_DP_N };   /* per frame: read +
+                                                    decode the CR2, develop (B) into the frame, look stage (film,
+                                                    halation, grain), encode + write the JPEG; MIX = before the first
+                                                    frame (frame -1): the look's effects built for the run */
 #define WF_DR_PW    288                          /* the print being developed: luma, 5184 x 3456 / 18 */
 #define WF_DR_PH    192
 #define WF_DR_TW    72                           /* prints on the wire: luma, 5184 x 3456 / 72 */
@@ -63,8 +65,9 @@ struct wf_dark_view {
     uint32_t gen;                                /* bumped on every change worth a redraw */
 };
 const struct wf_dark_view *wf_dark_view(void);   /* never 0 */
-int  wf_dark_start(void);                        /* rewinds a loaded roll, starts the task; 0 = started, -1 = nothing to
-                                                    develop, -2 = already running, -3 = not now (Canon busy / no card) */
+int  wf_dark_start(void);                        /* asks wf_task for a run (it rewinds a loaded roll); 0 = started, -1 =
+                                                    nothing to develop, -2 = already running, -3 = not now (Canon busy,
+                                                    no worker yet, battery) */
 void wf_dark_stop(void);                         /* MENU: stop after the current band (the frame is done again next run) */
 int  wf_dark_eta_s(const struct wf_dark_view *v);   /* seconds left for the roll (estimate) */
 int  wf_dark_src(int output, int flut);          /* EOS M: the WF_DEV_* tables a run builds for look output (WF_OUT_*) +

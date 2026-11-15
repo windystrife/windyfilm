@@ -2,12 +2,18 @@
  *
  * The roll (wf_task, wf_roll_poll): the roll file through wf_fio.h, the requests of the UI / menu, frame detection from
  * Canon's file number while Canon is idle, RAW+L and image review while a roll is in the camera, the HUD over LiveView.
- * The darkroom (task "wf_dark", one per run): memory, then per frame the CR2 read + decode (wf_cr2.c), the develop
- * (wf_dev.c), the look stage through the worker (wf_shot_run with frame.devd), the print encode (wf_jpe.c) and write,
- * the roll file, the view the UI draws (struct wf_dark_view). While a run lives it owns the roll: wf_task leaves it alone.
- * The pure per-frame parts (scales, Exif, thumbnails) are wf_darkp.c, shared with the host test. */
+ * The darkroom (wf_dark_poll: inside wf_task, one run at a time): the look's effects, memory, then per frame the CR2
+ * read + decode (wf_cr2.c), the develop (wf_dev.c), the look stage through the worker (wf_shot_run with frame.devd), the
+ * print encode (wf_jpe.c) and write, the roll file, the view the UI draws (struct wf_dark_view). No task of its own: the
+ * owner's RAWB9 camera refused "wf_dark" every time (DryOS's table full, "tasks 104 of 104", the UI task on the last
+ * slot: "dark: no task (5)"). Between its bands the run calls wf_task_yield (the ML-menu guard, the browser request);
+ * the UI task (prio 0x1B) runs above wf_task (0x1E) and stays live. While a run lives it owns the roll.
+ * The pure per-frame parts (scales, Exif, thumbnails) are wf_darkp.c, shared with the host test.
+ *
+ * The look while a roll is in the camera (owner RAWB9: each frame took 23..36 s of the in-camera look): wf_look_use. */
 #include "wf_core.h"
 #include "wf_dark.h"
+#include "wf_fx.h"
 #include "wf_loglut.h"
 #include "wf_rawb.h"                             /* B gives its shoot memory back before a darkroom run */
 #ifdef WF_BUILD_5D2
@@ -21,7 +27,6 @@
 #endif
 
 /* ML core (EOSM_202.sym / 5D2_212.sym both export these) */
-extern int  task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg);
 extern void *FIO_OpenFile(const char *name, unsigned mode);
 extern int   FIO_ReadFile(void *f, void *buf, size_t n);
 extern int   FIO_WriteFile(void *f, const void *buf, size_t n);
@@ -78,7 +83,8 @@ static int poll_F = -1, poll_D = -1, poll_stable, wind_t = -100000;
 static int pq_old = -1, rv_old = -1, prop_t;
 static int hud_on, hud_fonts_on, hud_t, hud_mode = -1, info_t = -100000, hud_sig, hud_job;
 static int hud_font_again, hud_font_t, hud_font_n;  /* the font pack read again while Canon held the card */
-static volatile int dk_running;                   /* the darkroom task owns the roll */
+static volatile int dk_running;                   /* a darkroom run owns the roll (asked for, or in wf_task now) */
+static volatile int dk_go;                        /* wf_dark_start asked: wf_task's next wf_dark_poll runs it */
 static int nt_state = -1, nt_req, nt_t, nt_len, nt_mode = -1, nt_pt;   /* the end-of-roll notice (roll_notice) */
 static volatile int nt_up, nt_drop, nt_poke;
 static volatile int sh_k;                         /* the shutter held now (roll_shutter): 0 no, 1 full, 2 rewound */
@@ -89,6 +95,23 @@ static void roll_changed(void) { roll_gen_n++; wf_gen_bump(); }
 int wf_roll_shooting(void) { return roll.state == WF_RS_LOADED; }
 int wf_roll_blocks_play(void) { return wf_blind && wf_roll_open(&roll) && !dk_running; }
 int wf_dark_busy(void) { return dk_running; }
+
+/* what the look's tables (the shot LUT, halation / grain / mist) are built for (owner RAWB9, 11-15: each roll frame took
+ * 23..36 s of the in-camera look, the LUT read 21 s and the grain 8..13 s at boot and at each roll load, and the
+ * Darkroom prints the roll later anyway). Any task (the hook reads it too: plain reads).
+ *   WF_LU_SHOTS  no roll in the camera, as before; also a roll with RAW develop B on (the owner's opt-in: B develops
+ *                each roll frame now and gives it the look, the Darkroom prints it later)
+ *   WF_LU_NONE   a roll in the camera (loaded, full or rewound): nothing of the look is built (given back if it was),
+ *                and a frame keeps Canon's own JPEG (the hook skips the worker): only Canon's own wait
+ *   WF_LU_DARK   a darkroom run: the effects and the film table for its look (no shot LUT: its develop holds the cube) */
+int wf_look_use(void)
+{
+    if (dk_running)
+        return WF_LU_DARK;
+    if (wf_roll_open(&roll) && !(WF_RAWB_CAN && wf_rawb))
+        return WF_LU_NONE;
+    return WF_LU_SHOTS;
+}
 
 /* GUI task (wf_main.c wf_keypress): a key while the end-of-roll notice is up drops it (wf_task clears it on its next
  * poll); what 1 (SET / Q) opens the Darkroom on top, 2 (INFO) the roll picker for a new roll. Never in the ML menu (the
@@ -513,9 +536,8 @@ void wf_roll_poll(void)
     roll_hud();
 }
 
-/* ================================================================== the darkroom */
-#define DK_PRIO     0x1F                         /* below wf_task (0x1E) and the worker (0x1C) */
-#define DK_W        5184                         /* the EOS M L frame in its CR2 (DESIGN 3.2: x0 84, y0 64) */
+/* ================================================================== the darkroom (wf_task) */
+#define DK_W        5184                        /* the EOS M L frame in its CR2 (DESIGN 3.2: x0 84, y0 64) */
 #define DK_H        3456
 #define DK_X0       84
 #define DK_Y0       64
@@ -747,6 +769,13 @@ static void dk_phase(int ph, int prog)
     dv_bump();
 }
 
+/* a band done: a moment for the tasks below wf_task, then the light part of wf_task's loop (the run lives inside it) */
+static void dk_yield(void)
+{
+    msleep(2);
+    wf_task_yield(0);
+}
+
 static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
 {
     char cr2[96], jpg[96], out[96], root[16], txt[200], t2[200];
@@ -784,7 +813,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
         dv.prog = dk_dec.jrow * 250 / (dk_dec.jh ? dk_dec.jh : 1);
         dv_bump();
         if (dk_should_stop()) { FIO_CloseFile(f); return DK_STOP; }
-        msleep(2);
+        dk_yield();
     }
     FIO_CloseFile(f);
     if (rc < 0) { dk_why = wf_cr2_err(rc); return DK_ERR; }
@@ -829,7 +858,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
         dv_bump();
         if (dk_should_stop())
             return DK_STOP;
-        msleep(2);
+        dk_yield();
     }
     dk_t[1] = get_ms_clock() - t;
     t += dk_t[1];
@@ -895,6 +924,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
             dv.prog = 800 + y * 200 / DK_H;
             dv_bump();
             if (dk_should_stop()) { stopped = 1; break; }
+            wf_task_yield(0);
         }
     }
     if (rc == WF_JPE_OK && !stopped)
@@ -934,9 +964,37 @@ static void dk_hang(int i)
     dv.hung_ms = get_ms_clock();
 }
 
-static void dk_task(void *arg)
+/* before the first frame: the look's effects (halation / grain / mist) and its film table, built here (wf_look_use is
+ * WF_LU_DARK now: nothing of them is built while a roll is in the camera), before the big blocks are taken. A part the
+ * camera has no memory for stays out of the prints; the log line says what is in ("-" = wanted, not ready). */
+static void dk_look(const struct wf_look *lk)
 {
-    (void)arg;
+    int t0 = get_ms_clock(), hk = 0, gk = 0, mk = 0, n = 0;
+    char b[80];
+    dv.frame = -1;
+    dk_phase(WF_DP_MIX, 0);
+    wf_ws_poll();                                /* the look's film table (a pack read) */
+    wf_fx_poll();                                /* the effects of its post code (seconds: the grain) */
+    if (lk->post) {
+        wf_fx_keys(lk->post, &hk, &gk);
+        mk = wf_fx_mkey(lk->post);
+    }
+    b[0] = 0;
+    if (lk->output == WF_OUT_FILM)
+        n += snprintf(b + n, sizeof b - n, wf_ws_table(lk->row, lk->variant) ? ", film table" : ", film table -");
+    if (hk && n < (int)sizeof b)
+        n += snprintf(b + n, sizeof b - n, wf_fx_hk == hk ? ", halation" : ", halation -");
+    if (gk && n < (int)sizeof b)
+        n += snprintf(b + n, sizeof b - n, wf_fx_gk == gk ? ", grain" : ", grain -");
+    if (mk && n < (int)sizeof b)
+        snprintf(b + n, sizeof b - n, wf_fx_mk == mk ? ", mist" : ", mist -");
+    wf_log("dark: look ready %dms: %s", get_ms_clock() - t0, b[0] ? b + 2 : "nothing to build");
+    wf_task_yield(1);
+}
+
+/* the run, inside wf_task (wf_dark_poll) */
+static void dk_task(void)
+{
     int t_run = get_ms_clock(), ndone = 0, nerr = 0, paused = 0, ms_sum = 0;
     dk_stopk = 0;
     const char *end_why = "";
@@ -945,10 +1003,13 @@ static void dk_task(void *arg)
         roll_save();
     }
     /* RAW develop B gives its tables + scratch (shoot memory) back while the run lives (wf_rawb_poll sees
-     * wf_dark_busy) and builds them again after it: wait for that here, so the frame's contiguous block has room */
+     * wf_dark_busy) and builds them again after it: that poll is wf_task's, so it runs here, until B holds nothing */
     int t_b = get_ms_clock();
-    while (wf_rawb_holds() && get_ms_clock() - t_b < 10000 && !dk_stop)   /* a cube build may take seconds */
-        msleep(20);
+    while (wf_rawb_holds() && get_ms_clock() - t_b < 10000 && !dk_stop) {   /* a cube build may take seconds */
+        wf_rawb_poll();
+        if (wf_rawb_holds())
+            msleep(20);
+    }
     if (wf_rawb_holds())
         wf_log("dark: RAW develop still holds its memory after %d ms", get_ms_clock() - t_b);
     else if (WF_RAWB_CAN && wf_rawb)
@@ -959,6 +1020,7 @@ static void dk_task(void *arg)
     dv.done = wf_roll_ndev(&roll);
     dv.left = wf_roll_left(&roll);
     wf_log("dark: roll %03d start, %d of %d to develop, look output %d", roll.num, dv.left, dv.total, lk.output);
+    dk_look(&lk);
     if (lv) {
         PauseLiveView();
         paused = 1;
@@ -1063,6 +1125,7 @@ static void dk_task(void *arg)
         dv.left = wf_roll_left(&roll);
         roll_changed();
         dv_bump();
+        wf_task_yield(1);                        /* the frame's lines to the card (no file of the run is open now) */
     }
     dk_free();
     powersave_permit();
@@ -1085,6 +1148,7 @@ static void dk_task(void *arg)
 #else
 int wf_dark_start(void) { dv.msg = "The Darkroom runs on the EOS M first"; dv_bump(); return -3; }
 void wf_dark_stop(void) {}
+void wf_dark_poll(void) {}
 #endif
 
 #if WF_DARK_CAN
@@ -1096,6 +1160,11 @@ int wf_dark_start(void)
         return -3;                               /* (a shot's B develop still runs: 30 s) */
     if (wf_cam() != WF_CAM_EOSM) {
         dv.msg = "The Darkroom runs on the EOS M first";
+        dv_bump();
+        return -3;
+    }
+    if (!wf_worker_up()) {                       /* a boot's first seconds (wf_main.c tries it again): the look stage */
+        dv.msg = "Starting: try again in a moment";   /* runs on the worker */
         dv_bump();
         return -3;
     }
@@ -1120,18 +1189,19 @@ int wf_dark_start(void)
     dv.avg_ms = 0;
     dk_t0 = get_ms_clock();
     WF_BARRIER();
-    dk_running = 1;                              /* wf_task leaves the roll alone from here */
-    int tid = task_create("wf_dark", DK_PRIO, 0x2000, (void *)dk_task, 0);
-    if (!DRY_OK(tid)) {                          /* DryOS's task table full: nothing taken yet, the roll as it was */
-        dk_running = 0;
-        dv.state = WF_DR_FAIL;
-        dv.msg = "No free task: try again";
-        wf_log("dark: no task (%x)", (unsigned)tid);
-        dv_bump();
-        return -3;
-    }
+    dk_running = 1;                              /* the roll is the run's from here (the shutter goes free) */
+    dk_go = 1;                                   /* wf_task's next loop runs it: no task to create, none to be refused */
     dv_bump();
     return 0;
+}
+
+/* wf_task, right after wf_roll_poll: a run asked for is carried out here, the whole run (minutes) */
+void wf_dark_poll(void)
+{
+    if (!dk_go)
+        return;
+    dk_go = 0;
+    dk_task();
 }
 
 void wf_dark_stop(void)
@@ -1156,12 +1226,18 @@ void wf_dark_init(void)
         dv.wire[i] = dv_wire[i];
 }
 
-/* wf_task at unload: a run stops at its next band; Canon's quality / review back */
+/* wf_task at unload (a run of its own already stopped at its next band: wf_unloading); one asked for and not begun is
+ * dropped; Canon's quality / review back */
 void wf_dark_end(void)
 {
     dk_stop = 1;
-    for (int i = 0; i < 300 && dk_running; i++)
-        msleep(20);
+    if (dk_go) {
+        dk_go = 0;
+        dv.state = WF_DR_STOPPED;
+        dv.msg = "unload";
+        WF_BARRIER();
+        dk_running = 0;
+    }
     if (pq_old >= 0 && pic_quality != pq_old)
         prop_request_change(WF_PROP_PIC_QUALITY, &pq_old, 4);
     if (rv_old >= 0 && image_review_time == 0)

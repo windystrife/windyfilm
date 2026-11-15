@@ -211,7 +211,8 @@ int wf_ll_state(int curve)
 static void wf_ll_poll(void)
 {
     int c = wf_curve, l = wf_flut;
-    int want = wf_yuv_active() && wf_out == WF_OUT_LLUT && c >= 1 && c <= WF_NCURVE ? c : 0;
+    /* for shots only (wf_look_use): a roll in the camera keeps Canon's JPEG, a darkroom run's develop holds the cube */
+    int want = wf_yuv_active() && wf_look_use() == WF_LU_SHOTS && wf_out == WF_OUT_LLUT && c >= 1 && c <= WF_NCURVE ? c : 0;
     int lut = want && l > 0 && l < WF_FLUT_N ? l : 0;
     int ei = want ? wf_lut_ei_t() : 0, inc = want ? wf_incurve_t() : 0, hs = want ? wf_ll_hs_now() : 0;
     int same = want == wf_ll_tried && lut == wf_ll_tried_lut && ei == wf_ll_tried_ei && inc == wf_ll_tried_inc;

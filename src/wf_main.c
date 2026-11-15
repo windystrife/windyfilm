@@ -6,8 +6,11 @@
  *
  * Threads:
  *   module init (ML's module loader): ROM checks (wf_cam_init), config, menu, the task. No hook, no file write.
- *   wf_task (prio 0x1E, own): starts the worker + hooks (wf_cam_start), then every ~50 ms: shot log, pack reader, Log + LUT
- *     tables, effects, preview tables, config save, EXIF writer, Light, the browser request, log flush.
+ *   wf_task (prio 0x1E, own): starts the worker + hooks (wf_cam_start), then every ~50 ms: the roll first (its file at
+ *     boot, requests, frames: owner RAWB9 had the roll at 10.9 / 15.2 s, after the grain build), a darkroom run when one
+ *     is asked for (the whole run, minutes: wf_dark.c, no task of its own), shot log, pack reader, Log + LUT tables,
+ *     effects (none of them while a roll is in the camera: wf_look_use), preview tables, config save, EXIF writer,
+ *     Light, the browser request, log flush.
  *     It also runs the EOS M ML-menu guard (wf_ui_menu_guard, src/ui/wf_ui.c) in its 10 ms waits. RAWB8 had that
  *     guard in a task of its own (wf_mguard): one task more filled DryOS's task table at boot and the worker was
  *     refused on 3 of 3 boots, so it lives here now (while wf_task is busy reading a LUT, ML's own 2 s ask stays).
@@ -354,6 +357,18 @@ static void wf_ui_poll(void)
         wf_log("ui: open -> %d", wf_ui_open());
 }
 
+/* the darkroom run (wf_dark.c) lives inside wf_task for minutes: between its bands it calls this, the light part of the
+ * loop (the EOS M ML-menu guard, the browser request); log 1 (between frames, no file of the run open) also writes the
+ * log. The UI task runs above wf_task and needs none of it. */
+void wf_task_yield(int log)
+{
+    if (wf_cam_ok)
+        wf_ui_menu_guard();
+    wf_ui_poll();
+    if (log)
+        wf_log_flush();
+}
+
 /* CBR_KEYPRESS (GUI task): the open browser gets every key; else its open key opens it (not in the ML menu, not in
  * Canon playback, where TRASH deletes) */
 static unsigned int wf_keypress(unsigned int key)
@@ -412,12 +427,14 @@ static void wf_task(void *arg)
             wf_cam_try();
         if (wf_cam_ok) {
             wf_cam_poll();
+            wf_roll_poll();                      /* Roll first: roll file, requests, frames, RAW+L / review, HUD (what
+                                                    the polls below build depends on it: wf_look_use) */
+            wf_dark_poll();                      /* a darkroom run asked for: here, the whole run */
             wf_shot_poll();                      /* shot log, EXIF entries, pack reader, Log + LUT, effects */
             wf_pv_poll();                        /* before the effects: a film switch shows its look first */
             wf_fx_poll();                        /* halation / grain / mist state: load / switch / free */
             wf_exp_poll();
             wf_rawb_poll();                      /* RAW develop: tables, memory, progress box, the shot's lines */
-            wf_roll_poll();                      /* Roll + Darkroom: roll file, frames, RAW+L / review, HUD */
         }
         wf_menu_poll();                          /* config save, EXIF writer, Light */
         wf_ui_poll();
