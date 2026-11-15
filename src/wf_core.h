@@ -14,6 +14,7 @@
 #include "wf_api.h"
 #include "wf_frame.h"
 #include "wf_cam.h"
+#include "wf_stagek.h"                           /* film-stage knob tables: struct wf_sg_knobs */
 #include "wf_fio.h"                              /* card writes: wf_fopen_w, wf_fcreate, wf_fremove, wf_frename */
 
 /* ------------------------------------------------------------------ DryOS / ML imports (both cameras' .sym have them)
@@ -68,6 +69,9 @@ struct wf_look {
     uint8_t  why;                                 /* WF_OUT_OFF: 0 set Off, 1 no film loaded, 2 film without a table */
     uint8_t  incurve;                             /* WF_INC_*: how Log + LUT read the JPEG (LLUT) */
     int8_t   hl, sh;                              /* Highlights / Shadows -5..5 (FILM: in ftflags; LLUT: the tables'), else 0 */
+    uint32_t stk;                                 /* film-stage knob key (wf_sg_key): 0 = the pack's table, else composed */
+    int8_t   sexp, spush, sprn[3];                /* the knob rows the composed table used (stk != 0), for EXIF */
+    uint8_t  scomp, siie;
     int      post;                               /* effect post code (above) */
     int      ftflags;                             /* wf_film_build flags of the film (WF_FT_*) incl. strength */
 };
@@ -119,7 +123,11 @@ int  wf_shot_run(struct wf_frame *f, int *status);/* camera layer (hook context)
                                                      done; 0 = the worker ran it (*status = WF_ST_*), -1 = busy / no worker */
 int  wf_worker_up(void);
 int  wf_yuv_active(void);                         /* the in-camera path is up and the module is not unloading */
-const uint32_t *wf_ws_table(int row, int variant);/* preview (wf_task): the published film table of (row, variant), 0 */
+const uint32_t *wf_ws_table(int row, int variant, uint32_t stk);   /* preview (wf_task): the published film table of
+                                                     (row, variant) made for stage knob key stk (0 = the pack's), else 0 */
+int  wf_sg_state(void);                           /* ML/DATA/WFSTAGE.DAT: 0 not read, 1 read, < 0 missing / bad */
+int  wf_sg_has(int row, int variant);             /* the stage pack has this film-stage pair (its knob rows work) */
+void wf_sg_knobs_now(struct wf_sg_knobs *k);      /* the knob rows as they stand (wf_menu.c), in range */
 void wf_shot_poll(void);                         /* wf_task: shot log, EXIF entries, pack reader, Log + LUT, effects */
 void wf_ws_poll(void);                            /* pack reader step (also inside the wait loops of wf_fx.c / wf_ll_poll) */
 int  wf_ws_state(void);                           /* 0 index not read, 1 read, < 0 pack missing / bad */
@@ -147,6 +155,7 @@ enum { WF_ST_NONE = 0, WF_ST_FILM, WF_ST_NOTAB, WF_ST_LOG, WF_ST_LLUT, WF_ST_NOL
 extern volatile int wf_out, wf_film_id, wf_print, wf_light, wf_curve, wf_flut, wf_lut_ei, wf_strength, wf_exif_off;
 extern volatile int wf_incurve;
 extern volatile int wf_hl, wf_sh;                 /* Highlights / Shadows, WF_HS_MIN..WF_HS_MAX (wf_film.h) */
+extern volatile int wf_sg_exp, wf_sg_push, wf_sg_comp, wf_sg_prn[3], wf_sg_iie;   /* film-stage knob rows (wf_stagek.h) */
 extern volatile int wf_cfg_dirty;
 void wf_menu_init(void);                          /* module init: config read, menu added */
 void wf_menu_deinit(void);                        /* unload: WB back, menu removed */

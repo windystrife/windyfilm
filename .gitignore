@@ -30,3 +30,5 @@ films/tables/.genesis/
 # the whole chain matrix (46 x 16, tools/mk_genesis_films.py matrix): 736 tables, ~14 MB, card data like the four above
 films/tables/G[0-9][0-9]P[0-9][0-9].T17
 films/tables/fit.csv
+# the chain in two halves (tools/mk_wfstage.py): measured negative / print halves and pair placements, card data source
+films/tables/.stage/

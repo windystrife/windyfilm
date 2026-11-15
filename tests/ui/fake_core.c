@@ -17,7 +17,8 @@ static int val[WF_NROWS];
 /* the names and choices of src/wf_menu.c (film-stage: print stocks, Grain / Halation with the Even / Wrap choices,
  * Bloom and Gauge; the print stocks' full names of wf_row_text_long) */
 static const char *const names[WF_NROWS] = { "Light", "Print stock", "Grain", "Halation", "Bloom", "Gauge", "Mist",
-                                             "Strength", "Highlights", "Shadows", "Film LUT" };
+                                             "Strength", "Highlights", "Shadows", "Film LUT", "Film exp", "Push / pull",
+                                             "Exp comp", "Printer R", "Printer G", "Printer B", "Interlayer" };
 static const char *const v_light[] = { "Auto", "Day", "Cloudy", "Tungsten", 0 };
 static const char *const v_print[] = { "Scan", "Cine", "Paper", "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72",
                                        "5382", "5384/82", "5384/92", "5385/93", "5385/62", "5386", "5383", "3513D", "3523XD", 0 };
@@ -34,8 +35,15 @@ static const char *const v_gauge[] = { "16 mm", "35 mm", "65 mm", 0 };
 static const char *const v_mist[] = { "Off", "1/8", "1/4", "1/2", "1", "Black 1/8", "Black 1/4", "Black 1/2", "Black 1", 0 };
 static const char *const v_flut[] = { "Off", "Vision3 250D", "Vision3 500T", "Portra 400", "Leica Vivid", "Windy 250D P", 0 };
 static const char *const v_hs[] = { "-5", "-4", "-3", "-2", "-1", "0", "+1", "+2", "+3", "+4", "+5", 0 };
+static const char *const v_sexp[] = { "-2", "-1.7", "-1.3", "-1", "-0.7", "-0.3", "0", "+0.3", "+0.7", "+1", "+1.3", "+1.7",
+                                      "+2", 0 };
+static const char *const v_spush[] = { "Pull 1", "Pull 2/3", "Pull 1/3", "0", "Push 1/3", "Push 2/3", "Push 1", 0 };
+static const char *const v_scomp[] = { "Off", "On", 0 };
+static const char *const v_sprn[] = { "-12", "-11", "-10", "-9", "-8", "-7", "-6", "-5", "-4", "-3", "-2", "-1", "0", "+1",
+                                      "+2", "+3", "+4", "+5", "+6", "+7", "+8", "+9", "+10", "+11", "+12", 0 };
+static const char *const v_siie[] = { "0%", "25%", "50%", "75%", "100%", "125%", "150%", "175%", "200%", 0 };
 static const char *const *vals[WF_NROWS] = { v_light, v_print, v_grain, v_halo, v_bloom, v_gauge, v_mist, 0, v_hs, v_hs,
-                                             v_flut };
+                                             v_flut, v_sexp, v_spush, v_scomp, v_sprn, v_sprn, v_sprn, v_siie };
 #define STRENGTH_MAX 6                      /* 0 .. 150 %, 25 % steps */
 
 static int nvals(int r)
@@ -57,6 +65,10 @@ void fake_reset(void)
     val[WF_ROW_GAUGE] = 1;                  /* 35 mm */
     val[WF_ROW_STRENGTH] = 4;               /* 100 % */
     val[WF_ROW_HL] = val[WF_ROW_SH] = 5;    /* 0 */
+    val[WF_ROW_SEXP] = 6;                   /* 0 */
+    val[WF_ROW_SPUSH] = 3;                  /* 0 */
+    val[WF_ROW_SPR] = val[WF_ROW_SPG] = val[WF_ROW_SPB] = 12;   /* 0 */
+    val[WF_ROW_SIIE] = 4;                   /* 100 % */
 }
 void fake_set_cam(int c) { cam = c; gen++; }
 void fake_set_loaded(int id) { loaded = id; gen++; }

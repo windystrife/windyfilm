@@ -101,6 +101,39 @@ tables: the *module* now carries constants of the plugin, not only sampled card 
   prints `gate: this tree is NOT clean-room` on every build. **Do not publish this branch, do not merge it into
   `main` without this section, and never describe a card made from it as clean-room.**
 
+**The chain's own knobs on the camera (15 Nov 2026, `film-stage`) — two-stage tables.** The owner asked for the
+chain's settings as rows: `Film exp` (+-2 stops in thirds), `Push / pull` (+-1 stop in thirds), `Exp comp`,
+`Printer R / G / B` (+-12 printer points, 0.025 logE each) and `Interlayer` (0..200 % in 25 % steps). A single 17^3
+table per pair cannot move with them, so the generator also writes the chain **in two halves** as card data
+(`ML/DATA/WFSTAGE.DAT`, `tools/mk_wfstage.py` + `tools/mk_wfstage.c`, layout in `src/wf_stagek.h`):
+
+- **negative half** per negative stock: display code -> exposure axis (`X`), axis -> density per channel (`A1`), and a
+  33^3 grid density -> printing density at interlayer 0 plus its interlayer part (`A2`); **print half** per print
+  stock: printing density -> print density per channel (`B1`) and a 33^3 grid print density -> the print's raw output
+  (`B2`); **per pair** the fitted exposure and the two pinned ends of the shipped table, and the FNV-1a of that very
+  `.T17` (the module takes an entry only when `WFFILMS.DAT` holds the same table, so the knobs never compose against
+  another chain build).
+- The halves are **measurements of the chain**, not its formulas: `tools/mk_wfstage.c` links the chain in the port
+  tree on the PC (as `mk_genesis_cube.c` does) and drives it as a black box (exposure sweeps, bisection, printer
+  offsets), reading the values its own trace prints through a host-only `fprintf` hook (`tools/mk_wfstage_hook.h`,
+  `-DGL_FILM_TRACE`; the chain source is not edited). Nothing of the plugin is linked, patched or called on the camera.
+- **Module**: `src/wf_stagek.c` composes a 17^3 table from the two halves with generic 1D / tetrahedral interpolation
+  (integer, armv5t, no division) in two passes, so one half is in memory at a time (435 KB, then 217 KB, plus 29 KB;
+  `WF_MEM_TMP`, freed at once). It runs in `wf_task` when a knob or the film changes, never per pixel: the per-pixel
+  kernel, its 17^3 table and its cost stay as they are. At default knobs the shipped table is used, not a composed one.
+  The module grows by the compose code and the index reader (image 502 KB of the 512 KB target, EOS M).
+- **Accuracy** (against the chain run directly at the 4913 nodes, 7 pairs x 12 knob sets): mean 0.25..0.6 codes, max
+  Y 1..8, V up to 13 on saturated nodes at the gamut edge. Default composition against the shipped tables, all 699
+  pairs: mean of means 0.29, worst mean 0.63, worst max 14.
+- `Push / pull` in this chain is only a shift of the exposure axis (the same scale as `Film exp`), and `Exp comp`
+  cancels both (the chain's `exposure = -push`), keeping the fitted placement; the help lines say so.
+- **The shipped matrix tables were stale** (found 15 Nov while checking the composition): 503 of 704 `G<nn>P<pp>.T17`
+  differed from the current chain by more than 1 code on average (worst 56), baked before the chain's 14 Nov change
+  (clamp after `StMtoPD`). All 736 matrix tables and the four stage films were regenerated from the current chain; the
+  looks of those pairs move to the current chain.
+- `WFSTAGE.DAT` (22.6 MB, 44 negative and 16 print halves) is card data like the tables: Genesis-derived, never
+  committed; without it the seven rows stay greyed and every film behaves as before.
+
 
 ## 2. Repo layout and who owns what
 
@@ -465,7 +498,10 @@ grade), Luca Bono, the Kodak / Fuji cubes and Leica Vivid are unchanged.
 
 Frozen: cameras, the catalogue struct, rows, load, status, UI entry points, log and card read. The core implements
 everything except `wf_ui_*`. The UI calls only these functions plus ML's drawing API. Rows (2026-11-14): Light, Print,
-Grain, Halation, Mist, Strength, Highlights, Shadows, Film LUT (`WF_NROWS` 9).
+Grain, Halation, Mist, Strength, Highlights, Shadows, Film LUT (`WF_NROWS` 9). Since 2026-11-15 (`film-stage`): Light,
+Print stock, Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights, Shadows, Film LUT, then the film-stage knobs
+Film exp, Push / pull, Exp comp, Printer R, Printer G, Printer B, Interlayer (`WF_NROWS` 18; the knob rows are
+available only on a film-stage pair that `ML/DATA/WFSTAGE.DAT` carries, section 1a).
 
 ### 4.2 Catalogue
 
@@ -532,7 +568,7 @@ The layout, 720x480 (the ML bitmap):
 | header (0-33) | mark, "WindyFilm" argnor23, "by WindyStrife" 13 px, loaded chip 15 px |
 | big can | 160x226 at (45, 40), glow in the film's colour (16 palette rings, recoloured per film), floor shadow |
 | right column x 262 | name argnor28 at y 38; chips (kind / ISO / format) 13 px at y 72; SET Load button; description 15 px, 2 lines at y 96 / 113 |
-| rows | 9 rows, 7 shown from y 136 at 19 px pitch; the list scrolls with the focus (2 px scroll bar at x 712); focus bar in the accent colour, chevrons on the focused value; Strength as 5 bars |
+| rows | 18 rows on `film-stage` (9 before), 7 shown from y 136 at 19 px pitch; the list scrolls with the focus (2 px scroll bar at x 712); focus bar in the accent colour, chevrons on the focused value; Strength as 5 bars |
 | tabs | Colour / Cine / B&W / Film LUT with counts at y 276, underline on the active one; counter "n / N" |
 | strip | 35 mm band y 300-436 with sprocket holes; cans 52x73 with short names (13 px condensed) under them; selected can 58x82 framed in the accent colour; edge fades and arrows |
 | scrollbar | y 441-446 |

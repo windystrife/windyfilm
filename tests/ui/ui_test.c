@@ -182,9 +182,13 @@ int main(int argc, char **argv)
     fake_set_row(WF_ROW_FLUT, 2);
     open_ui();
     go_to("LV500T");
-    key(MODULE_KEY_PRESS_UP);                                       /* wraps from Light to Film LUT */
-    CHECK(wfui_host_focus() == WF_ROW_FLUT, "UP from Light not on Film LUT");
-    CHECK(wfui_host_rtop() == WF_NROWS - 7, "Film LUT focused: the list shows its last 7 rows (top %d)", wfui_host_rtop());
+    key(MODULE_KEY_PRESS_UP);                                       /* wraps from Light to the last row */
+    CHECK(wfui_host_focus() == WF_NROWS - 1, "UP from Light not on the last row (Interlayer)");
+    CHECK(wfui_host_rtop() == WF_NROWS - 7, "last row focused: the list shows its last 7 rows (top %d)", wfui_host_rtop());
+    for (int i = WF_NROWS - 1; i > WF_ROW_FLUT; i--)
+        key(MODULE_KEY_PRESS_UP);                                   /* up the seven film-stage knob rows */
+    CHECK(wfui_host_focus() == WF_ROW_FLUT, "UP x %d from Light not on Film LUT", WF_NROWS - WF_ROW_FLUT);
+    CHECK(wfui_host_rtop() == WF_ROW_FLUT, "Film LUT focused from below: it tops the list (top %d)", wfui_host_rtop());
     shot("b2s_lut");
     close_ui(MODULE_KEY_TRASH, 0);
 
@@ -267,7 +271,8 @@ int main(int argc, char **argv)
     shot("fs_print_long");
     close_ui(MODULE_KEY_MENU, 0);
 
-    /* 2b. Highlights / Shadows: 11 rows, 7 shown, the list scrolls with the focus (the font keeps its size) */
+    /* 2b. Highlights / Shadows: WF_NROWS rows (18 since 11-15), 7 shown, the list scrolls with the focus (the font
+     * keeps its size) */
     fake_reset();
     fake_set_card(card);
     fake_set_loaded(id_of("PRT160"));
@@ -287,13 +292,21 @@ int main(int argc, char **argv)
     for (int i = 0; i < 6; i++) key(MODULE_KEY_WHEEL_LEFT);
     CHECK(fake_row_value(WF_ROW_SH) == 0, "Shadows stops at -5 (value %d)", fake_row_value(WF_ROW_SH));
     key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfui_host_focus() == WF_ROW_FLUT && wfui_host_rtop() == WF_NROWS - 7, "DOWN to Film LUT: top %d", wfui_host_rtop());
+    CHECK(wfui_host_focus() == WF_ROW_FLUT && wfui_host_rtop() == WF_ROW_FLUT - 6, "DOWN to Film LUT: top %d",
+          wfui_host_rtop());
+    /* the film-stage knob rows follow Film LUT (since 11-15); the last row wraps to Light */
+    for (int i = WF_ROW_FLUT + 1; i < WF_NROWS; i++) key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_NROWS - 1 && wfui_host_rtop() == WF_NROWS - 7, "DOWN to the last row: focus %d top %d",
+          wfui_host_focus(), wfui_host_rtop());
     key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfui_host_focus() == WF_ROW_LIGHT && wfui_host_rtop() == 0, "DOWN from Film LUT wraps to Light (top %d)",
+    CHECK(wfui_host_focus() == WF_ROW_LIGHT && wfui_host_rtop() == 0, "DOWN from the last row wraps to Light (top %d)",
           wfui_host_rtop());
     for (int i = 0; i < 3; i++) key(MODULE_KEY_PRESS_UP);
-    CHECK(wfui_host_focus() == WF_ROW_HL && wfui_host_rtop() == WF_NROWS - 7, "UP x3 from Light: Highlights, top %d",
-          wfui_host_rtop());
+    CHECK(wfui_host_focus() == WF_NROWS - 3 && wfui_host_rtop() == WF_NROWS - 7, "UP x3 from Light: focus %d top %d",
+          wfui_host_focus(), wfui_host_rtop());
+    for (int i = WF_NROWS - 3; i > WF_ROW_HL; i--) key(MODULE_KEY_PRESS_UP);
+    CHECK(wfui_host_focus() == WF_ROW_HL && wfui_host_rtop() == WF_ROW_HL, "UP to Highlights: focus %d top %d",
+          wfui_host_focus(), wfui_host_rtop());
     shot("b2s_hs_top");
     close_ui(MODULE_KEY_MENU, 0);
 

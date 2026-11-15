@@ -544,7 +544,7 @@ static void mod_deinit(void)
 static int look_table_ready(void)
 {
     struct wf_look lk;
-    return wf_look_now(&lk) != WF_OUT_FILM || wf_ws_table(lk.row, lk.variant) != 0;
+    return wf_look_now(&lk) != WF_OUT_FILM || wf_ws_table(lk.row, lk.variant, lk.stk) != 0;
 }
 
 /* a film shot of the current look; checks bit-exact vs the direct kernel, the mean luma shift, the log status */
@@ -1526,7 +1526,7 @@ static void t_cfg(void)
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\nexposure=%s\n"
-             "exptrim=-5\nexif=off\n"
+             "exptrim=-5\nexif=off\nstage=0,0,0,0,0,0,4\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
     free(b);
@@ -1850,6 +1850,246 @@ static void t_print_chain(void)
     snprintf(t2, sizeof t2, "%s", wf_row_text(WF_ROW_PRINT));
     chk(strcmp(t1, t2) != 0, "chain film: the next stock (%s -> %s)", t1, t2);
     film_shot("chain film, second print stock", kc, v2, 1, -10, 1.5);
+    mod_deinit();
+}
+
+/* ------------------------------------------------------------------ STAGE: film-stage knob rows (ML/DATA/WFSTAGE.DAT)
+ * A synthetic stage pack whose halves compose to the identity at default knobs: X, A1 and B1 straight lines, A2 and B2
+ * the grid itself, an interlayer part of 0.05 taken out of A2's base. So Film exp / Push move Y up, a printer point
+ * takes 0.025 off its channel, interlayer 0 / 200 % gives -0.05 / +0.05. Entries: (film, first print) naming the pack's
+ * table of it, (film, second print) naming a table the pack does not hold (must be refused).
+ * Cases: "" the rows and shots, "bad" a byte of the negative half flipped, "missing" no WFSTAGE.DAT (+ CFG parsing). */
+static struct wf_sg_neg *sg_n;
+static struct wf_sg_prn *sg_p;
+static struct wf_sg_pair sg_pr;
+static void stage_halves(void)
+{
+    sg_n = calloc(1, sizeof *sg_n);
+    sg_p = calloc(1, sizeof *sg_p);
+    for (int i = 0; i <= WF_SG_NX; i++)
+        sg_n->X[i] = (uint16_t)clampi((int)((int64_t)i * 65536 / (WF_SG_NX - 1)), 0, 65535);
+    for (int c = 0; c < 3; c++) {
+        sg_n->lo[c] = sg_p->lo[c] = 0;
+        sg_n->sc[c] = sg_p->sc[c] = 32 * 65536;  /* density 0..1 over the 33 nodes */
+        for (int i = 0; i < WF_SG_N1; i++) {
+            sg_n->A1[c][i] = (uint16_t)(i * 64);   /* density = x (Q14) */
+            sg_p->B1[c][i] = (uint16_t)(i * 64);   /* print density = 4 x printing density / 4 (Q12) */
+        }
+    }
+    for (int i = 0; i < WF_SG_A3; i++) {
+        int nd[3] = { i / (33 * 33), i / 33 % 33, i % 33 };
+        for (int c = 0; c < 3; c++) {
+            sg_n->A2[i][c] = (int16_t)(nd[c] * 4096 / 32 - 205);   /* base: the node less the interlayer part */
+            sg_n->A2[i][3 + c] = 205;                              /* interlayer part 0.05 (Q12) */
+        }
+    }
+    for (int i = 0; i < WF_SG_B3; i++) {
+        int nd[3] = { i / (33 * 33), i / 33 % 33, i % 33 };
+        for (int c = 0; c < 3; c++)
+            sg_p->B2[i][c] = (uint16_t)(nd[c] * 65535 / 32);
+    }
+    sg_pr.fit = 0;
+    sg_pr.bk = 0;
+    sg_pr.inv = 65537;                           /* 2^32 / 65535 */
+}
+static void stage_write(int k, int v1, int v2, const uint32_t *T1, int bad)
+{
+    uint32_t nb = sizeof *sg_n, pb = sizeof *sg_p, io = 64, no = io + 28 * 2, po = no + 4, dof = (po + 4 + 3) & ~3u;
+    uint32_t pof = dof + nb, sz = pof + pb;
+    uint8_t *b = calloc(1, sz);
+    memcpy(b, "WFSG", 4);
+    uint16_t h[8] = { 1, 2, 1, 1, WF_SG_NA, WF_SG_NB, WF_SG_N1, WF_SG_NX };
+    memcpy(b + 4, h, 16);
+    le32(b + 20, nb); le32(b + 24, pb); le32(b + 28, io); le32(b + 32, no); le32(b + 36, po); le32(b + 40, dof);
+    le32(b + 44, pof); le32(b + 52, sz);
+    for (int e = 0; e < 2; e++) {
+        uint8_t *x = b + io + 28 * e;
+        x[0] = wf_films[k].id; x[1] = e ? v2 : v1; x[2] = 0; x[3] = 0;
+        strncpy((char *)x + 4, wf_films[k].code, 8);
+        le32(x + 12, sg_pr.fit); le32(x + 16, sg_pr.bk); le32(x + 20, sg_pr.inv);
+        le32(x + 24, fnv(2166136261u, (const uint8_t *)T1, TW * 4));   /* entry 1 names T1 too: not its print's table */
+    }
+    memcpy(b + dof, sg_n, nb);
+    memcpy(b + pof, sg_p, pb);
+    le32(b + no, fnv(2166136261u, b + dof, nb));
+    le32(b + po, fnv(2166136261u, b + pof, pb));
+    le32(b + 48, fnv(2166136261u, b + io, po + 4 - io));
+    if (bad == 'N')
+        b[dof + nb / 2] ^= 0x10;                 /* after the checksum: the negative half fails it */
+    put_file("ML/DATA/WFSTAGE.DAT", b, sz);
+    free(b);
+}
+/* a film shot through the composed table of these knobs: bit-exact vs wf_sg_compose run here on the same halves */
+static double stage_shot(const char *what, int k, int v, const struct wf_sg_knobs *kn)
+{
+    static uint32_t Te[TW];
+    static uint16_t pd[TW * 3];
+    wf_sg_compose(sg_n, sg_p, &sg_pr, kn, 0, pd, Te);
+    tabs[k][v] = Te;
+    chk(WAIT(look_table_ready(), 10000), "%s: composed table published", what);
+    log_mark();
+    int sb = shot(in, out, FW, FH);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, Te, flags_of(k, 1));
+    int d = ndiff(out, ref, NW);
+    double m = mean_dy(in, out, NW);
+    chk(d == 0 && sb == 0, "%s: bit-exact vs the table wf_sg_compose makes from the same halves (%d words differ)", what, d);
+    chk(LOGW(": film ", 3000), "%s: log '%s'", what, log_line(": film "));
+    return m;
+}
+static int stage_rows_avail(void)
+{
+    int n = 0;
+    for (int r = WF_ROW_SEXP; r <= WF_ROW_SIIE; r++)
+        n += wf_row_avail(r) != 0;
+    return n;
+}
+static void t_stage(const char *cs)
+{
+    int kc = -1, v1 = -1, v2 = -1;
+    for (int k = 0; k < wf_nfilms && kc < 0; k++)
+        if (!(wf_films[k].flags & WF_F_LUTCAN) && (wf_films[k].prints >> WF_PRINT_STOCK0))
+            kc = k;
+    if (kc < 0) {
+        printf("  (no chain film in this catalogue: STAGE skipped)\n");
+        return;
+    }
+    for (int v = WF_PRINT_STOCK0; v < WF_NPRINTS; v++)
+        if (wf_films[kc].prints & (1u << v)) {
+            if (v1 < 0) v1 = v;
+            else if (v2 < 0) v2 = v;
+        }
+    if (v2 < 0) {
+        printf("  (chain film with one print: STAGE skipped)\n");
+        return;
+    }
+    uint32_t *T1 = tab_make(0, 0, 0, 0), *T2 = tab_make(-10, 0, 0, 0);
+    struct pk ec[] = { { kc, v1, T1 }, { kc, v2, T2 } };
+    pack_write(ec, 2, 0);
+    stage_halves();
+    struct wf_sg_knobs k0 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF };
+    {   /* the synthetic halves: identity at default knobs on the in-gamut nodes (the composition clamps a node's RGB) */
+        static uint32_t Te[TW];
+        static uint16_t pd[TW * 3];
+        int md = 0;
+        wf_sg_compose(sg_n, sg_p, &sg_pr, &k0, 0, pd, Te);
+        for (int i = 0; i < TW; i++) {
+            int y = clampi(16 * (i / 289), 0, 255), u = clampi(16 * (i / 17 % 17), 0, 255) - 128;
+            int v = clampi(16 * (i % 17), 0, 255) - 128;
+            double r = y + 1.402 * v, g = y - 0.344136 * u - 0.714136 * v, bl = y + 1.772 * u;
+            if (r < 0 || r > 255 || g < 0 || g > 255 || bl < 0 || bl > 255)
+                continue;
+            for (int s = 0; s < 24; s += 8) {
+                int a = (int8_t)(Te[i] >> s), c = (int8_t)(T1[i] >> s);
+                if (s == 8) { a = (Te[i] >> 8) & 255; c = (T1[i] >> 8) & 255; }
+                md = abs(a - c) > md ? abs(a - c) : md;
+            }
+        }
+        chk(md <= 2, "synthetic halves: default composition within 2 codes of the identity, in-gamut nodes (max %d)", md);
+    }
+    if (strcmp(cs, "missing"))
+        stage_write(kc, v1, v2, T1, !strcmp(cs, "bad") ? 'N' : 0);
+    put_cfg("film=%d\noutput=film\nprint=scan\ngrain=off\nhalation=off\nmist=off\n%s", wf_films[kc].id,
+            !strcmp(cs, "missing") ? "stage=-6,3,1,-12,12,5,0\n" : !strcmp(cs, "bad") ? "stage=1,2,x,0,0,0,4\n" : "");
+    mod_init(1);
+    gen_frame(in, FW, FH, 0);
+    chk(WAIT(wf_avail(wf_films[kc].id), 5000) && wf_load(wf_films[kc].id) == WF_LOAD_OK, "chain film %s loads",
+        wf_films[kc].code);
+    if (!strcmp(cs, "missing")) {
+        chk(WAIT(wf_sg_state() == -1, 5000) && LOGW("stage ML/DATA/WFSTAGE.DAT missing", 3000),
+            "no stage pack: state %d, log '%s'", wf_sg_state(), log_line("stage"));
+        chk(!strcmp(wf_row_text(WF_ROW_SEXP), "-2") && !strcmp(wf_row_text(WF_ROW_SPUSH), "Push 1")
+            && !strcmp(wf_row_text(WF_ROW_SCOMP), "On") && !strcmp(wf_row_text(WF_ROW_SPR), "-12")
+            && !strcmp(wf_row_text(WF_ROW_SPG), "+12") && !strcmp(wf_row_text(WF_ROW_SPB), "+5")
+            && !strcmp(wf_row_text(WF_ROW_SIIE), "0%"), "CFG stage=-6,3,1,-12,12,5,0 read: %s %s %s %s %s %s %s",
+            wf_row_text(WF_ROW_SEXP), wf_row_text(WF_ROW_SPUSH), wf_row_text(WF_ROW_SCOMP), wf_row_text(WF_ROW_SPR),
+            wf_row_text(WF_ROW_SPG), wf_row_text(WF_ROW_SPB), wf_row_text(WF_ROW_SIIE));
+        chk(stage_rows_avail() == 0, "no stage pack: the seven knob rows greyed");
+        tabs[kc][v1] = T1;
+        film_shot("no stage pack, knobs set: the pack's table", kc, v1, 1, 0, 0.5);
+        put_cfg("stage=7,0,0,0,0,0,4\n");          /* Film exp out of range: the whole line is ignored */
+        wf_cfg_load();
+        chk(wf_sg_exp == -6 && wf_sg_iie == 0, "CFG: a stage line with a value out of range is ignored");
+        put_cfg("stage=1,-1,0,2,-3,4,6\n");
+        wf_cfg_load();
+        chk(wf_sg_exp == 1 && wf_sg_push == -1 && wf_sg_comp == 0 && wf_sg_prn[0] == 2 && wf_sg_prn[1] == -3
+            && wf_sg_prn[2] == 4 && wf_sg_iie == 6, "CFG: stage=1,-1,0,2,-3,4,6 read");
+        mod_deinit();
+        return;
+    }
+    chk(WAIT(wf_sg_state() == 1, 5000) && LOGW("stage ok: 1 of 2 pairs match", 3000),
+        "stage pack read, the entry naming another table refused: state %d, '%s'", wf_sg_state(), log_line("stage"));
+    chk(stage_rows_avail() == 7 && wf_sg_has(kc, v1) && !wf_sg_has(kc, v2), "first print: the seven knob rows on");
+    chk(!strcmp(wf_row_text(WF_ROW_SEXP), "0") && !strcmp(wf_row_text(WF_ROW_SPUSH), "0")
+        && !strcmp(wf_row_text(WF_ROW_SCOMP), "Off") && !strcmp(wf_row_text(WF_ROW_SPG), "0")
+        && !strcmp(wf_row_text(WF_ROW_SIIE), "100%"), "default knob texts (a bad stage line keeps them)");
+    tabs[kc][v1] = T1;
+    film_shot("default knobs: the pack's table", kc, v1, 1, 0, 0.5);
+    struct wf_look lk;
+    if (!strcmp(cs, "bad")) {
+        log_mark();
+        for (int i = 0; i < 3; i++)
+            wf_row_step(WF_ROW_SEXP, 1);
+        chk(LOGW("stage negative half 0 bad", 5000), "a bad negative half: logged ('%s')", log_line("stage"));
+        chk(WAIT(stage_rows_avail() == 0, 3000) && wf_look_now(&lk) == WF_OUT_FILM && lk.stk == 0,
+            "a bad negative half: knob rows greyed, the look back on the pack's table");
+        film_shot("bad negative half: the pack's table", kc, v1, 1, 0, 0.5);
+        mod_deinit();
+        return;
+    }
+    /* Film exp +1 */
+    log_mark();
+    for (int i = 0; i < 3; i++)
+        chk(wf_row_step(WF_ROW_SEXP, 1), "Film exp steps up");
+    chk(!strcmp(wf_row_text(WF_ROW_SEXP), "+1"), "Film exp text '%s'", wf_row_text(WF_ROW_SEXP));
+    chk(LOGW("composed", 5000), "composed: '%s'", log_line("composed"));
+    struct wf_sg_knobs k1 = { 3, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF };
+    double m = stage_shot("Film exp +1", kc, v1, &k1);
+    chk(m > 7 && m < 14, "Film exp +1: brighter, mean dY %+.2f (the synthetic axis: +0.05 = +12.75 codes unclipped)", m);
+    wf_look_now(&lk);
+    uint32_t key1 = lk.stk;
+    /* Film exp +2/3 and Push +1/3: the same exposure axis, the same key and table */
+    chk(wf_row_step(WF_ROW_SEXP, -1) && wf_row_step(WF_ROW_SPUSH, 1) && !strcmp(wf_row_text(WF_ROW_SPUSH), "Push 1/3"),
+        "Film exp +0.7, Push 1/3 ('%s', '%s')", wf_row_text(WF_ROW_SEXP), wf_row_text(WF_ROW_SPUSH));
+    wf_look_now(&lk);
+    chk(lk.stk == key1 && key1, "Film exp +2/3 + Push +1/3 = the key of Film exp +1 (%x / %x)", lk.stk, key1);
+    stage_shot("Film exp +2/3 + Push +1/3", kc, v1, &k1);
+    /* Exp comp: both out, the pack's table again */
+    chk(wf_row_step(WF_ROW_SCOMP, 1) && !strcmp(wf_row_text(WF_ROW_SCOMP), "On"), "Exp comp On");
+    wf_look_now(&lk);
+    chk(lk.stk == 0 && !wf_row_avail(WF_ROW_SEXP) && !wf_row_avail(WF_ROW_SPUSH) && wf_row_avail(WF_ROW_SPR),
+        "Exp comp: no offset left (key %x), Film exp / Push greyed", lk.stk);
+    tabs[kc][v1] = T1;
+    film_shot("Exp comp: the pack's table", kc, v1, 1, 0, 0.5);
+    /* Printer G +4: green down 0.1 */
+    chk(wf_row_step(WF_ROW_SCOMP, 1) && wf_row_step(WF_ROW_SEXP, -1) && wf_row_step(WF_ROW_SEXP, -1)
+        && wf_row_step(WF_ROW_SPUSH, -1), "knobs back to 0");
+    for (int i = 0; i < 4; i++)
+        wf_row_step(WF_ROW_SPG, 1);
+    chk(!strcmp(wf_row_text(WF_ROW_SPG), "+4"), "Printer G '%s'", wf_row_text(WF_ROW_SPG));
+    struct wf_sg_knobs k2 = { 0, 0, 0, { 0, 4, 0 }, WF_SG_IIE_DEF };
+    m = stage_shot("Printer G +4", kc, v1, &k2);
+    chk(m < -5, "Printer G +4: darker (green down), mean dY %+.2f", m);
+    /* Interlayer 200 %: +0.05 on every channel; the row stops there */
+    for (int i = 0; i < 4; i++)
+        wf_row_step(WF_ROW_SPG, -1);
+    for (int i = 0; i < 4; i++)
+        wf_row_step(WF_ROW_SIIE, 1);
+    chk(!strcmp(wf_row_text(WF_ROW_SIIE), "200%") && !wf_row_step(WF_ROW_SIIE, 1), "Interlayer 200%%, no further step");
+    struct wf_sg_knobs k3 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_MAX };
+    m = stage_shot("Interlayer 200%", kc, v1, &k3);
+    chk(m > 7, "Interlayer 200%%: the synthetic interlayer part adds 0.05, mean dY %+.2f", m);
+    /* the second print: its entry names another table, refused; its pack table as it is, knobs or not */
+    chk(wf_row_step(WF_ROW_PRINT, 1), "Print stock steps to the second print");
+    chk(stage_rows_avail() == 0, "second print (no matching stage entry): the knob rows greyed");
+    film_shot("second print, Interlayer 200 percent set: its own pack table", kc, v2, 1, -10, 1.5);
+    /* the knob rows are saved */
+    h_clock_add_ms += 2000;
+    usleep(400000);
+    long n;
+    char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(b && strstr(b, "stage=0,0,0,0,0,0,8\n"), "CFG: stage=0,0,0,0,0,0,8 saved");
+    free(b);
     mod_deinit();
 }
 
@@ -3750,6 +3990,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LIGHT")) t_light();
     else if (!strcmp(mode, "PRINT")) t_print();
     else if (!strcmp(mode, "PRINT:chain")) t_print_chain();
+    else if (!strcmp(mode, "STAGE")) t_stage(cs);
     else if (!strcmp(mode, "LOG")) t_log(cs);
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();

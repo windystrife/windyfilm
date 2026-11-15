@@ -23,9 +23,9 @@ S=$R/src
 H=$R/tests/host
 case $CAM in
   EOSM) ML=/root/ml/expsim/mls; PLAT=EOSM.202; CAMDEF=; CAMSRC=wf_cam_eosm.c
-        ALL="SHOT SHOT:nocam SHOT:busy FX FXAB MIST EXIF EXPSIM CFG PACK LIGHT PRINT PRINT:chain HS LEICA CLOG2 CUBE65 PROBE PROBE:boot RAWB LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy FX FXAB MIST EXIF EXPSIM CFG PACK LIGHT PRINT PRINT:chain STAGE STAGE:bad STAGE:missing HS LEICA CLOG2 CUBE65 PROBE PROBE:boot RAWB LOG LOG:big LOG:new LOGCHK" ;;
   5D2)  ML=/root/ml/q5d2/ml; PLAT=5D2.212; CAMDEF=-DWF_BUILD_5D2; CAMSRC=wf_cam_5d2.c
-        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX FXAB MIST EXIF EXPSIM CFG PACK LIGHT PRINT PRINT:chain HS LEICA CLOG2 CUBE65 RAWB LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX FXAB MIST EXIF EXPSIM CFG PACK LIGHT PRINT PRINT:chain STAGE STAGE:bad STAGE:missing HS LEICA CLOG2 CUBE65 RAWB LOG LOG:big LOG:new LOGCHK" ;;
   *) echo "CAM must be EOSM or 5D2"; exit 2 ;;
 esac
 MODES=${MODES:-$ALL}
@@ -58,7 +58,7 @@ arm-none-eabi-gcc $MODFLAGS $MLFLAGS -Wno-unused-function -c -o $T/obj/wf_expoff
 HCC="arm-linux-gnueabi-gcc -O1 -marm -march=armv5te -Wall -Wno-unused-function -Wno-comment -Wno-format-truncation $CAMDEF -I$S -I$H -I$G"
 $HCC -c -o $T/obj/host_ml.o $H/host_ml.c
 $HCC -c -o $T/obj/wf_test.o $H/wf_test.c
-MOD="wf_main.o wf_menu.o wf_shot.o wf_pv.o wf_probe.o wf_loglut.o wf_llk.o wf_llk_arm.o wf_film.o yh_halo.o wf_mist.o yg_grain.o yg_stocks.o
+MOD="wf_main.o wf_menu.o wf_shot.o wf_pv.o wf_probe.o wf_loglut.o wf_llk.o wf_llk_arm.o wf_film.o wf_stagek.o yh_halo.o wf_mist.o yg_grain.o yg_stocks.o
  wf_fx.o wf_expsim.o wf_catalog.o wf_logout.o wf_rawb.o"
 [ -f $O/wf_expk.o ] && MOD="$MOD wf_expk.o"
 MOD="$MOD wf_dev.o wf_rsrc.o"                                     # RAW develop "B": the develop and the buffer check
