@@ -4,8 +4,14 @@ WindyFilm cho Canon EOS M (firmware 2.0.2) - thẻ thử đầu tiên, 14/11/202
 Module Magic Lantern tạo màu phim cho ảnh JPEG ngay lúc chụp.
 Tác giả: WindyStrife. Giấy phép GPL-2.0 (LICENSE_WINDYFILM.txt).
 Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
-Bảng Film stage (lon G00..G44 trong WFFILMS.DAT và WFSTAGE.DAT) là dữ liệu dẫn xuất
-(DESIGN 1a): chỉ dùng riêng, không chia sẻ.
+Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
+dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
+
+Thẻ 15/11 tối (nhánh chain-log, phương án (c) bước 2): lon Film stage khi RAW develop
+On lấy bảng log S-Log3 của đúng cặp âm bản x print từ ML/DATA/WFLOG.DAT, nên cả màu
+phim nằm trong bước develop từ RAW (vùng sáng giữ tới mức cháy của cảm biến). Đường
+JPEG YUV 8-bit 4:2:2 vẫn như cũ khi RAW develop Off. Xem mục 5 (lon Film stage trên
+RAW) và bước 6 trong "Cần thử". G09 Double-X 5222 giờ là phim đen trắng, chỉ in 2302.
 
 Bản này sửa các lỗi thấy ở lần chạy thật đầu tiên (14/11, RAW probe): giờ
 trong log hiện "u.u", dòng log bị mất khi thẻ bận, WFPROBE.BIN thiếu một bản
@@ -184,6 +190,20 @@ Bật:
   cube>.RBT (356 KB). Những lần sau (bật máy, đổi phim, xem ảnh xong) đọc file
   đó, khoảng 1 giây. Log ghi "... .RBT hit" hoặc lý do dựng lại. Xoá file .RBT
   thì lần sau dựng lại, không sao.
+- Lon Film stage (mới, 15/11 tối): RAW develop đọc bảng log 33^3 (215 KB) của đúng
+  cặp âm bản x print từ ML/DATA/WFLOG.DAT, develop RAW ra S-Log3 rồi áp bảng đó, nên
+  cả màu phim nằm trong develop; sau đó chỉ còn grain / halation / bloom / mist.
+  Không có file .RBT: mỗi lần đổi phim / print (hoặc bật lại RAW develop) đọc lại
+  215 KB từ thẻ. Log:
+    rawb: tables log pack G08 v4 c1 NNms (offset ..., 643 entries, ...)
+  Ghi lại NN: đó là thời gian đọc thẻ + dựng bảng (chưa đo trên máy thật).
+- Tạm thời (chờ quyết định): bảng log chưa chứa các hàng knob, Strength hay
+  Highlights / Shadows. Một trong các hàng đó khác mặc định (knob khác 0 / Off /
+  100 %, Strength khác 100 %, Highlights / Shadows khác 0) thì lon Film stage đi
+  đường 8-bit như trước: develop RAW ra sRGB rồi áp bảng phim 8-bit. Log ghi lý do:
+    rawb: chain film G08 v4 on the 8-bit chain (strength)
+  (hoặc "knob rows", "highlights / shadows"). Print nào không có trong WFLOG.DAT
+  hoặc file hỏng / thiếu: một dòng "rawb: log pack G08 v4: ..." rồi cũng đường 8-bit.
 - Khi RAW develop Off, thẻ này chạy giống thẻ EOSM_WindyFilm (cùng bản main,
   có RAW probe v2 và Highlights / Shadows).
 - Dòng menu báo trạng thái: đang nạp bảng, sẵn sàng ("About 30 s per shot"),
@@ -209,6 +229,13 @@ Cần thử và gửi lại:
 3. Một lần dừng bằng nửa nút chụp, và (nếu dám) một lần tắt máy giữa chừng.
 4. Một loạt chụp liên tục 3 tấm khi RAW develop On (phải ra màu phim thường).
 5. 1-2 tấm lon Leica Vivid với RAW develop On, kèm cùng cảnh với RAW develop Off.
+6. (15/11 tối) Lon Film stage trên RAW: nạp G08 (Vision3 5219 500T), Print stock
+   2383, mọi knob mặc định, Strength 100 %, Highlights / Shadows 0. Bật RAW develop
+   On. Log phải có "rawb: tables log pack G08 v4 c1 NNms": ghi lại NN. Chụp 2 tấm:
+   một cảnh có trời sáng / đèn cháy sáng, một cảnh tối; mỗi cảnh thêm 1 tấm RAW
+   develop Off để so. Đổi Print stock 2393, rồi 2302 (ảnh ĐEN TRẮNG): mỗi lần đổi có
+   một dòng "tables log pack" mới, ghi lại NN. Rồi Strength 30 %: log phải có
+   "on the 8-bit chain (strength)", chụp 1 tấm. Thêm 1 tấm G09 (Double-X, chỉ 2302).
 Gửi: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG của những tấm đó (cả tấm Off).
 Mỗi tấm có các dòng "rawb: ..." trong log: bộ đệm RAW đã chọn, điểm khớp,
 mức đen / trắng và thời gian từng bước.
@@ -253,6 +280,7 @@ Hàng Print stock: 15 print:
   5380 = 5381/72, 2395 = 5384/82, 5384/92 = 5385/93, 5385/62 = 5386. Cả hai tên được
   giữ như danh sách gốc; thực tế có 10 kiểu in khác nhau.
 - ECN-I 5248 25T (G17) chỉ có 12 print (thiếu 2302, 5383, 3523XD).
+- Double-X 5222 (G09) là âm bản đen trắng: chỉ in 2302, hàng Print stock chỉ có 2302.
 - Trình chọn hiện tên đầy đủ khi vừa chỗ; menu ML hiện mã, tên đầy đủ ở dòng help.
   EXIF ghi tên đầy đủ ("| Print Kodak Vision Color 2383").
 - Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights / Shadows dùng như phim
@@ -276,7 +304,7 @@ Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ t
 - Để mặc định hết (0 / 0 / Off / 0 0 0 / 100 %) thì máy dùng bảng có sẵn trong
   WFFILMS.DAT như mọi phim, không đọc WFSTAGE.DAT.
 - Đổi một hàng knob (hoặc đổi phim / print khi knob khác mặc định): máy dựng bảng mới
-  từ WFSTAGE.DAT. Không đọc cả file 22,4 MB: lúc bật máy chỉ đọc mục lục (khoảng
+  từ WFSTAGE.DAT. Không đọc cả file 21,3 MB: lúc bật máy chỉ đọc mục lục (khoảng
   20 KB); mỗi lần dựng đọc khoảng 650 KB của đúng cặp đó (nửa âm bản 435 KB, rồi
   nửa print 217 KB, cần khoảng 470 KB bộ nhớ tạm, trả lại ngay), tính toán khoảng
   20 ms trên EOS M. Log: "stage G08 v4 composed NNms k..." (bảng dựng từ knob) hoặc
@@ -289,10 +317,10 @@ Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ t
 
 7. FILM STAGE: LẦN CHẠY ĐẦU
 ---------------------------
-1. Thẻ phải có ML/DATA/WFSTAGE.DAT (22 410 240 B; md5 trong MD5SUMS.txt). Bật máy,
+1. Thẻ phải có ML/DATA/WFSTAGE.DAT (21 323 868 B; md5 trong MD5SUMS.txt). Bật máy,
    WINDYFLM.LOG phải có:
-     pack ok: 706 tables, index NNms, catalog 97 films
-     stage ok: 657 of 657 pairs match the pack (44 negatives, 15 prints), index NNms
+     pack ok: 692 tables, index NNms, catalog 97 films
+     stage ok: 643 of 643 pairs match the pack (44 negatives, 15 prints), index NNms
    Ghi lại hai số "index NNms" (thời gian đọc mục lục). Nếu thay vào đó là
    "stage ML/DATA/WFSTAGE.DAT missing (-1): film-stage knob rows hidden" thì thẻ thiếu
    file; "... bad (-N) ..." là file hỏng hoặc khác bản: chép lại và kiểm MD5SUMS.txt.
@@ -326,10 +354,13 @@ Gửi: ML/LOGS/WINDYFLM.LOG, ML/SETTINGS/WINDYFLM.CFG và các JPG (kèm CR2 n�
 8. FILE TRÊN THẺ
 ----------------
 ML/modules/windyflm.mo    module
-ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper, và 657 cặp Film stage)
-ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 657 cặp Film stage (22,4 MB),
+ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper, và 643 cặp Film stage)
+ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 643 cặp Film stage (21,3 MB),
                           cho 7 hàng knob (mục 6); thiếu thì các hàng đó mờ.
                           Dữ liệu dẫn xuất, chỉ dùng riêng
+ML/data/WFLOG.DAT         bảng log S-Log3 của 643 cặp Film stage cho RAW develop
+                          (92,5 MB, 428 bảng khác nhau, mục 5); thiếu thì lon Film
+                          stage trên RAW đi đường 8-bit. Dữ liệu dẫn xuất, chỉ dùng riêng
 ML/data/WFCANS.DAT        hình lon phim
 ML/data/WFFONTS.DAT       font chữ của giao diện (Ubuntu Sans, UBUNTU_FONT_LICENCE.txt)
 ML/data/WFPRINT.DAT       font chữ in dưới ảnh của Darkroom (viền + thông tin, Ubuntu Sans)

@@ -81,7 +81,9 @@ BRANCH = branch()
 # exception from that merge on; its clean-room print work ends at 47f9597, the commit before the merge.
 # `darkroom` took `print-frame` (with film-stage 4f92b21) in on 15 Nov 2026 (the owner: "merge fillm stage đi bạn"),
 # so it carries the same exception from that merge on; its clean-room work ends at fe4190e, the commit before it.
-NOT_CLEAN = BRANCH in ("film-stage", "grain-halation", "print-frame", "darkroom")
+# `chain-log` (option (c): chain films on the RAW develop from a log pack) is cut from darkroom dcc14dc and took
+# film-stage c0c9fea in on 15 Nov 2026 (its log-table generator): the same exception from its first commit on.
+NOT_CLEAN = BRANCH in ("film-stage", "grain-halation", "print-frame", "darkroom", "chain-log")
 DENY += list(BRANCH_EXCEPTIONS)                       # the derived generator's names are denied by default ...
 if NOT_CLEAN:                                         # ... and allowed only under the declared exception
     DENY = [w for w in DENY if w not in BRANCH_EXCEPTIONS]

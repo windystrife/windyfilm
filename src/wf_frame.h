@@ -30,7 +30,8 @@ struct wf_frame {
     int8_t   aspect;              /* JPEG aspect as the camera reported it (EOS M PROP_IMAGE_ASPECT_RATIO, -1 = unknown) */
     uint8_t  devd;                /* 1 = the Darkroom's frame (wf_dark.c): UYVY8 already developed from a CR2 by B; the
                                      worker runs only the look's stage after B (docs/DESIGN.md 3.6) and keeps it out of
-                                     the shot log's EXIF ring */
+                                     the shot log's EXIF ring; 2 = the same, developed with a chain film's log table
+                                     (wf_rawb.h): the film's look is in it, the stage adds the effects only */
     int      w, h;                /* this request's pixels (a half: h = full height / 2) */
     int      fw, fh;              /* the whole frame (fh = 2 * h for a half) */
     int      y0;                  /* first row of this request inside the whole frame (BOT: fh / 2) */

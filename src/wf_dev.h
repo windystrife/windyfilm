@@ -127,6 +127,29 @@ struct wf_dev_stat {
 int wf_dev_build_disp(struct wf_dev_tabs *t, int cam, const char *cube, int ei, int h, int s, struct wf_ll_info *info);
 int wf_dev_build(struct wf_dev_tabs *t, int src, int curve, int cam, const char *cube, int ei, int autoexp,
                  struct wf_ll_info *info);
+/* The chain films' log pack, ML/DATA/WFLOG.DAT (option (c), docs/DESIGN.md 1a; tools/mk_wflog.py writes it):
+ *   header 32 B  "WFLG", u16 version 1, u16 count, u32 grid 33, u32 table bytes 215622, u32 index offset 32,
+ *                u32 data offset, u32 FNV-1a of the index, u8 curve (WF_LL_*, the grid's log curve), u8 feed (0 = the
+ *                chain was fed the curve's own gamut, 1 = linear Rec.709; information only), u16 0
+ *   index  24 B  u8 catalogue id, u8 print variant (WF_PRINT_*), u8 flags (bit 1 B&W), u8 0, char code[8] (the table
+ *                code, NUL padded), u32 offset, u32 bytes, u32 Adler-32 of the table
+ *   table        33^3 nodes, red fastest (the .cube order), R' G' B' u16 little-endian each, value x 65535: the
+ *                develop's own grid for the header's curve (DOMAIN 0..1). Entries may share one table (the chain's
+ *                identical print tables are stored once).
+ * wf_dev_build_pack: the entry (id, variant, code) as a WF_DEV_CUBE build on the header's curve, LUT EI ei, no auto
+ * exposure: the very tables wf_dev_build makes of a 33-point .cube with those samples, without the text parse. The table
+ * is read in 8190-byte slabs into wf_dev_build's own node sampler (no 215 KB buffer); its Adler-32 is checked before
+ * the tables count. Returns WF_LL_OK, WF_LL_E_OPEN / _READ / _NOMEM / _TRUNC, or a WF_DEV_PK_E_* code (t unusable then);
+ * pi (may be 0) gets the pack's curve and feed, the entry and the index checksum for the log line and a table cache. */
+#define WF_DEV_PK_BYTES (WF_DEV_NODES * 6)
+enum { WF_DEV_PK_E_FORMAT = 40,                  /* not a WFLG pack of this version / grid / table size / curve */
+       WF_DEV_PK_E_INDEX,                        /* index unreadable, its checksum, or the entry's place in the file */
+       WF_DEV_PK_E_NOENT,                        /* no entry with this id, variant and code */
+       WF_DEV_PK_E_SUM };                        /* the table's checksum */
+struct wf_dev_pkinfo { int curve, feed, count, flags; uint32_t off, sum, ixsum; };
+int wf_dev_build_pack(struct wf_dev_tabs *t, int cam, const char *pack, int id, int variant, const char *code, int ei,
+                      struct wf_ll_info *info, struct wf_dev_pkinfo *pi);
+const char *wf_dev_pk_errstr(int rc);            /* short text of any result above (wf_loglut_errstr for WF_LL_*) */
 /* identity of the builder for a table cache (wf_rawb.c's .RBT): FNV-1a of WF_DEV_TABS_VER, the table size, src, curve,
  * cam and every constant table wf_dev_build reads for them (camera matrix, LUT EI gains, the sRGB decode, the curve's gamut
  * matrix, log encode and EI constants). Cached tables of another build id are rebuilt. Bump WF_DEV_TABS_VER whenever

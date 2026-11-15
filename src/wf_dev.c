@@ -29,6 +29,13 @@
 extern void *__mem_malloc(size_t len, unsigned flags, const char *file, unsigned line);
 extern void  __mem_free(void *p);
 extern void  wf_copyw(uint32_t *d, const uint32_t *s, int n);   /* wf_shot.c: 8-word LDM / STM bursts */
+/* the log pack's reads (wf_dev_build_pack; the EOS M / 5D2 core exports, as wf_loglut.c declares them) */
+extern void *FIO_OpenFile(const char *name, unsigned mode);   /* 0 on error */
+extern int   FIO_ReadFile(void *f, void *buf, size_t n);      /* buf must be uncacheable */
+extern void  FIO_CloseFile(void *f);
+extern int   FIO_GetFileSize(const char *name, uint32_t *size);
+extern int64_t FIO_SeekSkipFile(void *f, int64_t pos, int whence);
+#define WF_DV_MEM_DMA 1
 #define WF_DV_MEM_TMP 2
 
 /* ------------------------------------------------------------------ constants (tools/mk_devmat.py --check) */
@@ -271,6 +278,71 @@ static void wf_dv_smp(void *ctx, const uint16_t *rgb)
     B->wp = B->slab + (B->ib & 1) * B->nn3;
 }
 
+/* the log pack (wf_dev.h): the open pack and its entry for the build in progress (wf_task, as wf_dv_hs_h) */
+#define WF_DV_PKCH  8184                         /* read size: a multiple of 6 (one node) and 24 (one index entry) */
+struct wf_dv_pk {
+    void *f;
+    char *dma;                                   /* WF_DV_PKCH + 4, uncacheable: FIO reads here */
+    uint8_t *buf;                                /* its cached copy (wf_copyw bursts), the nodes are read from it */
+    uint32_t off, sum;
+};
+static const struct wf_dv_pk *wf_dv_pkp;
+
+static uint32_t wf_dv_le16(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8; }
+static uint32_t wf_dv_le32(const uint8_t *p) { return wf_dv_le16(p) | wf_dv_le16(p + 2) << 16; }
+
+/* n bytes (<= WF_DV_PKCH) from the pack's position into pk->buf */
+static int wf_dv_pkread(const struct wf_dv_pk *pk, uint32_t n)
+{
+    if (FIO_ReadFile(pk->f, pk->dma, n) != (int)n)
+        return WF_LL_E_TRUNC;
+    wf_copyw((uint32_t *)pk->buf, (const uint32_t *)pk->dma, (int)((n + 3) >> 2));
+    return WF_LL_OK;
+}
+
+/* wf_ll_parse's part for a pack entry: a 33-point grid on DOMAIN 0..1, then the table's nodes in the .cube order into
+   the same sampler; Adler-32 (RFC 1950) of the table bytes against the index */
+static int wf_dv_pkparse(const struct wf_dv_pk *pk, struct wf_dv_b *B, struct wf_ll_info *info)
+{
+    struct wf_ll_hdr h;
+    h.n = WF_DEV_G;
+    for (int c = 0; c < 3; c++) {
+        h.dmin[c] = 0;
+        h.dmax[c] = WF_DV_ONE;
+    }
+    info->n = WF_DEV_G;
+    int rc = wf_dv_hdr(B, &h);
+    if (rc)
+        return rc;
+    if (FIO_SeekSkipFile(pk->f, (int64_t)pk->off, 0) != (int64_t)pk->off)
+        return WF_LL_E_READ;
+    uint32_t a = 1, b = 0;
+    for (uint32_t left = WF_DEV_PK_BYTES; left; ) {
+        uint32_t n = left < WF_DV_PKCH ? left : WF_DV_PKCH;
+        if ((rc = wf_dv_pkread(pk, n)))
+            return rc;
+        const uint8_t *d = pk->buf;
+        for (uint32_t i = 0; i < n; ) {
+            uint32_t e = n - i > 5552 ? i + 5552 : n;   /* 5552: b stays below 2^32 before the reduction */
+            for (; i < e; i++) {
+                a += d[i];
+                b += a;
+            }
+            a %= 65521u;
+            b %= 65521u;
+        }
+        for (uint32_t i = 0; i < n; i += 6) {
+            uint16_t rgb[3] = { (uint16_t)wf_dv_le16(d + i), (uint16_t)wf_dv_le16(d + i + 2),
+                                (uint16_t)wf_dv_le16(d + i + 4) };
+            wf_dv_smp(B, rgb);
+        }
+        left -= n;
+        info->bytes += n;
+    }
+    info->samples = WF_DEV_NODES;
+    return (b << 16 | a) == pk->sum ? WF_LL_OK : WF_DEV_PK_E_SUM;
+}
+
 /* sRGB OETF of linear Q24 (clamped 0..1) as a u16 sum unit (value x 65535): inverse of wf_ll_dec, interpolated */
 static uint32_t wf_dv_oetf(int32_t x24)
 {
@@ -401,7 +473,8 @@ int wf_dev_build(struct wf_dev_tabs *t, int src, int curve, int cam, const char 
             wf_dv_hs_bend(B.N, wf_dv_hs_h, wf_dv_hs_s);
             B.hs = 1;
         }
-        int rc = wf_ll_parse(cube, wf_dv_hdr, wf_dv_smp, &B, info);
+        int rc = wf_dv_pkp && !B.disp ? wf_dv_pkparse(wf_dv_pkp, &B, info)
+                                      : wf_ll_parse(cube, wf_dv_hdr, wf_dv_smp, &B, info);
         if (B.slab)
             __mem_free(B.slab);
         if (rc)
@@ -474,6 +547,115 @@ int wf_dev_build(struct wf_dev_tabs *t, int src, int curve, int cam, const char 
         }
     }
     return WF_LL_OK;
+}
+
+/* the pack's header and index (wf_dev.h): the entry (id, variant, code) into pk->off / pk->sum and pi */
+static int wf_dv_pkfind(struct wf_dv_pk *pk, uint32_t fsz, int id, int variant, const char *code,
+                        struct wf_dev_pkinfo *pi)
+{
+    uint8_t want[8];
+    int i = 0;
+    for (; i < 8 && code && code[i]; i++) want[i] = (uint8_t)code[i];
+    if (code && code[i])
+        return WF_DEV_PK_E_NOENT;                /* longer than the index's 8 bytes: never listed */
+    for (; i < 8; i++) want[i] = 0;
+    if (fsz < 32 || wf_dv_pkread(pk, 32))
+        return WF_DEV_PK_E_FORMAT;
+    const uint8_t *hp = pk->buf;
+    uint32_t count = wf_dv_le16(hp + 6), doff = wf_dv_le32(hp + 20), ixsum = wf_dv_le32(hp + 24);
+    int curve = hp[28];
+    if (hp[0] != 'W' || hp[1] != 'F' || hp[2] != 'L' || hp[3] != 'G' || wf_dv_le16(hp + 4) != 1 || !count
+        || wf_dv_le32(hp + 8) != WF_DEV_G || wf_dv_le32(hp + 12) != WF_DEV_PK_BYTES || wf_dv_le32(hp + 16) != 32
+        || doff < 32 + count * 24 || doff > fsz || curve < 1 || curve > WF_LL_NCURVE)
+        return WF_DEV_PK_E_FORMAT;
+    pi->curve = curve;
+    pi->feed = hp[29];
+    pi->count = (int)count;
+    uint32_t h = 2166136261u, off = 0, bytes = 0, sum = 0;
+    int found = 0;
+    for (uint32_t left = count * 24; left; ) {   /* the index follows the header */
+        uint32_t n = left < WF_DV_PKCH ? left : WF_DV_PKCH;
+        if (wf_dv_pkread(pk, n))
+            return WF_DEV_PK_E_INDEX;
+        h = wf_dv_fnv(h, pk->buf, n);
+        for (const uint8_t *e = pk->buf; !found && e < pk->buf + n; e += 24) {
+            if (e[0] != id || e[1] != variant)
+                continue;
+            int k = 0;
+            while (k < 8 && e[4 + k] == want[k]) k++;
+            if (k < 8)
+                continue;
+            found = 1;
+            pi->flags = e[2];
+            off = wf_dv_le32(e + 12);
+            bytes = wf_dv_le32(e + 16);
+            sum = wf_dv_le32(e + 20);
+        }
+        left -= n;
+    }
+    pi->ixsum = h;
+    if (h != ixsum)
+        return WF_DEV_PK_E_INDEX;
+    if (!found)
+        return WF_DEV_PK_E_NOENT;
+    if (bytes != WF_DEV_PK_BYTES || off < doff || off > fsz || bytes > fsz - off)
+        return WF_DEV_PK_E_INDEX;
+    pk->off = pi->off = off;
+    pk->sum = pi->sum = sum;
+    return WF_LL_OK;
+}
+
+int wf_dev_build_pack(struct wf_dev_tabs *t, int cam, const char *pack, int id, int variant, const char *code, int ei,
+                      struct wf_ll_info *info, struct wf_dev_pkinfo *pi)
+{
+    struct wf_ll_info tmp;
+    struct wf_dev_pkinfo ptmp;
+    if (!info)
+        info = &tmp;
+    if (!pi)
+        pi = &ptmp;
+    {
+        char *z = (char *)info;
+        for (unsigned i = 0; i < sizeof *info; i++) z[i] = 0;
+        z = (char *)pi;
+        for (unsigned i = 0; i < sizeof *pi; i++) z[i] = 0;
+    }
+    if (!t || cam < 0 || cam >= WF_DEV_NCAM)
+        return WF_LL_E_MODE;
+    uint32_t fsz = 0;
+    if (!pack || FIO_GetFileSize(pack, &fsz) != 0)
+        return WF_LL_E_OPEN;
+    struct wf_dv_pk pk = { 0, 0, 0, 0, 0 };
+    if (!(pk.f = FIO_OpenFile(pack, 0)))
+        return WF_LL_E_OPEN;
+    pk.dma = __mem_malloc(WF_DV_PKCH + 4, WF_DV_MEM_DMA | WF_DV_MEM_TMP, "wf_dev.c", __LINE__);
+    pk.buf = __mem_malloc(WF_DV_PKCH + 4, WF_DV_MEM_TMP, "wf_dev.c", __LINE__);
+    int rc = pk.dma && pk.buf ? wf_dv_pkfind(&pk, fsz, id, variant, code, pi) : WF_LL_E_NOMEM;
+    if (!rc) {
+        wf_dv_pkp = &pk;
+        rc = wf_dev_build(t, WF_DEV_CUBE, pi->curve, cam, pack, ei, 0, info);
+        wf_dv_pkp = 0;
+        int k = 0;                               /* the log line's title: the table code */
+        for (; code && k < 8 && code[k]; k++) info->title[k] = code[k];
+        info->title[k] = 0;
+    }
+    if (pk.buf)
+        __mem_free(pk.buf);
+    if (pk.dma)
+        __mem_free(pk.dma);
+    FIO_CloseFile(pk.f);
+    return rc;
+}
+
+const char *wf_dev_pk_errstr(int rc)
+{
+    switch (rc) {
+    case WF_DEV_PK_E_FORMAT: return "not a log pack";
+    case WF_DEV_PK_E_INDEX:  return "pack index bad";
+    case WF_DEV_PK_E_NOENT:  return "not in the pack";
+    case WF_DEV_PK_E_SUM:    return "table checksum";
+    }
+    return wf_loglut_errstr(rc);
 }
 
 /* ------------------------------------------------------------------ the pixel look (shared by the kernel and tests) */

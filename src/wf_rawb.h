@@ -8,8 +8,8 @@
  *   3. wf_dev_prepare (WB fit on Canon's frame, highlight map, matrix, the film shoulder), then wf_dev_rows over the
  *      frame in 64-row bands, sleeping 10 ms between bands (wf_task and Canon's GUI run meanwhile) and stopping at
  *      unload, power off (ml_shutdown_requested), half-shutter held 1.5 s, or 90 s: the rows not developed stay Canon's.
- * The look's own stage then runs on the developed frame: films (sRGB base develop) get wf_film_words + effects, Log +
- * LUT (the cube develop) only the effects, plain log nothing.
+ * The look's own stage then runs on the developed frame: films (sRGB base develop) get wf_film_words + effects, chain
+ * films from the log pack (below) and Log + LUT (the cube develop) only the effects, plain log nothing.
  *
  * Tables: wf_task builds the look's develop tables (wf_dev_build, file I/O there) whenever the look changes, into one
  * shoot-memory block with the per-shot scratch (about 0.8 MB, shoot_malloc_suite_contig, cacheable, wf_fx.c rules),
@@ -32,9 +32,24 @@ enum { WF_RB_OFF = 0, WF_RB_NOCAM, WF_RB_IDLE, WF_RB_PLAY, WF_RB_LOADING, WF_RB_
 int  wf_rawb_can(void);                          /* this camera build can develop the raw (EOS M) */
 int  wf_rawb_state(void);                        /* menu: WF_RB_* */
 int  wf_rawb_err(void);                          /* WF_RB_ERR: the WF_LL_* code of the table build */
-/* worker: develop f (WF_FMT_RAW14) into f->dst. 1 = developed, 0 = not run (dst is still Canon's frame: the caller runs
-   the 8-bit look), -1 = stopped part way (the caller does nothing more to the frame) */
+/* worker: develop f (WF_FMT_RAW14) into f->dst. 1 = developed, 2 = developed with the film's look in the tables (a
+   chain film from the log pack: the caller adds the effects only), 0 = not run (dst is still Canon's frame: the caller
+   runs the 8-bit look), -1 = stopped part way (the caller does nothing more to the frame) */
 int  wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk);
+/* Chain films on RAW (option (c), docs/DESIGN.md 1a): the pair's log table in ML/DATA/WFLOG.DAT (tools/mk_wflog.py) is
+ * the develop's WF_DEV_CUBE table on its curve (S-Log3), LUT EI 0, no auto exposure, the film shoulder on: the whole
+ * film look comes out of the develop, no sRGB base develop and no 8-bit film table after it. wf_rawb_logpk says whether
+ * a look takes that path. Until the owner rules on the knob rows for RAW, a look the log table cannot express keeps the
+ * 8-bit chain exactly as before: film-stage knob rows away from neutral (a composed table), strength other than 100 %,
+ * Highlights / Shadows. So does a pair without a usable table (no pack, not a pack, not listed, bad checksum: one log
+ * line, then the 8-bit chain until the next boot). wf_rawb_logpk_build (wf_task: file I/O) builds the tables for B and
+ * the Darkroom and logs a failure; *ms = the whole SD read + build. */
+enum { WF_RLG_OK = 0, WF_RLG_NOTCHAIN, WF_RLG_KNOBS, WF_RLG_STRENGTH, WF_RLG_HS, WF_RLG_NOPACK, WF_RLG_NOENT, WF_RLG_N };
+struct wf_dev_tabs;
+struct wf_dev_pkinfo;
+int  wf_rawb_logpk(const struct wf_look *lk);                     /* WF_RLG_* */
+const char *wf_rawb_logpk_why(int why);
+int  wf_rawb_logpk_build(struct wf_dev_tabs *t, const struct wf_look *lk, int *ms, struct wf_dev_pkinfo *pi);
 /* worker: a shot that asked for B but did not get it (the camera layer's gate, or a look B cannot do) */
 enum { WF_RBW_OK = 0, WF_RBW_NOTAB, WF_RBW_BUF, WF_RBW_PREP, WF_RBW_LOOK, WF_RBW_FILMTAB, WF_RBW_CAM, WF_RBW_TOP,
        WF_RBW_CHG, WF_RBW_N };            /* TOP / CHG: a 5D2 BOT half that cannot continue its TOP */

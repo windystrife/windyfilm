@@ -77,6 +77,9 @@ for f in $PK; do cp "$B/$f" "$D/"; done
 if [ -s "$B/WFSTAGE.DAT" ]; then                         # film-stage: the knob rows' two-stage tables (PACKS=1 build)
   cp "$B/WFSTAGE.DAT" "$D/"; echo "pack: WFSTAGE.DAT ($(stat -c %s "$B/WFSTAGE.DAT") B)"
 fi
+if [ $CAM = EOSM ] && [ -s "$B/WFLOG.DAT" ]; then         # option (c): the chain films' log tables, RAW develop
+  cp "$B/WFLOG.DAT" "$D/"; echo "pack: WFLOG.DAT ($(stat -c %s "$B/WFLOG.DAT") B)"
+fi
 for c in $CUBES; do
   for f in "$D"/${c##*/}; do [ -e "$f" ] && { echo "${f#$DST/} already on the source card: refusing to replace it"; exit 1; }; done
   cp -p "$c" "$D/"
