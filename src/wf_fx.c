@@ -78,6 +78,8 @@ extern int   wf_yuv_active(void);                /* wf_shot.c: worker up, main h
 
 volatile int wf_grain = WF_GRAIN_CAN ? WF_GRAIN_DEF : 0;   /* wf_cam.h: the 5D2 build has grain (default Off), no halation */
 volatile int wf_halo = WF_HALO_CAN ? WF_HALO_DEF : 0;
+volatile int wf_bloom = WF_HALO_CAN ? WF_BLOOM_DEF : 0;   /* runs in the halation stage (WF_HALO_CAN) */
+volatile int wf_gauge = WF_GAUGE_DEF;            /* grain and halation stage (WF_GAUGE_Q8) */
 volatile int wf_mist = WF_MIST_CAN ? WF_MIST_DEF : 0;
 volatile int wf_fx_hk, wf_fx_gk, wf_fx_mk;
 volatile int wf_fx_retry_ms = 10000;             /* "no memory": next attempt after this (the host test shortens it) */
@@ -85,12 +87,13 @@ volatile int wf_fx_retry_ms = 10000;             /* "no memory": next attempt af
 /* Each film's effect parameters, their reasons and GUESS marks are its catalogue row (films/catalog.py, docs/FILMS.md):
  * e.g. Chungking 320 = Neg 800T grain x1.25 + negative halation x1.25 (the designer's "pushed, coarse" call, not
  * fitted), Cine 250D = Neg 250 grain + negative halation, both x1 (box-speed rule, not fitted). */
-#define FX_KEY_SET 63                            /* key bits 0..5: set + 1; grain bits 6..7 the amount level, halation bit 6 bloom,
-                                                    bit 7 spektrafilm (the set's spk profile and strength) */
-#define FX_KEY_BLOOM 64
-#define FX_KEY_SPK 128
-#define FX_KEY_GEN 256                           /* halation / grain: the Genesis model (WindyHalation / WindyGrain) */
+#define FX_KEY_SET 63                            /* key bits 0..5: set + 1; grain bits 6..7 the amount level, bit 8 the Genesis
+                                                    grain (Even), bits 9..10 the gauge; halation stage bits 6..7 the halation
+                                                    choice (2 = spektrafilm: the set's spk profile and strength, 3 = the
+                                                    Genesis light wrap), bits 8..9 the bloom level, bits 10..11 the gauge
+                                                    (wf_fx.h WF_FXK_*) */
 #define FX_KEY_GGEN 256
+static const char *const fx_gname[WF_GAUGE_MAX + 1] = { "16mm", "35mm", "65mm" };
 static const char *const fx_hname[YH_NSTOCK] = { "neg", "800T", "slide", "bw", "spk-s", "spk-w", "spk-c", "spk-n", "spk-bw", "spk-bww",
                                                  "wrap" };
 static const float fx_amount[WF_GRAIN_MAX + 1] = { 0.0f, 0.6f, 1.0f, 1.5f, 0.6f, 1.0f, 1.5f };
@@ -179,18 +182,24 @@ static int fx_sets(int post, int *gs, int *hs)
 }
 
 /* post: as a shot runs it (wf_post_mode); only post codes get keys, the catalogue gives the sets.
- * keys: halation (set + 1) | 64 bloom; grain (set + 1) | amount level << 6 */
+ * keys: halation stage (set + 1) | halation << 6 | bloom << 8 | gauge << 10, when halation or bloom runs (Wrap has no
+ * bloom); grain (set + 1) | amount level << 6 | 256 Genesis | gauge << 9 */
 int wf_fx_keys(int post, int *hk, int *gk)
 {
-    int h = wf_halo, g = wf_grain, gs, hs;       /* each read once */
+    int h = wf_halo, b = wf_bloom, g = wf_grain, ga = wf_gauge, gs, hs;   /* each read once */
     *hk = *gk = 0;
     if (!fx_sets(post, &gs, &hs))
         return 0;
-    if (WF_HALO_CAN && h >= 1 && h <= WF_HALO_MAX)
-        *hk = (hs + 1) | (WF_HALO_BLOOM(h) ? FX_KEY_BLOOM : 0) | (WF_HALO_SPK(h) ? FX_KEY_SPK : 0)
-              | (WF_HALO_GEN(h) ? FX_KEY_GEN : 0);
+    if (h < 0 || h > WF_HALO_MAX)
+        h = 0;
+    if (b < 0 || b > WF_BLOOM_MAX || WF_HALO_GEN(h))
+        b = 0;
+    if (ga < 0 || ga > WF_GAUGE_MAX)
+        ga = WF_GAUGE_DEF;
+    if (WF_HALO_CAN && (h || b))
+        *hk = (hs + 1) | h << 6 | b << 8 | ga << 10;
     if (WF_GRAIN_CAN && g >= 1 && g <= WF_GRAIN_MAX)
-        *gk = (gs + 1) | ((WF_GRAIN_GEN(g) ? g - WF_GRAIN_GEN0 + 1 : g) << 6) | (WF_GRAIN_GEN(g) ? FX_KEY_GGEN : 0);
+        *gk = (gs + 1) | ((WF_GRAIN_GEN(g) ? g - WF_GRAIN_GEN0 + 1 : g) << 6) | (WF_GRAIN_GEN(g) ? FX_KEY_GGEN : 0) | ga << 9;
     return *hk | *gk;
 }
 
@@ -310,7 +319,10 @@ static int fx_retry_due(int want, int nomem, int at)
  * fringe on shop lights and head lights, x1.5 800T the strong red glow, x4 slide (anti-halation underlayer: still
  * faint, as it should be), x2.5 B&W, bloom x2 (bloom_frac 0.06 -> 0.12 effective). GUESSES like the profiles.
  * yh_init limits hal_q8 / bloom_q8 to 1024 (x4); clamped here too so the log names what is used. */
-#define FX_BLOOM_Q8 512
+/* Bloom levels (its own row since 11-15, as RAWB11 on the darkroom branch): Normal = the old "+ Glow" (bloom_q8 512,
+ * x2 since Strength v2), Low half of it, Strong 896 (x3.5 of bloom_frac). GUESSES like the rest. */
+static const uint16_t fx_bloom_q8[WF_BLOOM_MAX + 1] = { 0, 256, 512, 896 };
+static const char *const fx_bname[WF_BLOOM_MAX + 1] = { "off", "low", "normal", "strong" };
 typedef char fx_gain_rows[YH_NSTOCK == 11 ? 1 : -1];                 /* a new profile needs its gain below (0 = no halation) */
 static int fx_hal_gain(int prof, int hq)
 {
@@ -351,20 +363,28 @@ static void fx_h_sync(int want)
         return;
     }
     yh_params p;
-    int s = (want & FX_KEY_SET) - 1, gen = (want & FX_KEY_GEN) != 0;
-    int spk = !gen && (want & FX_KEY_SPK) != 0;
+    int s = (want & FX_KEY_SET) - 1, hm = WF_FXK_HALO(want), bl = WF_FXK_BLOOM(want), ga = WF_FXK_HGAUGE(want);
+    int gen = WF_HALO_GEN(hm), spk = WF_HALO_SPK(hm);
     int prof = gen ? YH_GEN : spk ? wf_cat_hsets[s].sprof : wf_cat_hsets[s].prof;
     int hq = spk ? wf_cat_hsets[s].shal_q8 : wf_cat_hsets[s].hal_q8;
     char xb[8];
-    yh_default_params(&p, prof);                 /* hal_q8 256 = the profile's strength */
-    p.bloom_q8 = (want & FX_KEY_BLOOM) ? FX_BLOOM_Q8 : 0;
-    p.hal_q8 = fx_hal_gain(prof, hq);            /* the set's strength (Chungking 320: 320 = x1.25) x the profile's gain */
+    if (bl > WF_BLOOM_MAX || gen)
+        bl = 0;
+    if (ga > WF_GAUGE_MAX)
+        ga = WF_GAUGE_DEF;
+    yh_default_params(&p, prof);                 /* hal_q8 256 = the profile's strength; knee / boosts: the profile's,
+                                                    also for bloom alone (halation Off: the film's own profile) */
+    p.bloom_q8 = fx_bloom_q8[bl];
+    p.hal_q8 = hm ? fx_hal_gain(prof, hq) : 0;   /* the set's strength (Chungking 320: 320 = x1.25) x the profile's gain */
+    p.gauge_q8 = WF_GAUGE_Q8(ga);                /* halo and bloom sized for the gauge (yh_halo.h) */
+    p.gen_gauge_q8 = WF_GAUGE_Q8(ga);            /* the light wrap's own halation_film_gauge */
     fx_h_bw = YH_STOCK_BW(prof);                 /* read by the worker only under a published key */
     fx_h_spk = spk;                              /* likewise */
     yh_init(fx_yh, &p, FX_W, FX_HH, (uint8_t *)fx_yh + FX_AL(sizeof(yh_ctx)));
     if (want != fx_h_logged)
-        wf_log("fx halation %s%s%s ready %dms %dKB", prof >= 0 && prof < YH_NSTOCK ? fx_hname[prof] : "?",
-               fx_xname(hq, xb), (want & FX_KEY_BLOOM) ? "+bloom" : "", get_ms_clock() - t0, (int)(nb >> 10));
+        wf_log("fx halation %s%s%s%s, bloom %s, %s ready %dms %dKB", hm ? "" : "off (",
+               prof >= 0 && prof < YH_NSTOCK ? fx_hname[prof] : "?", hm ? fx_xname(hq, xb) : "", hm ? "" : ")",
+               fx_bname[bl], fx_gname[ga], get_ms_clock() - t0, (int)(nb >> 10));
     fx_h_logged = want;
     fx_h_errlog = 0;
     __asm__ __volatile__("" ::: "memory");
@@ -393,6 +413,7 @@ static void fx_g_sync(int want)
     fx_blk scr = { 0, 0, 0 };
     int s = (want & FX_KEY_SET) - 1, a = (want >> 6) & 3, row = wf_cat_gsets[s].row, sc = wf_cat_gsets[s].scale_q8;
     int gen = (want & FX_KEY_GGEN) != 0;
+    int ga = WF_FXK_GGAUGE(want) <= WF_GAUGE_MAX ? WF_FXK_GGAUGE(want) : WF_GAUGE_DEF, gq = WF_GAUGE_Q8(ga);
     char xb[8];
     if (!fx_gb.p)
         fx_heap_alloc(&fx_gb, FX_GBYTES);
@@ -423,12 +444,13 @@ static void fx_g_sync(int want)
         yg_gen_params gp;
         gp.amp_q8 = (int)(fx_amount[a] * sc / 256.0f * 256.0f + 0.5f);
         gp.sat_q8 = 256;                         /* film_grain_saturation 1.0: each channel its own table */
-        gp.gauge_q8 = 256;                       /* grain_film_gauge 35 mm */
+        gp.gauge_q8 = gq;                        /* grain_film_gauge: the Gauge row (16 mm 128, 35 mm 256, 65 mm 474) */
         gp.size_q8 = 256;                        /* film_grain_size 1.0 */
         gp.seed = 0x67656E31u;                   /* film_grain_random_seed ("gen1"); yg_set_shot mixes the file number in */
         yg_gen_init(fx_yg, &gp, 0);
         if (want != fx_g_logged)
-            wf_log("fx grain %s %s ready %dms %dKB%s", yg_stocks[row].name, fx_aname[a], get_ms_clock() - t0,
+            wf_log("fx grain %s %s %s ready %dms %dKB%s", yg_stocks[row].name, fx_aname[a + WF_GRAIN_GEN0 - 1], fx_gname[ga],
+                   get_ms_clock() - t0,
                    (int)(sizeof(yg_ctx) >> 10), fx_gb.suite ? " shoot" : "");
         fx_g_logged = want;
         fx_g_errlog = 0;
@@ -442,10 +464,14 @@ static void fx_g_sync(int want)
         fx_gst.amount *= sc / 256.0f;            /* the set's scale (Chungking 320: 320 / 256 = 1.25, exact in float) */
     if (wf_cat_gsets[s].rho_q8)
         fx_gst.rho_max = wf_cat_gsets[s].rho_q8 / 256.0f;   /* the film's own density range (catalog.py rho_for) */
-    yg_init(fx_yg, &fx_gst, YG_FULL | YG_SEAM_CUT, 0xC0FFEEu, 36000.0f / WF_GRAIN_W, (uint8_t *)fx_yg + FX_AL(sizeof(yg_ctx)), scr.p);
+    /* film pitch (um per pixel): a 36 mm frame at 35 mm, x gauge (16 mm: half the film per pixel, so the grain is twice
+     * the size and twice the RMS in pixels; 65 mm: x1.85, finer and weaker) */
+    yg_init(fx_yg, &fx_gst, YG_FULL | YG_SEAM_CUT, 0xC0FFEEu, 36000.0f * gq / 256.0f / WF_GRAIN_W,
+            (uint8_t *)fx_yg + FX_AL(sizeof(yg_ctx)), scr.p);
     fx_free(&scr);
     if (want != fx_g_logged)
-        wf_log("fx grain %s%s %s ready %dms %dKB%s", yg_stocks[row].name, fx_xname(sc, xb), fx_aname[a], get_ms_clock() - t0,
+        wf_log("fx grain %s%s %s %s ready %dms %dKB%s", yg_stocks[row].name, fx_xname(sc, xb), fx_aname[a], fx_gname[ga],
+               get_ms_clock() - t0,
                (int)(FX_GBYTES >> 10), fx_gb.suite ? " shoot" : "");
     fx_g_logged = want;
     fx_g_errlog = 0;
@@ -526,7 +552,7 @@ void wf_fx_poll(void)
 /* menu (wf_menu.c) */
 int wf_fx_state(int which)
 {
-    int hk, gk, hal = which == WF_FX_HAL, m;
+    int hk, gk, hal = which == WF_FX_HAL || which == WF_FX_BLM, m;
     if (which == WF_FX_MST) {
         int mk;
         if (!wf_mist)
@@ -544,10 +570,12 @@ int wf_fx_state(int which)
             return WF_FXS_PLAY;
         return fx_m_tried == mk && fx_m_nomem ? WF_FXS_NOMEM : WF_FXS_LOADING;
     }
-    if (!(hal ? wf_halo : wf_grain))
+    if (!(which == WF_FX_HAL ? wf_halo : which == WF_FX_BLM ? wf_bloom : wf_grain))
         return WF_FXS_OFF;
     if (!wf_yuv_active())
         return WF_FXS_INACTIVE;
+    if (which == WF_FX_BLM && WF_HALO_GEN(wf_halo))
+        return WF_FXS_UNUSED;                    /* the light wrap has no bloom */
     wf_fx_keys(m = wf_fx_mode(), &hk, &gk);
     if (!(hal ? hk : gk))
         return WF_FXS_UNUSED;

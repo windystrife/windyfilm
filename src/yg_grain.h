@@ -98,7 +98,8 @@ void yg_set_shot(yg_ctx *g, uint32_t shot);   /* per-shot seed: hash(file number
  * The grain lattice step (cell = 1 << gshift px) is our mapping of grain_film_gauge: Genesis renders the grain on
  * a buffer of `grainWidth` px and upsamples it when the frame is bigger, and sizes that buffer from the gauge
  * (16 mm 0.5 / 35 mm 1.0 / 65 mm 1.85: the host code is not in our sources). One sample per pixel at 35 mm and
- * size 1.0, one per 2 px from 16 mm (size / gauge >= 2), capped at 4 px. GUESS. */
+ * size 1.0, one per 2 px from 16 mm (size / gauge >= 2), capped at 4 px; finer than a pixel (65 mm) the amplitude
+ * is scaled by size / gauge (the mean of the samples a pixel would cover). GUESS. */
 typedef struct {
     int      amp_q8;     /* film_grain_amplitude: 256 = the tables as dumped */
     int      sat_q8;     /* film_grain_saturation: 256 = each channel its own table, 0 = the green table for all */

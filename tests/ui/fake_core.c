@@ -14,10 +14,10 @@ static char logbuf[32768];
 static int loglen;
 static int val[WF_NROWS];
 
-/* the names and choices of src/wf_menu.c (film-stage: print stocks, WindyGrain / WindyHalation with the Even / Light
- * wrap choices; the print stocks' full names of wf_row_text_long) */
-static const char *const names[WF_NROWS] = { "Light", "Print stock", "WindyGrain", "WindyHalation", "Mist", "Strength",
-                                             "Highlights", "Shadows", "Film LUT" };
+/* the names and choices of src/wf_menu.c (film-stage: print stocks, Grain / Halation with the Even / Wrap choices,
+ * Bloom and Gauge; the print stocks' full names of wf_row_text_long) */
+static const char *const names[WF_NROWS] = { "Light", "Print stock", "Grain", "Halation", "Bloom", "Gauge", "Mist",
+                                             "Strength", "Highlights", "Shadows", "Film LUT" };
 static const char *const v_light[] = { "Auto", "Day", "Cloudy", "Tungsten", 0 };
 static const char *const v_print[] = { "Scan", "Cine", "Paper", "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72",
                                        "5382", "5384/82", "5384/92", "5385/93", "5385/62", "5386", "5383", "3513D", "3523XD", 0 };
@@ -28,11 +28,14 @@ static const char *const v_print_full[16] = {
     "Eastman Color Print 5384 (1992)", "Eastman Color Print LC 5385 (1993)", "Eastman Color Print 5385 (1962)",
     "Eastman EXR Color Print 5386", "Eastman Color Print 5383", "Fuji Eterna-CP Type 3513D", "Fuji Eterna-CP 3523XD" };
 static const char *const v_grain[] = { "Off", "Fine", "Normal", "Strong", "Even Fine", "Even Normal", "Even Strong", 0 };
-static const char *const v_halo[] = { "Off", "Wide", "Wide + Glow", "Tight", "Tight + Glow", "Wrap", 0 };
+static const char *const v_halo[] = { "Off", "Wide", "Tight", "Wrap", 0 };
+static const char *const v_bloom[] = { "Off", "Low", "Normal", "Strong", 0 };
+static const char *const v_gauge[] = { "16 mm", "35 mm", "65 mm", 0 };
 static const char *const v_mist[] = { "Off", "1/8", "1/4", "1/2", "1", "Black 1/8", "Black 1/4", "Black 1/2", "Black 1", 0 };
 static const char *const v_flut[] = { "Off", "Vision3 250D", "Vision3 500T", "Portra 400", "Leica Vivid", "Windy 250D P", 0 };
 static const char *const v_hs[] = { "-5", "-4", "-3", "-2", "-1", "0", "+1", "+2", "+3", "+4", "+5", 0 };
-static const char *const *vals[WF_NROWS] = { v_light, v_print, v_grain, v_halo, v_mist, 0, v_hs, v_hs, v_flut };
+static const char *const *vals[WF_NROWS] = { v_light, v_print, v_grain, v_halo, v_bloom, v_gauge, v_mist, 0, v_hs, v_hs,
+                                             v_flut };
 #define STRENGTH_MAX 6                      /* 0 .. 150 %, 25 % steps */
 
 static int nvals(int r)
@@ -49,7 +52,9 @@ void fake_reset(void)
     busy_n = 0;
     for (int r = 0; r < WF_NROWS; r++) val[r] = 0;
     val[WF_ROW_GRAIN] = 2;                  /* Normal */
-    val[WF_ROW_HALO] = 1;                   /* Film */
+    val[WF_ROW_HALO] = 1;                   /* Wide */
+    val[WF_ROW_BLOOM] = 2;                  /* Normal */
+    val[WF_ROW_GAUGE] = 1;                  /* 35 mm */
     val[WF_ROW_STRENGTH] = 4;               /* 100 % */
     val[WF_ROW_HL] = val[WF_ROW_SH] = 5;    /* 0 */
 }

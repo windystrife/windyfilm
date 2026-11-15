@@ -14,6 +14,7 @@
 #define WF_MIST_SCALE           277      /* PSF scaled to the frame width: 5616 / 5184 * 256 */
 #define WF_GRAIN_DEF_CAM        0        /* grain / halation cost seconds per half on DIGIC 4: default Off */
 #define WF_HALO_DEF_CAM         0
+#define WF_BLOOM_DEF_CAM        0
 /* the halation grid: the 5D2's TOP / BOT seam (frame row 1872 = 117 x 16) is aligned to the 1/16 level only, so the grid
  * is the frame moved down 48 rows (zero light above the picture): 3792 rows, the seam at 1920 = 30 x 64 */
 #define WF_HALO_W               5616
@@ -31,7 +32,8 @@
 #define WF_MIST_CAN             1
 #define WF_MIST_SCALE           256
 #define WF_GRAIN_DEF_CAM        2
-#define WF_HALO_DEF_CAM         2
+#define WF_HALO_DEF_CAM         1        /* Wide + Bloom Normal = the old default "Wide + Glow" */
+#define WF_BLOOM_DEF_CAM        2
 #define WF_HALO_W               5184
 #define WF_HALO_H               3456
 #define WF_HALO_Y0              0

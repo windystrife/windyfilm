@@ -69,7 +69,9 @@ What this branch adds on top (14 Nov 2026, same day):
 
 **What branch `grain-halation` adds on top (15 Nov 2026, cut from `film-stage`) — the plugin's numbers in the CODE.**
 The owner asked for the plugin's grain and halation in the module as two named stages, **WindyGrain** and
-**WindyHalation** (the browser rows that used to read `Grain` and `Halation`). This is a bigger step than the four
+**WindyHalation** (the browser rows that used to read `Grain` and `Halation`; since 11-15 they read `Grain` and
+`Halation` again, next to a `Bloom` and a `Gauge` row, and the stage names live on in this section and the code
+comments). This is a bigger step than the four
 tables: the *module* now carries constants of the plugin, not only sampled card data.
 
 - **WindyGrain** (`src/yg_grain.c`, `yg_gen_*`): the plugin's three 64-point amplitude tables (`grainTable_r/g/b`,
@@ -88,11 +90,13 @@ tables: the *module* now carries constants of the plugin, not only sampled card 
 - **What is NOT taken**: no shader text, no plugin binary, no `.ofx`; nothing is linked, patched or called. The
   `light_wrap_color` default is the one constant we could not read exactly (0.40 / 0.50 / 0.45, the third a GUESS
   from the hand-off note).
-- **The plugin's stages are options, not replacements.** `Fine / Normal / Strong` (grain) and `Wide / Wide + Glow /
-  Tight / Tight + Glow` (halation) are unchanged in what they do; `Even Fine / Even Normal / Even Strong` (grain) and
-  `Wrap` (halation) are appended to the two rows; the labels say what they do and name no plugin or other project since
-  11-15, this section and the code comments keep the source. Every other film, table, stage and setting behaves exactly as before (the `FXAB`
-  host test measures both).
+- **The plugin's stages are options, not replacements.** `Fine / Normal / Strong` (grain) and `Wide / Tight`
+  (halation; the bloom has its own `Bloom` row since 11-15, it was `Wide + Glow` / `Tight + Glow`) are unchanged in
+  what they do; `Even Fine / Even Normal / Even Strong` (grain) and `Wrap` (halation) are appended to the two rows; the
+  labels say what they do and name no plugin or other project since 11-15, this section and the code comments keep
+  the source. The `Gauge` row (16 / 35 / 65 mm, 11-15) scales the Yedlin grain's pitch, the plugin grain's own gauge
+  and the reach of both halos; at `35 mm` (the default) every other film, table, stage and setting behaves exactly as
+  before (the `FXAB` host test measures both).
 - `tools/provenance_gate.py` allows this branch the same exception as `film-stage` (`NOT_CLEAN` lists both) and still
   prints `gate: this tree is NOT clean-room` on every build. **Do not publish this branch, do not merge it into
   `main` without this section, and never describe a card made from it as clean-room.**

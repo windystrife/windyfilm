@@ -8,7 +8,8 @@
  *   SHOT [nocam|busy]  film / strength / print-less shots bit-exact vs wf_film_build + wf_film_words, B&W, identity, aspects
  *                      and gates (EOS M), Diana halves, Log 1..5, Log + LUT (+ .FRT cache, can), Off, preview, keys
  *   FX                 grain + halation through the shot: ready keys, glow round a light, grain texture, no memory, free
- *   FXAB               WindyGrain / WindyHalation (the Genesis Pro 1.6.6 model, DESIGN 1a) against the stages before
+ *   FXAB               Even grain / Wrap (the Genesis Pro 1.6.6 model, DESIGN 1a) against the stages before; Bloom alone,
+ *                      the Gauge (16 / 35 / 65 mm: halo reach, grain size)
  *                      them on the same frame: the halo round a light, the core of a light (difference of blur keeps
  *                      it), no pixel darker than the plain look, the three grain amounts monotonic, and the frames
  *                      not equal to the old ones
@@ -934,7 +935,7 @@ static void t_fx(void)
     /* no shoot memory for a new halation key: the shot goes without, then the retry */
     h_shoot_fail = 1;
     log_mark();
-    wf_halo = 1;
+    wf_bloom = 0;                                /* Wide alone: a new halation-stage key */
     chk(LOGW("fx halation: no memory", 20000), "no memory: %s", log_line("fx halation"));
     log_mark();
     shot(in, out, FW, FH);
@@ -1017,7 +1018,8 @@ static void t_fxab(void)
 
     /* ---- the stages as they were: Yedlin grain Normal, halation Wide + Glow (cfg bloom) */
     wf_grain = 2;
-    wf_halo = 2;
+    wf_halo = 1;
+    wf_bloom = 2;
     post = wf_fx_mode();
     chk(wf_fx_keys(post, &hk, &gk) && WAIT(wf_fx_hk == hk && wf_fx_gk == gk, 120000), "old keys ready (%s | %s)",
         log_line("fx halation"), log_line("fx grain"));
@@ -1031,9 +1033,9 @@ static void t_fxab(void)
 
     /* ---- WindyHalation: the Genesis light wrap (no grain, so the ring measures the halo alone) */
     wf_grain = 0;
-    wf_halo = 5;
-    chk(wf_fx_keys(post, &hk, &gk) && (hk & 256) && WAIT(wf_fx_hk == hk, 120000), "WindyHalation ready (%s)",
-        log_line("fx halation"));
+    wf_halo = 3;                                     /* Bloom stays Normal: the light wrap has none (no bloom in the key) */
+    chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_HALO(hk) == 3 && WF_FXK_BLOOM(hk) == 0 && WAIT(wf_fx_hk == hk, 120000),
+        "Wrap ready, no bloom with it (%s)", log_line("fx halation"));
     usleep(200000);
     shot(in, out, FW, FH);
     chk(ndiff(ref, out, NW) > 2000, "WindyHalation changes the frame (%d of %d words)", ndiff(ref, out, NW), NW);
@@ -1079,6 +1081,7 @@ static void t_fxab(void)
 
     /* ---- WindyGrain: the Genesis grain, its three amounts */
     wf_halo = 0;
+    wf_bloom = 0;
     wf_grain = 4;
     chk(wf_fx_keys(post, &hk, &gk) && (gk & 256) && WAIT(wf_fx_gk == gk, 120000), "WindyGrain fine ready (%s)",
         log_line("fx grain"));
@@ -1120,8 +1123,66 @@ static void t_fxab(void)
             fs[1]);
     }
 
+    /* ---- 11-15: Bloom on its own row, the Gauge. Bloom alone (Halation Off) glows; the Wide halo reaches further on a
+     * narrower gauge (16 mm > 35 mm > 65 mm); the Yedlin grain is stronger at 16 mm and weaker at 65 mm, the Even grain
+     * weaker at 65 mm (finer than a pixel) */
+    {
+        double bo, far[3], near[3], gsd[3], esd[3];
+        gen_frame(in, FW, FH, 1);
+        memcpy(ref, in, NW * 4);
+        ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+        wf_grain = 0;
+        wf_halo = 0;
+        wf_bloom = 2;
+        wf_gauge = 1;
+        chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_HALO(hk) == 0 && WF_FXK_BLOOM(hk) == 2 && WAIT(wf_fx_hk == hk && !wf_fx_gk, 120000),
+            "bloom alone ready (%s)", log_line("fx halation"));
+        usleep(200000);
+        shot(in, out, FW, FH);
+        bo = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'y', 0);
+        chk(bo > 0.5, "Bloom alone glows round the light: dY %+.2f", bo);
+        wf_bloom = 0;
+        wf_halo = 1;
+        for (int ga = 0; ga <= WF_GAUGE_MAX; ga++) {
+            wf_gauge = ga;
+            chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_HGAUGE(hk) == ga && WAIT(wf_fx_hk == hk, 120000), "Wide at gauge %d ready (%s)",
+                ga, log_line("fx halation"));
+            usleep(200000);
+            shot(in, out, FW, FH);
+            near[ga] = ring(ref, out, FW, FH, disc_r + 6, disc_r + 30, 'y', 0);
+            far[ga] = ring(ref, out, FW, FH, disc_r + 60, disc_r + 160, 'y', 0);
+        }
+        /* the weights move to the coarser bases on a narrower gauge: more of the halo leaves the disc's edge for
+         * r+6..30 (11-15: EOS M 7.18 / 3.10 / 1.39, 5D2 6.33 / 2.62 / 1.31); r+60..160 stays near 0 for Wide */
+        chk(near[0] > near[1] * 1.5 && near[1] > near[2] * 1.4 && near[1] > 1.0 && far[0] >= far[1] && far[1] >= far[2] - 0.02,
+            "the halo spreads wider on a narrower gauge: dY at r+6..30 16 mm %+.2f, 35 mm %+.2f, 65 mm %+.2f (r+60..160:"
+            " %+.2f %+.2f %+.2f)", near[0], near[1], near[2], far[0], far[1], far[2]);
+        wf_halo = 0;
+        for (int ga = 0; ga <= WF_GAUGE_MAX; ga++) {
+            wf_gauge = ga;
+            wf_grain = 2;
+            chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_GGAUGE(gk) == ga && WAIT(wf_fx_gk == gk && !wf_fx_hk, 120000),
+                "Normal grain at gauge %d ready (%s)", ga, log_line("fx grain"));
+            usleep(200000);
+            shot(in, out, FW, FH);
+            corner(ref, out, FW, &gsd[ga]);
+            wf_grain = 5;
+            chk(wf_fx_keys(post, &hk, &gk) && WAIT(wf_fx_gk == gk, 120000), "Even Normal at gauge %d ready (%s)", ga,
+                log_line("fx grain"));
+            usleep(200000);
+            shot(in, out, FW, FH);
+            corner(ref, out, FW, &esd[ga]);
+        }
+        chk(gsd[0] > gsd[1] * 1.3 && gsd[1] > gsd[2] * 1.2, "Yedlin grain sd by gauge: 16 mm %.2f > 35 mm %.2f > 65 mm %.2f",
+            gsd[0], gsd[1], gsd[2]);
+        chk(esd[2] < esd[1] * 0.8 && esd[0] > esd[1] * 0.7, "Even grain sd by gauge: 16 mm %.2f, 35 mm %.2f, 65 mm %.2f (finer"
+            " than a pixel: weaker)", esd[0], esd[1], esd[2]);
+        wf_gauge = WF_GAUGE_DEF;
+    }
+
     wf_grain = 0;
     wf_halo = 0;
+    wf_bloom = 0;
     chk(WAIT(!wf_fx_hk && !wf_fx_gk, 20000), "effects off: both keys cleared");
     mod_deinit();
 }
@@ -1449,7 +1510,8 @@ static void t_cfg(void)
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
     chk(wf_incurve == WF_INC_FILM1 && wf_incurve_t() == (wf_ll_curve_have(WF_INC_FILM1) ? WF_INC_FILM1 : WF_INC_SRGB),
         "incurve %d (in use %d)", wf_incurve, wf_incurve_t());
-    chk(wf_print == 1 && wf_light == 3 && wf_strength == 2 && wf_grain == 1 && wf_halo == 4 && wf_mist == 7 && wf_pv_mode == 2,
+    chk(wf_print == 1 && wf_light == 3 && wf_strength == 2 && wf_grain == 1 && wf_halo == 2 && wf_bloom == 2 && wf_mist == 7
+        && wf_pv_mode == 2 && wf_gauge == WF_GAUGE_DEF,
         "print %d light %d strength %d grain %d halation %d mist %d preview %d", wf_print, wf_light, wf_strength, wf_grain, wf_halo,
         wf_mist, wf_pv_mode);
     chk(wf_hl == 3 && wf_sh == -2, "hl %d sh %d", wf_hl, wf_sh);
@@ -1463,7 +1525,8 @@ static void t_cfg(void)
     char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
-             "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=%s\nexptrim=-5\nexif=off\n"
+             "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\nexposure=%s\n"
+             "exptrim=-5\nexif=off\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
     free(b);
@@ -1498,34 +1561,52 @@ static void t_cfg(void)
     chk(wf_incurve == WF_INC_NEUTRAL && wf_incurve_t() == (wf_ll_curve_have(WF_INC_NEUTRAL) ? WF_INC_NEUTRAL : WF_INC_SRGB),
         "incurve=Neutral read: %d (in use %d)", wf_incurve, wf_incurve_t());
     wf_incurve = inc0;
-    /* the film-stage choices: the words written since 11-15 (evennormal, wrap) and the earlier ones (genstrong, gen) */
-    int gr0 = wf_grain, ha0 = wf_halo;
+    /* the film-stage words: since 11-15 (evennormal, wrap, bloom=, gauge=) and the earlier ones (genstrong, gen, and the
+     * halation words bloom / spkbloom that held the bloom) */
+    int gr0 = wf_grain, ha0 = wf_halo, bl0 = wf_bloom, ga0 = wf_gauge;
     put_cfg("grain=EvenNormal\nhalation=wrap\n");
     wf_cfg_load();
-    chk(wf_grain == 5 && wf_halo == 5, "grain=EvenNormal / halation=wrap read: %d %d", wf_grain, wf_halo);
+    chk(wf_grain == 5 && wf_halo == 3 && wf_bloom == 0, "grain=EvenNormal / halation=wrap read: %d %d (bloom %d)", wf_grain,
+        wf_halo, wf_bloom);
     put_cfg("grain=genstrong\nhalation=gen\n");
     wf_cfg_load();
-    chk(wf_grain == 6 && wf_halo == 5, "grain=genstrong / halation=gen (before 11-15) read: %d %d", wf_grain, wf_halo);
-    put_cfg("grain=even\nhalation=wrapx\n");
+    chk(wf_grain == 6 && wf_halo == 3, "grain=genstrong / halation=gen (before 11-15) read: %d %d", wf_grain, wf_halo);
+    put_cfg("halation=spkbloom\n");
     wf_cfg_load();
-    chk(wf_grain == WF_GRAIN_DEF && wf_halo == WF_HALO_DEF, "unknown grain / halation words: the defaults (%d %d)",
-        wf_grain, wf_halo);
-    /* the labels say what the halo looks like and name no product: per-film profiles Wide, 3-bounce Tight, light wrap Wrap */
+    chk(wf_halo == 2 && wf_bloom == 2, "halation=spkbloom (before 11-15): Tight + Bloom Normal (%d %d)", wf_halo, wf_bloom);
+    put_cfg("halation=bloom\nbloom=strong\ngauge=16\n");
+    wf_cfg_load();
+    chk(wf_halo == 1 && wf_bloom == 3 && wf_gauge == 0, "halation=bloom with a bloom= line: Wide + Strong, gauge 16 mm (%d %d %d)",
+        wf_halo, wf_bloom, wf_gauge);
+    put_cfg("bloom=low\nhalation=halation\ngauge=65\n");
+    wf_cfg_load();
+    chk(wf_halo == 1 && wf_bloom == 1 && wf_gauge == 2, "bloom= before halation= still counts, gauge 65 mm (%d %d %d)", wf_halo,
+        wf_bloom, wf_gauge);
+    put_cfg("grain=even\nhalation=wrapx\nbloom=x\ngauge=70\n");
+    wf_cfg_load();
+    chk(wf_grain == WF_GRAIN_DEF && wf_halo == WF_HALO_DEF && wf_bloom == WF_BLOOM_DEF && wf_gauge == WF_GAUGE_DEF,
+        "unknown grain / halation / bloom / gauge words: the defaults (%d %d %d %d)", wf_grain, wf_halo, wf_bloom, wf_gauge);
+    /* the rows and labels name no product: Grain / Halation / Bloom / Gauge; the halo by its look (per-film profiles Wide,
+     * 3-bounce Tight, light wrap Wrap) */
     wf_grain = 5;
     wf_halo = 1;
-    int lw = !strcmp(wf_row_text(WF_ROW_HALO), "Wide");
+    wf_bloom = 3;
+    wf_gauge = 0;
+    int lw = !strcmp(wf_row_text(WF_ROW_HALO), "Wide") && !strcmp(wf_row_text(WF_ROW_BLOOM), "Strong")
+             && !strcmp(wf_row_text(WF_ROW_GAUGE), "16 mm");
     wf_halo = 2;
-    lw = lw && !strcmp(wf_row_text(WF_ROW_HALO), "Wide + Glow");
+    wf_gauge = 2;
+    lw = lw && !strcmp(wf_row_text(WF_ROW_HALO), "Tight") && !strcmp(wf_row_text(WF_ROW_GAUGE), "65 mm");
     wf_halo = 3;
-    int lt = !strcmp(wf_row_text(WF_ROW_HALO), "Tight");
-    wf_halo = 4;
-    lt = lt && !strcmp(wf_row_text(WF_ROW_HALO), "Tight + Glow");
-    wf_halo = 5;
-    chk(lw && lt && !strcmp(wf_row_text(WF_ROW_HALO), "Wrap") && !strcmp(wf_row_text(WF_ROW_GRAIN), "Even Normal"),
-        "WindyHalation labels Wide / Wide + Glow / Tight / Tight + Glow / Wrap, WindyGrain Even Normal (%s, %s)",
-        wf_row_text(WF_ROW_HALO), wf_row_text(WF_ROW_GRAIN));
+    chk(lw && !strcmp(wf_row_text(WF_ROW_HALO), "Wrap") && !strcmp(wf_row_text(WF_ROW_GRAIN), "Even Normal")
+        && !strcmp(wf_row_name(WF_ROW_GRAIN), "Grain") && !strcmp(wf_row_name(WF_ROW_HALO), "Halation")
+        && !strcmp(wf_row_name(WF_ROW_BLOOM), "Bloom") && !strcmp(wf_row_name(WF_ROW_GAUGE), "Gauge"),
+        "rows Grain / Halation / Bloom / Gauge; Wide / Tight / Wrap, Bloom Strong, 16 / 65 mm, Even Normal (%s, %s, %s)",
+        wf_row_name(WF_ROW_HALO), wf_row_text(WF_ROW_HALO), wf_row_text(WF_ROW_GRAIN));
     wf_grain = gr0;
     wf_halo = ha0;
+    wf_bloom = bl0;
+    wf_gauge = ga0;
     char big[700];
     memset(big, '#', sizeof big);
     memcpy(big, "film=0\n", 7);

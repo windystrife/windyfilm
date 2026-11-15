@@ -89,7 +89,7 @@ void yh_default_params(yh_params *p, int stock)
 {
     p->stock = stock; p->hal_q8 = 256; p->bloom_q8 = 0; p->bloom_frac = 0.06f;
     p->knee_ev = -99.f; p->boost_ev = -99.f; p->pboost_ev = -99.f; p->tint_q8 = 0; p->ystep = 2; p->xfade = 8;
-    p->exact_only = 0; p->pair_t = 40;
+    p->exact_only = 0; p->pair_t = 40; p->gauge_q8 = 256;
     /* YH_GEN (Genesis light wrap): the plugin's own defaults - halation_strength 1.0 (hal_q8 256, above),
      * light_wrap_radius 10, halation_film_gauge 35 mm, and the mask threshold 0.94 of lightWrapI1Val */
     p->gen = stock == YH_GEN ? 1 : 0;
@@ -232,6 +232,36 @@ void yh_set_hot(yh_ctx *g, int hb_q8, int hp_q8, int hs_q8)
     hot_tables(g, (int)(((int64_t)g->boost_q16 * hb_q8 + 128) >> 8), YH_RAMP0);
 }
 
+/* The gauge (yh_params.gauge_q8, 256 = 35 mm as fitted): halo and bloom keep their size on the film, so on a frame
+ * 256 / gauge_q8 times narrower they cover that many times more pixels. The bases are about an octave apart (L0s, L0b,
+ * L1 .. L5: the 1/8 grid sharp and blurred, then 1/16 .. 1/256 blurred), so a gauge moves each base's weight by
+ * log2(256 / gauge_q8) bases: 16 mm (128) exactly one base coarser, 65 mm (474) 0.9 of a base finer, split between the
+ * two bases it falls between. Weight that would leave the pyramid stays at its end (L5 or L0s); the total (the halo's
+ * energy) is unchanged. 256: the weights as they are. Float, init only (exact IEEE ops: host = camera). */
+static void yh_gauge_w(const float *w, float *o, int gq)
+{
+    int n = 0;
+    float x = 256.0f / (float)(gq < 32 ? 32 : gq > 2048 ? 2048 : gq), f, t;
+    if (gq == 256) {
+        for (int b = 0; b < YH_NBAS; b++)
+            o[b] = w[b];
+        return;
+    }
+    for (int b = 0; b < YH_NBAS; b++)
+        o[b] = 0.0f;
+    while (x >= 2.0f) { x *= 0.5f; n++; }
+    while (x < 1.0f) { x *= 2.0f; n--; }
+    t = x - 1.0f;
+    f = t * (1.34f - 0.34f * t);                 /* log2(x) on [1, 2), within 0.01 */
+    for (int b = 0; b < YH_NBAS; b++) {
+        int b0 = b + n, b1 = b + n + 1;
+        b0 = b0 < 0 ? 0 : b0 >= YH_NBAS ? YH_NBAS - 1 : b0;
+        b1 = b1 < 0 ? 0 : b1 >= YH_NBAS ? YH_NBAS - 1 : b1;
+        o[b0] += w[b] * (1.0f - f);
+        o[b1] += w[b] * f;
+    }
+}
+
 int yh_init(yh_ctx *g, const yh_params *p, int W, int H, void *mem)
 {
     const yh_stock *s = &yh_stocks[p->stock < 0 || p->stock >= YH_NSTOCK ? 0 : p->stock];
@@ -283,6 +313,10 @@ int yh_init(yh_ctx *g, const yh_params *p, int W, int H, void *mem)
         yh_begin_frame(g);
         return 0;
     }
+    float hwg[3][YH_NBAS], wbg[YH_NBAS];         /* the profile's and the bloom's base weights for the gauge */
+    for (int c = 0; c < 3; c++)
+        yh_gauge_w(s->hw[c], hwg[c], p->gauge_q8);
+    yh_gauge_w(yh_w_bloom, wbg, p->gauge_q8);
 #ifdef YH_BAKED
 #if YH_T_RAMP0 != YH_RAMP0
 #error "yh_tables.h was made for another YH_RAMP0: re-run cam/mk_tables"
@@ -387,9 +421,9 @@ int yh_init(yh_ctx *g, const yh_params *p, int W, int H, void *mem)
         int t = tint_q8, bw = YH_STOCK_BW(p->stock);
         int32_t bf24 = (int32_t)(bfrac * 16777216.0f + 0.5f);
         for (int b = 0; b < YH_NBAS; b++) {
-            int32_t wb24 = (int32_t)(yh_w_bloom[b] * 16777216.0f + 0.5f), w0 = (int32_t)(s->hw[0][b] * 16777216.0f + 0.5f);
+            int32_t wb24 = (int32_t)(wbg[b] * 16777216.0f + 0.5f), w0 = (int32_t)(hwg[0][b] * 16777216.0f + 0.5f);
             for (int c = 0; c < 3; c++) {
-                int32_t wc = (int32_t)(s->hw[c][b] * 16777216.0f + 0.5f);
+                int32_t wc = (int32_t)(hwg[c][b] * 16777216.0f + 0.5f);
                 int64_t hw24 = ((int64_t)(256 - t) * wc + (int64_t)t * w0 + 128) >> 8;
                 for (int j = 0; j < 3; j++) {
                     int32_t xc = (int32_t)(s->xt[c][j] * 65536.0f + 0.5f), xn = bw ? xc : (c == j ? 65536 : 0);
@@ -409,9 +443,9 @@ int yh_init(yh_ctx *g, const yh_params *p, int W, int H, void *mem)
     for (int b = 0; b < YH_NBAS; b++)
         for (int c = 0; c < 3; c++)
             for (int j = 0; j < 3; j++) {
-                double hw = (1 - t) * s->hw[c][b] + t * s->hw[0][b];
+                double hw = (1 - t) * hwg[c][b] + t * hwg[0][b];
                 double x = (1 - t) * s->xt[c][j] + t * (YH_STOCK_BW(p->stock) ? s->xt[c][j] : (c == j));
-                double v = hs * hw * x + (c == j ? bs * yh_w_bloom[b] : 0.0);
+                double v = hs * hw * x + (c == j ? bs * wbg[b] : 0.0);
                 g->Mh0[b][c][j] = (int32_t)floor(hs * hw * x * 65536.0 + 0.5);
                 g->M[b][c][j] = (int32_t)floor(v * 65536.0 + 0.5);
             }

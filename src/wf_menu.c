@@ -14,7 +14,10 @@
  *   incurve=srgb|film1|neutral   how Log + LUT reads the JPEG (film1 / neutral: only when the build has that curve)
  *   print=scan|cine|paper   light=auto|day|cloudy|tungsten   strength=subtle|normal|strong
  *   hl=<-5..5>  sh=<-5..5>   Highlights / Shadows (films and Log + LUT; 0 = the curve as it was)
- *   grain=off|fine|normal|strong   halation=off|halation|bloom|spk|spkbloom   mist=off|w8|w4|w2|w1|b8|b4|b2|b1
+ *   grain=off|fine|normal|strong|evenfine|evennormal|evenstrong   halation=off|halation|spk|wrap
+ *   bloom=off|low|normal|strong   gauge=16|35|65   mist=off|w8|w4|w2|w1|b8|b4|b2|b1
+ *                    (an old file's halation=bloom / spkbloom reads as halation / spk + bloom=normal, its other halation
+ *                    words as bloom=off, unless the file has its own bloom= line; gen = wrap; no gauge= line: 35)
  *   preview=off|on|fast   exposure=camera|smooth   exptrim=<1/8 EV>   exif=on|off
  *   userwb=<mode>,<kelvin>,<gm>,<ba>   the user's white balance while Light holds it (restored on Auto / unload, also
  *                    after a power cycle in between) */
@@ -186,11 +189,19 @@ static const char *const wf_grain_key[WF_GRAIN_MAX + 1] = { "off", "fine", "norm
                                                             "evenstrong" };
 static const char *const wf_grain_old[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "genfine", "gennormal",
                                                             "genstrong" };
-/* WindyHalation by the look of the halo: the per-film fitted profiles (prof, cfg halation / bloom) reach 40..134 px
- * (90 % of the halo energy at 5184 px), the 3-bounce ones (sprof, cfg spk / spkbloom) 31..35 px; + Glow is the bloom */
-static const char *wf_halo_name[WF_HALO_MAX + 1] = { "Off", "Wide", "Wide + Glow", "Tight", "Tight + Glow", "Wrap" };
-static const char *const wf_halo_key[WF_HALO_MAX + 1] = { "off", "halation", "bloom", "spk", "spkbloom", "wrap" };
-static const char *const wf_halo_old[WF_HALO_MAX + 1] = { "off", "halation", "bloom", "spk", "spkbloom", "gen" };
+/* Halation by the look of the halo: the per-film fitted profiles (prof, cfg halation) reach 40..134 px (90 % of the
+ * halo energy at 5184 px, 35 mm), the 3-bounce ones (sprof, cfg spk) 31..35 px; Wrap is the light wrap */
+static const char *wf_halo_name[WF_HALO_MAX + 1] = { "Off", "Wide", "Tight", "Wrap" };
+static const char *const wf_halo_key[WF_HALO_MAX + 1] = { "off", "halation", "spk", "wrap" };
+/* every halation word ever written (bloom was a halation choice until 11-15, wrap was gen): the halation and the
+ * bloom each one means */
+#define WF_HALO_NOLD 7
+static const char *const wf_halo_old[WF_HALO_NOLD] = { "off", "halation", "bloom", "spk", "spkbloom", "wrap", "gen" };
+static const uint8_t wf_halo_old_h[WF_HALO_NOLD] = { 0, 1, 1, 2, 2, 3, 3 }, wf_halo_old_b[WF_HALO_NOLD] = { 0, 0, 2, 0, 2, 0, 0 };
+static const char *wf_bloom_name[WF_BLOOM_MAX + 1] = { "Off", "Low", "Normal", "Strong" };
+static const char *const wf_bloom_key[WF_BLOOM_MAX + 1] = { "off", "low", "normal", "strong" };
+static const char *wf_gauge_name[WF_GAUGE_MAX + 1] = { "16 mm", "35 mm", "65 mm" };
+static const char *const wf_gauge_key[WF_GAUGE_MAX + 1] = { "16", "35", "65" };
 static const char *wf_mist_name[WF_MIST_MAX + 1] = { "Off", "1/8", "1/4", "1/2", "1", "Black 1/8", "Black 1/4", "Black 1/2",
                                                      "Black 1" };
 static const char *const wf_mist_key[WF_MIST_MAX + 1] = { "off", "w8", "w4", "w2", "w1", "b8", "b4", "b2", "b1" };
@@ -351,10 +362,10 @@ int wf_loaded(void)
 }
 
 /* ------------------------------------------------------------------ rows (wf_api.h) */
-/* the two effect rows are named after this module's stages: their last choices are the Genesis Pro 1.6.6 model
- * (DESIGN 1a), the ones before it are the module's own Yedlin grain / 3-bounce halation */
-static const char *const wf_rname[WF_NROWS] = { "Light", "Print stock", "WindyGrain", "WindyHalation", "Mist", "Strength",
-                                                "Highlights", "Shadows", "Film LUT" };
+/* Grain / Halation: the last choice of each is the Genesis Pro 1.6.6 model (DESIGN 1a), the ones before it the module's
+ * own Yedlin grain / per-film and 3-bounce halation; Bloom and Gauge (11-15) size and add to the same stages */
+static const char *const wf_rname[WF_NROWS] = { "Light", "Print stock", "Grain", "Halation", "Bloom", "Gauge", "Mist",
+                                                "Strength", "Highlights", "Shadows", "Film LUT" };
 
 const char *wf_row_name(int row) { return row >= 0 && row < WF_NROWS ? wf_rname[row] : ""; }
 
@@ -391,6 +402,8 @@ const char *wf_row_text(int row)
     case WF_ROW_PRINT:    return wf_print_name[wf_print_eff(k)];
     case WF_ROW_GRAIN:    return wf_pick(wf_grain_name, WF_GRAIN_MAX + 1, wf_grain);
     case WF_ROW_HALO:     return wf_pick(wf_halo_name, WF_HALO_MAX + 1, wf_halo);
+    case WF_ROW_BLOOM:    return wf_pick(wf_bloom_name, WF_BLOOM_MAX + 1, wf_bloom);
+    case WF_ROW_GAUGE:    return wf_pick(wf_gauge_name, WF_GAUGE_MAX + 1, wf_gauge);
     case WF_ROW_MIST:     return wf_pick(wf_mist_name, WF_MIST_MAX + 1, wf_mist);
     case WF_ROW_STRENGTH: return wf_pick(wf_strength_name, WF_NSTRENGTH, wf_strength);
     case WF_ROW_HL:       return wf_hs_text(wf_hl);
@@ -426,7 +439,9 @@ int wf_row_avail(int row)
                 return 1;
         return 0;
     case WF_ROW_GRAIN:    return WF_GRAIN_CAN && post;
-    case WF_ROW_HALO:     return WF_HALO_CAN && post && wf_aspect_has_halo(wf_aspect);
+    case WF_ROW_HALO:
+    case WF_ROW_BLOOM:    return WF_HALO_CAN && post && wf_aspect_has_halo(wf_aspect);   /* one stage, 3:2 */
+    case WF_ROW_GAUGE:    return (WF_GRAIN_CAN || WF_HALO_CAN) && post;
     case WF_ROW_MIST:     return WF_MIST_CAN && post;
     case WF_ROW_STRENGTH: return lk.output == WF_OUT_FILM;
     case WF_ROW_HL:
@@ -503,6 +518,8 @@ int wf_row_step(int row, int delta)
     }
     case WF_ROW_GRAIN:    wf_grain = wf_wrap(wf_grain, delta, WF_GRAIN_MAX + 1); break;
     case WF_ROW_HALO:     wf_halo = wf_wrap(wf_halo, delta, WF_HALO_MAX + 1); break;
+    case WF_ROW_BLOOM:    wf_bloom = wf_wrap(wf_bloom, delta, WF_BLOOM_MAX + 1); break;
+    case WF_ROW_GAUGE:    wf_gauge = wf_wrap(wf_gauge, delta, WF_GAUGE_MAX + 1); break;
     case WF_ROW_MIST:
         if (!WF_MIST_CAN)
             return 0;
@@ -682,6 +699,7 @@ void wf_cfg_load(void)
     if (n <= 0 || n > WF_CFG_MAX)
         return;
     b[n] = 0;
+    int old_b = -1, has_b = 0;                    /* the bloom an old halation word holds; a bloom= line seen */
     for (const char *l = b; *l; ) {
         const char *v;
         int ok, x;
@@ -719,8 +737,14 @@ void wf_cfg_load(void)
             wf_grain = wf_cfg_word(v, wf_grain_key, WF_GRAIN_MAX + 1, -1);
             if (wf_grain < 0) wf_grain = wf_cfg_word(v, wf_grain_old, WF_GRAIN_MAX + 1, WF_GRAIN_DEF);
         } else if ((v = wf_cfg_val(l, "halation"))) {
-            wf_halo = wf_cfg_word(v, wf_halo_key, WF_HALO_MAX + 1, -1);
-            if (wf_halo < 0) wf_halo = wf_cfg_word(v, wf_halo_old, WF_HALO_MAX + 1, WF_HALO_DEF);
+            x = wf_cfg_word(v, wf_halo_old, WF_HALO_NOLD, -1);   /* the old words cover the new ones */
+            wf_halo = x < 0 ? WF_HALO_DEF : wf_halo_old_h[x];
+            old_b = x < 0 ? -1 : wf_halo_old_b[x];
+        } else if ((v = wf_cfg_val(l, "bloom"))) {
+            wf_bloom = wf_cfg_word(v, wf_bloom_key, WF_BLOOM_MAX + 1, WF_BLOOM_DEF);
+            has_b = 1;
+        } else if ((v = wf_cfg_val(l, "gauge"))) {
+            wf_gauge = wf_cfg_word(v, wf_gauge_key, WF_GAUGE_MAX + 1, WF_GAUGE_DEF);
         } else if ((v = wf_cfg_val(l, "mist"))) {
             wf_mist = WF_MIST_CAN ? wf_cfg_word(v, wf_mist_key, WF_MIST_MAX + 1, 0) : 0;
         } else if ((v = wf_cfg_val(l, "preview"))) {
@@ -750,6 +774,10 @@ void wf_cfg_load(void)
         if (*l)
             l++;
     }
+    if (!has_b && old_b >= 0)
+        wf_bloom = old_b;                         /* a file from before 11-15: its halation word held the bloom */
+    if (!WF_HALO_CAN)
+        wf_halo = wf_bloom = 0;
     if (wf_out < 0 || wf_out >= WF_NOUT)
         wf_out = WF_OUT_FILM;
 }
@@ -764,12 +792,14 @@ static int wf_cfg_save(void)
     int lei = wf_lut_ei_t(), fl = wf_flut > 0 && wf_flut < WF_FLUT_N ? wf_flut : 0;
     int n = snprintf(b, sizeof b,
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
-                     "strength=%s\nhl=%d\nsh=%d\ngrain=%s\nhalation=%s\nmist=%s\npreview=%s\nexposure=%s\nexptrim=%d\nexif=%s\n",
+                     "strength=%s\nhl=%d\nsh=%d\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\nexposure=%s\n"
+                     "exptrim=%d\nexif=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
                      wf_pick(wf_light_key, WF_NLIGHT, wf_light), wf_pick(wf_strength_key, WF_NSTRENGTH, wf_strength),
                      wf_hl_t(), wf_sh_t(), wf_pick(wf_grain_key, WF_GRAIN_MAX + 1, wf_grain), wf_pick(wf_halo_key, WF_HALO_MAX + 1, wf_halo),
+                     wf_pick(wf_bloom_key, WF_BLOOM_MAX + 1, wf_bloom), wf_gauge_key[wf_gauge >= 0 && wf_gauge <= WF_GAUGE_MAX ? wf_gauge : WF_GAUGE_DEF],
                      wf_pick(wf_mist_key, WF_MIST_MAX + 1, wf_mist), wf_pick(wf_pv_key, 3, wf_pv_mode),
                      wf_pick(wf_exp_key, 2, wf_exp_mode), wf_exp_trim >= -16 && wf_exp_trim <= 16 ? (int)wf_exp_trim : 0,
                      wf_exif_off ? "off" : "on");
@@ -823,7 +853,7 @@ int wf_shot_ev8(int *src)
  * a look, only kept for the numbering), written when Canon is idle (job_state 0) and the newest file is stable over two
  * polls, newest entry -> newest IMG_nnnn.JPG, a missing number (RAW only) skipped. */
 #define WF_EX_N 8
-#define WF_EX_T 200
+#define WF_EX_T 256                               /* text <= 255 bytes: 8 + 255 fit Canon's 264 (every field, worst case ~230) */
 static char wf_ex_q[WF_EX_N][WF_EX_T];
 static unsigned wf_ex_h, wf_ex_t;
 static int wf_ex_lastf = -1, wf_ex_sz = -1, wf_ex_stable, wf_ex_last, wf_ex_born, wf_ex_tries, wf_ex_cur = -1;
@@ -846,9 +876,10 @@ static void wf_ex_push(const char *t)
 
 void wf_exif_none(void) { wf_ex_push(""); }
 
-/* "WindyFilm: Portra 400 | Print Cine | Light Day | Strength 100% | Grain Normal | Halation Tight + Glow | Mist 1/8 | EV12"
- * g / h / m: the grain / halation / mist setting when it ran on this shot, 0 = it did not */
-void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev)
+/* "WindyFilm: Portra 400 | Print Cine | Light Day | Strength 100% | Grain Normal | Halation Tight | Bloom Normal | Gauge 16 mm
+ * | Mist 1/8 | EV12". g / h / b / m: the grain / halation / bloom / mist setting when it ran on this shot, 0 = it did not;
+ * the gauge (lk) only when grain or the halation stage ran and it is not 35 mm */
+void wf_exif_shot(const struct wf_look *lk, int g, int h, int bl, int m, int ev)
 {
     char b[WF_EX_T], t[48];
     int n = snprintf(b, sizeof b, "WindyFilm: %s", wf_look_title(lk, t, sizeof t));
@@ -874,6 +905,10 @@ void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev)
         n += snprintf(b + n, sizeof b - n, " | Grain %s", wf_grain_name[g]);
     if (h > 0 && h <= WF_HALO_MAX && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, " | Halation %s", wf_halo_name[h]);
+    if (bl > 0 && bl <= WF_BLOOM_MAX && n < (int)sizeof b)
+        n += snprintf(b + n, sizeof b - n, " | Bloom %s", wf_bloom_name[bl]);
+    if ((g > 0 || h > 0 || bl > 0) && lk->gauge != WF_GAUGE_DEF && lk->gauge <= WF_GAUGE_MAX && n < (int)sizeof b)
+        n += snprintf(b + n, sizeof b - n, " | Gauge %s", wf_gauge_name[lk->gauge]);
     if (m > 0 && m <= WF_MIST_MAX && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, m > 4 ? " | Black Mist %s" : " | Mist %s", wf_mist_name[m] + (m > 4 ? 6 : 0));
     if (ev != WF_EV_NONE && n < (int)sizeof b)
@@ -1128,6 +1163,8 @@ static MENU_SELECT_FUNC(wf_light_select) { (void)priv; wf_row_step(WF_ROW_LIGHT,
 static MENU_SELECT_FUNC(wf_print_select) { (void)priv; wf_row_step(WF_ROW_PRINT, delta); }
 static MENU_SELECT_FUNC(wf_grain_select) { (void)priv; wf_row_step(WF_ROW_GRAIN, delta); }
 static MENU_SELECT_FUNC(wf_halo_select) { (void)priv; wf_row_step(WF_ROW_HALO, delta); }
+static MENU_SELECT_FUNC(wf_bloom_select) { (void)priv; wf_row_step(WF_ROW_BLOOM, delta); }
+static MENU_SELECT_FUNC(wf_gauge_select) { (void)priv; wf_row_step(WF_ROW_GAUGE, delta); }
 static MENU_SELECT_FUNC(wf_mist_select) { (void)priv; wf_row_step(WF_ROW_MIST, delta); }
 static MENU_SELECT_FUNC(wf_strength_select)
 {
@@ -1255,14 +1292,19 @@ static MENU_UPDATE_FUNC(wf_row_update)
         WF_NOT_ACTIVE();
     else if (!wf_row_avail(row))
         MENU_SET_WARNING(MENU_WARN_INFO, "No effect with the current output (or camera).");
-    else if (row == WF_ROW_GRAIN || row == WF_ROW_HALO || row == WF_ROW_MIST) {
-        int s = wf_fx_state(row == WF_ROW_GRAIN ? WF_FX_GRN : row == WF_ROW_HALO ? WF_FX_HAL : WF_FX_MST);
-        if (s == WF_FXS_LOADING)
+    else if (row == WF_ROW_GAUGE && !wf_grain && !wf_halo && !wf_bloom)
+        MENU_SET_WARNING(MENU_WARN_INFO, "Grain, Halation and Bloom are off: no effect.");
+    else if (row == WF_ROW_GRAIN || row == WF_ROW_HALO || row == WF_ROW_BLOOM || row == WF_ROW_MIST) {
+        int s = wf_fx_state(row == WF_ROW_GRAIN ? WF_FX_GRN : row == WF_ROW_HALO ? WF_FX_HAL : row == WF_ROW_BLOOM ? WF_FX_BLM
+                            : WF_FX_MST);
+        if (row == WF_ROW_BLOOM && s == WF_FXS_UNUSED && WF_HALO_GEN(wf_halo))
+            MENU_SET_WARNING(MENU_WARN_ADVICE, "Wrap has no bloom: Bloom runs with Wide or Tight.");
+        else if (s == WF_FXS_LOADING)
             MENU_SET_WARNING(MENU_WARN_INFO, "Being prepared (a few s); shots meanwhile go without it.");
         else if (s == WF_FXS_NOMEM)
             MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "Not enough memory: off, retried every 10 s.");
         else if (s == WF_FXS_ASPECT)
-            MENU_SET_WARNING(MENU_WARN_ADVICE, "Halation needs the 3:2 aspect.");
+            MENU_SET_WARNING(MENU_WARN_ADVICE, row == WF_ROW_BLOOM ? "Bloom needs the 3:2 aspect." : "Halation needs the 3:2 aspect.");
         else if (s == WF_FXS_NOLUT)
             MENU_SET_WARNING(MENU_WARN_ADVICE, "No cube loaded for Log + LUT.");
     }
@@ -1405,8 +1447,10 @@ static struct menu_entry wf_menu[] = {
               .help = "How Log + LUT reads the JPEG: sRGB, or a Canon style undone (Film 1, Neutral)." },
             WF_ROWE("Light", WF_ROW_LIGHT, wf_light_select, "White balance: Auto (yours), the stock's Day, Cloudy, Tungsten."),
             WF_ROWE("Print", WF_ROW_PRINT, wf_print_select, "Scan, cine print or paper print of the loaded film."),
-            WF_ROWE("WindyGrain", WF_ROW_GRAIN, wf_grain_select, "Grain: Fine / Normal / Strong follow the tone, Even ... does not."),
-            WF_ROWE("WindyHalation", WF_ROW_HALO, wf_halo_select, "Highlight halo: Wide / Tight, + Glow adds bloom; Wrap: edge spill."),
+            WF_ROWE("Grain", WF_ROW_GRAIN, wf_grain_select, "Grain: Fine / Normal / Strong follow the tone, Even ... does not."),
+            WF_ROWE("Halation", WF_ROW_HALO, wf_halo_select, "Red-orange halo round highlights: Wide, Tight; Wrap: edge spill."),
+            WF_ROWE("Bloom", WF_ROW_BLOOM, wf_bloom_select, "Soft glow in the light's own colour, apart from the halo (3:2)."),
+            WF_ROWE("Gauge", WF_ROW_GAUGE, wf_gauge_select, "Film gauge: 16 mm coarser grain, wider halo; 65 mm finer, tighter."),
             WF_ROWE("Mist", WF_ROW_MIST, wf_mist_select, "Diffusion filter: glow on lights, veil on shadows."),
             { .name = "Strength", .priv = (void *)&wf_strength, .max = WF_NSTRENGTH - 1, .choices = wf_strength_name,
               .select = wf_strength_select, .help = "How strongly the film look is applied." },

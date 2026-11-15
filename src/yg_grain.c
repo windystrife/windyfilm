@@ -198,6 +198,9 @@ int yg_gen_init(yg_ctx *g, const yg_gen_params *p, uint32_t shot)
     gg = p->gauge_q8 < 64 ? 64 : p->gauge_q8;
     for (sh = 0; sh < 2 && sz >= (gg << (sh + 1)); sh++)       /* cell = size / gauge, powers of two only */
         ;
+    if (gg > sz)                       /* finer than a pixel (65 mm): the buffer is bigger than the frame, so each pixel
+                                          is the mean of (gauge / size)^2 samples - the amplitude x size / gauge. GUESS */
+        g->gamp_q8 = (g->gamp_q8 * sz + gg / 2) / gg;
     g->gshift = sh;
     g->gseed0 = p->seed;
     yg_set_shot(g, shot);

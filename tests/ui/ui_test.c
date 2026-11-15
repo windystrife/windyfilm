@@ -227,20 +227,30 @@ int main(int argc, char **argv)
     end_checks();
 
     /* 2e. film-stage (11-15): a chain can (G08 = 5219 500T, the Film stage tab) loaded, Print stock 2302 (its full name
-     * on the row), WindyGrain Even Normal, WindyHalation Wrap; the focus walks down to WindyHalation; INFO */
+     * on the row), Grain Even Normal, Halation Wrap; the focus walks down to Halation, then Bloom and Gauge; INFO */
     fake_reset();
     fake_set_card(card);
     fake_set_loaded(id_of("G08"));
     fake_set_row(WF_ROW_PRINT, 3);
     fake_set_row(WF_ROW_GRAIN, 5);
-    fake_set_row(WF_ROW_HALO, 5);
+    fake_set_row(WF_ROW_HALO, 3);
     open_ui();
     CHECK(wfui_host_sel_id() == id_of("G08"), "open not on the loaded chain can");
     CHECK(wfui_host_group() == WF_GRP_STAGE, "chain can in group %d, not Film stage", wfui_host_group());
     shot("fs_chain");
     for (int i = 0; i < WF_ROW_HALO; i++) key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfui_host_focus() == WF_ROW_HALO, "DOWN x3 not on WindyHalation");
+    CHECK(wfui_host_focus() == WF_ROW_HALO && !strcmp(wf_row_name(WF_ROW_HALO), "Halation"), "DOWN x3 not on Halation");
     shot("fs_rows");
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wfui_host_focus() == WF_ROW_BLOOM && !strcmp(wf_row_text(WF_ROW_BLOOM), "Strong")
+          && !strcmp(wf_row_text(WF_ROW_HALO), "Wrap"), "Bloom row: RIGHT to Strong, Halation untouched ('%s', '%s')",
+          wf_row_text(WF_ROW_BLOOM), wf_row_text(WF_ROW_HALO));
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wfui_host_focus() == WF_ROW_GAUGE && !strcmp(wf_row_text(WF_ROW_GAUGE), "16 mm"), "Gauge row: LEFT to 16 mm ('%s')",
+          wf_row_text(WF_ROW_GAUGE));
+    shot("fs_bloom_gauge");
     key(MODULE_KEY_INFO);
     CHECK(wfui_host_info(), "INFO did not open the overlay");
     shot("fs_info");
@@ -257,7 +267,7 @@ int main(int argc, char **argv)
     shot("fs_print_long");
     close_ui(MODULE_KEY_MENU, 0);
 
-    /* 2b. Highlights / Shadows: 9 rows, 7 shown, the list scrolls with the focus (the font keeps its size) */
+    /* 2b. Highlights / Shadows: 11 rows, 7 shown, the list scrolls with the focus (the font keeps its size) */
     fake_reset();
     fake_set_card(card);
     fake_set_loaded(id_of("PRT160"));

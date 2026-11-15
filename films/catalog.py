@@ -91,7 +91,7 @@ TYPES = {"neg": 0, "slide": 1, "bw": 2}
 GRAIN_ROWS = {"Neg 400": 0, "Neg 800T": 1, "Slide 50": 2, "B&W 400": 3, "Neg 160": 4, "Neg 250": 5}
 HALO_PROFILES = {"neg": 0, "C800T": 1, "slide": 2, "BW": 3,           # YH_NEG, YH_C800T, YH_SLIDE, YH_BW
                  "spk_s": 4, "spk_w": 5, "spk_c": 6, "spk_n": 7, "spk_bw": 8, "spk_bww": 9}   # YH_SPK_S .. YH_SPK_BWW
-# spektrafilm halation (WindyHalation "Tight" / "Tight + Glow"; yh_halo.h YH_SPK_*, fit_levels.py): the profile of
+# spektrafilm halation (Halation "Tight"; yh_halo.h YH_SPK_*, fit_levels.py): the profile of
 # the film's anti-halation class as spektrafilm's params_builder assigns it (Portra / Ektar / slide strong, Gold /
 # UltraMax / C200 / Xtra weak, Vision3 cine strong, rem-jet removed none); B&W GUESS (spektrafilm has none). Default by
 # family; a row's `spk` (profile, strength Q8) overrides it. Strength stays 256 unless the row's README pushes the
@@ -584,7 +584,7 @@ def header(out, synth=0, gaps=False):
     L.append("static const struct { uint8_t row; uint16_t scale_q8, rho_q8; } fr_cat_gsets[FR_CAT_NGSET] = { %s };" %
              ", ".join("{ %d, %d, %d }" % g for g in gs))
     L.append("/* halation sets: yh profile (YH_NEG 0, YH_C800T 1, YH_SLIDE 2, YH_BW 3), strength Q8 (yh_params.hal_q8); the")
-    L.append(" * spektrafilm profile (YH_SPK_S 4 .. YH_SPK_BWW 9) and its strength Q8 (WindyHalation \"Tight\") */")
+    L.append(" * spektrafilm profile (YH_SPK_S 4 .. YH_SPK_BWW 9) and its strength Q8 (Halation \"Tight\") */")
     L.append("static const struct { uint8_t prof, sprof; uint16_t hal_q8, shal_q8; } fr_cat_hsets[FR_CAT_NHSET] = { %s };" %
              ", ".join("{ %d, %d, %d, %d }" % (h[0], h[2], h[1], h[3]) for h in hs))
     L.append("#endif")
@@ -774,7 +774,7 @@ def docs(out):
             f["id"], f["name"], f["code"], f["type"], f["iso"], f["kelvin"], f["family"], g, h,
             "as + LUT" if f["lut"] else "%s x%.2f" % (s[0], s[1] / 256.0),
             "cube" if f["lut"] else "yes" if f["ready"] else "placeholder", f["prov"] or "-"))
-    L += ["", "## spektrafilm halation (WindyHalation: Tight / Tight + Glow)", "",
+    L += ["", "## spektrafilm halation (Halation: Tight)", "",
           "The halation model of spektrafilm (github andreavolpato/spektrafilm, GPLv3; its published model numbers, no code):",
           "light reflected back from the film base re-exposes the emulsion in 3 bounces, Gaussians of sigma, 1.41 sigma and",
           "1.73 sigma with weights 4/7, 2/7, 1/7, the same sigma in every layer (65 um still, 50 um cine; 9.4 / 7.2 px at",

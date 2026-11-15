@@ -70,6 +70,8 @@ typedef struct {
     int   xfade;                 /* Diana: crossfade below the seam in 32-px rows (0 = off, default 8) */
     int   exact_only;            /* 1 = exact per-channel path everywhere (reference for tests) */
     int   pair_t;                /* pair path threshold abs(Y0 - Y1), default 40; < 0 = no pair path */
+    int   gauge_q8;              /* film gauge: 256 = 35 mm (the profiles as fitted, default), 128 = 16 mm, 474 = 65 mm;
+                                  * halo and bloom keep their size on the film (yh_init: yh_gauge_w) */
     /* YH_GEN (Genesis light wrap): the mask, its blur and the gate of the plugin; hal_q8 is halation_strength */
     int   gen;                   /* 1 = the Genesis model (stock must be YH_GEN; knee / boost / bloom / tint unused) */
     int   gen_radius;            /* light_wrap_radius: the halo radius in px at 2048 px and 35 mm, default 10 */
