@@ -52,7 +52,8 @@ WSL work dirs (one each, never shared): core `/root/ml/wf_core`, ui `/root/ml/wf
 ```
 module_init ─ wf_cam_init (ROM word checks) ─ wf_cfg_load ─ menu ─ wf_task (own task, prio 0x1C)
    CBRs: CBR_KEYPRESS (browser + open key), CBR_DISPLAY_FILTER (LiveView preview), CBR_SHOOT_TASK if needed
-wf_task loop (~50 ms): pack reader, Log + LUT cube loader, preview tables, EXIF writer, config save, log flush, UI redraw
+wf_task loop (~50 ms): roll (first) ─ a darkroom run when asked ─ pack reader, Log + LUT cube loader, effects, preview
+      tables, EXIF writer, config save, log flush
 shot: Canon YUV conversion site ─ hook (patch_hook_function) ─ gate ─ semaphore ─ worker task film_yuv (prio 0x1C)
       worker: chunks of 288 words into cached scratch ─ kernel (film / log / Log + LUT) ─ effects (grain, halation, mist)
 ```
@@ -396,7 +397,7 @@ comes first. The 5D2 follows once the EOS M works (raw 5792 x 3804, pitch 10136,
   ITU-T T.81 (lossless JPEG) descriptions;
 - the develop `wf_dev.c` (B, section 3.2);
 - the baseline JPEG encoder `wf_jpe.c`, from T.81 and its Annex K tables;
-- the roll state machine `wf_roll.c`, the darkroom task `wf_dark.c` with its pure parts `wf_darkp.c`, and the screens
+- the roll state machine `wf_roll.c`, the darkroom run `wf_dark.c` (inside wf_task) with its pure parts `wf_darkp.c`, and the screens
   `ui/wf_dark_ui.c`.
 
 None of it is code from the Film Roll author, and Canon's ROM JPEG encoder is not used: the CR2 is developed outside
@@ -427,8 +428,9 @@ Stocks keep their Windy names, and there are no brand logos.
   - File handles: any value but 0 (and -1) is a good FIO handle (`WF_FH_OK`). DryOS hands out odd handles as often
     as even ones; RAWB8 took 3 / 5 / 7 for errors and left the file open, so the roll file stayed 0 bytes and the
     log, config and .RBT writes failed now and then ("rc 3/5/7").
-  - It is read at boot. A file that does not parse means no roll (logged); an empty file (a save that did not finish)
-    too.
+  - It is read at boot, the first thing in wf_task's loop after the worker and the hooks, before anything of the look
+    is built (owner RAWB9: the roll came at 10.9 / 15.2 s, after the grain build, and RAW+L, review off and the HUD
+    waited for it). A file that does not parse means no roll (logged); an empty file (a save that did not finish) too.
 - **Frames.** wf_task counts frames while Canon is idle (job_state 0, no shot pending) and the file number from
   `get_shooting_card()` has been stable over two polls. `wf_roll_seen` then adds every new number that has a CR2:
   - numbers wrap 9999 -> 1 with the folder + 1;
@@ -436,10 +438,21 @@ Stocks keep their Windy names, and there are no brand logos.
   - frames past the count are not added, and at the count the roll is FULL.
 - **RAW+L forced.** While a roll can shoot, wf_task sets `PROP_PIC_QUALITY` to RAW + L fine when it differs. The old
   value comes back once the roll is full, rewound or closed, and at unload. A frame without a CR2 does not count.
-- **The shot's JPEG** gets the module's look of the roll's film at once, so the card holds a picture: the normal
-  8-bit look, or B's develop when the menu "RAW develop" is On.
-- **Both modes at once** (owner 11-14 evening, replacing that afternoon's "one mode at a time"): with a roll loaded
-  and RAW develop On, each RAW+L shot is developed by B right away (about 30 s, as without a roll) and also counts as a
+- **The shot's JPEG is Canon's own** (owner RAWB9, 11-15: the in-camera look took 23..36 s a frame, "chụp nó lại
+  thành xử lý luôn"). While a roll is in the camera (loaded, full or rewound) and RAW develop is Off, `wf_look_use()`
+  is `WF_LU_NONE`:
+  - the NN / TOP / BOT hooks hand nothing to the worker: the frame keeps Canon's JPEG and the shot costs only Canon's
+    own wait. The log says `yuv NN#n roll frame: Canon's JPEG, no look (the Darkroom prints it)`; each such JPEG keeps
+    its empty place in the EXIF ring (the numbering), no UserComment is written;
+  - nothing of the look is built: no Log + LUT tables (the 21 s cube read), no halation / grain / mist (8..13 s for the
+    grain), and what was built is given back (about 6 MB of shoot memory). Loading a roll after a film change costs
+    nothing either. The LiveView preview of a film look stays (the pack table is a quick read); a Log + LUT look is
+    not previewed while a roll is in (its tables are not there).
+  - The Darkroom prints the frames later with the full look. Closing the roll (or developing all of it) brings the
+    shot path back (`WF_LU_SHOTS`): the tables are built again for normal shots.
+- **Both modes at once** (owner 11-14 evening, replacing that afternoon's "one mode at a time"; kept as the owner's
+  opt-in after RAWB9: RAW develop is Off at every boot): with a roll loaded and RAW develop On (`WF_LU_SHOTS`: the look
+  is built as without a roll), each RAW+L shot is developed by B right away (about 30 s, as without a roll) and also counts as a
   roll frame whose CR2 the Darkroom prints later with the roll's film. Loading a roll leaves RAW develop alone, and
   RAW develop leaves the roll alone. The frame counts once Canon is idle and B has finished (no shot pending), so
   "WIND ON" comes after B's develop.
@@ -498,8 +511,8 @@ Stocks keep their Windy names, and there are no brand logos.
   - EOS M only (the 5D2 has no roll yet: `wf_roll_req_swap` returns -4 there).
 - **End / close.** "End roll now" (menu) ends the roll early (the roll is rewound: no more frames); starting the darkroom rewinds a loaded roll first.
 - **A full or rewound roll keeps** (until the Darkroom develops it or Close roll): the film loaded and locked (another
-  film is refused; the same film plays the load animation); the film look on every later JPEG (and B with RAW develop
-  On, if the quality Canon gets back is RAW+L: B develops only RAW+L shots); RAW+L and image review back to Canon's
+  film is refused; the same film plays the load animation); Canon's own JPEG on any later shot (`WF_LU_NONE`; with RAW
+  develop On, B and the look, if the quality Canon gets back is RAW+L: B develops only RAW+L shots); RAW+L and image review back to Canon's
   own values (forced only while the roll can still take frames); PLAY still blocked while Blind roll is On.
   "Close roll" gives up on the frames not yet developed: they become K and their CR2s stay untouched.
 
@@ -512,8 +525,21 @@ Stocks keep their Windy names, and there are no brand logos.
     when lit. With no roll on the camera the browser's PLAY still closes it, as before. The end-of-roll notice's SET
     goes to the same screen.
   - Starting needs: not movie mode, a card, battery >= 30 %, and no B develop of a shot still running.
-- **Task "wf_dark"**, prio 0x1F (below wf_task 0x1E and the worker 0x1C), lives for one run.
-  - At start: PauseLiveView, powersave_prohibit, then the memory:
+- **Inside wf_task**, no task of its own (owner RAWB9: DryOS's table was full, `tasks 104 of 104`, the UI task on the
+  last slot, and `task_create("wf_dark")` was refused at every SET: `dark: no task (5)`, the owner waited 4 minutes).
+  `wf_dark_start` (UI / menu) only checks and asks (`dk_go`); wf_task's next loop runs the whole run in `wf_dark_poll`,
+  right after `wf_roll_poll`, and comes back when the roll is developed or stopped. No refusal is possible.
+  - wf_task's other polls wait meanwhile; between bands the run calls `wf_task_yield` (the EOS M ML-menu guard, the
+    browser request) and writes the log between frames. The UI task (prio 0x1B, above wf_task 0x1E) draws and takes
+    MENU as before. The worker (0x1C) runs the look stage, as for a shot. B's tables are given back by calling
+    `wf_rawb_poll` from the run's own wait.
+  - The start needs the worker up (a boot's first seconds: "Starting: try again in a moment").
+  - **Getting ready** (`WF_DP_MIX`, frame -1, "Mixing the chemistry"): `wf_look_use()` is `WF_LU_DARK` now, so the run
+    builds the look's effects (halation, grain, mist) for its post code and loads the film table, before the big
+    blocks are taken: `dark: look ready 10150ms: film table, halation, grain` ("-" after a part with no memory). No
+    shot LUT is built (the develop tables hold the cube) and the halation is built whatever the camera's aspect (the
+    print is 3:2).
+  - Then: PauseLiveView, powersave_prohibit, then the memory:
     - raw: 32,598,720 B from the SRM suite (a contiguous run of its buffers);
     - frame: 35,831,808 B (5184 x 3456 UYVY) from `shoot_malloc_suite_contig`, else another SRM run;
     - a 256 KB DMA read buffer, a 256 KB cacheable decoder input, the 128 KB CR2 head, the encoder state and a 64 KB
@@ -699,7 +725,8 @@ The layout, 720x480 (the ML bitmap):
   seconds (RAW develop 35-45 s), and wf_task (0x1E) builds the grain tables for 2-19 s without sleeping; the owner's
   RAWB2 log shows the old prio-0x1E UI task waiting out that build (DryOS does not time-slice equal priorities). The UI
   task now runs at 0x1B, above both and below ML's menu_task (0x1A) and Canon's GUI. It beats at every step; a key that finds no
-  beat for 2 s goes to Canon / ML and asks the task to close when it runs (log `ui: no beat for N ms (state, phase)`;
+  beat for 2 s (10 s while it opens inside a pack read: owner RAWB9, the cans read waited 2.2 / 7.3 s on a card busy
+  with the roll's last frame) goes to Canon / ML and asks the task to close when it runs (log `ui: no beat for N ms (state, phase)`;
   phases listed at the top of `src/ui/wf_ui.c`). The EOS M two-finger tap then opens the ML menu (no module took MENU).
   The open is claimed under `cli` (TRASH in the GUI task and the menu entry in wf_task cannot start two tasks), a failed
   `task_create` leaves the browser closed, and keys pass on while the task starts LiveView after a load.
