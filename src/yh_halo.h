@@ -108,6 +108,7 @@ typedef struct {
     /* YH_GEN (Genesis light wrap): the two tables of its two arctans, the wrap colour, the blur radius and a
      * reciprocal of the box length (init only; the model needs no display model) */
     int      gen, g_rad, g_str_q8, g_thr;
+    int      g_keep;             /* halves: the seam row (L0 grid) whose mask rows the TOP build kept in L[1], -1 none */
     int16_t  gcol[3];            /* light_wrap_color, Q15 */
     uint16_t gta[256];           /* the highlight mask (lightWrapI1Val's arctan), Q15 of 0..1 */
     uint16_t gti[256];           /* the per-channel gate (LightWrapStepTwo's i2), Q8 of 0..1 (0..256) */

@@ -967,6 +967,34 @@ static double ring_neg(const uint32_t *a, const uint32_t *b, int w, int h, int r
     return mn;
 }
 
+/* mean (b - a) luma over the pixels x0 <= x < x1, y0 <= y < y1 of a w-wide frame (x0, x1 even) */
+static double box_dy(const uint32_t *a, const uint32_t *b, int w, int x0, int x1, int y0, int y1)
+{
+    int wpr = w / 2;
+    int64_t s = 0;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0 / 2; x < x1 / 2; x++)
+            s += WY0(b[y * wpr + x]) - WY0(a[y * wpr + x]) + WY1(b[y * wpr + x]) - WY1(a[y * wpr + x]);
+    return (double)s / ((double)(x1 - x0) * (y1 - y0));
+}
+
+/* over n words: the mean and sd of the (b - a) luma, the mean (b - a) of U and V */
+static void flat_stats(const uint32_t *a, const uint32_t *b, int n, double *my, double *sy, double *mu, double *mv)
+{
+    int64_t s = 0, s2 = 0, su = 0, sv = 0;
+    for (int i = 0; i < n; i++) {
+        int d0 = WY0(b[i]) - WY0(a[i]), d1 = WY1(b[i]) - WY1(a[i]);
+        s += d0 + d1;
+        s2 += d0 * d0 + d1 * d1;
+        su += WU(b[i]) - WU(a[i]);
+        sv += WV(b[i]) - WV(a[i]);
+    }
+    *my = (double)s / (2.0 * n);
+    *sy = sqrt((double)s2 / (2.0 * n) - *my * *my);
+    *mu = (double)su / n;
+    *mv = (double)sv / n;
+}
+
 static void t_fxab(void)
 {
     struct pk e[] = { { fC, 0, tab_make(0, 0, 0, 0) } };
@@ -1016,6 +1044,38 @@ static void t_fxab(void)
     chk(nneg == 0 && hl == 0, "the halo only adds light (%d darker pixels, worst %+.0f)", nneg, hl);
     chk(fabs(hi) < 3.0, "difference of blur keeps the core of the light (dY %+.2f, old stages %+.2f)", hi, hi_old);
     chk(fabs(ho - ho_old) > 0.3, "not the old halation: %+.2f vs %+.2f", ho, ho_old);
+#ifndef WF_BUILD_5D2
+    /* ---- 11-15: WindyHalation in Diana halves (TOP + BOT builds) against the whole frame. The light crosses the seam
+     * (the centre row): its glow in the 6 rows above and below the seam, beside and over the disc. */
+    {
+        int x0 = FW / 2 - disc_r - 40, x1 = FW / 2 + disc_r + 40;
+        double wa = box_dy(ref, out, FW, x0, x1, FH / 2 - 6, FH / 2), wb = box_dy(ref, out, FW, x0, x1, FH / 2, FH / 2 + 6);
+        double wa2 = box_dy(ref, out, FW, x0, x1, FH / 2 - 60, FH / 2 - 6), wb2 = box_dy(ref, out, FW, x0, x1, FH / 2 + 6, FH / 2 + 60);
+        halves = 1;
+        log_mark();
+        shot(in, out2, FW, FH);
+        halves = 0;
+        chk(LOGW("(TOP ", 5000), "WindyHalation halves shot: %s", log_line("(TOP "));
+        double ha = box_dy(ref, out2, FW, x0, x1, FH / 2 - 6, FH / 2), hb = box_dy(ref, out2, FW, x0, x1, FH / 2, FH / 2 + 6);
+        double ha2 = box_dy(ref, out2, FW, x0, x1, FH / 2 - 60, FH / 2 - 6), hb2 = box_dy(ref, out2, FW, x0, x1, FH / 2 + 6, FH / 2 + 60);
+        printf("INFO halves seam: whole %+.2f | %+.2f (wide %+.2f | %+.2f), halves %+.2f | %+.2f (wide %+.2f | %+.2f), max diff %d,"
+               " mean %+.3f\n", wa, wb, wa2, wb2, ha, hb, ha2, hb2, max_d(out, out2, NW), mean_dy(out, out2, NW));
+        chk(fabs(ha - wa) < 1.0 && fabs(hb - wb) < 1.0, "WindyHalation halves = whole frame at the seam: above %+.2f (whole %+.2f),"
+            " below %+.2f (whole %+.2f)", ha, wa, hb, wb);
+        chk(fabs(ha2 - wa2) < 1.0 && fabs(hb2 - wb2) < 1.0, "WindyHalation halves = whole frame near the seam: above %+.2f"
+            " (whole %+.2f), below %+.2f (whole %+.2f)", ha2, wa2, hb2, wb2);
+    }
+#else
+    /* ---- 11-15: every 5D2 shot is TOP + BOT (seam at the centre row): the light's glow is the same above and below */
+    {
+        int x0 = FW / 2 - disc_r - 40, x1 = FW / 2 + disc_r + 40;
+        double a = box_dy(ref, out, FW, x0, x1, FH / 2 - 6, FH / 2), b = box_dy(ref, out, FW, x0, x1, FH / 2, FH / 2 + 6);
+        double a2 = box_dy(ref, out, FW, x0, x1, FH / 2 - 60, FH / 2 - 6), b2 = box_dy(ref, out, FW, x0, x1, FH / 2 + 6, FH / 2 + 60);
+        printf("INFO TOP / BOT seam: %+.2f | %+.2f (wide %+.2f | %+.2f)\n", a, b, a2, b2);
+        chk(fabs(a - b) < 1.0 && fabs(a2 - b2) < 1.0, "WindyHalation over the TOP / BOT seam: above %+.2f, below %+.2f (wide"
+            " %+.2f, %+.2f)", a, b, a2, b2);
+    }
+#endif
 
     /* ---- WindyGrain: the Genesis grain, its three amounts */
     wf_halo = 0;
@@ -1039,6 +1099,26 @@ static void t_fxab(void)
     chk(sd_f < sd_n && sd_n < sd_s, "grain amount is monotonic: fine %.2f < normal %.2f < strong %.2f", sd_f, sd_n, sd_s);
     chk(sd_n < sd_old * 0.9 + 6 && sd_n > 0.3, "not the Yedlin grain: sd %.2f vs %.2f", sd_n, sd_old);
     chk(fabs(cm_old) < 3, "the old grain was centred too (mean %+.2f, sd %.2f)", cm_old, sd_old);
+
+    /* ---- 11-15: WindyGrain (Strong) is centred and the same at every level, it adds in display space. Flat grey
+     * frames, the whole frame: the old rank mapping of yg_gtab gave about dY +0.15, dU +0.12 here. */
+    {
+        static const int lv[2] = { 70, 150 };
+        double fm[2], fs[2], fu[2], fv[2];
+        for (int k = 0; k < 2; k++) {
+            for (int i = 0; i < NW; i++) in[i] = word(0, lv[k], 0, lv[k]);
+            memcpy(ref, in, NW * 4);
+            ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+            shot(in, out, FW, FH);
+            flat_stats(ref, out, NW, &fm[k], &fs[k], &fu[k], &fv[k]);
+        }
+        chk(fabs(fm[0]) < 0.05 && fabs(fm[1]) < 0.05, "WindyGrain is centred: dY %+.3f at Y %d, %+.3f at Y %d", fm[0], lv[0],
+            fm[1], lv[1]);
+        chk(fabs(fu[0]) < 0.05 && fabs(fv[0]) < 0.05 && fabs(fu[1]) < 0.05 && fabs(fv[1]) < 0.05,
+            "WindyGrain chroma is centred: dU %+.3f / %+.3f, dV %+.3f / %+.3f", fu[0], fu[1], fv[0], fv[1]);
+        chk(fs[0] > 0.5 && fabs(fs[1] / fs[0] - 1) < 0.05, "WindyGrain is the same at both levels: sd %.3f / %.3f", fs[0],
+            fs[1]);
+    }
 
     wf_grain = 0;
     wf_halo = 0;

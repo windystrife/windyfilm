@@ -81,16 +81,20 @@ static inline uint32_t yg_gmix(uint32_t h)
 #define YG_GCH 2246822519u
 
 /* one channel: the table at rank u (Q24 of the rank), linear between the two entries, and the kernel's straight line
- * to the tail for the lowest 1/64 of the rank (CreateFilmGrain: "straight line from (0.015625, tab[0]) to (0, tail)") */
+ * to the tail for the lowest 1/64 of the rank (CreateFilmGrain: "straight line from (0.015625, tab[0]) to (0, tail)").
+ * Entry i sits at rank (i + 1) / 64: tab[0] at 1/64 where the line ends, tab[63] (the + tail) at rank 1. Continuous at
+ * 1/64, and the mean over the rank is 0 (to 0.01 level); until 11-15 the line ran the other way (tab[0] at rank 0, the
+ * tail at 1/64, a jump to tab[1]) and the rest used rank * 63: a mean of +0.08 / +0.09 / +0.25 level per pixel (r g b,
+ * amount 1), a brighter, bluer frame. */
 static inline int yg_gtab(const int16_t *t, int tail, uint32_t u)
 {
     if (u < 262144u) {                                   /* 0.015625 * 2^24 */
-        int wq8 = (int)(u >> 10);                        /* rank / 0.015625, Q8 */
-        return t[0] + (((tail - t[0]) * wq8 + 128) >> 8);
+        int wq8 = (int)(u >> 10);                        /* rank / 0.015625, Q8: 0 at rank 0, 256 at 1/64 */
+        return tail + (((t[0] - tail) * wq8 + 128) >> 8);
     }
     {
-        uint32_t p = (u * 63u) >> 8;                     /* rank * 63, Q16: u < 2^24 -> p < 63 << 16 */
-        int i = (int)(p >> 16), fr = (int)((p >> 8) & 255u);
+        uint32_t f = (u >> 2) - 65536u;                  /* rank * 64 - 1, Q16: 0 at 1/64, < 63 << 16 below rank 1 */
+        int i = (int)(f >> 16), fr = (int)((f >> 8) & 255u);
         return t[i] + (((t[i + 1] - t[i]) * fr + 128) >> 8);
     }
 }

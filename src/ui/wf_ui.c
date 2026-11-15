@@ -545,7 +545,8 @@ static void draw_info(const struct wf_film *f, int g)
     static const char *const pn[WF_NPRINTS] = { "Scan", "Cine", "Paper",
         "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72", "5382", "5384/82", "5384/92", "5385/93",
         "5385/62", "5386", "5383", "3513D", "3523XD" };
-    char pr[96];
+    char pr[160], pl[3][72];
+    int npl = 0;
     pr[0] = 0;
     for (int v = 0; v < WF_NPRINTS; v++)
         if (f->prints & (1u << v))
@@ -553,6 +554,36 @@ static void draw_info(const struct wf_film *f, int g)
             int n = strlen(pr);
             snprintf(pr + n, sizeof(pr) - n, "%s%s", n ? ", " : "", pn[v]);
         }
+    /* the Prints value in up to 3 lines, each broken after the last comma that fits (a chain film has up to 16 print
+     * stocks: until 11-15 the list was cut after the seventh); the third line is clipped as before */
+    {
+        const char *s = lut ? "-" : pr;
+        int pw = x1 - 20 - (x + 112);
+        while (*s && npl < 3)
+        {
+            int n = strlen(s), cut = n;
+            if (npl < 2 && ui_textw(F_15, s) > pw)
+            {
+                cut = 0;
+                for (int i = 0; s[i] && i + 1 < (int)sizeof pl[0]; i++)
+                    if (s[i] == ',' && s[i + 1] == ' ')
+                    {
+                        memcpy(pl[npl], s, i + 1);
+                        pl[npl][i + 1] = 0;
+                        if (ui_textw(F_15, pl[npl]) > pw) break;
+                        cut = i + 1;
+                    }
+                if (!cut) cut = n;
+            }
+            int k = cut < (int)sizeof pl[0] - 1 ? cut : (int)sizeof pl[0] - 1;
+            memcpy(pl[npl], s, k);
+            pl[npl][k] = 0;
+            npl++;
+            s += cut;
+            while (*s == ' ') s++;
+        }
+        if (!npl) pl[npl++][0] = 0;
+    }
     char kel[16], outp[40];
     snprintf(kel, sizeof(kel), "%d K", f->kelvin);
     /* a can's chip 3 names the curve its Load sets ("V-Log", "C-Log2" for the CinePrint looks), "Standard" a display look */
@@ -562,7 +593,7 @@ static void draw_info(const struct wf_film *f, int g)
     const char *kv[] = {
         "Table", f->code ? f->code : "",
         "Daylight", kel,
-        "Prints", lut ? "-" : pr,
+        "Prints", pl[0],
         "Output", lut ? outp : "Film look",
         "On the card", av ? (lut ? "LUT cube found" : "Film table found") : (lut ? "LUT cube missing" : "Film table missing"),
         "State", wf_loaded() == f->id ? "Loaded" : "Not loaded",
@@ -571,6 +602,11 @@ static void draw_info(const struct wf_film *f, int g)
     {
         ui_text(F_15, x, y, kv[i], C_TXT3);
         ui_text_clip(F_15, x + 112, y, kv[i + 1], i == 8 && !av ? C_WARN : C_TXT, x1 - 20);
+        for (int j = 1; i == 4 && j < npl; j++)  /* the rest of the print stocks */
+        {
+            y += 19;
+            ui_text_clip(F_15, x + 112, y, pl[j], C_TXT, x1 - 20);
+        }
     }
     y += 4;
     wfg_rect(x, y, x1 - 20, y, C_LINE);

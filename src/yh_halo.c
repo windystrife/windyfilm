@@ -429,6 +429,7 @@ void yh_begin_frame(yh_ctx *g)
     memset(g->gacc, 0, 4u * g->gw * 4);
     for (int i = 0; i < g->gh; i++) { g->l0lo[i] = (int16_t)g->gw; g->l0hi[i] = 0; g->h0lo[i] = (int16_t)g->gw; g->h0hi[i] = 0; }
     g->gacc_gy = -1; g->cur_y = -1; g->row_lo = g->row_hi = 0; g->nsave = 0; g->glo = 1 << 30; g->ghi = -1;
+    g->g_keep = -1;
     g->st_gather_words = g->st_gather_hot = g->st_apply_fast = g->st_apply_exact = g->st_build_cells = 0;
     g->st_pboost_cells = g->st_apply_pair = g->st_cells_vis = 0;
 }
@@ -1245,17 +1246,42 @@ static void yh_gen_box_h(yh_ctx *g, const int16_t *src, int stride, int h0a, int
 }
 
 /* build: two separable box passes of the mask, all at the 1/8 grid; H0 is the working buffer, L0 the copy the
- * vertical pass reads (the mask in L0 is not needed after this: the apply takes i1 from the pixel's own luma) */
+ * vertical pass reads (the mask in L0 is not needed after this: the apply takes i1 from the pixel's own luma).
+ * Halves (11-15): the TOP build has no mask below the seam yet, so the seam is its frame edge: the vertical window
+ * stops at row s0 - 1 and is normalised by the rows it used, the plugin's own rule at the frame edges. Before, the
+ * empty rows counted and the glow of a light across the seam fell to about half in the rows above it (host FXAB,
+ * EOS M halves: +4.3 levels against +8.1 for the whole frame, 23 levels at worst). The TOP build also keeps the
+ * mask rows the BOTTOM build needs (row s0 - 1 and the YH_GEN_BOX2 * r rows above it) in L[1], which this model
+ * does not use; the BOTTOM build puts them back and starts its passes YH_GEN_BOX2 * r rows above row s0 - 1, each
+ * pass r rows lower, so its rows from s0 - 1 down are the whole frame's exactly. Before, it blurred the TOP build's
+ * left-over blurred rows again (-1.0 level just below the seam). */
 static void yh_gen_build(yh_ctx *g, int y_begin, int y_end, int mode)
 {
     int w = g->gw, h = g->gh, r = g->g_rad;
     int s0 = (mode == YH_TOP ? y_end : y_begin) >> 3;
-    int h0a = mode == YH_BOTTOM ? s0 - 1 : 0, h0b = mode == YH_TOP ? s0 + YH_H0X : h;
+    int ylim = mode == YH_TOP && s0 >= 1 ? s0 : h;        /* the vertical window ends before this row */
+    int ka = s0 - 1 - YH_GEN_BOX2 * r, h0a = 0, h0b = mode == YH_TOP ? s0 + YH_H0X : h, keep, restored = 0;
     if (g->gacc_gy >= 0) { flush(g); g->gacc_gy = -1; }
-    if (h0a < 0) h0a = 0;
+    if (ka < 0) ka = 0;
     if (h0b > h) h0b = h;
+    keep = mode != YH_WHOLE && s0 >= 1 && s0 < h && w * (s0 - ka) <= g->lw[1] * g->lh[1];
+    if (keep && mode == YH_TOP) {
+        memcpy(g->L[1], g->L[0] + 3 * w * ka, 6u * w * (s0 - ka));
+        g->g_keep = s0;
+    }
+    if (mode == YH_BOTTOM) {
+        if (keep && g->g_keep == s0) {
+            memcpy(g->L[0] + 3 * w * ka, g->L[1], 6u * w * (s0 - ka));
+            h0a = ka;
+            restored = 1;
+        } else
+            h0a = s0 - 1 < 0 ? 0 : s0 - 1;               /* no TOP build kept them: the rows as they are */
+    }
     memset(g->H0 + 4 * w * h0a, 0, 8u * w * (h0b - h0a));
     for (int pass = 0; pass < YH_GEN_BOX2; pass++) {
+        /* the first row this pass gets right: a BOTTOM build's window reaches r rows above its first row */
+        int va = restored ? s0 - 1 - (YH_GEN_BOX2 - 1 - pass) * r : h0a;
+        if (va < h0a) va = h0a;
         /* horizontal: from L0 (pass 0) or from the previous pass's H0 */
         yh_gen_box_h(g, pass ? g->H0 : (const int16_t *)g->L[0], pass ? 4 : 3, h0a, h0b);
         for (int y = h0a; y < h0b; y++) {                 /* the horizontal result, kept for the vertical pass */
@@ -1267,8 +1293,10 @@ static void yh_gen_build(yh_ctx *g, int y_begin, int y_end, int mode)
                 d[3 * c + 2] = (uint16_t)s[4 * c + 2];
             }
         }
+        h0a = va;
         for (int y = h0a; y < h0b; y++) {                 /* vertical, out of the copy, into H0 */
-            int y0 = y - r < 0 ? 0 : y - r, y1 = y + r >= h ? h - 1 : y + r;
+            int y0 = y - r < 0 ? 0 : y - r, y1 = y + r >= ylim ? ylim - 1 : y + r;
+            if (y0 > y1) y0 = y1;                         /* TOP rows below the seam: the edge row */
             uint32_t q = g->grq[y1 - y0 + 1];
             int16_t *d = g->H0 + 4 * w * y;
             int lo = w, hi = 0;

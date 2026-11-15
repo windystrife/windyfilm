@@ -225,6 +225,26 @@ int main(int argc, char **argv)
     CHECK(closed && wf_loaded() == id_of("SUN200"), "a key did not skip the animation");
     end_checks();
 
+    /* 2e. film-stage (11-15): a chain can (G08 = 5219 500T) loaded, Print stock 2302, WindyGrain Gen Normal,
+     * WindyHalation Genesis; the focus walks down to WindyHalation; its INFO page */
+    fake_reset();
+    fake_set_card(card);
+    fake_set_loaded(id_of("G08"));
+    fake_set_row(WF_ROW_PRINT, 3);
+    fake_set_row(WF_ROW_GRAIN, 5);
+    fake_set_row(WF_ROW_HALO, 5);
+    open_ui();
+    CHECK(wfui_host_sel_id() == id_of("G08"), "open not on the loaded chain can");
+    shot("fs_chain");
+    for (int i = 0; i < WF_ROW_HALO; i++) key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_HALO, "DOWN x3 not on WindyHalation");
+    shot("fs_rows");
+    key(MODULE_KEY_INFO);
+    CHECK(wfui_host_info(), "INFO did not open the overlay");
+    shot("fs_info");
+    key(MODULE_KEY_INFO);
+    close_ui(MODULE_KEY_MENU, 0);
+
     /* 2b. Highlights / Shadows: 9 rows, 7 shown, the list scrolls with the focus (the font keeps its size) */
     fake_reset();
     fake_set_card(card);
