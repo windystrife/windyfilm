@@ -19,8 +19,8 @@
  * a matching file is read instead of the parse, any other is rebuilt and rewritten (only while Canon is idle; a busy
  * write is tried again every 2 s while the tables stay). No shoot memory beyond the 0.8 MB block.
  *
- * Log: one line per shot that asked for B (wf_task): the buffer and its score, levels, WB source, the shoulder, the
- * time per phase, or why the shot got the 8-bit look. */
+ * Log: one line per shot that asked for B (wf_task): the buffer and its score, levels, WB source, the shoulder (kind a / i
+ * / d and its per-shot table time), the time per phase, or why the shot got the 8-bit look. */
 #ifndef WF_RAWB_H
 #define WF_RAWB_H
 #include <stdint.h>
@@ -39,17 +39,29 @@ int  wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk);
 /* Chain films on RAW (option (c), docs/DESIGN.md 1a): the pair's log table in ML/DATA/WFLOG.DAT (tools/mk_wflog.py) is
  * the develop's WF_DEV_CUBE table on its curve (S-Log3), LUT EI 0, no auto exposure, the film shoulder on: the whole
  * film look comes out of the develop, no sRGB base develop and no 8-bit film table after it. wf_rawb_logpk says whether
- * a look takes that path. Until the owner rules on the knob rows for RAW, a look the log table cannot express keeps the
- * 8-bit chain exactly as before: film-stage knob rows away from neutral (a composed table), strength other than 100 %,
- * Highlights / Shadows. So does a pair without a usable table (no pack, not a pack, not listed, bad checksum: one log
- * line, then the 8-bit chain until the next boot). wf_rawb_logpk_build (wf_task: file I/O) builds the tables for B and
- * the Darkroom and logs a failure; *ms = the whole SD read + build. */
+ * a look takes that path. The film-stage knob rows (the owner 2026-11-15: on RAW too): any knob set away from neutral
+ * takes a log table composed on the camera from the pair's halves (WFSTAGE.DAT) and ML/DATA/WFSTLOG.DAT
+ * (tools/mk_wfstlog.py) plus the shipped table's residual, moved with the exposure offset (wf_rawb.c "the knob rows on
+ * RAW"). Strength other than 100 % and Highlights / Shadows keep the 8-bit chain exactly as before, and so does a pair
+ * without a usable table (no pack, not a pack, not listed, bad checksum: one log line, then the 8-bit chain until the
+ * next boot; a failed knob table drops only that pair's knob tables, no WFSTLOG.DAT all knob tables).
+ * wf_rawb_logpk_build (wf_task: file I/O) builds the tables for B and the Darkroom and logs a failure; scr: the develop
+ * scratch (a knob table keeps its printing densities and residual there, wf_dev_scratch_bytes of the frame is enough);
+ * *ms = the whole SD read + build (+ i's colour trim). */
 enum { WF_RLG_OK = 0, WF_RLG_NOTCHAIN, WF_RLG_KNOBS, WF_RLG_STRENGTH, WF_RLG_HS, WF_RLG_NOPACK, WF_RLG_NOENT, WF_RLG_N };
+/* the chain films' film shoulder on RAW (B and the Darkroom), WINDYFLM.CFG shoulder=i|a|d (wf_menu.c), WF_DEV_HUE_* of
+ * wf_dev.h: I (default, the owner's pick 2026-11-15: lights keep their colour up to the look's white, then roll into
+ * cream / white; with it the table takes the colour trim WF_DEV_HUE_I_SAT / _VIB, the owner's "a little less
+ * saturated" (-19 / -19 since 2026-11-16), in wf_rawb_logpk_build, so rb_key holds it), A (each channel on its own, as RAWB14 / RAWB15 and before:
+ * the old frames bit for bit), D (the hue kept throughout; comparisons; no trim). The Log + LUT cans and the sRGB base
+ * develop always take A. */
+extern volatile int wf_rb_hue;
 struct wf_dev_tabs;
 struct wf_dev_pkinfo;
 int  wf_rawb_logpk(const struct wf_look *lk);                     /* WF_RLG_* */
 const char *wf_rawb_logpk_why(int why);
-int  wf_rawb_logpk_build(struct wf_dev_tabs *t, const struct wf_look *lk, int *ms, struct wf_dev_pkinfo *pi);
+int  wf_rawb_logpk_build(struct wf_dev_tabs *t, void *scr, size_t scr_n, const struct wf_look *lk, int *ms,
+                         struct wf_dev_pkinfo *pi);
 /* worker: a shot that asked for B but did not get it (the camera layer's gate, or a look B cannot do) */
 enum { WF_RBW_OK = 0, WF_RBW_NOTAB, WF_RBW_BUF, WF_RBW_PREP, WF_RBW_LOOK, WF_RBW_FILMTAB, WF_RBW_CAM, WF_RBW_TOP,
        WF_RBW_CHG, WF_RBW_N };            /* TOP / CHG: a 5D2 BOT half that cannot continue its TOP */

@@ -36,7 +36,8 @@
  *     -> R/G and B/G, holes filled from neighbour blocks (8 rounds), then neutral (trap W19).
  *   - film shoulder (j.roll): the look's tone curve to a knee half an octave below the first clip, then a shoulder that
  *     reaches the look's white with zero slope at the sensor's white, folded into a per-shot copy of the enc tables
- *     (no per-pixel cost). Without it a V-Log film cube, made for about 8 stops above grey, leaves the EOS M's clip
+ *     (no per-pixel cost; j.hue I / D: a per-shot shift table on the luma enc index instead, see WF_DEV_HUE_*).
+ *     Without it a V-Log film cube, made for about 8 stops above grey, leaves the EOS M's clip
  *     (3.2 - 4.1 stops) mid-shoulder: clipped sky and sun stop flat at about 195 - 213 instead of rolling into white.
  * Rows (wf_dev_rows): any band of output rows, so the NN full frame and the Diana halves use the same code.
  *
@@ -102,7 +103,32 @@ struct wf_dev_job {
                                                     SRGB; see wf_dev.c wf_dv_roll), 0 = the look's curve as is */
     int      canon_pw;                           /* words per row of canon, 0 = w / 2 (a 5D2 half: the 5616 px row while
                                                     the develop covers 5600 px of it, w must be a multiple of 32) */
+    int      hue;                                /* the shoulder's colour, WF_DEV_HUE_* (only with roll on a log curve's
+                                                    CUBE tables; A elsewhere): the chain films' RAW develop takes I */
+    int    (*ms)(void);                          /* a ms clock for st->ro_ms, 0 = none */
 };
+
+/* how the film shoulder treats colour (j.hue). The shoulder is one map of the enc index i -> i' (wf_dv_roll):
+ *   A  each channel through the map at its own index: a coloured light whitens as soon as its brightest channel rolls
+ *      (blue sky above the knee turns magenta; the Log + LUT cans, the sRGB base develop, RAWB14 / RAWB15 and before)
+ *   D  one shift per pixel, the map's shift at the pixel's luma index: R:G:B in linear stay, the hue holds into the
+ *      highlights (comparisons and the cost bench only)
+ *   I  D below the look's white, then over 1.5 stops (WF_DV_HUE_SPAN) a smooth step toward A: lights keep their colour
+ *      up to the look's white and roll into cream / paper white above it (the owner's pick 2026-11-15, the gallery's
+ *      shoulder-e round). Per shot a shift table on the luma enc index; per pixel a luma, one lookup, and per channel
+ *      one more lookup and multiply-add (src/wf_dev_arm.S wf_dv_span_hs; CORE-NOTES 10.9). */
+enum { WF_DEV_HUE_A = 0, WF_DEV_HUE_I = 1, WF_DEV_HUE_D = 2, WF_DEV_HUE_N };
+const char *wf_dev_hue_name(int hue);           /* "a" / "i" / "d" (logs, WINDYFLM.CFG shoulder=), "?" out of range */
+/* the colour trim the chain films take with I (wf_rawb_logpk_build, on the built table): saturation and vibrance in %,
+   wf_dev_trim. The owner 2026-11-15: i a little less saturated, -10 / -10; 2026-11-16, still a bit strong: that again
+   x 0.9, so -19 / -19 (a muted colour x 0.81, the strongest x 0.81 x 0.81 = 0.656: the -10 trim applied twice, to 0.3 %) */
+#define WF_DEV_HUE_I_SAT (-19)
+#define WF_DEV_HUE_I_VIB (-19)
+/* on built tables (any src): Y' of every node kept (the tone and every detail stay, a neutral is untouched), Cb / Cr x
+   (1 + sat / 100) (1 + vib / 100 x s), s = max - min of the node's R'G'B' (0 .. 1): sat on every colour, vib weighted by
+   the colour's own saturation (negative: the strong colours cut most, the muted ones left to sat). Once per build, no
+   per-pixel cost; sat = vib = 0 leaves the table as built. */
+void wf_dev_trim(struct wf_dev_tabs *t, int sat, int vib);
 
 /* per-shot results (log line, tests) */
 struct wf_dev_stat {
@@ -116,6 +142,8 @@ struct wf_dev_stat {
     int      roll;                               /* 1 = the film shoulder is in this shot's enc tables */
     int      ro_k, ro_c, ro_w, ro_grey;          /* enc indices (256 per octave): knee, sensor white, look's white, 18 % grey */
     int      ro_ytop;                            /* the look's white the shoulder ends on, 256 Y' */
+    int      hue;                                /* WF_DEV_HUE_* this shot's shoulder took (A when roll is 0) */
+    int      ro_ms;                              /* the shoulder's per-shot tables, ms (j.ms; 0 without a clock) */
 };
 
 /* ------------------------------------------------------------------ load time (wf_task) */
@@ -150,6 +178,18 @@ struct wf_dev_pkinfo { int curve, feed, count, flags; uint32_t off, sum, ixsum; 
 int wf_dev_build_pack(struct wf_dev_tabs *t, int cam, const char *pack, int id, int variant, const char *code, int ei,
                       struct wf_ll_info *info, struct wf_dev_pkinfo *pi);
 const char *wf_dev_pk_errstr(int rc);            /* short text of any result above (wf_loglut_errstr for WF_LL_*) */
+/* a WF_DEV_CUBE build on curve from samples made on the camera (a chain film's composed log table, the film-stage knob
+ * rows on RAW: wf_stagek.h's log grid): fill(ctx, rgb, n) writes the next n nodes (n = 33^2, one blue plane, the .cube
+ * order, R' G' B' u16 value x 65535) and returns WF_LL_OK or a WF_LL_* code that stops the build; LUT EI ei, no auto
+ * exposure. The same samples make the very tables wf_dev_build_pack makes of a pack entry holding them. */
+int wf_dev_build_gen(struct wf_dev_tabs *t, int cam, int curve, int ei, int (*fill)(void *ctx, uint16_t *rgb, int n),
+                     void *ctx, struct wf_ll_info *info);
+/* a pack entry's samples as they are (the knob tables' residual, wf_rawb.c): fn(ctx, le, n) gets the next n nodes (the
+ * .cube order, R' G' B' u16 little-endian, n <= 1364 a call, n x 6 bytes at le) and returns WF_LL_OK or a code that
+ * stops the read; the table's Adler-32 is checked against the index after the last call (WF_DEV_PK_E_SUM). pi as
+ * wf_dev_build_pack. Returns WF_LL_OK, WF_LL_E_OPEN / _READ / _NOMEM / _TRUNC, a WF_DEV_PK_E_* code or fn's. */
+int wf_dev_pack_samples(const char *pack, int id, int variant, const char *code,
+                        int (*fn)(void *ctx, const uint8_t *le, int n), void *ctx, struct wf_dev_pkinfo *pi);
 /* identity of the builder for a table cache (wf_rawb.c's .RBT): FNV-1a of WF_DEV_TABS_VER, the table size, src, curve,
  * cam and every constant table wf_dev_build reads for them (camera matrix, LUT EI gains, the sRGB decode, the curve's gamut
  * matrix, log encode and EI constants). Cached tables of another build id are rebuilt. Bump WF_DEV_TABS_VER whenever

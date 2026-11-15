@@ -622,12 +622,18 @@ int wf_dark_src(int output, int flut)
 /* a chain film's log table from WFLOG.DAT for this run (option (c), wf_rawb.h): 1 = M.tabs built (a WF_DEV_CUBE develop,
  * the look stage then adds the effects only: frame devd 2), 0 = the 8-bit chain (the failure is logged and marked) */
 static int dk_lgk;
-static int dk_logpk(const struct wf_look *lk, struct wf_dev_tabs *t)
+static int dk_logpk(const struct wf_look *lk, struct wf_dev_tabs *t, void *scr)
 {
     struct wf_dev_pkinfo pi;
     int ms;
-    dk_lgk = wf_rawb_logpk_build(t, lk, &ms, &pi) == WF_LL_OK;
-    if (dk_lgk)
+    dk_lgk = wf_rawb_logpk_build(t, scr, wf_dev_scratch_bytes(DK_W, DK_H), lk, &ms, &pi) == WF_LL_OK;
+    if (dk_lgk && lk->stk) {
+        struct wf_sg_knobs kk;
+        wf_sg_unkey(lk->stk, &kk);
+        wf_log("dark: tables knobs %s v%d k%x exp %d prn %d %d %d interlayer %d c%d %dms (sum %x)",
+               wf_films[lk->row].code, lk->variant, (unsigned)lk->stk, kk.fexp, kk.prn[0], kk.prn[1], kk.prn[2],
+               kk.iie * 25, pi.curve, ms, (unsigned)pi.sum);
+    } else if (dk_lgk)
         wf_log("dark: tables log pack %s v%d c%d %dms (offset %d, %d entries, sum %x)", wf_films[lk->row].code,
                lk->variant, pi.curve, ms, (int)pi.off, pi.count, (unsigned)pi.sum);
     return dk_lgk;
@@ -953,6 +959,8 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     j.white = lw ? lw : wf_dk_white(WF_DK_EOSM, dk_inf.iso);
     int as = wf_dk_scales(WF_DK_EOSM, dk_inf.wb, j.black, j.white, dk_inf.iso, j.wb_q8);
     j.roll = src != WF_DEV_LOG;
+    j.hue = dk_lgk ? wf_rb_hue : WF_DEV_HUE_A;   /* chain films (B's switch, wf_rawb.h); cans + sRGB base develop: A */
+    j.ms = get_ms_clock;
     struct wf_dev_stat st;
     memset(&st, 0, sizeof st);
     if (wf_dev_prepare(M.scr, M.tabs, &j, &st) != 0) { dk_why = "prepare"; return DK_ERR; }
@@ -1060,9 +1068,9 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     *bytes = (int)wr.n;
     dv.print_ready = 2;
     wf_log("dark: F%02d IMG_%04d iso %d: load %d expose %d fix %d dry %d ms, %d KB, wb %s, trim %d, black %d white %d%s, "
-           "look %s", i + 1, roll.file[i], dk_inf.iso, dk_t[0], dk_t[1], dk_t[2], dk_t[3], (int)(wr.n >> 10),
-           as ? "as-shot" : "daylight", wf_dk_trim10(WF_DK_EOSM, dk_inf.iso), j.black, j.white, lw ? "" : " (table)",
-           wf_status_name(status));
+           "shoulder %s %dms, look %s", i + 1, roll.file[i], dk_inf.iso, dk_t[0], dk_t[1], dk_t[2], dk_t[3],
+           (int)(wr.n >> 10), as ? "as-shot" : "daylight", wf_dk_trim10(WF_DK_EOSM, dk_inf.iso), j.black, j.white,
+           lw ? "" : " (table)", st.roll ? wf_dev_hue_name(st.hue) : "-", st.ro_ms, wf_status_name(status));
     return DK_OK;
 }
 
@@ -1158,7 +1166,7 @@ static void dk_task(void)
         end_why = "no look (output Off)";
     } else if (dk_alloc((int)DK_RAW_N + 4096, DK_W * DK_H * 2) != 0) {
         end_why = "no memory";
-    } else if (lgw == WF_RLG_OK && dk_logpk(&lk, M.tabs)) {
+    } else if (lgw == WF_RLG_OK && dk_logpk(&lk, M.tabs, M.scr)) {
         src = WF_DEV_CUBE;                       /* the chain film's whole look is in these tables */
     } else {
         if ((lgw = wf_rawb_logpk(&lk)) != WF_RLG_NOTCHAIN)

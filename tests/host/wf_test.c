@@ -43,6 +43,12 @@
  *   RAWB chain         (EOS M) option (c): a chain film's RAW shot from its log table in WFLOG.DAT = the direct develop
  *                      with that table (S-Log3, LUT EI 0, no auto exposure), bit-exact, no film table after it; strength
  *                      30 %, a print the pack lacks and a bad pack keep the 8-bit chain bit-exact, the reason logged
+ *   RAWB knobs         (EOS M) the knob rows on RAW: Interlayer 0 / 50 / 200 %, Film exp +1, Film exp -2 + Push -1/3
+ *                      with Printer R +12, Exp comp on, a mixed set = the direct develop with the composed log table +
+ *                      the shipped table's residual (worked out here, read at the node the exposure offset moves to),
+ *                      bit-exact; the residual's clip logged; Film exp + Push cancelling and default knobs give the
+ *                      shipped table (the same frame); strength 30 % keeps the 8-bit chain; a WFSTLOG.DAT made for
+ *                      other halves the 8-bit chain with the reason
  *   HS                 Highlights / Shadows: wf_hs_bend vs the formula (121 pairs), never down, 0 / 0 bit-identical to the
  *                      film builder before the feature (FNV), only N changes; rows, film shot + log + EXIF + preview; Log +
  *                      LUT bent after the load (.FRT unbent), an h / s change bends again without a load; flat Log / Off
@@ -2344,7 +2350,16 @@ static void t_look_sweep(void)
     }
     put_file("ML/DATA/WFFILMS.DAT", b, n);
     free(b);
-    put_cfg("film=26\noutput=film\nprint=scan\nstrength=normal\ngrain=off\nhalation=off\nbloom=off\nmist=off\n");
+    const char *stp = getenv("WF_LOOK_STAGE"), *xcfg = getenv("WF_LOOK_CFG");   /* the knob rows: their pack + config */
+    if (stp) {
+        b = get_file(stp, &n);
+        chk(b != 0, "WF_LOOK_STAGE %s (%ld B)", stp, n);
+        if (b)
+            put_file("ML/DATA/WFSTAGE.DAT", b, n);
+        free(b);
+    }
+    put_cfg("film=26\noutput=film\nprint=scan\nstrength=normal\ngrain=off\nhalation=off\nbloom=off\nmist=off\n%s\n",
+            xcfg ? xcfg : "");
     const char *cubes = getenv("WF_LOOK_CUBES");
     if (cubes) {
         DIR *dd = opendir(cubes);
@@ -2462,7 +2477,7 @@ static void t_cfg(void)
     const char *code1 = wf_flut_code[1];
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
-            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1);
+            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\nshoulder=D\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
@@ -2475,6 +2490,7 @@ static void t_cfg(void)
     chk(wf_exp_mode == (WF_EXP_CAN ? WF_EXP_SMOOTH : WF_EXP_CANON) && wf_exp_trim == -5 && wf_exif_off == 1,
         "exposure %d exptrim %d exif off %d", wf_exp_mode, wf_exp_trim, wf_exif_off);
     chk(wf_blind == 0, "blind=OFF read: Blind roll off (%d)", wf_blind);
+    chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
     chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2, "print finishes read: frame %d info %d date %d (want 4 2 2)",
         wf_pr_frame, wf_pr_info, wf_pr_date);
     chk(WAIT(h_kelvin_last == 3200, 5000), "Light Tungsten applied at start (%dK)", h_kelvin_last);
@@ -2486,7 +2502,7 @@ static void t_cfg(void)
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\nexposure=%s\n"
-             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\nstage=0,0,0,0,0,0,4\n"
+             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\nshoulder=d\nstage=0,0,0,0,0,0,4\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
     free(b);
@@ -3944,6 +3960,8 @@ static int rb_ref_hl, rb_ref_sh;                 /* WF_DEV_DISP: Highlights / Sh
 static int rb_ref_curve;                         /* WF_DEV_CUBE: the curve and cube of the reference, auto exposure on */
 static const char *rb_ref_cube;
 static int rb_ref_auto = 1;                      /* WF_DEV_CUBE: 0 = no auto exposure (a chain film's log table) */
+static int rb_ref_hue;                           /* WF_DEV_HUE_* of the reference (A: each channel on its own) */
+static int rb_ref_trim;                          /* 1: i's colour trim on the reference's table (wf_rawb_logpk_build) */
 static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
 {
     static struct wf_dev_tabs T;
@@ -3952,6 +3970,8 @@ static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
     int rc = src == WF_DEV_DISP ? wf_dev_build_disp(&T, WF_DEV_EOSM, "ML/DATA/LEICAVSR.CUB", 0, rb_ref_hl, rb_ref_sh, &inf)
                                 : wf_dev_build(&T, src, cu ? rb_ref_curve : 0, WF_DEV_EOSM, cu ? rb_ref_cube : 0, 0,
                                                cu && rb_ref_auto, &inf);
+    if (!rc && rb_ref_trim)
+        wf_dev_trim(&T, WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB);
     void *scr = memalign(32, wf_dev_scratch_bytes(FW, FH));
     struct wf_dev_job j;
     memset(&j, 0, sizeof j);
@@ -3965,11 +3985,12 @@ static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
     memcpy(dst, canon, NW * 4);
     j.canon = dst; j.canon_y0 = 0; j.canon_h = FH;
     j.roll = roll;
+    j.hue = rb_ref_hue;
     struct wf_dev_stat st;
     int rp = wf_dev_prepare(scr, &T, &j, &st);
     wf_dev_rows(scr, 0, FH, dst, FW * 2);
-    printf("reference develop: build %d, levels %d / %d, prepare %d, wb %d, clip %d, roll %d\n", rc, lb, lw, rp, st.wb_src,
-           st.clip_quads, st.roll);
+    printf("reference develop: build %d, levels %d / %d, prepare %d, wb %d, clip %d, roll %d, shoulder %d, trim %d\n", rc,
+           lb, lw, rp, st.wb_src, st.clip_quads, st.roll, st.hue, rb_ref_trim);
     free(scr);
 }
 /* B table cache (.RBT) helpers: switch the Film LUT and wait for B's tables line holding `expect` (ms = its time) */
@@ -4168,7 +4189,8 @@ static void t_rawb(void)
     wf_out = WF_OUT_LLUT;
     chk(LOGW("rawb: tables cube c2 VLOG.CUB", 60000), "Log + LUT: '%s'", log_line("rawb: tables"));
     rb_stopped("Log + LUT", "buf 0 52000000 of 3,");
-    chk(strstr(log_line("rawb: black"), "roll 1") != 0, "Log + LUT: shoulder on ('%s')", log_line("rawb: black"));
+    chk(strstr(log_line("rawb: black"), "roll 1") != 0 && strstr(log_line("rawb: black"), "shoulder a "),
+        "Log + LUT: shoulder on, each channel on its own (a can: not the chain films' I, '%s')", log_line("rawb: black"));
     /* Leica Vivid (WF_FLUT_DISP): raw -> the sRGB develop -> the owner's display cube on the sRGB codes, no log step */
     {
         char nb[WF_LL_NAME];
@@ -4513,15 +4535,60 @@ static void t_rawb_chain(void)
     rb_ref_curve = WF_LL_SLOG3;
     rb_ref_cube = "ML/DATA/LGREF.CUB";
     rb_ref_auto = 0;
+    rb_ref_hue = WF_DEV_HUE_I;
+    rb_ref_trim = 1;
     rb_ref(ref, in, WF_DEV_CUBE, 1);
-    rb_ref_auto = 1;
-    rb_ref_cube = 0;
+    chk(wf_rb_hue == WF_DEV_HUE_I, "no shoulder= in WINDYFLM.CFG: the chain films' shoulder I (%d)", wf_rb_hue);
     chk(sb == 0 && ndiff(out, ref, NW) == 0, "log pack shot: bit-exact vs the direct develop with its table as a .cube "
-        "(S-Log3, LUT EI 0, no auto exposure, shoulder on), no film table after it (%d words differ)", ndiff(out, ref, NW));
-    chk(LOGW("rawb: done rows 3456,", 5000) && strstr(log_line("rawb: black"), "roll 1"), "developed, shoulder on: '%s'",
-        log_line("rawb: black"));
+        "(S-Log3, LUT EI 0, no auto exposure, shoulder I + its colour trim), no film table after it (%d words differ)",
+        ndiff(out, ref, NW));
+    /* the trim moves chroma only: without it every Y byte is the same, U / V nearer 0 with it */
+    rb_ref_trim = 0;
+    rb_ref(ref, in, WF_DEV_CUBE, 1);
+    {
+        long ydiff = 0, cdiff = 0, cin = 0, cout = 0;
+        for (int i = 0; i < NW; i++) {
+            ydiff += (out[i] & 0xff00ff00u) != (ref[i] & 0xff00ff00u);
+            cdiff += (out[i] & 0x00ff00ffu) != (ref[i] & 0x00ff00ffu);
+            cin += abs((int8_t)(ref[i] & 255)) + abs((int8_t)(ref[i] >> 16));
+            cout += abs((int8_t)(out[i] & 255)) + abs((int8_t)(out[i] >> 16));
+        }
+        chk(ydiff == 0 && cdiff > 0 && cout < cin, "i's colour trim: %ld words with another Y (want 0), %ld with other U / V, "
+            "mean |U| + |V| %.2f -> %.2f", ydiff, cdiff, (double)cin / NW, (double)cout / NW);
+        printf("trim: %ld of %d words change U / V, Y none; mean |U| + |V| %.2f -> %.2f (%.1f %%)\n", cdiff, NW,
+               (double)cin / NW, (double)cout / NW, cin ? 100.0 * (cout - cin) / cin : 0.0);
+    }
+    chk(LOGW("rawb: done rows 3456,", 5000) && strstr(log_line("rawb: black"), "roll 1")
+        && strstr(log_line("rawb: black"), "shoulder i "), "developed, shoulder I: '%s'", log_line("rawb: black"));
     chk(LOGW(": film ", 3000) && strstr(log_line(": film "), " raw"), "shot line marks the develop: '%s'", log_line(": film "));
     memcpy(out2, out, NW * 4);
+    /* shoulder=a: the frame as before the owner's pick (RAWB14), bit for bit; shoulder=d: the hue-locked one. Leaving i
+       rebuilds the table (i's colour trim lives in it: rb_key), a -> d does not. */
+    static const char hk[3] = { 'a', 'i', 'd' };
+    for (int hv = WF_DEV_HUE_A; hv <= WF_DEV_HUE_D; hv += WF_DEV_HUE_D - WF_DEV_HUE_A) {
+        log_mark();
+        wf_rb_hue = hv;
+        if (hv == WF_DEV_HUE_A)
+            chk(LOGW(want, 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 2000), "shoulder=a: the table again without the "
+                "trim ('%s')", log_line("rawb: tables"));
+        sb = shot(in, out, FW, FH);
+        rb_ref_hue = hv;
+        rb_ref(ref, in, WF_DEV_CUBE, 1);
+        int dv = ndiff(out, out2, NW);
+        char sw[16];
+        snprintf(sw, sizeof sw, "shoulder %c ", hk[hv]);
+        /* A must change the frame; D may equal I here: this frame's light stays under the look's white, where I is D
+           (dev mode hue covers I's weights above it) */
+        chk(sb == 0 && ndiff(out, ref, NW) == 0 && (hv == WF_DEV_HUE_D || dv > 0), "shoulder=%c: bit-exact vs the direct "
+            "develop with hue %d (%d words differ), %d words of %d differ from I", hk[hv], hv, ndiff(out, ref, NW), dv, NW);
+        chk(LOGW("rawb: done rows 3456,", 5000) && strstr(log_line("rawb: black"), sw), "shoulder=%c logged: '%s'", hk[hv],
+            log_line("rawb: black"));
+        printf("shoulder=%c: %d of %d words differ from I\n", hk[hv], dv, NW);
+    }
+    wf_rb_hue = WF_DEV_HUE_I;
+    rb_ref_hue = WF_DEV_HUE_A;
+    rb_ref_auto = 1;
+    rb_ref_cube = 0;
 
     /* strength 30 %: the log table has no strength, the 8-bit chain does it (base develop + the print's table) */
     log_mark();
@@ -4586,6 +4653,360 @@ static void t_rawb_chain(void)
     wf_rawb = 0;
     mod_deinit();
     free(t); free(rb_dev);
+}
+
+/* RAWB knobs (option (c) milestones 2-3, wf_rawb.c "the knob rows on RAW"): a chain film on RAW with knobs moved takes a
+ * log table composed on the camera from the stage halves (WFSTAGE.DAT: the synthetic halves of STAGE) and WFSTLOG.DAT
+ * (written here from tools/mk_wfstlog.py's description, v2: one entry, the x section = each node's own S-Log3 codes, a
+ * shift section of synthetic rows), plus the shipped table's residual. The reference: wf_sg_neg_pass_x /
+ * wf_sg_prn_pass_rgb on the same halves at the knobs and at default (the composer; tools/mk_wfstage.c logcheck holds it
+ * against the chain), the residual worked out here in quarter codes (half away from 0, clipped at +-127) from the shipped
+ * table and, for an exposure offset, read at the shift row's positions with this test's own integer trilinear (the
+ * wf_stagek.h spec), written as a text cube and developed directly: the shot must be bit-exact. The shipped table = the
+ * default composition + a smooth residual of a few codes + three nodes 40 codes off (they clip, up to 9 values; fewer
+ * where the table saturates). The shift rows: node k of offset o at k x 256 + o k 8 (Q8, clamped to 32 x 256), so the
+ * fractions vary and the top nodes clamp; the real rows (tools/mk_wfstage.c logshift) are held by tools/mk_wfstage.c
+ * logdat. */
+#define SL_N (33 * 33 * 33)
+#define SL_NSH 19                                /* offsets -9 .. +9 thirds of a stop */
+#define SL_OMIN (-9)
+static uint16_t *sl_x;                           /* the x section: node (r, g, b) -> r / 32, g / 32, b / 32 (Q16) */
+static int sl_pos(int o, int k) { return clampi(k * 256 + o * k * 8, 0, 32 * 256); }
+static void sl_write(const struct wf_film *f, int v, const uint8_t *t, int bad)
+{
+    uint32_t n = 1, so = 48 + 36 * n, xo = (so + SL_NSH * 33 * 2 + 511) & ~511u, sz = xo + SL_N * 6;
+    uint8_t *b = calloc(1, sz);
+    memcpy(b, "WFSL", 4);
+    b[4] = 2; b[6] = (uint8_t)n; b[8] = 33; b[10] = WF_LL_SLOG3; b[11] = 1;
+    le32(b + 12, 48); le32(b + 16, xo); le32(b + 20, sz); le32(b + 32, so);
+    b[36] = SL_NSH; b[38] = (uint8_t)SL_OMIN; b[39] = 0xFF;
+    for (int o = 0; o < SL_NSH; o++)
+        for (int k = 0; k < 33; k++) {
+            int p = sl_pos(o + SL_OMIN, k);
+            b[so + 66 * o + 2 * k] = (uint8_t)p;
+            b[so + 66 * o + 2 * k + 1] = (uint8_t)(p >> 8);
+        }
+    le32(b + 40, fnv(2166136261u, b + so, SL_NSH * 66));
+    uint8_t *x = b + 48;
+    x[0] = f->id; x[1] = (uint8_t)v; x[2] = 0;
+    strncpy((char *)x + 4, f->code, 8);
+    le32(x + 12, (uint32_t)sg_pr.fit); le32(x + 16, (uint32_t)sg_pr.bk); le32(x + 20, sg_pr.inv);
+    uint32_t a = 1, c = 0;
+    for (int i = 0; i < SL_N * 6; i++) { a = (a + t[i]) % 65521u; c = (c + a) % 65521u; }
+    le32(x + 24, c << 16 | a);
+    le32(x + 28, fnv(2166136261u, (const uint8_t *)sg_n, sizeof *sg_n) ^ (bad == 'H'));   /* 'H': other halves */
+    le32(x + 32, fnv(2166136261u, (const uint8_t *)sg_p, sizeof *sg_p));
+    memcpy(b + xo, sl_x, SL_N * 6);
+    le32(b + 24, fnv(2166136261u, b + 48, 36 * n));
+    le32(b + 28, fnv(2166136261u, b + xo, SL_N * 6));
+    put_file("ML/DATA/WFSTLOG.DAT", b, sz);
+    free(b);
+}
+static int sl_lerp(int a, int b, int f) { return a + (((b - a) * f + 128) >> 8); }
+/* the residual x 64 (channel c) at node positions p (Q8 per axis): lerp over R, then G, then B */
+static int sl_moved(const int8_t *q, const int p[3], int c)
+{
+    int i[3], f[3];
+    for (int a = 0; a < 3; a++) {
+        i[a] = p[a] >> 8 > 31 ? 31 : p[a] >> 8;
+        f[a] = p[a] - 256 * i[a];
+    }
+    int e[2][2];
+    for (int db = 0; db < 2; db++)
+        for (int dg = 0; dg < 2; dg++) {
+            int n0 = i[0] + 33 * (i[1] + dg + 33 * (i[2] + db));
+            e[db][dg] = sl_lerp(q[3 * n0 + c] * 64, q[3 * (n0 + 1) + c] * 64, f[0]);
+        }
+    return sl_lerp(sl_lerp(e[0][0], e[0][1], f[1]), sl_lerp(e[1][0], e[1][1], f[1]), f[2]);
+}
+/* the table B must build for knobs k: composed(k) + the residual of t against composed(default), read at the node the
+ * exposure offset (k->fexp, unkeyed: the whole offset) moves to, as a text cube */
+static int sl_nmoved;                            /* sl_ref: values where the moved read differs from the node's own */
+static int sl_ref(const uint8_t *t, const struct wf_sg_knobs *k, const char *path)
+{
+    static uint16_t pd[SL_N * 3], c0[SL_N * 3], ck[SL_N * 3];
+    static int8_t q[SL_N * 3];
+    struct wf_sg_knobs k0 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF };
+    wf_sg_neg_pass_x(sg_n, &sg_pr, &k0, sl_x, SL_N, pd);
+    wf_sg_prn_pass_rgb(sg_p, &sg_pr, pd, SL_N, 0, c0);
+    wf_sg_neg_pass_x(sg_n, &sg_pr, k, sl_x, SL_N, pd);
+    wf_sg_prn_pass_rgb(sg_p, &sg_pr, pd, SL_N, 0, ck);
+    int clip = 0;
+    for (int j = 0; j < SL_N * 3; j++) {
+        int d = (t[2 * j] | t[2 * j + 1] << 8) - c0[j];
+        int v = (int)(d >= 0 ? floor(d / 64.0 + 0.5) : -floor(-d / 64.0 + 0.5));
+        if (v > 127 || v < -127) { v = v > 0 ? 127 : -127; clip++; }
+        q[j] = (int8_t)v;
+    }
+    FILE *cf = fopen(path, "w");
+    fprintf(cf, "TITLE \"knob table reference\"\nLUT_3D_SIZE 33\n");
+    sl_nmoved = 0;
+    for (int i = 0; i < SL_N; i++) {
+        int p[3] = { sl_pos(k->fexp, i % 33), sl_pos(k->fexp, i / 33 % 33), sl_pos(k->fexp, i / 1089) };
+        double o[3];
+        for (int ch = 0; ch < 3; ch++) {
+            int r = k->fexp ? sl_moved(q, p, ch) : 64 * q[3 * i + ch];
+            sl_nmoved += r != 64 * q[3 * i + ch];
+            o[ch] = clampi(ck[3 * i + ch] + r, 0, 65535) / 65535.0;
+        }
+        fprintf(cf, "%.6f %.6f %.6f\n", o[0], o[1], o[2]);
+    }
+    fclose(cf);
+    return clip;
+}
+/* one knob shot with the rows as they stand (the caller marked the log before moving them): B's knob table (its log line
+ * names the knobs unkeyed), the shot bit-exact vs sl_ref's cube; returns the words that differ from out2 (the shipped
+ * table's frame) */
+static int sl_shot(const struct wf_film *f, int v, const uint8_t *t, int nclip, const char *cwant, const char *what)
+{
+    struct wf_look lk;
+    struct wf_sg_knobs kk;
+    char want[160];
+    wf_look_now(&lk);
+    wf_sg_unkey(lk.stk, &kk);
+    chk(lk.stk && wf_rawb_logpk(&lk) == WF_RLG_OK, "%s: a knob key %x on the RAW path (%s)", what, lk.stk,
+        wf_rawb_logpk_why(wf_rawb_logpk(&lk)));
+    snprintf(want, sizeof want, "rawb: tables knobs %s v%d k%x exp %d prn %d %d %d interlayer %d c1 ", f->code, v,
+             (unsigned)lk.stk, kk.fexp, kk.prn[0], kk.prn[1], kk.prn[2], kk.iie * 25);
+    chk(LOGW(want, 15000) && WAIT(wf_rawb_state() == WF_RB_READY, 2000), "%s: '%s'", what, log_line("rawb: tables"));
+    chk(strstr(log_line("rawb: knob table"), cwant) != 0, "%s: the residual's clip logged: '%s'", what,
+        log_line("rawb: knob table"));
+    int clip = sl_ref(t, &kk, "ML/DATA/SLREF.CUB");
+    chk(!kk.fexp || sl_nmoved > SL_N, "%s: the moved read changes %d of %d residual values", what, sl_nmoved, SL_N * 3);
+    log_mark();
+    int sb = shot(in, out, FW, FH);
+    rb_ref_cube = "ML/DATA/SLREF.CUB";
+    rb_ref(ref, in, WF_DEV_CUBE, 1);
+    int dv = ndiff(out, out2, NW);
+    chk(sb == 0 && ndiff(out, ref, NW) == 0 && clip == nclip && dv > 0, "%s: bit-exact vs the direct develop with the "
+        "composed table + the residual%s (%d words differ; %d clipped), %d words differ from the shipped table's", what,
+        kk.fexp ? " read at the moved node" : "", ndiff(out, ref, NW), clip, dv);
+    chk(LOGW("rawb: done rows 3456,", 5000), "%s: developed", what);
+    printf("knobs: %s: %d of %d words differ from the shipped table's frame\n", what, dv, NW);
+    return dv;
+}
+/* the rows back to the shipped table: key 0, the log pack, out2 again */
+static void sl_default(const struct wf_film *f, int v, const char *what)
+{
+    struct wf_look lk;
+    char want[96];
+    wf_look_now(&lk);
+    chk(lk.stk == 0, "%s: the default key (%x)", what, lk.stk);
+    snprintf(want, sizeof want, "rawb: tables log pack %s v%d c1 ", f->code, v);
+    chk(LOGW(want, 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 2000), "%s: the log pack's tables ('%s')", what,
+        log_line("rawb: tables"));
+    log_mark();
+    int sb = shot(in, out, FW, FH);
+    chk(sb == 0 && ndiff(out, out2, NW) == 0, "%s: the shipped table's shot, bit-exact (%d)", what, ndiff(out, out2, NW));
+}
+static void sl_steps(int row, int n)
+{
+    for (int i = 0; i < (n < 0 ? -n : n); i++)
+        chk(wf_row_step(row, n < 0 ? -1 : 1), "row %d steps %s", row, n < 0 ? "down" : "up");
+}
+static void t_rawb_knobs(void)
+{
+    if (!rb_map) rb_map = map_at(RB_Z, 0x8000000u - 4096);
+    rb_dev = malloc(NW * 4);
+    int kc = -1, v1 = -1, v2 = -1;
+    for (int k = 0; k < wf_nfilms && kc < 0; k++)
+        if (!(wf_films[k].flags & (WF_F_LUTCAN | WF_F_BW)) && wf_films[k].group == WF_GRP_STAGE
+            && (wf_films[k].prints >> WF_PRINT_STOCK0))
+            kc = k;
+    if (kc < 0) {
+        printf("  (no chain film in this catalogue: skipped)\n");
+        return;
+    }
+    const struct wf_film *f = &wf_films[kc];
+    chain_prints(kc, &v1, &v2);
+    chk(v1 >= 0 && v2 >= 0, "chain film %s: two prints (%d, %d)", f->code, v1, v2);
+    if (v2 < 0)
+        return;
+    gen_frame(in, FW, FH, 0);
+    rb_raw((uint8_t *)(uintptr_t)RB_A, in);
+    const uint32_t *T1 = tab_make(12, 0, 0, 0);
+    struct pk ec[] = { { kc, v1, T1 }, { kc, v2, tab_make(-10, 0, 0, 0) } };
+    pack_write(ec, 2, 0);
+    stage_halves();
+    stage_write(kc, v1, v2, T1, 0);
+    sl_x = malloc(SL_N * 6);
+    for (int b = 0, i = 0; b < 33; b++)
+        for (int g = 0; g < 33; g++)
+            for (int r = 0; r < 33; r++, i++) {
+                int nd[3] = { r, g, b };
+                for (int c = 0; c < 3; c++)
+                    sl_x[3 * i + c] = (uint16_t)clampi(nd[c] * 65536 / 32, 0, 65535);
+            }
+    /* the shipped table: the default composition + a smooth residual (a few codes) + three nodes 40 codes up */
+    uint8_t *t = malloc(LG_TB);
+    {
+        static uint16_t pd[SL_N * 3], c0[SL_N * 3];
+        struct wf_sg_knobs k0 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF };
+        wf_sg_neg_pass_x(sg_n, &sg_pr, &k0, sl_x, SL_N, pd);
+        wf_sg_prn_pass_rgb(sg_p, &sg_pr, pd, SL_N, 0, c0);
+        for (int i = 0; i < SL_N; i++)
+            for (int c = 0; c < 3; c++) {
+                int r = i % 33, g = i / 33 % 33, b = i / 1089;
+                double d = 4.0 * sin(0.37 * r + 0.23 * g + 0.11 * b + c) * 257 + (r == g && g == b && r >= 28 ? -600 : 0);
+                if (i == 5000 || i == 17000 || i == 30000) d = 40 * 257;
+                int q = clampi((int)lrint(c0[3 * i + c] + d), 0, 65535);
+                t[6 * i + 2 * c] = (uint8_t)q;
+                t[6 * i + 2 * c + 1] = (uint8_t)(q >> 8);
+            }
+    }
+    lg_write(f, v1, t, 0);
+    sl_write(f, v1, t, 0);
+    struct wf_sg_knobs kd = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF };
+    int nclip = sl_ref(t, &kd, "ML/DATA/SLREF.CUB");   /* the residual's clips: the same for every knob */
+    char cwant[96];
+    snprintf(cwant, sizeof cwant, "residual clipped at %d of %d values", nclip, SL_N * 3);
+    chk(nclip >= 6 && nclip <= 9, "the test table: %d residual values beyond +-127 quarter codes", nclip);
+    FILE *cf = fopen("ML/DATA/LGREF.CUB", "w");
+    fprintf(cf, "TITLE \"log pack reference\"\nLUT_3D_SIZE 33\n");
+    for (int i = 0; i < SL_N; i++) {
+        const uint8_t *p = t + 6 * i;
+        fprintf(cf, "%.6f %.6f %.6f\n", (p[0] | p[1] << 8) / 65535.0, (p[2] | p[3] << 8) / 65535.0,
+                (p[4] | p[5] << 8) / 65535.0);
+    }
+    fclose(cf);
+    put_cfg("film=%d\noutput=film\nprint=scan\ngrain=off\nhalation=off\nmist=off\n", f->id);
+    mod_init(1);
+    h_prop_send(PROP_ASPECT, 0);
+    chk(WAIT(look_table_ready(), 10000), "chain film %s: its 8-bit table published", f->code);
+    chk(WAIT(wf_sg_state() == 1, 5000) && wf_sg_has(kc, v1), "the stage pack read: the pair's knob rows (state %d)",
+        wf_sg_state());
+    usleep(300000);
+    int live0 = h_arena_live;
+    pic_quality = 0x3070000;                     /* RAW + L fine */
+    drive_mode = 0;
+    memset(h_pb, 0, sizeof h_pb);
+    memset(h_edmac, 0, sizeof h_edmac);
+    rb_point(RB_A, 0);
+    struct wf_look lk;
+    struct wf_sg_knobs kk;
+    char want[120];
+    rb_ref_curve = WF_LL_SLOG3;
+    rb_ref_auto = 0;
+    rb_ref_hue = WF_DEV_HUE_I;
+    rb_ref_trim = 1;
+
+    /* default knobs: the shipped table (the pack path) */
+    log_mark();
+    wf_rawb = 1;
+    snprintf(want, sizeof want, "rawb: tables log pack %s v%d c1 ", f->code, v1);
+    chk(LOGW(want, 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 2000), "default knobs: the log pack's tables ('%s')",
+        log_line("rawb: tables"));
+    log_mark();
+    int sb = shot(in, out, FW, FH);
+    rb_ref_cube = "ML/DATA/LGREF.CUB";
+    rb_ref(ref, in, WF_DEV_CUBE, 1);
+    chk(sb == 0 && ndiff(out, ref, NW) == 0, "default knobs: bit-exact vs the shipped table (%d words differ)",
+        ndiff(out, ref, NW));
+    memcpy(out2, out, NW * 4);
+
+    /* Interlayer 0 / 50 / 200 %: the composed table + the residual */
+    static const int iies[3] = { 0, 2, 8 };
+    int cur = WF_SG_IIE_DEF;
+    for (int q = 0; q < 3; q++) {
+        while (cur > iies[q]) { chk(wf_row_step(WF_ROW_SIIE, -1), "Interlayer steps down"); cur--; }
+        while (cur < iies[q]) { chk(wf_row_step(WF_ROW_SIIE, 1), "Interlayer steps up"); cur++; }
+        log_mark();
+        wf_look_now(&lk);
+        chk(lk.stk && lk.siie == iies[q] && wf_rawb_logpk(&lk) == WF_RLG_OK, "Interlayer %d %%: a knob key %x on the RAW "
+            "path (%s)", iies[q] * 25, lk.stk, wf_rawb_logpk_why(wf_rawb_logpk(&lk)));
+        snprintf(want, sizeof want, "rawb: tables knobs %s v%d k%x exp 0 prn 0 0 0 interlayer %d c1 ", f->code, v1,
+                 (unsigned)lk.stk, iies[q] * 25);
+        chk(LOGW(want, 15000) && WAIT(wf_rawb_state() == WF_RB_READY, 2000), "Interlayer %d %%: '%s'", iies[q] * 25,
+            log_line("rawb: tables"));
+        chk(strstr(log_line("rawb: knob table"), cwant) != 0, "the residual's clip logged: '%s'",
+            log_line("rawb: knob table"));
+        wf_sg_unkey(lk.stk, &kk);
+        int clip = sl_ref(t, &kk, "ML/DATA/SLREF.CUB");
+        log_mark();
+        sb = shot(in, out, FW, FH);
+        rb_ref_cube = "ML/DATA/SLREF.CUB";
+        rb_ref(ref, in, WF_DEV_CUBE, 1);
+        int dv = ndiff(out, out2, NW);
+        chk(sb == 0 && ndiff(out, ref, NW) == 0 && clip == nclip && dv > 0, "Interlayer %d %%: bit-exact vs the direct develop "
+            "with the composed table + residual (%d words differ; %d clipped), %d words differ from 100 %%",
+            iies[q] * 25, ndiff(out, ref, NW), clip, dv);
+        chk(LOGW("rawb: done rows 3456,", 5000), "Interlayer %d %%: developed", iies[q] * 25);
+        printf("knobs: Interlayer %d %%: %d of %d words differ from 100 %%\n", iies[q] * 25, dv, NW);
+    }
+
+    /* the exposure offset (milestone 3): Film exp +1 (Interlayer back at 100 %), the residual read at the moved node */
+    log_mark();
+    sl_steps(WF_ROW_SIIE, WF_SG_IIE_DEF - cur);
+    cur = WF_SG_IIE_DEF;
+    sl_steps(WF_ROW_SEXP, 3);
+    int d1 = sl_shot(f, v1, t, nclip, cwant, "Film exp +1");
+    /* Push / pull -1/3 x 3 cancels it: offset 0, the default key, the shipped table */
+    log_mark();
+    sl_steps(WF_ROW_SPUSH, -3);
+    sl_default(f, v1, "Film exp +1 + Push -1");
+    /* Film exp -2 + Push -1 = offset -9 (the bottom row), Printer R +12 */
+    log_mark();
+    sl_steps(WF_ROW_SEXP, -9);
+    sl_steps(WF_ROW_SPR, 12);
+    int d2 = sl_shot(f, v1, t, nclip, cwant,"Film exp -2 + Push -1, Printer R +12");
+    /* Exp comp on: no offset left (the residual at the node itself), Printer R +12 alone */
+    log_mark();
+    chk(wf_row_step(WF_ROW_SCOMP, 1), "Exp comp on");
+    wf_look_now(&lk);
+    wf_sg_unkey(lk.stk, &kk);
+    chk(kk.fexp == 0 && kk.prn[0] == 12, "Exp comp on: offset %d, Printer R %d in the key", kk.fexp, kk.prn[0]);
+    int d3 = sl_shot(f, v1, t, nclip, cwant, "Exp comp on, Printer R +12");
+    /* a mixed set: Film exp +5/3, Push +2/3 (offset +7), Printer R +3 G -2 B +4, Interlayer 150 % */
+    log_mark();
+    chk(wf_row_step(WF_ROW_SCOMP, 1), "Exp comp off");
+    sl_steps(WF_ROW_SEXP, 11);
+    sl_steps(WF_ROW_SPUSH, 5);
+    sl_steps(WF_ROW_SPR, -9);
+    sl_steps(WF_ROW_SPG, -2);
+    sl_steps(WF_ROW_SPB, 4);
+    sl_steps(WF_ROW_SIIE, 2);
+    int d4 = sl_shot(f, v1, t, nclip, cwant, "mixed: offset +7, Printer +3 -2 +4, Interlayer 150 %");
+    printf("knobs: words off the shipped table's frame: %d / %d / %d / %d\n", d1, d2, d3, d4);
+    /* strength 30 % with knobs: the 8-bit chain (wf_film_words' mix); back at 100 %, the knob table again */
+    log_mark();
+    wf_strength = 0;
+    wf_look_now(&lk);
+    snprintf(want, sizeof want, "rawb: chain film %s v%d on the 8-bit chain (strength)", f->code, v1);
+    chk(lk.stk && wf_rawb_logpk(&lk) == WF_RLG_STRENGTH && LOGW("rawb: tables srgb", 10000) && LOGW(want, 3000),
+        "knobs + strength 30 %%: the 8-bit chain ('%s')", log_line("rawb: chain film"));
+    chk(WAIT(wf_rawb_state() == WF_RB_READY && look_table_ready(), 10000), "knobs + strength 30 %%: tables ready");
+    log_mark();
+    wf_strength = 1;
+    sl_shot(f, v1, t, nclip, cwant, "mixed again at strength 100 %");
+    /* every row back: the shipped table, the same frame */
+    log_mark();
+    sl_steps(WF_ROW_SEXP, -5);
+    sl_steps(WF_ROW_SPUSH, -2);
+    sl_steps(WF_ROW_SPR, -3);
+    sl_steps(WF_ROW_SPG, 2);
+    sl_steps(WF_ROW_SPB, -4);
+    sl_steps(WF_ROW_SIIE, -2);
+    sl_default(f, v1, "default knobs again");
+
+    /* a WFSTLOG.DAT made for other halves: one line, this pair's knob tables on the 8-bit chain */
+    wf_rawb = 0;
+    chk(WAIT(h_arena_live == live0, 3000) && wf_rawb_state() == WF_RB_OFF, "off: the tables' memory given back");
+    sl_write(f, v1, t, 'H');
+    chk(wf_row_step(WF_ROW_SIIE, -1), "Interlayer 75 %%");
+    log_mark();
+    wf_rawb = 1;
+    snprintf(want, sizeof want, "rawb: knob table %s v%d k", f->code, v1);
+    chk(LOGW(want, 15000) && strstr(log_line("rawb: knob table"), "packs of another build")
+        && LOGW("rawb: tables srgb", 10000), "other halves: '%s', then the 8-bit chain", log_line("rawb: knob table"));
+    wf_look_now(&lk);
+    chk(wf_rawb_logpk(&lk) == WF_RLG_KNOBS, "other halves: the pair's knob rows on the 8-bit chain until the next boot");
+    wf_rawb = 0;
+    mod_deinit();
+    free(t); free(sl_x); free(rb_dev);
+    rb_ref_hue = WF_DEV_HUE_A;
+    rb_ref_auto = 1;
+    rb_ref_cube = 0;
+    rb_ref_trim = 0;
 }
 #else
 /* 5D2: RAW develop "B" over Canon's TOP + BOT halves. CR2 row 0 sits at MEM1 + 0x76C8 - pitch (MEM1 = R5_M1, named by the job
@@ -5904,6 +6325,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LOG")) t_log(cs);
 #ifndef WF_BUILD_5D2
     else if (!strcmp(mode, "RAWB") && !strcmp(cs, "chain")) t_rawb_chain();
+    else if (!strcmp(mode, "RAWB") && !strcmp(cs, "knobs")) t_rawb_knobs();
 #endif
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();

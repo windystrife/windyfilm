@@ -40,6 +40,7 @@
 #include "wf_expsim.h"
 #include "wf_dark.h"
 #include "wf_rawb.h"
+#include "wf_dev.h"                              /* WF_DEV_HUE_*: the chain films' shoulder (shoulder=) */
 #include "wf_print.h"                             /* the print finishes' settings (WF_PFR_*, WF_PIN_*, WF_PDT_*) */
 
 extern int shooting_mode;                         /* Canon mode dial: 3 = M */
@@ -48,6 +49,7 @@ extern int get_global_draw(void);
 extern int get_global_draw_setting(void);
 
 #define WF_CFG "ML/SETTINGS/WINDYFLM.CFG"
+static const char *const wf_hue_key[WF_DEV_HUE_N] = { "a", "i", "d" };   /* shoulder=, by WF_DEV_HUE_* */
 #define WF_CFG_MAX 600
 
 /* ------------------------------------------------------------------ the state */
@@ -813,6 +815,7 @@ void wf_cfg_load(void)
     char b[WF_CFG_MAX + 1];
     uint32_t sz = 0;
     wf_cfg_read = 1;
+    wf_rb_hue = WF_DEV_HUE_I;                    /* no shoulder= line: the owner's pick */
     if (FIO_GetFileSize(WF_CFG, &sz) != 0 || sz == 0 || sz > WF_CFG_MAX)
         return;
     FILE *f = FIO_OpenFile(WF_CFG, O_RDONLY | O_SYNC);
@@ -907,6 +910,8 @@ void wf_cfg_load(void)
                 wf_sg_exp = q[0]; wf_sg_push = q[1]; wf_sg_comp = q[2];
                 wf_sg_prn[0] = q[3]; wf_sg_prn[1] = q[4]; wf_sg_prn[2] = q[5]; wf_sg_iie = q[6];
             }
+        } else if ((v = wf_cfg_val(l, "shoulder"))) {
+            wf_rb_hue = wf_cfg_word(v, wf_hue_key, WF_DEV_HUE_N, WF_DEV_HUE_I);
         } else if ((v = wf_cfg_val(l, "input"))) {
             ;                                     /* reserved: "jpeg" is the only input path */
         } else if ((v = wf_cfg_val(l, "userwb"))) {
@@ -943,7 +948,7 @@ static int wf_cfg_save(void)
     int n = snprintf(b, sizeof b,
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
                      "strength=%s\nhl=%d\nsh=%d\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\nexposure=%s\n"
-                     "exptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\n",
+                     "exptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\nshoulder=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
@@ -953,7 +958,8 @@ static int wf_cfg_save(void)
                      wf_pick(wf_mist_key, WF_MIST_MAX + 1, wf_mist), wf_pick(wf_pv_key, 3, wf_pv_mode),
                      wf_pick(wf_exp_key, 2, wf_exp_mode), wf_exp_trim >= -16 && wf_exp_trim <= 16 ? (int)wf_exp_trim : 0,
                      wf_exif_off ? "off" : "on", wf_blind ? "on" : "off", wf_pick(wf_pfr_key, WF_PFR_N, wf_pr_frame),
-                     wf_pick(wf_pin_key, WF_PIN_N, wf_pr_info), wf_pick(wf_pdt_key, WF_PDT_N, wf_pr_date));
+                     wf_pick(wf_pin_key, WF_PIN_N, wf_pr_info), wf_pick(wf_pdt_key, WF_PDT_N, wf_pr_date),
+                     wf_pick(wf_hue_key, WF_DEV_HUE_N, wf_rb_hue));
     struct wf_sg_knobs sk;
     wf_sg_knobs_now(&sk);
     if (n > 0 && n < (int)sizeof b)

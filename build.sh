@@ -15,9 +15,11 @@
 #      check (tools/fmt_check.py: only %d %x %X %s, Canon's vsnprintf has no %u / %lu / %zu / %+d and breaks %c)
 #   4. checksyms against the camera's card .sym; TCC link check with the camera's own loader object (image size)
 #   5. card packs (tools/mk_wfpack.py, mk_wfcans.py, mk_wffont.py, mk_wfstage.py; EOS M also mk_wffont.py --print-only
-#      WFPRINT.DAT, the Darkroom's print fonts, and mk_wflog.py WFLOG.DAT, the chain films' log tables for the RAW
-#      develop from films/tables/log; a failing pack tool is reported, not fatal: without WFSTAGE.DAT the film-stage
-#      knob rows stay hidden, without WFLOG.DAT a chain film's RAW shot keeps the 8-bit chain)
+#      WFPRINT.DAT, the Darkroom's print fonts, mk_wflog.py WFLOG.DAT, the chain films' log tables for the RAW
+#      develop from films/tables/log, and mk_wfstlog.py WFSTLOG.DAT, the knob rows on that develop (after WFSTAGE.DAT
+#      and WFLOG.DAT); a failing pack tool is reported, not fatal: without WFSTAGE.DAT the film-stage knob rows stay
+#      hidden, without WFLOG.DAT a chain film's RAW shot keeps the 8-bit chain, without WFSTLOG.DAT it does so with a
+#      knob row moved)
 #   6. provenance gate (tools/provenance_gate.py): any finding fails the build (check 5: card files are made / removed /
 #      renamed only through src/wf_fio.h)
 set -e
@@ -182,10 +184,11 @@ grep -q "__module_info_windyflm: .* -> OK" tcc.log || { echo "TCC: module_info n
 # ---------------------------------------------------------------- 5. card packs
 if [ "${PACKS:-1}" = 1 ]; then
   for p in "mk_wfpack.py WFFILMS.DAT" "mk_wfcans.py WFCANS.DAT" "mk_wffont.py WFFONTS.DAT" "mk_wfstage.py WFSTAGE.DAT" \
-           "mk_wffont.py WFPRINT.DAT --print-only" "mk_wflog.py WFLOG.DAT"; do
+           "mk_wffont.py WFPRINT.DAT --print-only" "mk_wflog.py WFLOG.DAT" "mk_wfstlog.py WFSTLOG.DAT"; do
     set -- $p
     [ $2 = WFPRINT.DAT ] && [ $CAM != EOSM ] && continue   # the Darkroom's print fonts (DESIGN 3.9): EOS M
     [ $2 = WFLOG.DAT ] && [ $CAM != EOSM ] && continue     # the RAW develop's chain tables (DESIGN 1a, option c): EOS M
+    [ $2 = WFSTLOG.DAT ] && [ $CAM != EOSM ] && continue   # their knob rows (the log grid's x section + placements)
     if $PY $R/tools/$1 $B/$2 ${3:-} > pack_$2.log 2>&1; then echo "pack $2: $(stat -c %s $B/$2) B"
     else echo "pack $2: NOT built ($1 failed, see $O/pack_$2.log)"; rm -f $B/$2; fi
   done

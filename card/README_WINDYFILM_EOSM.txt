@@ -197,13 +197,35 @@ Bật:
   215 KB từ thẻ. Log:
     rawb: tables log pack G08 v4 c1 NNms (offset ..., 643 entries, ...)
   Ghi lại NN: đó là thời gian đọc thẻ + dựng bảng (chưa đo trên máy thật).
-- Tạm thời (chờ quyết định): bảng log chưa chứa các hàng knob, Strength hay
-  Highlights / Shadows. Một trong các hàng đó khác mặc định (knob khác 0 / Off /
-  100 %, Strength khác 100 %, Highlights / Shadows khác 0) thì lon Film stage đi
-  đường 8-bit như trước: develop RAW ra sRGB rồi áp bảng phim 8-bit. Log ghi lý do:
+- Vai sáng của lon Film stage trên RAW (15/11, chủ máy chọn i): đèn và chỗ sáng giữ
+  màu tới trắng của phim rồi mới chuyển dần sang kem / trắng. Muốn ảnh y như thẻ
+  RAWB14 / RAWB15 (từng kênh tự cháy sáng, vai sáng a) thì sửa trên máy tính file
+  ML/SETTINGS/WINDYFLM.CFG thành dòng shoulder=a (shoulder=d: giữ nguyên tông màu
+  tới hết, để so), shoulder=i là mặc định. Lon Log + LUT và phim thường không đổi. Log mỗi tấm:
+    rawb: black ..., roll 1 c.. y.., shoulder i NNms
+  (NN = thời gian dựng bảng vai sáng của tấm đó).
+  Với i, màu còn được giảm: saturation -19 %, vibrance -19 % (bằng giảm -10 % hai
+  lần: màu nhạt còn x0,81, màu đậm nhất còn khoảng x0,66). Độ sáng và chi tiết giữ nguyên, chỉ màu đổi.
+  Phần giảm màu làm một lần lúc dựng bảng, nên dòng "rawb: tables log pack" dài
+  thêm khoảng 20 ms; shoulder=a và shoulder=d không có nó.
+- Hàng knob trên RAW (16/11): đổi bất kỳ hàng knob nào của lon Film stage (Film
+  exp, Push, Exp comp, Printer R / G / B, Interlayer) thì lon vẫn đi RAW. Máy dựng
+  bảng log mới từ hai nửa trong WFSTAGE.DAT cộng phần chênh của bảng gốc (cần
+  ML/DATA/WFSTLOG.DAT của chính thẻ này; file của thẻ cũ không dùng được), khoảng
+  nửa giây tính toán cộng đọc thẻ khoảng 1,1 MB, mỗi lần đổi knob (không phải mỗi
+  tấm). Với Film exp / Push, phần chênh được đọc ở nút đã dời theo độ phơi, nên vai
+  sáng dời theo. Log:
+    rawb: tables knobs G08 v4 k... exp 3 prn 0 0 0 interlayer 100 c1 NNms (...)
+  (exp = độ phơi còn lại sau Exp comp, đơn vị 1/3 stop; prn = Printer R G B).
+  Ghi lại NN. Mọi knob mặc định vẫn dùng đúng bảng gốc như trên.
+- Còn tạm thời: Strength và Highlights / Shadows chưa có trên RAW. Một trong hai
+  hàng đó khác mặc định thì lon Film stage đi đường 8-bit như trước: develop RAW ra
+  sRGB rồi áp bảng phim 8-bit. Log ghi lý do:
     rawb: chain film G08 v4 on the 8-bit chain (strength)
-  (hoặc "knob rows", "highlights / shadows"). Print nào không có trong WFLOG.DAT
-  hoặc file hỏng / thiếu: một dòng "rawb: log pack G08 v4: ..." rồi cũng đường 8-bit.
+  (hoặc "highlights / shadows"). Print nào không có trong WFLOG.DAT hoặc file hỏng /
+  thiếu: một dòng "rawb: log pack G08 v4: ..." rồi cũng đường 8-bit. Thiếu
+  WFSTLOG.DAT hoặc file không khớp: "rawb: knob table G08 v4 k...: ..., the 8-bit
+  chain" rồi các hàng knob đi đường 8-bit (lý do "knob rows").
 - Khi RAW develop Off, thẻ này chạy giống thẻ EOSM_WindyFilm (cùng bản main,
   có RAW probe v2 và Highlights / Shadows).
 - Dòng menu báo trạng thái: đang nạp bảng, sẵn sàng ("About 30 s per shot"),
@@ -236,6 +258,15 @@ Cần thử và gửi lại:
    develop Off để so. Đổi Print stock 2393, rồi 2302 (ảnh ĐEN TRẮNG): mỗi lần đổi có
    một dòng "tables log pack" mới, ghi lại NN. Rồi Strength 30 %: log phải có
    "on the 8-bit chain (strength)", chụp 1 tấm. Thêm 1 tấm G09 (Double-X, chỉ 2302).
+6b. (16/11) Hàng knob trên RAW: G08, Print stock 2383, Strength 100 %, RAW develop
+   On. Đặt Interlayer 50 %: log phải có "rawb: tables knobs G08 v4 ... interlayer 50
+   c1 NNms", ghi lại NN; chụp 1 tấm. Rồi Interlayer 0 % (nhạt hơn), chụp cùng cảnh.
+   Rồi Interlayer 100 % và Film exp +1 (3 nấc): log "tables knobs ... exp 3 ...",
+   ghi NN, chụp cùng cảnh. Rồi Exp comp On: dòng "tables log pack" quay lại (Exp comp
+   bù hết độ phơi). Rồi Exp comp Off, Film exp về 0, Printer R -6 và B +6: log
+   "prn -6 0 6", chụp cùng cảnh (ấm hơn: bớt đèn đỏ, thêm đèn xanh khi in thì ảnh
+   ngả đỏ - vàng; chiều ngược lại R +6 B -6 ra ảnh ngả cyan). Cuối cùng đưa mọi
+   knob về mặc định: dòng "tables log pack" quay lại.
 Gửi: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG của những tấm đó (cả tấm Off).
 Mỗi tấm có các dòng "rawb: ..." trong log: bộ đệm RAW đã chọn, điểm khớp,
 mức đen / trắng và thời gian từng bước.
@@ -365,6 +396,9 @@ ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 643 cặp Film stage
 ML/data/WFLOG.DAT         bảng log S-Log3 của 643 cặp Film stage cho RAW develop
                           (92,5 MB, 428 bảng khác nhau, mục 5); thiếu thì lon Film
                           stage trên RAW đi đường 8-bit. Dữ liệu dẫn xuất, chỉ dùng riêng
+ML/data/WFSTLOG.DAT       hàng Interlayer trên RAW develop (239 KB, mục 5): lưới log
+                          và vị trí đặt của 643 cặp; thiếu thì Interlayer khác 100 %
+                          đi đường 8-bit. Dữ liệu dẫn xuất, chỉ dùng riêng
 ML/data/WFCANS.DAT        hình lon phim
 ML/data/WFFONTS.DAT       font chữ của giao diện (Ubuntu Sans, UBUNTU_FONT_LICENCE.txt)
 ML/data/WFPRINT.DAT       font chữ in dưới ảnh của Darkroom (viền + thông tin, Ubuntu Sans)

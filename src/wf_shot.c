@@ -684,6 +684,42 @@ static int wf_sg_make(int key, uint32_t stk, uint32_t *T)
     return rc;
 }
 
+int wf_sg_halves(int row, int v, int *nb, int *pb, uint32_t *nfnv, uint32_t *pfnv)
+{
+    if (!wf_sg_has(row, v))
+        return 0;
+    const struct wf_sg_ent *e = &wf_sg_e[wf_sg_map[WF_WS_KEY(row, v)] - 1];
+    *nb = e->nb;
+    *pb = e->pb;
+    *nfnv = wf_sg_nfnv[e->nb];
+    *pfnv = wf_sg_pfnv[e->pb];
+    return 1;
+}
+
+int wf_sg_read_half(int half, int idx, void *mem)
+{
+    if (wf_sg_st != 1 || idx < 0 || idx >= (half ? WF_SG_MAXP : WF_SG_MAXN))
+        return -3;
+    uint32_t sz = half ? sizeof(struct wf_sg_prn) : sizeof(struct wf_sg_neg), h = 2166136261u;
+    uint32_t pos = half ? wf_sg_poff + idx * sz : wf_sg_noff + idx * sz;
+    void *f = FIO_OpenFile(WF_SG_PACK, 0);
+    char *dma = f ? __mem_malloc(WF_WS_CHUNK, WF_MEM_DMA | WF_MEM_TMP, "wf_shot.c", __LINE__) : 0;
+    int rc = !f ? -1 : !dma ? -2 : 0;
+    if (!rc && (wf_ws_rd(f, dma, pos, mem, sz, &h, 0) || h != (half ? wf_sg_pfnv[idx] : wf_sg_nfnv[idx])))
+        rc = half ? -5 : -4;
+    if (dma) __mem_free(dma);
+    if (f) FIO_CloseFile(f);
+    if (rc == -4 || rc == -5) {
+        if (half)
+            wf_sg_pbad[idx] = 1;
+        else
+            wf_sg_nbad[idx] = 1;
+        wf_log("stage %s half %d bad: its films keep their pack tables", half ? "print" : "negative", idx);
+        wf_gen_bump();
+    }
+    return rc;
+}
+
 /* the table the next shot (and the preview) uses: key + 1, 0 = none; *stk its knob key (0 = the pack's table) */
 static int wf_ws_want(uint32_t *stk)
 {

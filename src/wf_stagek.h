@@ -73,4 +73,34 @@ void wf_sg_neg_pass(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, cons
 void wf_sg_prn_pass(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int bw, uint32_t *T);
 void wf_sg_compose(const struct wf_sg_neg *n, const struct wf_sg_prn *p, const struct wf_sg_pair *pr,
                    const struct wf_sg_knobs *k, int bw, uint16_t *pd, uint32_t *T);
+
+/* The RAW develop's log grid (chain films on RAW, option (c), wf_rawb.h): the same two passes over the 33^3 nodes of a
+ * chain film's log table (ML/DATA/WFLOG.DAT, the .cube order, red fastest), so the knob rows reach B and the Darkroom.
+ * The node's input is not a display code but a log code (the develop's curve, decoded and brought to linear Rec.709
+ * as tools/mk_genesis_cube.c DOMAIN does): xn holds each node's exposure axis value per channel (Q16, the stage log
+ * pack's section, measured like X; it does not depend on the negative), pr is the pair's log placement (its fit and
+ * ends as the .L33 was placed), rgb = R' G' B' u16 value x 65535 per node, the samples a .L33 holds (bw: R' = G' = B'
+ * = the BT.601 luma, as a B&W .L33). Both passes take any run of nodes (xn, pd, rgb point at its first), so the camera
+ * can stream xn in and rgb out in slabs; pd is 3 x u16 per node as above. The x section and the placements ship in
+ * ML/DATA/WFSTLOG.DAT (tools/mk_wfstlog.py). wf_rawb.c rb_sl_build composes twice (default and the knobs) and adds the
+ * shipped table's residual (.L33 - default composition, quarter 8-bit codes) to the knobs' samples: default knobs never
+ * get here (the shipped table itself), and the composition's own 0.15-code mean error against the chain stays out. */
+#define WF_SG_LG 33
+#define WF_SG_LNODES (WF_SG_LG * WF_SG_LG * WF_SG_LG)
+void wf_sg_neg_pass_x(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k,
+                      const uint16_t *xn, int nodes, uint16_t *pd);
+void wf_sg_prn_pass_rgb(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int nodes, int bw,
+                        uint16_t *rgb);
+
+/* The RAW knob table's residual (wf_rawb.c rb_sl_build; tools/mk_wfstage.c logcheck / logdat run the same code):
+ * wf_sg_res_quant: r = the shipped log table's samples (le: u16 little-endian) less the default composition's (rgb),
+ * n nodes x 3, in quarter 8-bit codes (64 Q16 units, half away from 0), clipped at +-127; returns the clipped count.
+ * wf_sg_res_add: rgb (the knobs' samples of nodes node0 .. node0 + n - 1) += r x 64 read at the node the knobs' exposure
+ * offset moves it to. pos: WFSTLOG.DAT's shift row for the offset (WF_SG_LG axis positions, node units Q8: where the
+ * S-Log3 linear is 2^(offset / 3) times the node's), or 0 for none (r at the node itself, Interlayer / printer).
+ * Per axis i0 = min(p >> 8, WF_SG_LG - 2), f = p - 256 i0; lerp(a, b) = a + (((b - a) f + 128) >> 8) on r x 64, over R,
+ * then G, then B; the sum clamped to 0 .. 65535. r holds all WF_SG_LNODES nodes (the moved read reaches any of them). */
+#define WF_SG_SHIFT_Q 8
+int  wf_sg_res_quant(const uint8_t *le, const uint16_t *rgb, int n, int8_t *r);
+void wf_sg_res_add(const int8_t *r, const uint16_t *pos, int node0, int n, uint16_t *rgb);
 #endif

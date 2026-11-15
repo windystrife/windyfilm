@@ -119,7 +119,8 @@ Deny input: the old module's binary (path assembled inside the script, read only
   `lutei=-3..6`, `print=scan|cine|paper`, `light=auto|day|cloudy|tungsten`, `strength=subtle|normal|strong`,
   `grain=off|fine|normal|strong`, `halation=off|halation|spk`, `bloom=off|low|normal|strong` (RAWB11; an old `halation=bloom|spkbloom` reads as
   `halation|spk` + `bloom=normal`), `mist=off|w8|w4|w2|w1|b8|b4|b2|b1`,
-  `preview=off|on|fast`, `exposure=camera|smooth`, `exptrim=-16..16`, `exif=on|off`, `userwb=mode,kelvin,gm,ba`
+  `preview=off|on|fast`, `exposure=camera|smooth`, `exptrim=-16..16`, `exif=on|off`,
+  `shoulder=i|a|d` (chain-log: the chain films' shoulder colour on RAW, 10.9; no line = i), `userwb=mode,kelvin,gm,ba`
   (only while Light holds the WB). Written by `wf_task` 1.5 s after a change, at most 600 B.
 - `ML/LOGS/WINDYFLM.LOG`: appended across boots. A boot starts with `WindyFilm <date>: camera ..` (logged in
   `wf_init`); at the first write of a boot a log over 512 KB becomes `WINDYFLM.OLD`. Lines wait in a 16 KB byte ring
@@ -405,6 +406,9 @@ buffer was refetched. Hence the fused kernel with a stack slot.
 Real colour spreads the tetrahedral lookups over more of the 356 KB node table; the D-cache is 8 KB. So 29-36 s per
 shot. A sky as large as IMG_0206's (4.8 M highlight pixels) would add more.
 
+Chain films on RAW with the shoulder I (10.9, the default since 2026-11-15): +2.2..3.9 s of rows per shot on the
+real raws (memsim), the per-shot table 5 ms.
+
 The next step for speed is to cut the node-table misses. Candidates:
 - a smaller node table: 17^3 nodes, or 16-bit lanes;
 - going through the rows in tiles.
@@ -687,3 +691,199 @@ on the EOS M, after every boot, look change and playback -> shoot, and a 65^3 Ci
 - whether raw0 really holds this shot at both hooks: the P0 probe run answers it;
 - the RearDevelop task's patience while the TOP holds FrontDevelop about 20 s;
 - white levels per ISO.
+
+### 10.9 Shoulder colour on chain films (chain-log, 2026-11-15, the owner picked i)
+
+The film shoulder (`j.roll`, 10.7) maps each enc index on its own: per channel (A), so a bright coloured light walks
+off toward white channel by channel. The owner compared A, D (one shift from the pixel's luma for all three channels:
+the hue kept to the top) and I (D up to the look's white, then a smooth step over 1.5 stops toward each channel's own
+shift: lights keep their colour up to the print's white, then roll into cream / white) and picked **I** for the chain
+films on RAW. `struct wf_dev_job.hue` (`WF_DEV_HUE_A / I / D`) asks for it; `wf_dev_prepare` takes it only with the
+shoulder on, `WF_DEV_CUBE` and a log curve (1..5), else A. Callers: B (`wf_rawb_stage`) and the Darkroom
+(`dk_frame`) pass `wf_rb_hue` for a chain film on the log pack (`RB_K_LG` / `dk_lgk`), A for everything else (Log +
+LUT cans, Leica, plain log, the sRGB base develop of films and of the 8-bit chain). `wf_rb_hue` = WINDYFLM.CFG
+`shoulder=i|a|d`, i when the line is missing; a gives the RAWB14 / RAWB15 frame bit for bit (wf_test RAWB:chain).
+
+**Per shot** (`wf_dv_roll`): instead of A's three enc copies, one table T of `WF_DEV_NENC + 256` words in `enc2`:
+`T[i] = (uint16)(s(i) + 2) | w(i) << 16`, s = A's map as a shift in quarter enc steps (signed: the shoulder holds the
+look back, then lifts it near the sensor's white), w Q14 = 0 up to the look's white, smooth step over 384 steps, 1
+beyond (D: 0); the top 256 words repeat the last. Logged as `shoulder <a|i|d> <ms>` on B's `rawb: black ...` line and
+the Darkroom's `dark: F.. IMG_....` line (`st.ro_ms` through `j.ms`).
+
+**Per pixel** (C reference `wf_dv_hue_idx`, asm `wf_dv_span_hs`): luma of the three non-negative accumulators with the
+gamut's Rec.709-Y row (`wf_dv_hue_lw`, x 32768, SMULW), im = enc index of the luma + 256; d = T[im] low, w = T[im]
+high; per channel i += (d (16384 - w) + h w) >> 16 with h = T[i] low, clamped to 0 .. NENC - 1, then the plain enc
+table. Pre-test: R and G accumulators both under `hk` (every gamut's B weight is negative, so the luma is under the
+knee) take the plain lookups. A neutral pixel has im = i: knee, target and grey stay A's. `wf_dv_span_hs` is the span
+kernel macro with the shoulder block (`KERNEL name, hue` in wf_dev_arm.S); `wf_dv_span_s` assembles byte-identical to
+before. Tests: dev mode `hue` (luma rows against inv(wf_ll_mat), asm = C over 4 phases x 9 scales, I and D on a
+neutral ramp within 2 codes of A and equal below the knee), wf_test RAWB:chain (I default, a / d through the switch,
+each bit-exact against the direct develop), CFG (`shoulder=`), RAWB (Log + LUT logs `shoulder a`).
+
+**Cost** (memsim, `HUE=a|i|d [CAM=5D2] [CURVE=1 CUBE=.. SCENE=..] bash tools/dev_bench.sh`):
+
+Per-shot table ("shoulder tables", its own memsim phase through `j.ms`): A 9.1-10.9 ms (three per-channel enc copies),
+I 4.1-4.9 ms, D 4.0-4.7 ms. Rows, the frame 5184 x 3456 (instructions per pixel in brackets):
+
+| Shot | A (RAWB14 / 15) | **I** | D |
+|---|---|---|---|
+| synthetic scene, V-Log `FILM33.CUB`, knee 1905, 11 % highlight px | 25.60 s (161.7) | **28.52 s** (177.1) | 28.52 s (177.1) |
+| IMG_6849, G03P01 log table on S-Log3, knee 1296, bright facade, no clip | 22.70 s (120.9) | **26.57 s** (150.0) | 26.23 s (149.0) |
+| IMG_6856, G03P01, night street, 339 k highlight px | 23.15 s (128.0) | **25.33 s** (144.5) | 25.11 s (143.7) |
+
+- I costs the real chain-film shots +2.2 s (6856) to +3.9 s (6849) of rows, +9 to +17 %: the luma (3 SMULW), T[im] and
+  the per-channel shift with its MAC run on every pixel the pre-test does not send to the plain lookups. D saves only
+  0.2-0.3 s of that (the w > 0 MAC). A's per-pixel path and checksum are unchanged (no shoulder: bbbeb78c, 25.86 s).
+- Shot (prepare + rows; prepare 4.64-4.68 s here includes `wf_dev_levels`, logged apart as `lev` on the camera):
+  IMG_6849 27.35 -> 31.21 s, IMG_6856 27.83 -> 30.00 s.
+- 5D2 develop (`CAM=5D2`: its matrix and object, the same EOS M frames): the same within 0.1 s (A 22.64 / 23.12, I 26.52
+  / 25.30, D 26.17 / 25.07 s). Its frame is 5600 x 3744 = 1.17 x: about 26.5 -> 31.0 s (6849) and 27.0 -> 29.6 s (6856)
+  of rows. The 5D2 has no WFLOG.DAT, so its B never takes I today; the Darkroom is EOS M only.
+- On the camera: `shoulder i NNms` (the table) and `rows NN ms` on B's lines; the Darkroom's `expose` time.
+
+**Colour trim on i** (the owner after the 16-raw preview: i a little less saturated, saturation and vibrance -10 %, the
+detail kept; 16 Nov, after the trim preview: still a bit strong, that again x 0.9, so -19 / -19). `wf_dev_trim(t, sat, vib)` works on the built nodes: Y' of every node stays, Cb / Cr x (1 + sat / 100)
+(1 + vib / 100 x s), s = max - min of the node's R'G'B' (BT.601 back from its Y'CbCr, 0..1). `WF_DEV_HUE_I_SAT` =
+`WF_DEV_HUE_I_VIB` = -19 (were -10 / -10 on 15 Nov): a muted colour x 0.81, the strongest x 0.81 x 0.81 = 0.656, the -10
+trim applied twice to 0.3 % (x 0.655 .. 0.776 over the dev test cube's nodes with |c| >= 64); a neutral is untouched, so the tone, the shoulder table (it reads the nodes' Y') and every detail stay.
+`wf_rawb_logpk_build` applies it when `wf_rb_hue` is I, so B and the Darkroom both get it with the table. B's `rb_key`
+carries bit 24 = trim: leaving i (shoulder=a / d) rebuilds the table without it, a stays the RAWB14 / RAWB15 frame bit
+for bit, D has no trim. Cost: once per table build, 20.6 ms in memsim (2.9 M instructions over the 35 937 nodes, two
+software divisions each), inside the logged `tables log pack ... NNms`; nothing per pixel. Tests: dev `hue` part 4 (0 / 0
+a no-op, only the nodes change, Y' and neutrals kept, each Cb / Cr between (1 + sat)(1 + vib) and 1 + sat of its own
+with its sign, from the two defines),
+wf_test RAWB:chain (I + trim bit-exact against the direct develop with the trim; without it every Y byte equal and U / V
+nearer 0), darkroom `devset` hue field `i` (the camera's, with the trim) / `i0` (without). On the owner's 16 raws through
+the darkroom devset, i0 and i differ in no Y byte (cmp).
+
+### 10.10 Knob rows on RAW (chain-log, 2026-11-16; milestone 2: Interlayer)
+
+A chain film on the log pack with a film-stage knob row moved used to keep the 8-bit chain (`WF_RLG_KNOBS`). Interlayer
+(0..200 %) now stays on RAW: B (`wf_rawb_logpk_build`) and the Darkroom (`dk_logpk`) build the pair's log table on the
+camera. Film exp, Push, Exp comp and the printer points followed in milestone 3 (10.11, which changes the WFSTLOG.DAT
+format, the log lines and `wf_rawb_logpk` described here).
+
+**The table** (`rb_sl_build`, wf_rawb.c): T(k) = composed(k) + r, with r = shipped .L33 - composed(default). Both
+compositions are the log grid's two passes (wf_stagek.h `wf_sg_neg_pass_x` / `wf_sg_prn_pass_rgb`) on the pair's halves
+from WFSTAGE.DAT. The residual carries what the composition misses against the chain (at default over the 643 entries:
+mean 0.145, worst mean 0.268, worst max 19.8 8-bit codes; milestone 1, `mk_wfstage logcheck` / `logdat`), so a knob
+table sits on the same base as the shipped table, which default knobs keep. r is int8 in quarter 8-bit codes (64 Q16
+units, half away from 0, clipped at +-127 = +-31.75 codes and the clip count logged; the shipped entries peak at 19.8).
+Interlayer and the printer points move no exposure, so r is read at its own node; Film exp / Push / Exp comp move the
+knee and need r moved with it (`logcheck`'s "moved" column, milestone 3).
+
+**Data:** ML/DATA/WFSTLOG.DAT (tools/mk_wfstlog.py; EOS M, built after WFSTAGE.DAT and WFLOG.DAT, 239,174 B for 643
+entries): the x section (each log node's exposure axis value per channel, the same for every negative) and per entry the
+log placement (fit, black, 2^32 / (white - black)) with the checksums of the halves and of the log table it goes with.
+An entry whose halves (FNV-1a) or log table (Adler-32) are not the card's gives "packs of another build" and the 8-bit
+chain for that pair until the next boot.
+
+**On the camera** (B's worker; the Darkroom's look check):
+1. WFSTLOG.DAT header and index (FNV-1a) -> the entry; its halves' checksums against WFSTAGE.DAT's.
+2. The negative half (434,856 B, TMP) read and checked (`wf_sg_read_half`); the x section streamed in 8,172-byte chunks
+   (FNV-1a at the end), each chunk through both negative passes: pd0 (default) into the tables block, pd (the knobs)
+   into the develop scratch. The half is freed.
+3. The print half (217,192 B, TMP) read; the shipped table's samples streamed from WFLOG.DAT (`wf_dev_pack_samples`,
+   Adler-32 checked, at most 1,364 nodes a call): the print pass at pd0, r into the develop scratch.
+4. `wf_dev_build_gen`: the pack path's build from samples (bit-identical to `wf_dev_build_pack` on the same samples,
+   dev `pack`), 33 calls, each the print pass at pd + r. The print half is freed; i's colour trim as on the pack path.
+Shoot memory is unchanged (790 KB: the tables block and the scratch hold pd0, pd and r); TMP peaks at the negative half
+plus two 8 KB chunk buffers.
+
+**Key:** `rb_key` has no room for the knob key, so B keeps `rb_have_stk` beside `rb_have` (published first, behind a
+barrier), `rb_top_stk` and `rb_tried_stk`; `rb_stk` is the look's knob key on the log-pack kind, 0 otherwise.
+`wf_rawb_logpk` takes a knob key only when `rb_sl_knobs` holds (no exposure offset and no printer points: Interlayer
+alone) and the pair has not failed; the rest keeps `WF_RLG_KNOBS`. Logs: `rawb: tables knobs <code> v<n> k<key>
+interlayer <%> c<curve> <ms>`, the Darkroom's `dark: tables knobs ...`, a failure `rawb: knob table ...: <why> (<rc>),
+the 8-bit chain`, a clip `rawb: knob table ...: residual clipped at <n> of 107811 values`.
+
+**Cost** (memsim ARM946E-S, one knob table; G03 v4 and G38 v18 at Interlayer 0 / 50 / 200 %, the same to 0.5 ms):
+both negative passes 219.8 ms, the residual 118.1 ms, the fill 113.1 ms: 451 ms on top of the build from samples (the
+pack path's), and about 1.1 MB of SD reads (index up to 23 KB, x 216 KB, halves 435 + 217 KB, the log table 216 KB).
+Once per knob change, nothing per shot. Code (text + data of the touched objects): EOS M +6,026 B (wf_rawb +3,960,
+wf_dev +1,332, wf_shot +588, wf_dark +146), 5D2 +5,876 B; the 5D2 has no WFLOG.DAT / WFSTLOG.DAT, so it never runs.
+
+**Tests:** dev `pack` (gen = pack bit for bit on 16 builds, samples streamed as they are, a flipped byte, the callback's
+code, missing pack / entry); wf_test RAWB:knobs (EOS M: Interlayer 0 / 50 / 200 % bit-exact against the direct develop
+with the composed table + residual worked out in the test, the clip logged, Film exp -> the 8-bit chain, default
+knobs again = the shipped table's frame, a WFSTLOG.DAT for other halves -> "packs of another build"); RAWB:chain
+unchanged (shoulder=a = RAWB15 bit for bit). LOOK:sweep takes `WF_LOOK_STAGE` (a WFSTAGE.DAT) and `WF_LOOK_CFG` (extra
+config lines, e.g. `stage=0,0,0,0,0,0,2`) for sheets with the 8-bit chain at knob rows.
+
+**Owner sheet** (main's notes `gallery-log/interlayer-m2/`, the 16 raws, real kernels, shoulder i): bright-half C*, mean
+of 16, at Interlayer 100 / 50 / 0 %: G03P01 8-bit 28.5 / 26.1 / 23.8, RAW 24.9 / 23.0 / 21.2; G38P15 8-bit 35.0 / 34.3
+/ 33.1, RAW 29.1 / 28.6 / 27.8. Both paths move together; RAW stays paler by i's trim, the detail as before.
+
+### 10.11 Knob rows on RAW, milestone 3: Film exp, Push, Exp comp, Printer R / G / B (chain-log, 2026-11-16)
+
+Every film-stage knob row now composes on RAW. A chain film on the log pack keeps the 8-bit chain only for strength 30 /
+125 %, Highlights / Shadows, a pair whose WFSTLOG.DAT entry fails, or no WFSTLOG.DAT on the card. `rb_sl_knobs` is gone:
+`rb_sl_ok` = a WFSTLOG.DAT was read, the pair has not failed and WFSTAGE.DAT has its halves. Default knobs (key 0: no
+offset left after Exp comp, printer 0, Interlayer 100 %) still take the shipped table through the pack path, so
+shoulder=a stays RAWB15 bit for bit.
+
+**Printer points** move no exposure: T(k) = composed(k) + r at the node itself, as Interlayer.
+
+**Film exp / Push / Exp comp** reach the negative pass as one exposure offset in thirds of a stop (`wf_sg_off`: Exp
+comp on = 0, else Film exp + Push, -9..+9; `wf_sg_unkey` gives it whole as fexp). The offset moves the knee, so the
+residual must move with it: r is read where the node's S-Log3 linear is 2^(offset / 3) times its own, per axis (a
+brighter offset reads a higher node). Milestone 1's `logcheck` "moved" column is that read in doubles; the module's is
+integer:
+- `wf_sg_res_quant(le, rgb, n, r)`: r = shipped - composed(default) in quarter 8-bit codes (64 Q16 units, half away
+  from 0, clipped at +-127, the clips counted). This was inline in rb_sl_res; now one function for the camera and the
+  generator.
+- `wf_sg_res_add(r, pos, node0, n, rgb)`: rgb += r x 64 read at the moved node. pos = the offset's shift row (33 axis
+  positions, node units Q8), or 0 for none. Per axis i0 = min(p >> 8, 31), f = p - 256 i0; lerp(a, b) = a + (((b - a)
+  f + 128) >> 8) over R, then G, then B; the sum clamped to 0..65535. r holds all 35,937 nodes (a moved read can reach
+  any of them), which it already did for the fill.
+
+**WFSTLOG.DAT v2** (tools/mk_wfstlog.py, 240,198 B for 643 entries): header 48 B (`WFSL`, u16 version 2, u16 n, u16
+grid 33, u8 curve, u8 feed, u32 index offset 48, u32 x offset, u32 size, u32 FNV-1a index, u32 FNV-1a x, u32 shift
+offset = 48 + 36 n, u16 rows 19, s16 first offset -9, u32 FNV-1a shift, u32 0), the index (36 B entries, as v1), the
+shift section (19 rows x 33 u16, offset -9 first: `mk_wfstage logshift`, from the same `lg_shift` as logcheck's moved
+column, lrint x 256), the x section at the next 512-byte boundary. A v1 file (milestone 2's card) gives "WFSTLOG.DAT not a
+pack": every knob table falls back to the 8-bit chain, nothing else changes. An offset outside the rows gives
+`RB_SL_E_SHIFT` ("exposure offset not in WFSTLOG.DAT") and the 8-bit chain for that pair.
+
+**On the camera** (B and the Darkroom, the 10.10 order): step 1 reads the shift section after the index (1,254 B,
+FNV-1a) and copies the offset's row into `rb_sl.pos` (66 B in rb_sl_build's frame); step 4's fill calls `wf_sg_res_add`
+with that row when fexp != 0. No new reads beyond those 1,254 B; shoot memory unchanged (790 KB).
+
+**What it fixes** (`mk_wfstage logcheck`, the 5 pairs x 14 knob sets of milestone 1, now with a "module" column = this
+code; module = moved to 0.01 node in every knee): the knee node (`lg_knee`: the neutral axis' fractional node index
+where its luma first reaches its monotone top - 256, where the develop's shoulder finds white) for chain / composed +
+residual at its node / module:
+- G15P10 exp +1: 13.94 / 14.75 / 13.95; exp -2: 20.96 / 21.85 / 20.97; exp +2: 11.77 / 11.94 / 11.88.
+- G03P01 exp -2: 21.59 / 21.88 / 21.75. G09P14 (B&W) exp -2: 20.98 / 21.53 / 20.98.
+- Mean error against the chain, all sets: module <= 0.267 8-bit codes (G15P10 mixed); exp -2 on G15P10 0.283 -> 0.143.
+- **The one knee miss: G38P15 (Eterna 8553 / 3523XD), Film exp +2 (offset +6, printer 0, Interlayer 100 %): chain
+  12.44, composed 12.87, module 12.85.** The composition puts that knee 0.43 node late and the residual read at the
+  moved node takes back 0.02 of it. Mean error 0.099 codes, max 9.0.
+- Two smaller ones, G21P05 (offset +3: Film exp +1 or Push +1): chain 14.02, composed 14.84, module 14.81; G21P05 mixed
+  (Film exp +2/3, Push -1/3 = offset +1, printer +3 / -2 / +4, Interlayer 150 %): chain 15.94, composed 15.99, module 16.16 (the moved residual
+  overshoots by 0.2 node; mean 0.126).
+- Printer R +12 on G21P05: one node 26.8 codes off the chain in R, the same with or without the residual (the
+  composition's own miss at the printer's end; mean 0.148).
+- `logdat` over the 643 entries: residual |max| 79 quarter codes, 0 clipped; the shift section equals `lg_shift_row`;
+  Film exp +1 through the module's table lifts 17 of 17 neutral nodes in every entry.
+
+**Cost** (memsim ARM946E-S, G03 v4 and G38 v18, the module's wf_stagek.o): negative passes 219-220 ms, the residual
+123.6 ms (wf_sg_res_quant, a call per slab: +5.5 ms against the inline loop), the fill 117.8 ms at the node itself
+(Interlayer / printer; +4.7 ms) or 160-163 ms read at the moved node (offset +3, -9 with Printer R +12, +7 mixed): 461
+ms per knob table without an offset, 504 ms with one, plus the build from samples (the pack path's). SD reads about 1.1
+MB as 10.10 + 1,254 B. Host and ARM give the same samples. Code (text + data, against milestone 2): EOS M +1,183 B
+(wf_stagek +832, wf_rawb +235, wf_dark +116), 5D2 +1,067 B; the 5D2 has no WFLOG.DAT / WFSTLOG.DAT, so it never runs.
+
+**Logs:** `rawb: tables knobs <code> v<n> k<key> exp <offset> prn <r> <g> <b> interlayer <%> c<curve> <ms> (sum <x>,
+<n> KB shoot memory)`, the Darkroom's `dark: tables knobs ...` the same; exp is the offset left after Exp comp.
+
+**Tests:** wf_test RAWB:knobs (EOS M, WFSTLOG.DAT v2 written by the test with synthetic shift rows k x 256 + 8 o k, so
+the fractions vary and the top nodes clamp): Interlayer 0 / 50 / 200 %, Film exp +1, Film exp -2 + Push -1 (offset -9,
+the bottom row) with Printer R +12, Exp comp on (offset 0, Printer R +12 at the node), a mixed set (offset +7, printer
++3 / -2 / +4, Interlayer 150 %) and the same again after strength 30 % -> 100 %: each bit-exact against the direct
+develop of the test's own reference (the composer at the knobs + the residual read with the test's integer trilinear),
+the moved read changing 105,000-107,000 of 107,811 residual values; Film exp +1 + Push -1 (offset 0) and every row back
+give the default key and the shipped table's frame bit for bit; strength 30 % with knobs -> the 8-bit chain; other
+halves -> "packs of another build". `mk_wfstlog.py` self-test: v2 header, monotone rows, offset 0 = identity, brighter
+offsets read higher nodes. `mk_wfstage logknob ... FEXP PUSH COMP PRNR PRNG PRNB IIE` writes the module's knob table as
+a .L33 (sheets).

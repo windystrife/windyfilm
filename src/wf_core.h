@@ -154,6 +154,12 @@ const uint32_t *wf_ws_table(int row, int variant, uint32_t stk);   /* preview (w
 int  wf_sg_state(void);                           /* ML/DATA/WFSTAGE.DAT: 0 not read, 1 read, < 0 missing / bad */
 int  wf_sg_has(int row, int variant);             /* the stage pack has this film-stage pair (its knob rows work) */
 void wf_sg_knobs_now(struct wf_sg_knobs *k);      /* the knob rows as they stand (wf_menu.c), in range */
+/* the RAW develop's knob tables (wf_rawb.c, wf_task): the halves WFSTAGE.DAT gives pair (row, variant), their blob
+ * indices and checksums (1; 0 = no usable pair), and one half (0 negative, 1 print) read into mem (sizeof struct wf_sg_neg
+ * / wf_sg_prn), checksum-checked: 0, -1 cannot open, -2 no memory, -3 no pack, -4 / -5 bad (the half is then marked bad,
+ * as for the 8-bit composition: its films keep their pack tables) */
+int  wf_sg_halves(int row, int variant, int *nb, int *pb, uint32_t *nfnv, uint32_t *pfnv);
+int  wf_sg_read_half(int half, int idx, void *mem);
 void wf_shot_poll(void);                         /* wf_task: shot log, EXIF entries, pack reader, Log + LUT, effects */
 void wf_ws_poll(void);                            /* pack reader step (also inside the wait loops of wf_fx.c / wf_ll_poll) */
 int  wf_ws_state(void);                           /* 0 index not read, 1 read, < 0 pack missing / bad */

@@ -272,7 +272,7 @@ Sửa bằng bánh xe, hoặc nhấn joystick ("JOY Edit") rồi trái / phải.
 - Để mặc định hết (0 / 0 / Off / 0 0 0 / 100 %) thì máy dùng bảng có sẵn trong
   WFFILMS.DAT như mọi phim, không đọc WFSTAGE.DAT.
 - Đổi một hàng knob (hoặc đổi phim / print khi knob khác mặc định): máy dựng bảng mới
-  từ WFSTAGE.DAT. Không đọc cả file 22,4 MB: lúc bật máy chỉ đọc mục lục (khoảng
+  từ WFSTAGE.DAT. Không đọc cả file 21,3 MB: lúc bật máy chỉ đọc mục lục (khoảng
   20 KB); mỗi lần dựng đọc khoảng 650 KB của đúng cặp đó (nửa âm bản 435 KB, rồi
   nửa print 217 KB, cần khoảng 470 KB bộ nhớ tạm, trả lại ngay), tính toán khoảng
   40 ms trên 5D2. Log: "stage G08 v4 composed NNms k..." (bảng dựng từ knob) hoặc
@@ -285,7 +285,7 @@ Sửa bằng bánh xe, hoặc nhấn joystick ("JOY Edit") rồi trái / phải.
 
 7. FILM STAGE: LẦN CHẠY ĐẦU
 ---------------------------
-1. Thẻ phải có ML/DATA/WFSTAGE.DAT (22 409 848 B; md5 trong MD5SUMS.txt). Bật máy,
+1. Thẻ phải có ML/DATA/WFSTAGE.DAT (21 323 868 B; md5 trong MD5SUMS.txt). Bật máy,
    WINDYFLM.LOG phải có:
      pack ok: 692 tables, index NNms, catalog 97 films
      stage ok: 643 of 643 pairs match the pack (44 negatives, 15 prints), index NNms
@@ -325,7 +325,7 @@ Gửi: ML/LOGS/WINDYFLM.LOG, ML/SETTINGS/WINDYFLM.CFG và các JPG (kèm CR2 n�
 ----------------
 ML/modules/windyflm.mo    module
 ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper, và 643 cặp Film stage)
-ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 643 cặp Film stage (22,4 MB),
+ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 643 cặp Film stage (21,3 MB),
                           cho 7 hàng knob (mục 6); thiếu thì các hàng đó mờ.
                           Dữ liệu dẫn xuất, chỉ dùng riêng
 ML/data/WFCANS.DAT        hình lon phim
