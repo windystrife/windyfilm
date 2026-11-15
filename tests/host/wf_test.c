@@ -1672,6 +1672,7 @@ static void ms_ev(int ev8)                       /* the shot's EV100 x 8: lens_i
     h_li_set("shutter", clampi(ev8 - 8 - h_li_get("aperture") + sv, 8, 200));
     vp_bytes[2] = (uint8_t)clampi(ev8 - 8 - vp_bytes[1] + vp_bytes[0] + h_li_get("ae"), 8, 200);
 }
+extern int get_ms_clock(void);
 /* the Darkroom's stage (wf_dark.c step 3) on a developed frame src -> dst, the CR2's EV ev8 (fr.dev_ev8): after a log
  * mark, its "yuv DARK" line */
 static const char *dk_stage(const uint32_t *src, uint32_t *dst, int ev8)
@@ -3072,7 +3073,6 @@ static void rb_stopped(const char *what, const char *want_buf)
     chk(LOGW(": rbstop", 3000) && strstr(log_line(": rbstop"), "raw-stop"), "%s: status '%s'", what, log_line(": rbstop"));
 }
 
-extern int get_ms_clock(void);
 static void t_rawb(void)
 {
     uint32_t *R = rb_map ? rb_map : map_at(RB_Z, 0x8000000u - 4096), *alt = malloc(NW * 4);
