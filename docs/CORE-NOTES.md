@@ -755,3 +755,60 @@ with its sign, from the two defines),
 wf_test RAWB:chain (I + trim bit-exact against the direct develop with the trim; without it every Y byte equal and U / V
 nearer 0), darkroom `devset` hue field `i` (the camera's, with the trim) / `i0` (without). On the owner's 16 raws through
 the darkroom devset, i0 and i differ in no Y byte (cmp).
+
+### 10.10 Knob rows on RAW (chain-log, 2026-11-16; milestone 2: Interlayer)
+
+A chain film on the log pack with a film-stage knob row moved used to keep the 8-bit chain (`WF_RLG_KNOBS`). Interlayer
+(0..200 %) now stays on RAW: B (`wf_rawb_logpk_build`) and the Darkroom (`dk_logpk`) build the pair's log table on the
+camera. Film exp, Push, Exp comp and the printer points still keep the 8-bit chain (milestone 3).
+
+**The table** (`rb_sl_build`, wf_rawb.c): T(k) = composed(k) + r, with r = shipped .L33 - composed(default). Both
+compositions are the log grid's two passes (wf_stagek.h `wf_sg_neg_pass_x` / `wf_sg_prn_pass_rgb`) on the pair's halves
+from WFSTAGE.DAT. The residual carries what the composition misses against the chain (at default over the 643 entries:
+mean 0.145, worst mean 0.268, worst max 19.8 8-bit codes; milestone 1, `mk_wfstage logcheck` / `logdat`), so a knob
+table sits on the same base as the shipped table, which default knobs keep. r is int8 in quarter 8-bit codes (64 Q16
+units, half away from 0, clipped at +-127 = +-31.75 codes and the clip count logged; the shipped entries peak at 19.8).
+Interlayer and the printer points move no exposure, so r is read at its own node; Film exp / Push / Exp comp move the
+knee and need r moved with it (`logcheck`'s "moved" column, milestone 3).
+
+**Data:** ML/DATA/WFSTLOG.DAT (tools/mk_wfstlog.py; EOS M, built after WFSTAGE.DAT and WFLOG.DAT, 239,174 B for 643
+entries): the x section (each log node's exposure axis value per channel, the same for every negative) and per entry the
+log placement (fit, black, 2^32 / (white - black)) with the checksums of the halves and of the log table it goes with.
+An entry whose halves (FNV-1a) or log table (Adler-32) are not the card's gives "packs of another build" and the 8-bit
+chain for that pair until the next boot.
+
+**On the camera** (B's worker; the Darkroom's look check):
+1. WFSTLOG.DAT header and index (FNV-1a) -> the entry; its halves' checksums against WFSTAGE.DAT's.
+2. The negative half (434,856 B, TMP) read and checked (`wf_sg_read_half`); the x section streamed in 8,172-byte chunks
+   (FNV-1a at the end), each chunk through both negative passes: pd0 (default) into the tables block, pd (the knobs)
+   into the develop scratch. The half is freed.
+3. The print half (217,192 B, TMP) read; the shipped table's samples streamed from WFLOG.DAT (`wf_dev_pack_samples`,
+   Adler-32 checked, at most 1,364 nodes a call): the print pass at pd0, r into the develop scratch.
+4. `wf_dev_build_gen`: the pack path's build from samples (bit-identical to `wf_dev_build_pack` on the same samples,
+   dev `pack`), 33 calls, each the print pass at pd + r. The print half is freed; i's colour trim as on the pack path.
+Shoot memory is unchanged (790 KB: the tables block and the scratch hold pd0, pd and r); TMP peaks at the negative half
+plus two 8 KB chunk buffers.
+
+**Key:** `rb_key` has no room for the knob key, so B keeps `rb_have_stk` beside `rb_have` (published first, behind a
+barrier), `rb_top_stk` and `rb_tried_stk`; `rb_stk` is the look's knob key on the log-pack kind, 0 otherwise.
+`wf_rawb_logpk` takes a knob key only when `rb_sl_knobs` holds (no exposure offset and no printer points: Interlayer
+alone) and the pair has not failed; the rest keeps `WF_RLG_KNOBS`. Logs: `rawb: tables knobs <code> v<n> k<key>
+interlayer <%> c<curve> <ms>`, the Darkroom's `dark: tables knobs ...`, a failure `rawb: knob table ...: <why> (<rc>),
+the 8-bit chain`, a clip `rawb: knob table ...: residual clipped at <n> of 107811 values`.
+
+**Cost** (memsim ARM946E-S, one knob table; G03 v4 and G38 v18 at Interlayer 0 / 50 / 200 %, the same to 0.5 ms):
+both negative passes 219.8 ms, the residual 118.1 ms, the fill 113.1 ms: 451 ms on top of the build from samples (the
+pack path's), and about 1.1 MB of SD reads (index up to 23 KB, x 216 KB, halves 435 + 217 KB, the log table 216 KB).
+Once per knob change, nothing per shot. Code (text + data of the touched objects): EOS M +6,026 B (wf_rawb +3,960,
+wf_dev +1,332, wf_shot +588, wf_dark +146), 5D2 +5,876 B; the 5D2 has no WFLOG.DAT / WFSTLOG.DAT, so it never runs.
+
+**Tests:** dev `pack` (gen = pack bit for bit on 16 builds, samples streamed as they are, a flipped byte, the callback's
+code, missing pack / entry); wf_test RAWB:knobs (EOS M: Interlayer 0 / 50 / 200 % bit-exact against the direct develop
+with the composed table + residual worked out in the test, the clip logged, Film exp -> the 8-bit chain, default
+knobs again = the shipped table's frame, a WFSTLOG.DAT for other halves -> "packs of another build"); RAWB:chain
+unchanged (shoulder=a = RAWB15 bit for bit). LOOK:sweep takes `WF_LOOK_STAGE` (a WFSTAGE.DAT) and `WF_LOOK_CFG` (extra
+config lines, e.g. `stage=0,0,0,0,0,0,2`) for sheets with the 8-bit chain at knob rows.
+
+**Owner sheet** (main's notes `gallery-log/interlayer-m2/`, the 16 raws, real kernels, shoulder i): bright-half C*, mean
+of 16, at Interlayer 100 / 50 / 0 %: G03P01 8-bit 28.5 / 26.1 / 23.8, RAW 24.9 / 23.0 / 21.2; G38P15 8-bit 35.0 / 34.3
+/ 33.1, RAW 29.1 / 28.6 / 27.8. Both paths move together; RAW stays paler by i's trim, the detail as before.

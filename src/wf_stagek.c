@@ -92,62 +92,109 @@ static void wf_sg_node(int yc, int uc, int vc, int *rgb)
     rgb[2] = wf_sg_clamp(Y * 65536 + 116130 * U, 0, 255 << 16);
 }
 
-void wf_sg_neg_pass(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k, uint16_t *pd)
+/* the negative pass's per-table part */
+struct wf_sg_np { int sx, iie, tim[3]; };
+static void wf_sg_np_set(const struct wf_sg_pair *pr, const struct wf_sg_knobs *k, struct wf_sg_np *q)
 {
     /* exposure axis offset, as the chain adds it: (push + exposure x 0.3) / 6 in Q16 logE, the fitted exposure inside;
      * the knobs' offset (wf_sg_off, thirds of a stop) on top. Exp comp: only the fitted placement is left. A key's
      * knobs (wf_sg_unkey: the whole offset in fexp) give the same table as the knobs it was made from */
     int off = k->comp ? 0 : wf_sg_clamp(k->fexp + k->push, -WF_SG_OFF_MAX, WF_SG_OFF_MAX);
     int32_t loge = (int32_t)(((int64_t)pr->fit * 19661) >> 16) + off * 6554;   /* stops x 0.3; a third = 0.1 logE */
-    int sx = loge >= 0 ? (int)(((int64_t)loge * 10923) >> 16) : -(int)(((int64_t)-loge * 10923) >> 16);   /* / 6 */
+    q->sx = loge >= 0 ? (int)(((int64_t)loge * 10923) >> 16) : -(int)(((int64_t)-loge * 10923) >> 16);   /* / 6 */
     /* colour timing in Q16 printing density: the chain's auto-balance is inside A2's base (measured with the printer at
      * 0), so only the printer points move it, 1 point = 0.025 logE, subtracted as the chain does */
-    int tim[3], iie = wf_sg_clamp(k->iie, 0, WF_SG_IIE_MAX);
+    q->iie = wf_sg_clamp(k->iie, 0, WF_SG_IIE_MAX);
     for (int c = 0; c < 3; c++)
-        tim[c] = -((wf_sg_clamp(k->prn[c], -WF_SG_PRN_MAX, WF_SG_PRN_MAX) * 104858) >> 6);
+        q->tim[c] = -((wf_sg_clamp(k->prn[c], -WF_SG_PRN_MAX, WF_SG_PRN_MAX) * 104858) >> 6);
+}
 
+/* one node of the negative pass: the exposure axis x of each channel (Q16) -> A1 -> A2 -> printing density / 4 */
+static inline void wf_sg_nnode(const struct wf_sg_neg *n, const struct wf_sg_np *q, const int *x, uint16_t *pd)
+{
+    int cell[3], fr[3];
+    struct wf_sg_tet t;
+    for (int c = 0; c < 3; c++) {
+        int d = wf_sg_1d(n->A1[c], x[c] + q->sx);
+        wf_sg_cell(((int64_t)(d - n->lo[c]) * n->sc[c]) >> 14, WF_SG_NA, &cell[c], &fr[c]);
+    }
+    wf_sg_tetw(cell, fr, WF_SG_NA, &t);
+    const int16_t *a0 = n->A2[t.i0], *a1 = n->A2[t.i1], *a2 = n->A2[t.i2], *a3 = n->A2[t.i3];
+    for (int c = 0; c < 3; c++) {
+        int base = (a0[c] * t.w0 + a1[c] * t.w1 + a2[c] * t.w2 + a3[c] * t.w3 + 8192) >> 14;
+        int quad = (a0[3 + c] * t.w0 + a1[3 + c] * t.w1 + a2[3 + c] * t.w2 + a3[3 + c] * t.w3 + 8192) >> 14;
+        int v = (base * 16 + ((quad * 16 * q->iie) >> 2) + q->tim[c]) >> 2;   /* Q16 printing density / 4: B1's axis */
+        pd[c] = (uint16_t)wf_sg_clamp(v, 0, 65535);                         /* 65535 stands for the top end */
+    }
+}
+
+void wf_sg_neg_pass(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k, uint16_t *pd)
+{
+    struct wf_sg_np q;
+    wf_sg_np_set(pr, k, &q);
     for (int node = 0, yc = 0, uc = 0, vc = 0; node < WF_SG_NODES; node++) {   /* node = (yc * 17 + uc) * 17 + vc */
-        int rgb[3], cell[3], fr[3];
-        struct wf_sg_tet t;
+        int rgb[3], x[3];
         wf_sg_node(yc, uc, vc, rgb);
         if (++vc == 17 && (vc = 0, ++uc == 17))
             uc = 0, yc++;
         for (int c = 0; c < 3; c++) {
-            int r = rgb[c], i = r >> 14, x, d;
-            x = i >= WF_SG_NX - 1 ? n->X[WF_SG_NX - 1] : n->X[i] + (((n->X[i + 1] - n->X[i]) * (r & 0x3fff)) >> 14);
-            d = wf_sg_1d(n->A1[c], x + sx);
-            wf_sg_cell(((int64_t)(d - n->lo[c]) * n->sc[c]) >> 14, WF_SG_NA, &cell[c], &fr[c]);
+            int r = rgb[c], i = r >> 14;
+            x[c] = i >= WF_SG_NX - 1 ? n->X[WF_SG_NX - 1] : n->X[i] + (((n->X[i + 1] - n->X[i]) * (r & 0x3fff)) >> 14);
         }
-        wf_sg_tetw(cell, fr, WF_SG_NA, &t);
-        const int16_t *a0 = n->A2[t.i0], *a1 = n->A2[t.i1], *a2 = n->A2[t.i2], *a3 = n->A2[t.i3];
-        for (int c = 0; c < 3; c++) {
-            int base = (a0[c] * t.w0 + a1[c] * t.w1 + a2[c] * t.w2 + a3[c] * t.w3 + 8192) >> 14;
-            int quad = (a0[3 + c] * t.w0 + a1[3 + c] * t.w1 + a2[3 + c] * t.w2 + a3[3 + c] * t.w3 + 8192) >> 14;
-            int q = (base * 16 + ((quad * 16 * iie) >> 2) + tim[c]) >> 2;   /* Q16 printing density / 4: B1's axis */
-            pd[node * 3 + c] = (uint16_t)wf_sg_clamp(q, 0, 65535);         /* 65535 stands for the top end */
-        }
+        wf_sg_nnode(n, &q, x, pd + node * 3);
+    }
+}
+
+void wf_sg_neg_pass_x(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k,
+                      const uint16_t *xn, int nodes, uint16_t *pd)
+{
+    struct wf_sg_np q;
+    wf_sg_np_set(pr, k, &q);
+    for (int i = 0; i < nodes; i++, xn += 3, pd += 3) {
+        int x[3] = { xn[0], xn[1], xn[2] };
+        wf_sg_nnode(n, &q, x, pd);
+    }
+}
+
+/* one node of the print pass: printing density / 4 -> B1 -> B2 -> the pinned ends, Q16 (black 0, white 65536) */
+static inline void wf_sg_pnode(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int64_t *lv)
+{
+    int cell[3], fr[3];
+    struct wf_sg_tet t;
+    for (int c = 0; c < 3; c++) {
+        int x = pd[c];
+        int q = wf_sg_1d(p->B1[c], x == 65535 ? 65536 : x);
+        wf_sg_cell(((int64_t)(q - p->lo[c]) * p->sc[c]) >> 12, WF_SG_NB, &cell[c], &fr[c]);
+    }
+    wf_sg_tetw(cell, fr, WF_SG_NB, &t);
+    for (int c = 0; c < 3; c++) {
+        int raw = (p->B2[t.i0][c] * t.w0 + p->B2[t.i1][c] * t.w1 + p->B2[t.i2][c] * t.w2
+                   + p->B2[t.i3][c] * t.w3 + 8192) >> 14;
+        int64_t v = ((int64_t)(raw - pr->bk) * pr->inv) >> 16;        /* pinned ends: black 0, white 65536 */
+        lv[c] = v < 0 ? 0 : v > 65536 ? 65536 : v;
+    }
+}
+
+void wf_sg_prn_pass_rgb(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int nodes, int bw,
+                        uint16_t *rgb)
+{
+    for (int i = 0; i < nodes; i++, pd += 3, rgb += 3) {
+        int64_t lv[3];
+        wf_sg_pnode(p, pr, pd, lv);
+        if (bw)                                                       /* BT.601 luma in all three, as a B&W .L33 */
+            lv[0] = lv[1] = lv[2] = (lv[0] * 19595 + lv[1] * 38470 + lv[2] * 7471 + 32768) >> 16;
+        for (int c = 0; c < 3; c++)
+            rgb[c] = (uint16_t)((lv[c] * 65535 + 32768) >> 16);       /* value x 65535 */
     }
 }
 
 void wf_sg_prn_pass(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int bw, uint32_t *T)
 {
     for (int node = 0; node < WF_SG_NODES; node++) {
-        int cell[3], fr[3];
-        struct wf_sg_tet t;
-        for (int c = 0; c < 3; c++) {
-            int x = pd[node * 3 + c];
-            int q = wf_sg_1d(p->B1[c], x == 65535 ? 65536 : x);
-            wf_sg_cell(((int64_t)(q - p->lo[c]) * p->sc[c]) >> 12, WF_SG_NB, &cell[c], &fr[c]);
-        }
-        wf_sg_tetw(cell, fr, WF_SG_NB, &t);
         int64_t o[3];
-        for (int c = 0; c < 3; c++) {
-            int raw = (p->B2[t.i0][c] * t.w0 + p->B2[t.i1][c] * t.w1 + p->B2[t.i2][c] * t.w2
-                       + p->B2[t.i3][c] * t.w3 + 8192) >> 14;
-            int64_t lv = ((int64_t)(raw - pr->bk) * pr->inv) >> 16;   /* pinned ends: black 0, white 65536 */
-            lv = lv < 0 ? 0 : lv > 65536 ? 65536 : lv;
-            o[c] = lv * 255;                                          /* Q16 code */
-        }
+        wf_sg_pnode(p, pr, pd + node * 3, o);
+        for (int c = 0; c < 3; c++)
+            o[c] *= 255;                                              /* Q16 code */
         int oy = (int)((o[0] * 19595 + o[1] * 38470 + o[2] * 7471 + ((int64_t)1 << 31)) >> 32);
         int ou = (int)((o[0] * -11058 + o[1] * -21710 + o[2] * 32768 + ((int64_t)1 << 31)) >> 32);
         int ov = (int)((o[0] * 32768 + o[1] * -27439 + o[2] * -5329 + ((int64_t)1 << 31)) >> 32);

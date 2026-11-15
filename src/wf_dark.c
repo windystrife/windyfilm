@@ -622,12 +622,15 @@ int wf_dark_src(int output, int flut)
 /* a chain film's log table from WFLOG.DAT for this run (option (c), wf_rawb.h): 1 = M.tabs built (a WF_DEV_CUBE develop,
  * the look stage then adds the effects only: frame devd 2), 0 = the 8-bit chain (the failure is logged and marked) */
 static int dk_lgk;
-static int dk_logpk(const struct wf_look *lk, struct wf_dev_tabs *t)
+static int dk_logpk(const struct wf_look *lk, struct wf_dev_tabs *t, void *scr)
 {
     struct wf_dev_pkinfo pi;
     int ms;
-    dk_lgk = wf_rawb_logpk_build(t, lk, &ms, &pi) == WF_LL_OK;
-    if (dk_lgk)
+    dk_lgk = wf_rawb_logpk_build(t, scr, wf_dev_scratch_bytes(DK_W, DK_H), lk, &ms, &pi) == WF_LL_OK;
+    if (dk_lgk && lk->stk)
+        wf_log("dark: tables knobs %s v%d k%x interlayer %d c%d %dms (sum %x)", wf_films[lk->row].code, lk->variant,
+               (unsigned)lk->stk, lk->siie * 25, pi.curve, ms, (unsigned)pi.sum);
+    else if (dk_lgk)
         wf_log("dark: tables log pack %s v%d c%d %dms (offset %d, %d entries, sum %x)", wf_films[lk->row].code,
                lk->variant, pi.curve, ms, (int)pi.off, pi.count, (unsigned)pi.sum);
     return dk_lgk;
@@ -1160,7 +1163,7 @@ static void dk_task(void)
         end_why = "no look (output Off)";
     } else if (dk_alloc((int)DK_RAW_N + 4096, DK_W * DK_H * 2) != 0) {
         end_why = "no memory";
-    } else if (lgw == WF_RLG_OK && dk_logpk(&lk, M.tabs)) {
+    } else if (lgw == WF_RLG_OK && dk_logpk(&lk, M.tabs, M.scr)) {
         src = WF_DEV_CUBE;                       /* the chain film's whole look is in these tables */
     } else {
         if ((lgw = wf_rawb_logpk(&lk)) != WF_RLG_NOTCHAIN)

@@ -287,6 +287,14 @@ struct wf_dv_pk {
     uint32_t off, sum;
 };
 static const struct wf_dv_pk *wf_dv_pkp;
+/* a generated table (wf_dev_build_gen): fill gives the samples, WF_DV_GENN nodes a call, in the .cube order */
+#define WF_DV_GENN (WF_DEV_G * WF_DEV_G)         /* one blue plane */
+struct wf_dv_gen {
+    int (*fill)(void *ctx, uint16_t *rgb, int n);
+    void *ctx;
+    uint16_t *buf;
+};
+static const struct wf_dv_gen *wf_dv_genp;
 
 static uint32_t wf_dv_le16(const uint8_t *p) { return (uint32_t)p[0] | (uint32_t)p[1] << 8; }
 static uint32_t wf_dv_le32(const uint8_t *p) { return wf_dv_le16(p) | wf_dv_le16(p + 2) << 16; }
@@ -297,6 +305,31 @@ static int wf_dv_pkread(const struct wf_dv_pk *pk, uint32_t n)
     if (FIO_ReadFile(pk->f, pk->dma, n) != (int)n)
         return WF_LL_E_TRUNC;
     wf_copyw((uint32_t *)pk->buf, (const uint32_t *)pk->dma, (int)((n + 3) >> 2));
+    return WF_LL_OK;
+}
+
+/* wf_ll_parse's part for a generated table: the pack's grid (33 points on DOMAIN 0..1), the nodes from g->fill into the
+   same sampler, so the same samples make the same tables as a pack entry */
+static int wf_dv_genparse(const struct wf_dv_gen *g, struct wf_dv_b *B, struct wf_ll_info *info)
+{
+    struct wf_ll_hdr h;
+    h.n = WF_DEV_G;
+    for (int c = 0; c < 3; c++) {
+        h.dmin[c] = 0;
+        h.dmax[c] = WF_DV_ONE;
+    }
+    info->n = WF_DEV_G;
+    int rc = wf_dv_hdr(B, &h);
+    if (rc)
+        return rc;
+    for (int done = 0; done < WF_DEV_NODES; done += WF_DV_GENN) {
+        if ((rc = g->fill(g->ctx, g->buf, WF_DV_GENN)))
+            return rc;
+        for (int i = 0; i < WF_DV_GENN; i++)
+            wf_dv_smp(B, g->buf + 3 * i);
+        info->bytes += WF_DV_GENN * 6;
+    }
+    info->samples = WF_DEV_NODES;
     return WF_LL_OK;
 }
 
@@ -474,7 +507,8 @@ int wf_dev_build(struct wf_dev_tabs *t, int src, int curve, int cam, const char 
             B.hs = 1;
         }
         int rc = wf_dv_pkp && !B.disp ? wf_dv_pkparse(wf_dv_pkp, &B, info)
-                                      : wf_ll_parse(cube, wf_dv_hdr, wf_dv_smp, &B, info);
+               : wf_dv_genp && !B.disp ? wf_dv_genparse(wf_dv_genp, &B, info)
+                                       : wf_ll_parse(cube, wf_dv_hdr, wf_dv_smp, &B, info);
         if (B.slab)
             __mem_free(B.slab);
         if (rc)
@@ -639,6 +673,70 @@ int wf_dev_build_pack(struct wf_dev_tabs *t, int cam, const char *pack, int id, 
         for (; code && k < 8 && code[k]; k++) info->title[k] = code[k];
         info->title[k] = 0;
     }
+    if (pk.buf)
+        __mem_free(pk.buf);
+    if (pk.dma)
+        __mem_free(pk.dma);
+    FIO_CloseFile(pk.f);
+    return rc;
+}
+
+int wf_dev_build_gen(struct wf_dev_tabs *t, int cam, int curve, int ei, int (*fill)(void *ctx, uint16_t *rgb, int n),
+                     void *ctx, struct wf_ll_info *info)
+{
+    struct wf_ll_info tmp;
+    if (!info)
+        info = &tmp;
+    if (!t || !fill || cam < 0 || cam >= WF_DEV_NCAM || curve < 1 || curve > WF_LL_NCURVE)
+        return WF_LL_E_MODE;
+    struct wf_dv_gen g = { fill, ctx, __mem_malloc(WF_DV_GENN * 6, WF_DV_MEM_TMP, "wf_dev.c", __LINE__) };
+    if (!g.buf)
+        return WF_LL_E_NOMEM;
+    wf_dv_genp = &g;
+    int rc = wf_dev_build(t, WF_DEV_CUBE, curve, cam, "gen", ei, 0, info);
+    wf_dv_genp = 0;
+    __mem_free(g.buf);
+    return rc;
+}
+
+int wf_dev_pack_samples(const char *pack, int id, int variant, const char *code,
+                        int (*fn)(void *ctx, const uint8_t *le, int n), void *ctx, struct wf_dev_pkinfo *pi)
+{
+    {
+        char *z = (char *)pi;
+        for (unsigned i = 0; i < sizeof *pi; i++) z[i] = 0;
+    }
+    uint32_t fsz = 0;
+    if (!pack || !fn || FIO_GetFileSize(pack, &fsz) != 0)
+        return WF_LL_E_OPEN;
+    struct wf_dv_pk pk = { 0, 0, 0, 0, 0 };
+    if (!(pk.f = FIO_OpenFile(pack, 0)))
+        return WF_LL_E_OPEN;
+    pk.dma = __mem_malloc(WF_DV_PKCH + 4, WF_DV_MEM_DMA | WF_DV_MEM_TMP, "wf_dev.c", __LINE__);
+    pk.buf = __mem_malloc(WF_DV_PKCH + 4, WF_DV_MEM_TMP, "wf_dev.c", __LINE__);
+    int rc = pk.dma && pk.buf ? wf_dv_pkfind(&pk, fsz, id, variant, code, pi) : WF_LL_E_NOMEM;
+    if (!rc && FIO_SeekSkipFile(pk.f, (int64_t)pk.off, 0) != (int64_t)pk.off)
+        rc = WF_LL_E_READ;
+    uint32_t a = 1, b = 0;
+    for (uint32_t left = WF_DEV_PK_BYTES; !rc && left; ) {
+        uint32_t n = left < WF_DV_PKCH ? left : WF_DV_PKCH;
+        if ((rc = wf_dv_pkread(&pk, n)))
+            break;
+        const uint8_t *d = pk.buf;
+        for (uint32_t i = 0; i < n; ) {
+            uint32_t e = n - i > 5552 ? i + 5552 : n;   /* as wf_dv_pkparse */
+            for (; i < e; i++) {
+                a += d[i];
+                b += a;
+            }
+            a %= 65521u;
+            b %= 65521u;
+        }
+        rc = fn(ctx, d, (int)(n / 6));
+        left -= n;
+    }
+    if (!rc && (b << 16 | a) != pk.sum)
+        rc = WF_DEV_PK_E_SUM;
     if (pk.buf)
         __mem_free(pk.buf);
     if (pk.dma)

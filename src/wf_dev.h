@@ -178,6 +178,18 @@ struct wf_dev_pkinfo { int curve, feed, count, flags; uint32_t off, sum, ixsum; 
 int wf_dev_build_pack(struct wf_dev_tabs *t, int cam, const char *pack, int id, int variant, const char *code, int ei,
                       struct wf_ll_info *info, struct wf_dev_pkinfo *pi);
 const char *wf_dev_pk_errstr(int rc);            /* short text of any result above (wf_loglut_errstr for WF_LL_*) */
+/* a WF_DEV_CUBE build on curve from samples made on the camera (a chain film's composed log table, the film-stage knob
+ * rows on RAW: wf_stagek.h's log grid): fill(ctx, rgb, n) writes the next n nodes (n = 33^2, one blue plane, the .cube
+ * order, R' G' B' u16 value x 65535) and returns WF_LL_OK or a WF_LL_* code that stops the build; LUT EI ei, no auto
+ * exposure. The same samples make the very tables wf_dev_build_pack makes of a pack entry holding them. */
+int wf_dev_build_gen(struct wf_dev_tabs *t, int cam, int curve, int ei, int (*fill)(void *ctx, uint16_t *rgb, int n),
+                     void *ctx, struct wf_ll_info *info);
+/* a pack entry's samples as they are (the knob tables' residual, wf_rawb.c): fn(ctx, le, n) gets the next n nodes (the
+ * .cube order, R' G' B' u16 little-endian, n <= 1364 a call, n x 6 bytes at le) and returns WF_LL_OK or a code that
+ * stops the read; the table's Adler-32 is checked against the index after the last call (WF_DEV_PK_E_SUM). pi as
+ * wf_dev_build_pack. Returns WF_LL_OK, WF_LL_E_OPEN / _READ / _NOMEM / _TRUNC, a WF_DEV_PK_E_* code or fn's. */
+int wf_dev_pack_samples(const char *pack, int id, int variant, const char *code,
+                        int (*fn)(void *ctx, const uint8_t *le, int n), void *ctx, struct wf_dev_pkinfo *pi);
 /* identity of the builder for a table cache (wf_rawb.c's .RBT): FNV-1a of WF_DEV_TABS_VER, the table size, src, curve,
  * cam and every constant table wf_dev_build reads for them (camera matrix, LUT EI gains, the sRGB decode, the curve's gamut
  * matrix, log encode and EI constants). Cached tables of another build id are rebuilt. Bump WF_DEV_TABS_VER whenever

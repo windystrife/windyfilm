@@ -1365,6 +1365,35 @@ static int pk_try(const char *pack, int id, int var, const char *code, struct wf
     return wf_dev_build_pack(D, 0, pack, id, var, code, 0, &inf, pi);
 }
 
+/* wf_dev_build_gen / wf_dev_pack_samples: the samples of a table in memory, n nodes a call; fail: the call (1-based)
+   that returns WF_LL_E_TRUNC instead */
+struct pk_gen { const uint8_t *t; int node, calls, fail, maxn, bad; uint8_t *got; };
+static int pk_fill(void *ctx, uint16_t *rgb, int n)
+{
+    struct pk_gen *g = ctx;
+    if (++g->calls == g->fail)
+        return WF_LL_E_TRUNC;
+    if (n != WF_DEV_G * WF_DEV_G || g->node + n > WF_DEV_NODES)
+        g->bad++;
+    for (int i = 0; i < 3 * n && g->node * 3 + i < WF_DEV_NODES * 3; i++)
+        rgb[i] = (uint16_t)(g->t[2 * (g->node * 3 + i)] | g->t[2 * (g->node * 3 + i) + 1] << 8);
+    g->node += n;
+    return WF_LL_OK;
+}
+static int pk_take(void *ctx, const uint8_t *le, int n)
+{
+    struct pk_gen *g = ctx;
+    if (++g->calls == g->fail)
+        return WF_LL_E_TRUNC;
+    if (n < 1 || n > 1364 || g->node + n > WF_DEV_NODES)
+        g->bad++;
+    else
+        memcpy(g->got + 6 * g->node, le, 6 * (size_t)n);
+    if (n > g->maxn) g->maxn = n;
+    g->node += n;
+    return WF_LL_OK;
+}
+
 static void mode_pack(void)
 {
     /* three tables: the synthetic film, the film with a hue shift and noise in the low bits, a B&W one (R' = G' = B') */
@@ -1464,6 +1493,61 @@ static void mode_pack(void)
     CHECK(pk_try("BAD.DAT", 89, PK_P0, "G00", &pi) == WF_DEV_PK_E_FORMAT, "pack cut in the index");
     CHECK(!strcmp(wf_dev_pk_errstr(WF_DEV_PK_E_SUM), "table checksum") && wf_dev_pk_errstr(WF_LL_E_OPEN)[0],
           "error texts");
+
+    /* generated samples (the RAW knob tables, wf_rawb.c): the same samples make the same tables as the pack entry */
+    int ngen = 0;
+    for (int i = 0; i < 4; i++)
+        for (int cam = 0; cam < WF_DEV_NCAM; cam++)
+            for (int ei = 0; ei <= 6; ei += 6) {
+                struct pk_gen g = { tab[ent[i].tab], 0, 0, 0, 0, 0, 0 };
+                memset(D, 0, sizeof *D);
+                memset(C, 0, sizeof *C);
+                int rp = wf_dev_build_pack(D, cam, "WFLOG.DAT", ent[i].id, ent[i].var, ent[i].code, ei, &inf, &pi);
+                int rg = wf_dev_build_gen(C, cam, WF_LL_SLOG3, ei, pk_fill, &g, &cinf);
+                CHECK(rp == 0 && rg == 0 && g.node == WF_DEV_NODES && g.calls == WF_DEV_G && !g.bad,
+                      "gen entry %d cam %d ei %d: rc %d / %d, %d nodes in %d calls (%d bad)", i, cam, ei, rp, rg, g.node,
+                      g.calls, g.bad);
+                CHECK(!memcmp(D, C, sizeof *D), "gen entry %d cam %d ei %d: tables differ from the pack's", i, cam, ei);
+                CHECK(cinf.n == WF_DEV_G && cinf.samples == WF_DEV_NODES && cinf.bytes == PK_TB,
+                      "gen entry %d info: n %d samples %d bytes %u", i, cinf.n, cinf.samples, (unsigned)cinf.bytes);
+                ngen++;
+            }
+    {
+        struct pk_gen g = { tab[1], 0, 0, 3, 0, 0, 0 };
+        CHECK(wf_dev_build_gen(C, 0, WF_LL_SLOG3, 0, pk_fill, &g, &cinf) == WF_LL_E_TRUNC && g.calls == 3,
+              "gen: the fill's code stops the build (%d calls)", g.calls);
+        CHECK(wf_dev_build_gen(C, 0, 0, 0, pk_fill, &g, 0) == WF_LL_E_MODE
+              && wf_dev_build_gen(C, 0, WF_LL_NCURVE + 1, 0, pk_fill, &g, 0) == WF_LL_E_MODE
+              && wf_dev_build_gen(C, WF_DEV_NCAM, WF_LL_SLOG3, 0, pk_fill, &g, 0) == WF_LL_E_MODE
+              && wf_dev_build_gen(C, 0, WF_LL_SLOG3, 0, 0, &g, 0) == WF_LL_E_MODE, "gen: curve / camera / no fill");
+    }
+    /* an entry's samples as they are */
+    {
+        uint8_t *got = malloc(PK_TB);
+        struct pk_gen g = { 0, 0, 0, 0, 0, 0, got };
+        memset(got, 0, PK_TB);
+        int rs = wf_dev_pack_samples("WFLOG.DAT", 90, PK_P0, "G01", pk_take, &g, &pi);
+        CHECK(rs == 0 && g.node == WF_DEV_NODES && !g.bad && g.maxn == 1364 && !memcmp(got, tab[1], PK_TB)
+              && pi.sum == pk_adler(tab[1], PK_TB) && pi.curve == WF_LL_SLOG3 && pi.count == 4,
+              "samples: rc %d, %d nodes in %d calls (largest %d, %d bad), bytes %s, sum %08x", rs, g.node, g.calls,
+              g.maxn, g.bad, memcmp(got, tab[1], PK_TB) ? "differ" : "equal", pi.sum);
+        memcpy(mut, buf, n);
+        mut[pi.off + 100003] ^= 0x10;
+        pk_save("BAD.DAT", mut, n);
+        g = (struct pk_gen){ 0, 0, 0, 0, 0, 0, got };
+        rs = wf_dev_pack_samples("BAD.DAT", 90, PK_P0, "G01", pk_take, &g, &pi);
+        CHECK(rs == WF_DEV_PK_E_SUM && g.node == WF_DEV_NODES, "samples: a flipped table byte -> rc %d after %d nodes", rs,
+              g.node);
+        g = (struct pk_gen){ 0, 0, 0, 5, 0, 0, got };
+        rs = wf_dev_pack_samples("WFLOG.DAT", 90, PK_P0, "G01", pk_take, &g, &pi);
+        CHECK(rs == WF_LL_E_TRUNC && g.calls == 5, "samples: the callback's code stops the read (rc %d, %d calls)", rs,
+              g.calls);
+        CHECK(wf_dev_pack_samples("NOPACK.DAT", 90, PK_P0, "G01", pk_take, &g, &pi) == WF_LL_E_OPEN
+              && wf_dev_pack_samples("WFLOG.DAT", 92, PK_P0, "G03", pk_take, &g, &pi) == WF_DEV_PK_E_NOENT,
+              "samples: missing pack, unlisted entry");
+        free(got);
+    }
+    printf("pack: generated samples = the pack's tables on %d builds; samples streamed as they are\n", ngen);
     free(C); free(buf); free(mut);
     for (int k = 0; k < 3; k++) free(tab[k]);
 }
