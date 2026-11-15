@@ -2798,7 +2798,22 @@ static void t_print(void)
  * earlier mod_init stays in the statically linked module) */
 /* a chain film: no Scan / Cine / Paper, only print stocks (bits WF_PRINT_STOCK0..). Its catalogue row must be READY
  * (else the browser leaves it off the strip and wf_load says "Film table not on the card"), it loads, the Print stock
- * row starts on its first stock and steps to the next, and each shot uses that stock's table. */
+ * row starts on WF_PRINT_CHAIN_DEF (2383; since 11-15, not the first stock 2302, the B&W print) and steps to the next,
+ * and each shot uses that stock's table (the shot's own fallback, wf_shot.c wf_variant_eff, picks the same print). */
+/* a chain film's start print (WF_PRINT_CHAIN_DEF when it has it, else its first stock) and the next one it has, -1 if none
+ * (also the STAGE cases' first / second print) */
+static void chain_prints(int kc, int *v1, int *v2)
+{
+    *v1 = *v2 = -1;
+    for (int v = WF_PRINT_STOCK0; v < WF_NPRINTS && *v1 < 0; v++)
+        if (wf_films[kc].prints & (1u << v))
+            *v1 = v;
+    if (wf_films[kc].prints & (1u << WF_PRINT_CHAIN_DEF))
+        *v1 = WF_PRINT_CHAIN_DEF;
+    for (int i = 1; i < WF_NPRINTS && *v1 >= 0 && *v2 < 0; i++)
+        if (wf_films[kc].prints & (1u << ((*v1 + i) % WF_NPRINTS)))
+            *v2 = (*v1 + i) % WF_NPRINTS;
+}
 static void t_print_chain(void)
 {
     int kc = -1, v1 = -1, v2 = -1;
@@ -2809,11 +2824,17 @@ static void t_print_chain(void)
         printf("  (no chain film in this catalogue: chain part skipped)\n");
         return;
     }
-    for (int v = WF_PRINT_STOCK0; v < WF_NPRINTS; v++)
-        if (wf_films[kc].prints & (1u << v)) {
-            if (v1 < 0) v1 = v;
-            else if (v2 < 0) v2 = v;
+    int nchain = 0;
+    for (int k = 0; k < wf_nfilms; k++)
+        if (!(wf_films[k].flags & WF_F_LUTCAN) && (wf_films[k].prints >> WF_PRINT_STOCK0)) {
+            nchain++;
+            chk(wf_films[k].prints & (1u << WF_PRINT_CHAIN_DEF), "chain film %s offers 2383, the default print",
+                wf_films[k].code);
+            chk(!(wf_films[k].prints & (1u << (WF_PRINT_STOCK0 + 14))), "chain film %s offers no 3513D (no table)",
+                wf_films[k].code);
         }
+    printf("  %d chain films\n", nchain);
+    chain_prints(kc, &v1, &v2);
     chk(wf_films[kc].flags & WF_F_READY, "chain film %d %s: READY (its print tables were there at build time)",
         wf_films[kc].id, wf_films[kc].code);
     chk(v1 >= 0 && v2 >= 0 && !(wf_films[kc].prints & 7), "chain film: two print stocks, no Scan / Cine / Paper");
@@ -2829,8 +2850,9 @@ static void t_print_chain(void)
     char t1[16] = "", t2[16] = "";
     snprintf(t1, sizeof t1, "%s", wf_row_text(WF_ROW_PRINT));
     chk(wf_row_avail(WF_ROW_PRINT) && strcmp(t1, "Scan") && strcmp(t1, "Cine") && strcmp(t1, "Paper"),
-        "chain film: Print stock row on its first stock (%s), not Scan", t1);
-    film_shot("chain film, first print stock", kc, v1, 1, 12, 1.5);
+        "chain film: Print stock row on a print stock (%s), not Scan", t1);
+    chk(v1 != WF_PRINT_CHAIN_DEF || !strcmp(t1, "2383"), "chain film: Print = Scan starts on 2383, the default print (%s)", t1);
+    film_shot("chain film, default print stock", kc, v1, 1, 12, 1.5);
     chk(wf_row_step(WF_ROW_PRINT, 1), "chain film: Print stock steps");
     snprintf(t2, sizeof t2, "%s", wf_row_text(WF_ROW_PRINT));
     chk(strcmp(t1, t2) != 0, "chain film: the next stock (%s -> %s)", t1, t2);
@@ -2841,7 +2863,7 @@ static void t_print_chain(void)
 /* ------------------------------------------------------------------ STAGE: film-stage knob rows (ML/DATA/WFSTAGE.DAT)
  * A synthetic stage pack whose halves compose to the identity at default knobs: X, A1 and B1 straight lines, A2 and B2
  * the grid itself, an interlayer part of 0.05 taken out of A2's base. So Film exp / Push move Y up, a printer point
- * takes 0.025 off its channel, interlayer 0 / 200 % gives -0.05 / +0.05. Entries: (film, first print) naming the pack's
+ * takes 0.025 off its channel, interlayer 0 / 200 % gives -0.05 / +0.05. Entries: (film, start print: 2383) naming the pack's
  * table of it, (film, second print) naming a table the pack does not hold (must be refused).
  * Cases: "" the rows and shots, "bad" a byte of the negative half flipped, "missing" no WFSTAGE.DAT (+ CFG parsing),
  * "dark" the Darkroom's stage with knob rows set against the camera's shot (stage_dark). */
@@ -3076,11 +3098,7 @@ static void t_stage(const char *cs)
         printf("  (no chain film in this catalogue: STAGE skipped)\n");
         return;
     }
-    for (int v = WF_PRINT_STOCK0; v < WF_NPRINTS; v++)
-        if (wf_films[kc].prints & (1u << v)) {
-            if (v1 < 0) v1 = v;
-            else if (v2 < 0) v2 = v;
-        }
+    chain_prints(kc, &v1, &v2);                  /* v1 = the print the film starts on (2383), v2 the next one */
     if (v2 < 0) {
         printf("  (chain film with one print: STAGE skipped)\n");
         return;
@@ -5683,6 +5701,8 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "CFG")) t_cfg();
     else if (!strcmp(mode, "PACK")) t_pack(cs, argc > 3 ? argv[3] : 0);
     else if (!strcmp(mode, "LIGHT")) t_light();
+    /* test.sh passes "PRINT:chain" as MODE PRINT, CASE chain (until 11-15 that ran t_print a second time) */
+    else if (!strcmp(mode, "PRINT") && !strcmp(cs, "chain")) t_print_chain();
     else if (!strcmp(mode, "PRINT")) t_print();
     else if (!strcmp(mode, "PRINT:chain")) t_print_chain();
     else if (!strcmp(mode, "STAGE")) t_stage(cs);

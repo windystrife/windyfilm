@@ -53,7 +53,7 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 - Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
   WB của bạn được trả lại khi về Auto hoặc khi tắt module.
 - Hàng Print stock (trước gọi là Print): Scan / Cine print / Paper với phim có mô
-  hình in; với lon Film stage là 16 print stock (mục 6).
+  hình in; với lon Film stage là 15 print stock (mục 6).
 - Hàng Grain: Off / Fine / Normal / Strong (độ hạt đổi theo độ sáng của vùng ảnh) và
   Even Fine / Even Normal / Even Strong (hạt như nhau ở mọi độ sáng). Mặc định Normal.
 - Hàng Halation / Bloom (từ 15/11, hai hàng riêng; mặc định Wide + Normal):
@@ -123,8 +123,8 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 1. ML/LOGS/WINDYFLM.LOG sau khi bật máy phải có:
      hook NN ff169414 rom e92d41fc err 0
      hooks: installed (0)
-     pack ok: 749 tables, index NNms, catalog 97 films
-     stage ok: 699 of 699 pairs match the pack (44 negatives, 16 prints), index NNms
+     pack ok: 706 tables, index NNms, catalog 97 films
+     stage ok: 657 of 657 pairs match the pack (44 negatives, 15 prints), index NNms
    (dòng "stage ok" là của Film stage, xem mục 7).
 2. Chụp một ảnh mỗi chế độ: phim (Print Scan / Cine / Paper), Log, Log + LUT,
    một lon Film LUT. Mỗi ảnh có dòng "yuv NN ..." trong log.
@@ -229,9 +229,9 @@ hàng Print stock. Mỗi cặp âm bản x print có bảng màu 17^3 riêng tro
   ảnh ngoài trời ngả xanh như phim tungsten không kính lọc. Light Auto giữ WB của
   bạn (giống gắn kính lọc 85).
 
-Hàng Print stock: 16 print, theo thứ tự của chuỗi (p00 .. p15):
+Hàng Print stock: 15 print:
     2302      Kodak B&W Print Film 2302              (ĐEN TRẮNG)
-    2383      Kodak Vision Color 2383
+    2383      Kodak Vision Color 2383                (MẶC ĐỊNH)
     2393      Kodak Vision Premier Color 2393
     2395      Kodak Vision Color Teleprint 2395 500T
     5380      Eastman Color Print LC 5380
@@ -244,15 +244,15 @@ Hàng Print stock: 16 print, theo thứ tự của chuỗi (p00 .. p15):
     5385/62   Eastman Color Print 5385 (1962)
     5386      Eastman EXR Color Print 5386
     5383      Eastman Color Print 5383
-    3513D     Fuji Eterna-CP Type 3513D
     3523XD    Fuji Eterna-CP 3523XD
-- MẶC ĐỊNH LÀ ĐEN TRẮNG: lon Film stage không có Scan. Khi hàng Print stock đang là
-  Scan (mặc định của mọi phim), máy dùng print đầu tiên, p00 = 2302, phim in đen
-  trắng. Muốn ảnh màu thì chọn 2383 (bản in rạp phổ biến nhất) hoặc print màu khác.
+- Mặc định là 2383 (bản in rạp phổ biến nhất): lon Film stage không có Scan. Khi
+  hàng Print stock đang là Scan (mặc định của mọi phim) hoặc là print mà âm bản đó
+  không có, máy dùng Kodak Vision Color 2383. Chỉ 2302 là bản in đen trắng.
+- Không có Fuji Eterna-CP Type 3513D: chuỗi không có bảng của print này.
 - Năm cặp cho ảnh giống hệt nhau trên mọi âm bản (cùng một bảng): 2383 = 2393,
   5380 = 5381/72, 2395 = 5384/82, 5384/92 = 5385/93, 5385/62 = 5386. Cả hai tên được
-  giữ như danh sách gốc; thực tế có 11 kiểu in khác nhau.
-- ECN-I 5248 25T (G17) chỉ có 12 print (thiếu 2395, 5384/82, 5383, 3523XD).
+  giữ như danh sách gốc; thực tế có 10 kiểu in khác nhau.
+- ECN-I 5248 25T (G17) chỉ có 12 print (thiếu 2302, 5383, 3523XD).
 - Trình chọn hiện tên đầy đủ khi vừa chỗ; menu ML hiện mã, tên đầy đủ ở dòng help.
   EXIF ghi tên đầy đủ ("| Print Kodak Vision Color 2383").
 - Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights / Shadows dùng như phim
@@ -276,7 +276,7 @@ Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ t
 - Để mặc định hết (0 / 0 / Off / 0 0 0 / 100 %) thì máy dùng bảng có sẵn trong
   WFFILMS.DAT như mọi phim, không đọc WFSTAGE.DAT.
 - Đổi một hàng knob (hoặc đổi phim / print khi knob khác mặc định): máy dựng bảng mới
-  từ WFSTAGE.DAT. Không đọc cả file 22,6 MB: lúc bật máy chỉ đọc mục lục (khoảng
+  từ WFSTAGE.DAT. Không đọc cả file 22,4 MB: lúc bật máy chỉ đọc mục lục (khoảng
   20 KB); mỗi lần dựng đọc khoảng 650 KB của đúng cặp đó (nửa âm bản 435 KB, rồi
   nửa print 217 KB, cần khoảng 470 KB bộ nhớ tạm, trả lại ngay), tính toán khoảng
   20 ms trên EOS M. Log: "stage G08 v4 composed NNms k..." (bảng dựng từ knob) hoặc
@@ -289,26 +289,28 @@ Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ t
 
 7. FILM STAGE: LẦN CHẠY ĐẦU
 ---------------------------
-1. Thẻ phải có ML/DATA/WFSTAGE.DAT (22 628 612 B; md5 trong MD5SUMS.txt). Bật máy,
+1. Thẻ phải có ML/DATA/WFSTAGE.DAT (22 410 240 B; md5 trong MD5SUMS.txt). Bật máy,
    WINDYFLM.LOG phải có:
-     pack ok: 749 tables, index NNms, catalog 97 films
-     stage ok: 699 of 699 pairs match the pack (44 negatives, 16 prints), index NNms
+     pack ok: 706 tables, index NNms, catalog 97 films
+     stage ok: 657 of 657 pairs match the pack (44 negatives, 15 prints), index NNms
    Ghi lại hai số "index NNms" (thời gian đọc mục lục). Nếu thay vào đó là
    "stage ML/DATA/WFSTAGE.DAT missing (-1): film-stage knob rows hidden" thì thẻ thiếu
    file; "... bad (-N) ..." là file hỏng hoặc khác bản: chép lại và kiểm MD5SUMS.txt.
    Thiếu file thì lon Film stage vẫn chụp được, chỉ mất 7 hàng knob.
 2. Nhóm Film stage: lon có màu hãng, header đúng phim (ví dụ G08 Vision3 5219 500T:
-   ISO 500, 3200 K). Nạp G08, để Print stock mặc định: hàng hiện "Kodak B&W Print
-   Film 2302". Chụp 1 tấm: ảnh ĐEN TRẮNG. Log "pack G08 v3 loaded NNms".
-3. Print stock 2383: chụp, ảnh màu, log "pack G08 v4 loaded". Rồi 2393, cùng cảnh:
-   ảnh phải giống hệt tấm 2383 (cặp trùng).
-4. Film exp +1, chụp. Log "stage G08 v4 composed NNms k...": ghi lại NN (dự tính
-   khoảng 20 ms tính + thời gian đọc khoảng 650 KB từ thẻ). Ảnh sáng hơn tấm ở bước 3.
+   ISO 500, 3200 K). Nạp G08, để Print stock mặc định: hàng hiện "Kodak Vision Color
+   2383". Chụp 1 tấm: ảnh màu. Log "pack G08 v4 loaded NNms".
+3. Print stock 2302: chụp, ảnh ĐEN TRẮNG, log "pack G08 v3 loaded". Rồi 2393, cùng cảnh
+   với tấm ở bước 2: ảnh phải giống hệt tấm 2383 (cặp trùng). Trong hàng Print stock
+   không có 3513D.
+4. Print stock về 2383, Film exp +1, chụp. Log
+   "stage G08 v4 composed NNms k...": ghi lại NN (dự tính
+   khoảng 20 ms tính + thời gian đọc khoảng 650 KB từ thẻ). Ảnh sáng hơn tấm ở bước 2.
    EXIF có "| Film exp +1". Chụp thêm 1 tấm ngay sau: không dựng lại (không có dòng
    composed mới).
-5. Film exp về 0, Printer R +6: ảnh ngả xanh lơ so với bước 3 (ghi lại nếu ngả đỏ).
+5. Film exp về 0, Printer R +6: ảnh ngả xanh lơ so với bước 2 (ghi lại nếu ngả đỏ).
    EXIF "| Printer R+6 G0 B0". Printer R về 0, Printer B +6: ngả vàng.
-6. Film exp +1, Exp comp On: Film exp và Push / pull mờ đi, ảnh như bước 3; EXIF có
+6. Film exp +1, Exp comp On: Film exp và Push / pull mờ đi, ảnh như bước 2; EXIF có
    "| Exp comp".
 7. Exp comp Off, Film exp 0, Interlayer 0 % rồi 200 %: màu nhạt rồi đậm hơn.
 8. Grain Normal, Halation Wide, Gauge 16 mm: hạt to hơn, quầng rộng hơn so với 35 mm;
@@ -324,8 +326,8 @@ Gửi: ML/LOGS/WINDYFLM.LOG, ML/SETTINGS/WINDYFLM.CFG và các JPG (kèm CR2 n�
 8. FILE TRÊN THẺ
 ----------------
 ML/modules/windyflm.mo    module
-ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper, và 700 cặp Film stage)
-ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 699 cặp Film stage (22,6 MB),
+ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper, và 657 cặp Film stage)
+ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 657 cặp Film stage (22,4 MB),
                           cho 7 hàng knob (mục 6); thiếu thì các hàng đó mờ.
                           Dữ liệu dẫn xuất, chỉ dùng riêng
 ML/data/WFCANS.DAT        hình lon phim

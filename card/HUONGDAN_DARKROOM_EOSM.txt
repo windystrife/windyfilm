@@ -154,7 +154,8 @@ CUỘN PHIM FILM STAGE (15/11)
   Interlayer), Gauge, Grain, Halation, Bloom như khi chụp thường (README mục 6).
 - Bản in dùng các hàng đang đặt LÚC BẤM SET trong Darkroom, không phải lúc chụp. Muốn
   so với ảnh chụp thường thì đừng đổi các hàng đó giữa lúc chụp và lúc tráng.
-- Print stock để mặc định (Scan) thì lon Film stage in bằng 2302: bản in ĐEN TRẮNG.
+- Print stock để mặc định (Scan) thì lon Film stage in bằng 2383 (màu). Chỉ 2302 là
+  bản in đen trắng.
 - Knob khác mặc định: lúc "Mixing the chemistry" máy dựng bảng từ ML/DATA/WFSTAGE.DAT
   (đọc khoảng 650 KB, cần khoảng 470 KB bộ nhớ tạm, trước khi Darkroom lấy các khối
   lớn). Log: "stage G08 v4 composed NNms k..." rồi "dark: look ready NNms: film
@@ -209,9 +210,9 @@ q. (15/11) Viền + ngày: trong Darkroom đặt Frame White, Info On + roll, Da
 r. (15/11) Đặt lại Frame Off, Date Off: bản in phải như cũ (không viền, không ngày).
    Tắt máy bật lại: 3 dòng PRINT giữ giá trị đã đặt.
 s. (15/11) Cuộn Film stage có knob. Thẻ phải có ML/DATA/WFSTAGE.DAT; log lúc bật máy
-   có "stage ok: 699 of 699 pairs match the pack (44 negatives, 16 prints)".
+   có "stage ok: 657 of 657 pairs match the pack (44 negatives, 15 prints)".
    1. Không có cuộn: trình chọn phim, nhóm Film stage, nạp G08 (Vision3 5219 500T).
-      Đặt Print stock 2383, Film exp +1, Printer R +4, Gauge 16 mm, Grain Normal,
+      Print stock 2383 (mặc định), Film exp +1, Printer R +4, Gauge 16 mm, Grain Normal,
       Halation Wide, Bloom Normal. Chụp 1 tấm RAW+L một cảnh có đèn / điểm sáng: đây
       là ẢNH CHỤP THƯỜNG để so. Log "stage G08 v4 composed NNms k...", EXIF có
       "| Print Kodak Vision Color 2383 | ... | Film exp +1 | Printer R+4 G0 B0 | ...

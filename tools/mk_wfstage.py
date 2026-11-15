@@ -6,7 +6,8 @@ committed; a tree without the port tree builds no WFSTAGE.DAT and the films keep
 then stay hidden).
 
 One entry per (film, print variant) of films/catalog.py whose table is a chain pair: films/tables/G<nn>P<pp>.T17 (the
-chain rows) and the four stage films of tools/mk_genesis_films.py (GX500T ...).
+chain rows; <pp> is the label slot, its halves the chain print tools/mk_genesis_films.py PRINT_CHAIN names) and the four
+stage films of tools/mk_genesis_films.py (GX500T ...).
   header 64 B  "WFSG", u16 version 1, u16 entries, u16 negatives, u16 prints, u16 33, u16 33, u16 257, u16 1021,
                u32 negative blob bytes, u32 print blob bytes, u32 index offset 64, u32 negative checksums offset,
                u32 print checksums offset, u32 negatives offset, u32 prints offset,
@@ -86,8 +87,9 @@ def entries():
             t17 = catalog.t17_path(f, v)
             name = os.path.basename(t17)[:-4]
             m = re.fullmatch(r"G(\d\d)P(\d\d)", name)
-            pair = (int(m.group(1)), int(m.group(2))) if m else GX.get(name)
-            if pair and os.path.exists(t17):
+            # a chain row's <pp> is the label slot; the halves are the chain's own print (mk_genesis_films PRINT_CHAIN)
+            pair = (int(m.group(1)), G.PRINT_CHAIN[int(m.group(2))]) if m else GX.get(name)
+            if pair and pair[1] is not None and os.path.exists(t17):
                 assert len(f["table"]) <= 8 and f["id"] <= 255, f["table"]
                 out.append((f["id"], catalog.PRINTS.index(v), f["table"], pair[0], pair[1], t17))
     out.sort(key=lambda e: (e[0], e[1]))
@@ -127,7 +129,7 @@ def main():
     # a pair whose print white sits (almost) on its black has no usable span to pin: it keeps its shipped table only
     flat = [e for e in ents if (lambda r: r[2] - r[1])(pr[(e[3] * 16 + e[4]) * 3:(e[3] * 16 + e[4]) * 3 + 3]) <= 1000]
     for e in flat:
-        print("  %s %s (negative %d, print %d): print white on its black, left out" % (e[2], catalog.PRINTS[e[1]], e[3], e[4]))
+        print("  %s %s (negative %d, chain print %d): print white on its black, left out" % (e[2], catalog.PRINTS[e[1]], e[3], e[4]))
     ents = [e for e in ents if e not in flat]
     negs = sorted({e[3] for e in ents})
     prns = sorted({e[4] for e in ents})

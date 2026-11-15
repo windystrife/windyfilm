@@ -23,9 +23,9 @@ S=$R/src
 H=$R/tests/host
 case $CAM in
   EOSM) ML=/root/ml/expsim/mls; PLAT=EOSM.202; CAMDEF=; CAMSRC=wf_cam_eosm.c
-        ALL="SHOT SHOT:nocam SHOT:busy FX FXAB MIST EXIF EXPSIM CFG PACK LIGHT PRINT PRINT:chain STAGE STAGE:bad STAGE:missing HS LEICA CLOG2 CUBE65 PROBE PROBE:boot RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy FX FXAB MIST EXIF EXPSIM CFG PACK LIGHT PRINT PRINT:chain SLOTS GREY STAGE STAGE:bad STAGE:missing HS LEICA CLOG2 CUBE65 PROBE PROBE:boot RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
   5D2)  ML=/root/ml/q5d2/ml; PLAT=5D2.212; CAMDEF=-DWF_BUILD_5D2; CAMSRC=wf_cam_5d2.c
-        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX FXAB MIST EXIF EXPSIM CFG PACK LIGHT PRINT PRINT:chain STAGE STAGE:bad STAGE:missing HS LEICA CLOG2 CUBE65 RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX FXAB MIST EXIF EXPSIM CFG PACK LIGHT PRINT PRINT:chain SLOTS GREY STAGE STAGE:bad STAGE:missing HS LEICA CLOG2 CUBE65 RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
   *) echo "CAM must be EOSM or 5D2"; exit 2 ;;
 esac
 ALL="$ALL SHOT:late SHOT:noworker"                 # the worker's late start (DryOS refused its task at boot)
@@ -99,6 +99,20 @@ for m in $MODES; do
           done ;;
     PACK:real) [ -f $REAL ] && run PACK real $REAL || echo "  PACK_real      skipped (no $REAL)" ;;
     *:*) run ${m%%:*} ${m#*:} ;;
+    SLOTS|GREY)  # camera-independent table checks: SLOTS = the chain print stocks' label slots vs their tables
+                 # (tools/check_print_slots.py), GREY = the chain films' mid-grey vs the catalogue's (check_chain_grey.py)
+      t0=$(date +%s)
+      [ $m = SLOTS ] && chk=check_print_slots.py || chk=check_chain_grey.py
+      python3 -I -B $R/tools/$chk > $T/$m.log 2>&1
+      rc=$?
+      res=$(grep "^RESULT" $T/$m.log | tail -1)
+      p=$(echo "$res" | sed -n 's/.*: \([0-9]*\) pass.*/\1/p'); f=$(echo "$res" | sed -n 's/.* \([0-9]*\) fail.*/\1/p')
+      p=${p:-0}; f=${f:-1}
+      [ $rc = 0 ] || [ "$f" != 0 ] || f=1
+      TP=$((TP + p)); TF=$((TF + f))
+      printf "  %-14s %3d pass %3d fail  %4ds%s\n" $m $p $f $(( $(date +%s) - t0 )) "$([ $rc = 0 ] || echo "  (exit $rc, see $T/$m.log)")"
+      [ "$f" = 0 ] || { BAD="$BAD $m"; grep "^FAIL" $T/$m.log | head -8 | sed 's/^/      /'; }
+      grep "^note" $T/$m.log | sed 's/^/      /' ;;
     LOGCHK)
       arm-none-eabi-gcc $MODFLAGS -Dwf_log_words=ref_log_words -Dwf_lenc=ref_lenc -c -o $T/obj/logref.o $H/wf_logout_ref.c &&
       arm-linux-gnueabi-gcc -O2 -marm -march=armv5te -static -o $T/logchk $R/tools/logchk.c $T/obj/logref.o $O/wf_logout.o \

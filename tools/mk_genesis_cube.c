@@ -15,12 +15,15 @@
  * 0.35 into the toe - measured 14/11/2026), the two ends are pinned on the OUTPUT: base fog becomes display black
  * and print white becomes display white, i.e. printer points, exactly how a print is placed on a scanner.  What is
  * left between them is the film's own curve, untouched.  GREY is where 18 % grey then lands (the exposure offset is
- * fitted for it) and is reported along with black and white.
+ * fitted for it) and is reported along with black and white.  It is a display code: the probe is the JPEG's 18 %
+ * grey code, GENESIS_GREY_CODE (tools/mk_genesis_place.h), and by default it lands on that same code, so a grey patch
+ * comes out where it went in; an empty GREY argument keeps the default.
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include "fr_glook.h"
+#include "mk_genesis_place.h"
 
 /* the chain's output ends, filled by the placement pass */
 static double out_black = 0.0, out_white = 1.0;
@@ -68,15 +71,15 @@ int main(int argc, char **argv)
     if (argc > 8)
         p.neutral_tonescale = p.neutral_density = (int)(atof(argv[8]) * GL_ONE);
 
-    /* Placement: exposure first so that 18 % grey, once the ends are pinned, lands on GREY.  Raising exposure
+    /* Placement: exposure first so that the 18 % grey code, once the ends are pinned, lands on GREY.  Raising exposure
      * lifts grey faster than white (white saturates against the print's shoulder), so the position after levels is
      * monotonic in exposure and a plain scan finds it. */
     {
-        double grey = 0.18, bestd = 1e9;
+        double grey = GENESIS_GREY_CODE, bestd = 1e9;
         int e, best = 0;
-        const int32_t probe = (int32_t)(0.18 * GL_ONE);
+        const int32_t probe = disp_code_lin((int32_t)(GENESIS_GREY_CODE * GL_ONE));
         double bk, wt;
-        if (argc > 9) grey = atof(argv[9]);
+        if (argc > 9 && argv[9][0]) grey = atof(argv[9]);
         if (grey < 0.03) grey = 0.03;
         if (grey > 0.70) grey = 0.70;
 
@@ -107,11 +110,11 @@ int main(int argc, char **argv)
         gl_film_lin(in, &p, out);
         out_white = out[1] / (double)GL_ONE;
 
-        in[0] = in[1] = in[2] = (int32_t)(0.18 * GL_ONE);
+        in[0] = in[1] = in[2] = probe;
         gl_film_lin(in, &p, out);
         fprintf(stderr, "fit: exposure %+.2f stops, print density %.3f..%.3f, "
-                        "18%% grey -> %.3f (asked %.3f), white -> 1.000, black -> 0.000\n",
-                best / (double)GL_ONE, out_black, out_white,
+                        "18%% grey code %.3f -> %.3f (asked %.3f), white -> 1.000, black -> 0.000\n",
+                best / (double)GL_ONE, out_black, out_white, GENESIS_GREY_CODE,
                 level(out[1] / (double)GL_ONE), grey);
     }
 
