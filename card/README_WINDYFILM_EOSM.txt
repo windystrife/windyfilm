@@ -263,9 +263,10 @@ Cần thử và gửi lại:
    c1 NNms", ghi lại NN; chụp 1 tấm. Rồi Interlayer 0 % (nhạt hơn), chụp cùng cảnh.
    Rồi Interlayer 100 % và Film exp +1 (3 nấc): log "tables knobs ... exp 3 ...",
    ghi NN, chụp cùng cảnh. Rồi Exp comp On: dòng "tables log pack" quay lại (Exp comp
-   bù hết độ phơi). Rồi Exp comp Off, Film exp về 0, Printer R +6 và B -6: log
-   "prn 6 0 -6", chụp cùng cảnh (ấm hơn). Cuối cùng đưa mọi knob về mặc định: dòng
-   "tables log pack" quay lại.
+   bù hết độ phơi). Rồi Exp comp Off, Film exp về 0, Printer R -6 và B +6: log
+   "prn -6 0 6", chụp cùng cảnh (ấm hơn: bớt đèn đỏ, thêm đèn xanh khi in thì ảnh
+   ngả đỏ - vàng; chiều ngược lại R +6 B -6 ra ảnh ngả cyan). Cuối cùng đưa mọi
+   knob về mặc định: dòng "tables log pack" quay lại.
 Gửi: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG của những tấm đó (cả tấm Off).
 Mỗi tấm có các dòng "rawb: ..." trong log: bộ đệm RAW đã chọn, điểm khớp,
 mức đen / trắng và thời gian từng bước.
