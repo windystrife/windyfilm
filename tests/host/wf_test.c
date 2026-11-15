@@ -8,6 +8,10 @@
  *   SHOT [nocam|busy]  film / strength / print-less shots bit-exact vs wf_film_build + wf_film_words, B&W, identity, aspects
  *                      and gates (EOS M), Diana halves, Log 1..5, Log + LUT (+ .FRT cache, can), Off, preview, keys
  *   FX                 grain + halation through the shot: ready keys, glow round a light, grain texture, no memory, free
+ *   FXAB               WindyGrain / WindyHalation (the Genesis Pro 1.6.6 model, DESIGN 1a) against the stages before
+ *                      them on the same frame: the halo round a light, the core of a light (difference of blur keeps
+ *                      it), no pixel darker than the plain look, the three grain amounts monotonic, and the frames
+ *                      not equal to the old ones
  *   MIST               white / black mist: glow, veil, halves vs whole frame, seam
  *   EXIF               wf_ex_write on LE / BE files and odd files; the ring vs IMG_nnnn.JPG numbers (RAW-only gap, JPEG M)
  *   EXPSIM             dEV, smoothing, gain tables, ExpSim off / back / stuck, the display filter (EOS M; 5D2: stays off)
@@ -944,6 +948,101 @@ static void t_fx(void)
     wf_halo = 0;
     wf_grain = 0;
     chk(WAIT(!wf_fx_hk && !wf_fx_gk && h_arena_live == 0, 20000), "effects off: shoot memory and heap blocks freed (%d live)", h_arena_live);
+    mod_deinit();
+}
+
+/* ------------------------------------------------------------------ FXAB: WindyGrain / WindyHalation against the old stages */
+/* the most negative (b - a) luma of an annulus round the frame centre, and how many pixels it darkened */
+static double ring_neg(const uint32_t *a, const uint32_t *b, int w, int h, int r0, int r1, int *nneg)
+{
+    int wpr = w / 2, mn = 0;
+    *nneg = 0;
+    for (int y = h / 2 - r1; y <= h / 2 + r1; y++)
+        for (int x = (w / 2 - r1) / 2; x <= (w / 2 + r1) / 2; x++) {
+            int dx = 2 * x - w / 2, dy = y - h / 2, d2 = dx * dx + dy * dy;
+            if (y < 0 || y >= h || x < 0 || x >= wpr || d2 < r0 * r0 || d2 >= r1 * r1) continue;
+            int d = (WY0(b[y * wpr + x]) - WY0(a[y * wpr + x]) + WY1(b[y * wpr + x]) - WY1(a[y * wpr + x])) / 2;
+            if (d < 0) { (*nneg)++; if (d < mn) mn = d; }
+        }
+    return mn;
+}
+
+static void t_fxab(void)
+{
+    struct pk e[] = { { fC, 0, tab_make(0, 0, 0, 0) } };
+    int hk = 0, gk = 0, nneg, post;
+    double sd, sd_f, sd_n, sd_s, cm, ho, hi, hl;
+    pack_write(e, 1, 0);
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\n", wf_films[fC].id);
+    wf_fx_retry_ms = 500;
+    mod_init(1);
+#ifndef WF_BUILD_5D2
+    h_prop_send(PROP_ASPECT, 0);
+#endif
+    disc_r = 60;
+    gen_frame(in, FW, FH, 1);
+    chk(WAIT(look_table_ready(), 10000), "table published");
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+    shot(in, out2, FW, FH);
+    chk(ndiff(ref, out2, NW) == 0, "both effects off: the frame is the film look alone");
+
+    /* ---- the stages as they were: Yedlin grain Normal, halation Film + bloom */
+    wf_grain = 2;
+    wf_halo = 2;
+    post = wf_fx_mode();
+    chk(wf_fx_keys(post, &hk, &gk) && WAIT(wf_fx_hk == hk && wf_fx_gk == gk, 120000), "old keys ready (%s | %s)",
+        log_line("fx halation"), log_line("fx grain"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    cm = corner(ref, out, FW, &sd);
+    double sd_old = sd, cm_old = cm;
+    double ho_old = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'y', 0);
+    double hi_old = ring(ref, out, FW, FH, 6, disc_r - 8, 'y', 0);
+    memcpy(out2, out, NW * 4);                       /* the old stages' frame, for the difference below */
+
+    /* ---- WindyHalation: the Genesis light wrap (no grain, so the ring measures the halo alone) */
+    wf_grain = 0;
+    wf_halo = 5;
+    chk(wf_fx_keys(post, &hk, &gk) && (hk & 256) && WAIT(wf_fx_hk == hk, 120000), "WindyHalation ready (%s)",
+        log_line("fx halation"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    chk(ndiff(ref, out, NW) > 2000, "WindyHalation changes the frame (%d of %d words)", ndiff(ref, out, NW), NW);
+    ho = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'y', 0);
+    hi = ring(ref, out, FW, FH, 6, disc_r - 8, 'y', 0);
+    hl = ring_neg(ref, out, FW, FH, disc_r + 6, disc_r + 40, &nneg);
+    chk(ho > 1.0, "halo round the light: dY %+.2f (old stages %+.2f)", ho, ho_old);
+    chk(nneg == 0 && hl == 0, "the halo only adds light (%d darker pixels, worst %+.0f)", nneg, hl);
+    chk(fabs(hi) < 3.0, "difference of blur keeps the core of the light (dY %+.2f, old stages %+.2f)", hi, hi_old);
+    chk(fabs(ho - ho_old) > 0.3, "not the old halation: %+.2f vs %+.2f", ho, ho_old);
+
+    /* ---- WindyGrain: the Genesis grain, its three amounts */
+    wf_halo = 0;
+    wf_grain = 4;
+    chk(wf_fx_keys(post, &hk, &gk) && (gk & 256) && WAIT(wf_fx_gk == gk, 120000), "WindyGrain fine ready (%s)",
+        log_line("fx grain"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    corner(ref, out, FW, &sd_f);
+    wf_grain = 5;
+    chk(wf_fx_keys(post, &hk, &gk) && WAIT(wf_fx_gk == gk, 120000), "WindyGrain normal ready (%s)", log_line("fx grain"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    cm = corner(ref, out, FW, &sd_n);
+    chk(fabs(cm) < 3 && sd_n > 0.8 && sd_n < 25, "grain in the dark: mean %+.2f, sd %.2f", cm, sd_n);
+    wf_grain = 6;
+    chk(wf_fx_keys(post, &hk, &gk) && WAIT(wf_fx_gk == gk, 120000), "WindyGrain strong ready (%s)", log_line("fx grain"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    corner(ref, out, FW, &sd_s);
+    chk(sd_f < sd_n && sd_n < sd_s, "grain amount is monotonic: fine %.2f < normal %.2f < strong %.2f", sd_f, sd_n, sd_s);
+    chk(sd_n < sd_old * 0.9 + 6 && sd_n > 0.3, "not the Yedlin grain: sd %.2f vs %.2f", sd_n, sd_old);
+    chk(fabs(cm_old) < 3, "the old grain was centred too (mean %+.2f, sd %.2f)", cm_old, sd_old);
+
+    wf_grain = 0;
+    wf_halo = 0;
+    chk(WAIT(!wf_fx_hk && !wf_fx_gk, 20000), "effects off: both keys cleared");
     mod_deinit();
 }
 
@@ -3453,6 +3552,7 @@ int main(int argc, char **argv)
     pick_films();
     if (!strcmp(mode, "SHOT")) t_shot(cs);
     else if (!strcmp(mode, "FX")) t_fx();
+    else if (!strcmp(mode, "FXAB")) t_fxab();
     else if (!strcmp(mode, "MIST")) t_mist();
     else if (!strcmp(mode, "EXIF")) t_exif();
     else if (!strcmp(mode, "EXPSIM")) t_expsim();

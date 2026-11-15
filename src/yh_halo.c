@@ -80,6 +80,9 @@ const yh_stock yh_stocks[YH_NSTOCK] = {
     { "spektrafilm cine, no AH (no rem-jet)",        yh_w_spk_n,   YH_XT_DIAG, 1.0f, 2.0f, 4.0f },
     { "spektrafilm-style B&W, strong AH",            yh_w_spk_bw,  YH_XT_BW,   1.0f, 2.0f, 4.0f },
     { "spektrafilm-style B&W, weak AH",              yh_w_spk_bww, YH_XT_BW,   1.0f, 2.0f, 4.0f },
+    /* the light wrap of Genesis Pro 1.6.6: the pyramid's weights, crosstalk and knee are not read (yh_params.gen
+     * switches the stage to the plugin's own mask / blur / gate, see yh_gen_* at the end of this file) */
+    { "Genesis light wrap (arctan mask, difference of blur)", yh_w_neg, YH_XT_DIAG, 1.0f, 2.0f, 4.0f },
 };
 
 void yh_default_params(yh_params *p, int stock)
@@ -87,6 +90,13 @@ void yh_default_params(yh_params *p, int stock)
     p->stock = stock; p->hal_q8 = 256; p->bloom_q8 = 0; p->bloom_frac = 0.06f;
     p->knee_ev = -99.f; p->boost_ev = -99.f; p->pboost_ev = -99.f; p->tint_q8 = 0; p->ystep = 2; p->xfade = 8;
     p->exact_only = 0; p->pair_t = 40;
+    /* YH_GEN (Genesis light wrap): the plugin's own defaults - halation_strength 1.0 (hal_q8 256, above),
+     * light_wrap_radius 10, halation_film_gauge 35 mm, and the mask threshold 0.94 of lightWrapI1Val */
+    p->gen = stock == YH_GEN ? 1 : 0;
+    p->gen_radius = 10;
+    p->gen_gauge_q8 = 256;
+    p->gen_thr = 240;                                   /* 0.94 * 255 = 239.7 */
+    p->gen_rgb_q8[0] = 102; p->gen_rgb_q8[1] = 128; p->gen_rgb_q8[2] = 115;   /* 0.40 / 0.50 / 0.45 */
 }
 
 #ifndef YH_RAMP0
@@ -107,6 +117,11 @@ void yh_default_params(yh_params *p, int stock)
 #endif
 #define YH_H0X 4                                         /* Diana: H0 rows below the seam blended from the top build */
 #define YH_MIRROR_NOTE                                    /* Diana: L0 rows mirrored below the seam (top build) */
+/* YH_GEN (Genesis light wrap): its three passes are implemented at the end of this file */
+static void yh_gen_tables(yh_ctx *g, const yh_params *p);
+static void yh_gen_gather(yh_ctx *g, const uint32_t *p, int npix, int x0, int y);
+static void yh_gen_build(yh_ctx *g, int y_begin, int y_end, int mode);
+static void yh_gen_apply(yh_ctx *g, uint32_t *p, int npix, int x0, int y);
 static void sizes(int W, int H, int *lw, int *lh)
 {
     lw[0] = (W + 7) >> 3; lh[0] = (H + 7) >> 3;
@@ -197,6 +212,8 @@ static void hot_tables(yh_ctx *g, int boost_q16, int v0)
  * the last call. hs 256 gives M0 exactly ((x * 256 + 128) >> 8 == x, also for negative x). */
 void yh_set_hot(yh_ctx *g, int hb_q8, int hp_q8, int hs_q8)
 {
+    if (g->gen)
+        return;                                  /* the light wrap has no clipped-energy ramp and no per-shot scale */
     hb_q8 = hb_q8 < 0 ? 0 : hb_q8 > 256 ? 256 : hb_q8;
     hp_q8 = hp_q8 < 0 ? 0 : hp_q8 > 256 ? 256 : hp_q8;
     hs_q8 = hs_q8 < 0 ? 0 : hs_q8 > 256 ? 256 : hs_q8;
@@ -259,6 +276,13 @@ int yh_init(yh_ctx *g, const yh_params *p, int W, int H, void *mem)
     float bfrac = p->bloom_frac < 0 ? 0 : p->bloom_frac > 0.25f ? 0.25f : p->bloom_frac;
     g->pb_q8 = g->pb_base = pboost_f > 0 ? (int)(pboost_f * 256 + 0.5f) : 0;
     g->hb_q8 = g->hp_q8 = 256;
+    if (p->gen) {                                    /* YH_GEN: no display-model tables, no matrices (see the end) */
+        g->gen = 1;
+        g->g_str_q8 = hal_q8;
+        yh_gen_tables(g, p);
+        yh_begin_frame(g);
+        return 0;
+    }
 #ifdef YH_BAKED
 #if YH_T_RAMP0 != YH_RAMP0
 #error "yh_tables.h was made for another YH_RAMP0: re-run cam/mk_tables"
@@ -471,6 +495,7 @@ static __attribute__((noinline)) void gather_hot(const yh_ctx *g, uint32_t *a, u
 
 void yh_gather_chunk(yh_ctx *g, const uint32_t *p, int npix, int x0, int y)
 {
+    if (g->gen) { yh_gen_gather(g, p, npix, x0, y); return; }
     if (y & (g->ystep - 1)) return;
     int gy = y >> 3;
     if (gy != g->gacc_gy) { if (g->gacc_gy >= 0) flush(g); g->gacc_gy = gy; }
@@ -771,6 +796,7 @@ static void seam_mirror(yh_ctx *g, int s0)
 
 void yh_build(yh_ctx *g, int y_begin, int y_end, int mode)
 {
+    if (g->gen) { yh_gen_build(g, y_begin, y_end, mode); return; }
     if (g->gacc_gy >= 0) { flush(g); g->gacc_gy = -1; }
     int s0 = (mode == YH_TOP ? y_end : y_begin) >> 3;    /* Diana: seam row on the L0 grid */
     if (mode == YH_TOP) {
@@ -985,6 +1011,7 @@ void yh_apply_chunk(yh_ctx *g, uint32_t *p, int npix, int x0, int y)
 {
     if (y != g->cur_y) prep_row(g, y);
     if (g->row_lo >= g->row_hi) return;
+    if (g->gen) { yh_gen_apply(g, p, npix, x0, y); return; }
     int xa = x0, xb = x0 + npix;
     int ia = (xa - 3) >> 3, ib = (xb - 5) >> 3;          /* cells of the first / last word */
     if (ia < g->row_lo) ia = g->row_lo;
@@ -1063,4 +1090,305 @@ void yh_apply_chunk(yh_ctx *g, uint32_t *p, int npix, int x0, int y)
     }
 #undef YH_COL
 #undef YH_BND
+}
+
+/* ================================================================== YH_GEN: the light wrap of Genesis Pro 1.6.6
+ * Written from the plugin's own kernels (halation_step1_step2.cl.txt; kernel_source.cl:1723 lightWrapI1Val,
+ * :2340 LightWrapStepTwo, halation_performance_grain_head.cl.txt LightWrapStepTwoNoConvolve):
+ *
+ *   luma  = (r + g + b) / 3 + wrapSens - 0.94                   (wrapSens = light_wrap_sensitivity, default 0)
+ *   a     = clamp(-0.55 + 1 / (0.626 * atan(6.5267 - 9.2033 * luma) + 1.147), 0, 1)
+ *   i1_c  = a * wrapIntens(1) * wrapColor_c                     (the highlight mask, one value per channel)
+ *   i2_c  = 1 - clamp(0.491 - 0.507 * atan(-5.5 * (-0.3 + c)), 0, 1)   (c = that channel of the source, 0..1)
+ *   delta = max(blur(i1) - i1, 0)                               (difference of blur: the core of a light stays put)
+ *   out   = src + delta * i2 * halation_strength
+ *
+ * blur: the cone |dist - r| / r of the Precision kernel (halation_version 1) or the Gaussian of the Performance
+ * kernel (version 0, the plugin's default); radius r = max(1, maxDim * light_wrap_radius / (2048 * gauge)).
+ * Here: the mask is gathered on the 1/8 grid the pyramid already uses (Q15 per channel), blurred there with two
+ * box passes (a Gaussian to within a few percent, and every radius this build makes is 1..8 cells), and the
+ * difference of blur is taken per pixel against the mask at that pixel's own luma - which is exactly the plugin's
+ * operator, only its blur runs on the coarse grid.
+ * Domain (declared in docs/DESIGN.md 1a): the plugin runs on LogC3, where 0.94 sits far above display white, and
+ * adds in that log space; our frame is display-referred, so the arctan's own window (rank 0.58..0.95 -> 0..1) is
+ * laid onto codes gen_thr..255, and the delta is added in code units, the closest this stage gets after the film
+ * table. The gate i2 keeps a bright core from being lifted twice, as in the plugin. */
+#define YH_GEN_MAX_RAD 8
+#ifndef YH_GEN_BOX2
+#define YH_GEN_BOX2 2                                    /* box passes; the plugin's Performance blur is a Gaussian */
+#endif
+
+/* atan for the init tables only (the EOS M ML core exports no atanf): polynomial on |x| <= 1 folded through
+ * pi/2 - atan(1/x), error < 1e-5 - far below what a 256-entry table keeps */
+static float yh_at1(float x)
+{
+    float x2 = x * x;
+    return x * (0.9998660f + x2 * (-0.3302995f + x2 * (0.1801410f + x2 * (-0.0851330f + x2 * 0.0208351f))));
+}
+static float yh_atan(float x)
+{
+    if (x < 0.0f)
+        return -yh_atan(-x);
+    if (x <= 1.0f)
+        return yh_at1(x);
+    return 1.5707963268f - yh_at1(1.0f / x);
+}
+
+/* the two tables, the wrap colour, the radius; yh_init calls this and returns (no display model, no matrices) */
+static void yh_gen_tables(yh_ctx *g, const yh_params *p)
+{
+    int v, thr = p->gen_thr < 1 ? 1 : p->gen_thr > 254 ? 254 : p->gen_thr;
+    float span = 255.0f - thr;
+    g->g_thr = thr;
+    for (v = 0; v < 256; v++) {
+        float t = 0.58f + 0.37f * ((float)v - thr) / span;   /* the arctan's own 0.58..0.95 window, laid on the codes */
+        float a = -0.55f + 1.0f / (0.626f * yh_atan(6.5267f - 9.2033f * t) + 1.147f);
+        float c = (float)v * (1.0f / 255.0f);
+        float q = 0.491f - 0.507f * yh_atan(-5.5f * (-0.3f + c));
+        a = a < 0.0f ? 0.0f : a > 1.0f ? 1.0f : a;
+        q = q < 0.0f ? 0.0f : q > 1.0f ? 1.0f : q;
+        g->gta[v] = (uint16_t)(a * 32768.0f + 0.5f);
+        g->gti[v] = (uint16_t)((1.0f - q) * 256.0f + 0.5f);
+    }
+    for (v = 0; v < 3; v++) {
+        int c = p->gen_rgb_q8[v];
+        c = c < 0 ? 0 : c > 256 ? 256 : c;
+        g->gcol[v] = (int16_t)(c << 7);                  /* Q8 of 0..1 -> Q15 */
+    }
+    {
+        int rad = p->gen_radius < 1 ? 1 : p->gen_radius > 40 ? 40 : p->gen_radius;
+        int gg = p->gen_gauge_q8 < 64 ? 64 : p->gen_gauge_q8;
+        int big = g->W > g->H ? g->W : g->H;
+        int cells = (big * rad) / (64 * gg);              /* px = big * rad / (2048 * gg / 256), / 8 for the grid */
+        if (cells < 1) cells = 1;
+        if (cells > YH_GEN_MAX_RAD) cells = YH_GEN_MAX_RAD;
+        g->g_rad = cells;
+    }
+    for (v = 1; v <= 17; v++)
+        g->grq[v] = (uint32_t)(65536.0f / (float)v + 0.5f);
+}
+
+/* gather: the mean mask of a 1/8 cell, Q15 per channel, into L0 (the drive slots the pyramid would use) */
+static void yh_gen_gather(yh_ctx *g, const uint32_t *p, int npix, int x0, int y)
+{
+    const uint8_t *mo = g->moff;
+    const uint16_t *ta = g->gta;
+    int thr = g->g_thr, c0 = g->gcol[0], c1 = g->gcol[1], c2 = g->gcol[2];
+    uint32_t *acc;
+    int nw = npix >> 1, clo = 1 << 30, chi = -1, gy;
+    if (y & (g->ystep - 1))
+        return;
+    gy = y >> 3;
+    if (gy != g->gacc_gy) { if (g->gacc_gy >= 0) flush(g); g->gacc_gy = gy; }
+    acc = g->gacc + 4 * (x0 >> 3);
+    for (int k = 0; k < nw; k++) {
+        uint32_t w = p[k];
+        int Y0 = (w >> 8) & 255, Y1 = (int)(w >> 24), ym = Y0 > Y1 ? Y0 : Y1;
+        int U, V, rv, gu, bu;
+        uint32_t *a;
+        if (ym + mo[((w >> 3) & 31) | ((w >> 14) & 0x3e0)] < thr)
+            continue;                                    /* no channel of this word can reach the mask */
+        U = (int8_t)w; V = (int8_t)(w >> 16);
+        rv = (359 * V) >> 8; gu = (88 * U + 183 * V) >> 8; bu = (454 * U) >> 8;
+        a = acc + 4 * (k >> 2);
+        for (int q = 0; q < 2; q++) {
+            int Y = q ? Y1 : Y0, l = (3 * Y + rv - gu + bu) / 3, m;
+            if (l < thr) continue;
+            if (l > 255) l = 255;
+            m = ta[l];
+            if (!m) continue;
+            a[0] += (uint32_t)((m * c0) >> 15);
+            a[1] += (uint32_t)((m * c1) >> 15);
+            a[2] += (uint32_t)((m * c2) >> 15);
+        }
+        if (k < clo) clo = k;
+        chi = k;
+    }
+    if (chi >= 0) {
+        int c_0 = (x0 >> 3) + (clo >> 2), c_1 = (x0 >> 3) + (chi >> 2);
+        if (c_0 < g->glo) g->glo = c_0;
+        if (c_1 > g->ghi) g->ghi = c_1;
+    }
+}
+
+/* horizontal box of `src` (3 channels per cell when stride 3 = L0's mask, 4 when stride 4 = H0 itself) into H0,
+ * normalised by the length the window actually used (the plugin skips the out-of-frame taps and divides by their
+ * sum), edges replicated; H0's fourth slot takes the channel maximum (the span test of the apply) */
+static void yh_gen_box_h(yh_ctx *g, const int16_t *src, int stride, int h0a, int h0b)
+{
+    int w = g->gw, r = g->g_rad;
+    for (int y = h0a; y < h0b; y++) {
+        const int16_t *s = src + stride * w * y;
+        int16_t *d = g->H0 + 4 * w * y;
+        int lo = w, hi = 0;
+        for (int c = 0; c < w; c++) {
+            int x0 = c - r < 0 ? 0 : c - r, x1 = c + r >= w ? w - 1 : c + r;
+            uint32_t q = g->grq[x1 - x0 + 1], a0 = 0, a1 = 0, a2 = 0;
+            int v0, v1, v2, mx;
+            for (int x = x0; x <= x1; x++) {
+                const int16_t *p = s + stride * x;
+                a0 += (uint16_t)p[0]; a1 += (uint16_t)p[1]; a2 += (uint16_t)p[2];
+            }
+            v0 = (int)(((uint64_t)a0 * q) >> 16);
+            v1 = (int)(((uint64_t)a1 * q) >> 16);
+            v2 = (int)(((uint64_t)a2 * q) >> 16);
+            mx = v0 > v1 ? v0 : v1;
+            if (v2 > mx) mx = v2;
+            if (mx > 32767) { v0 = v0 > 32767 ? 32767 : v0; v1 = v1 > 32767 ? 32767 : v1;
+                              v2 = v2 > 32767 ? 32767 : v2; mx = 32767; }
+            d[4 * c] = (int16_t)v0; d[4 * c + 1] = (int16_t)v1; d[4 * c + 2] = (int16_t)v2;
+            d[4 * c + 3] = (int16_t)mx;
+            if (mx) { if (c < lo) lo = c; hi = c + 1; }
+        }
+        g->h0lo[y] = (int16_t)lo; g->h0hi[y] = (int16_t)hi;
+    }
+}
+
+/* build: two separable box passes of the mask, all at the 1/8 grid; H0 is the working buffer, L0 the copy the
+ * vertical pass reads (the mask in L0 is not needed after this: the apply takes i1 from the pixel's own luma) */
+static void yh_gen_build(yh_ctx *g, int y_begin, int y_end, int mode)
+{
+    int w = g->gw, h = g->gh, r = g->g_rad;
+    int s0 = (mode == YH_TOP ? y_end : y_begin) >> 3;
+    int h0a = mode == YH_BOTTOM ? s0 - 1 : 0, h0b = mode == YH_TOP ? s0 + YH_H0X : h;
+    if (g->gacc_gy >= 0) { flush(g); g->gacc_gy = -1; }
+    if (h0a < 0) h0a = 0;
+    if (h0b > h) h0b = h;
+    memset(g->H0 + 4 * w * h0a, 0, 8u * w * (h0b - h0a));
+    for (int pass = 0; pass < YH_GEN_BOX2; pass++) {
+        /* horizontal: from L0 (pass 0) or from the previous pass's H0 */
+        yh_gen_box_h(g, pass ? g->H0 : (const int16_t *)g->L[0], pass ? 4 : 3, h0a, h0b);
+        for (int y = h0a; y < h0b; y++) {                 /* the horizontal result, kept for the vertical pass */
+            const int16_t *s = g->H0 + 4 * w * y;
+            uint16_t *d = g->L[0] + 3 * w * y;
+            for (int c = 0; c < w; c++) {
+                d[3 * c] = (uint16_t)s[4 * c];
+                d[3 * c + 1] = (uint16_t)s[4 * c + 1];
+                d[3 * c + 2] = (uint16_t)s[4 * c + 2];
+            }
+        }
+        for (int y = h0a; y < h0b; y++) {                 /* vertical, out of the copy, into H0 */
+            int y0 = y - r < 0 ? 0 : y - r, y1 = y + r >= h ? h - 1 : y + r;
+            uint32_t q = g->grq[y1 - y0 + 1];
+            int16_t *d = g->H0 + 4 * w * y;
+            int lo = w, hi = 0;
+            for (int c = 0; c < w; c++) {
+                uint32_t a0 = 0, a1 = 0, a2 = 0;
+                int v0, v1, v2, mx;
+                for (int k = y0; k <= y1; k++) {
+                    const uint16_t *s = g->L[0] + 3 * w * k;
+                    a0 += s[3 * c]; a1 += s[3 * c + 1]; a2 += s[3 * c + 2];
+                }
+                v0 = (int)(((uint64_t)a0 * q) >> 16);
+                v1 = (int)(((uint64_t)a1 * q) >> 16);
+                v2 = (int)(((uint64_t)a2 * q) >> 16);
+                mx = v0 > v1 ? v0 : v1;
+                if (v2 > mx) mx = v2;
+                if (mx > 32767) { v0 = v0 > 32767 ? 32767 : v0; v1 = v1 > 32767 ? 32767 : v1;
+                                  v2 = v2 > 32767 ? 32767 : v2; mx = 32767; }
+                d[4 * c] = (int16_t)v0; d[4 * c + 1] = (int16_t)v1; d[4 * c + 2] = (int16_t)v2;
+                d[4 * c + 3] = (int16_t)mx;
+                if (mx) { if (c < lo) lo = c; hi = c + 1; }
+            }
+            g->h0lo[y] = (int16_t)lo; g->h0hi[y] = (int16_t)hi;
+        }
+    }
+    g->cur_y = -1; g->row_lo = g->row_hi = 0;
+}
+
+/* one delta: the difference of blur (Q15) through the gate (Q8) and the strength (Q8), in code levels */
+static inline int yh_gen_d(int cr, int gate, int hs)
+{
+    int t = (cr * gate) >> 8;                             /* Q15 */
+    t = (t * 255) >> 7;                                   /* Q8 of a display level */
+    t = (t * hs) >> 8;
+    return (t + 128) >> 8;
+}
+
+/* the cell's words: the blurred mask interpolated between cells i and i+1 (Q3, as the pyramid's halo),
+ * the plugin's per-pixel gate, then the delta added in code units and packed back into the UYVY word */
+static __attribute__((noinline)) void yh_gen_cell(const yh_ctx *g, uint32_t *pw, uint32_t *pe,
+                                                  int qR, int qG, int qB, int sR, int sG, int sB)
+{
+    const uint16_t *ta = g->gta, *ti = g->gti;
+    int hs = g->g_str_q8, g0 = g->gcol[0], g1 = g->gcol[1], g2 = g->gcol[2], thr = g->g_thr;
+    for (; pw < pe; pw++, qR += sR, qG += sG, qB += sB) {
+        uint32_t w = *pw;
+        int U = (int8_t)w, Y0 = (w >> 8) & 255, V = (int8_t)(w >> 16), Y1 = (int)(w >> 24);
+        int rv = (359 * V) >> 8, gu = (88 * U + 183 * V) >> 8, bu = (454 * U) >> 8;
+        int bR = qR >> 3, bG = qG >> 3, bB = qB >> 3;
+        int dR0 = 0, dG0 = 0, dB0 = 0, dR1 = 0, dG1 = 0, dB1 = 0, s_r, s_g, s_b;
+        for (int q = 0; q < 2; q++) {
+            int Y = q ? Y1 : Y0;
+            int r = Y + rv, gg = Y - gu, b = Y + bu;
+            int l = (r + gg + b) / 3, m, cr, cg, cb, dR, dG, dB;
+            if (l < thr && !(bR | bG | bB))
+                continue;                                 /* nothing can be added here */
+            if (l > 255) l = 255;
+            if (l < 0) l = 0;
+            m = ta[l];
+            cr = bR - ((m * g0) >> 15); if (cr < 0) cr = 0;
+            cg = bG - ((m * g1) >> 15); if (cg < 0) cg = 0;
+            cb = bB - ((m * g2) >> 15); if (cb < 0) cb = 0;
+            dR = yh_gen_d(cr, ti[r < 0 ? 0 : r > 255 ? 255 : r], hs);
+            dG = yh_gen_d(cg, ti[gg < 0 ? 0 : gg > 255 ? 255 : gg], hs);
+            dB = yh_gen_d(cb, ti[b < 0 ? 0 : b > 255 ? 255 : b], hs);
+            if (q) { dR1 = dR; dG1 = dG; dB1 = dB; }
+            else   { dR0 = dR; dG0 = dG; dB0 = dB; }
+        }
+        s_r = dR0 + dR1; s_g = dG0 + dG1; s_b = dB0 + dB1;
+        if (!(s_r | s_g | s_b))
+            continue;
+        Y0 += (77 * dR0 + 150 * dG0 + 29 * dB0 + 128) >> 8;
+        Y1 += (77 * dR1 + 150 * dG1 + 29 * dB1 + 128) >> 8;
+        U += (-43 * s_r - 85 * s_g + 128 * s_b + 256) >> 9;
+        V += (128 * s_r - 107 * s_g - 21 * s_b + 256) >> 9;
+        if (Y0 > 255) Y0 = 255;
+        if (Y0 < 0) Y0 = 0;
+        if (Y1 > 255) Y1 = 255;
+        if (Y1 < 0) Y1 = 0;
+        CLAMP_S8(U); CLAMP_S8(V);
+        *pw = pack_word(U, Y0, V, Y1);
+    }
+}
+
+static void yh_gen_apply(yh_ctx *g, uint32_t *p, int npix, int x0, int y)
+{
+    int xa = x0, xb = x0 + npix;
+    int ia = (xa - 3) >> 3, ib = (xb - 5) >> 3;
+    const int16_t *ra, *rb;
+    int fy, wa, gw = g->gw, cR, cG, cB, nR, nG, nB;
+    (void)y;
+    if (ia < g->row_lo) ia = g->row_lo;
+    if (ib > g->row_hi - 1) ib = g->row_hi - 1;
+    if (ia > ib) return;
+    ra = g->row_a; rb = g->row_b; fy = g->row_fy; wa = 16 - fy;
+#define YH_GEN_COL(j, R, G, B) do {                                                      \
+        int j_ = (j); if ((unsigned)j_ >= (unsigned)gw) j_ = j_ < 0 ? 0 : gw - 1;          \
+        const int16_t *pa_ = ra + 4 * j_, *pb_ = rb + 4 * j_;                              \
+        if (!(pa_[3] | pb_[3])) { R = G = B = 0; }                                         \
+        else {                                                                             \
+            R = (pa_[0] * wa + pb_[0] * fy + 8) >> 4;                                      \
+            G = (pa_[1] * wa + pb_[1] * fy + 8) >> 4;                                      \
+            B = (pa_[2] * wa + pb_[2] * fy + 8) >> 4;                                      \
+        }                                                                                  \
+    } while (0)
+    YH_GEN_COL(ia, cR, cG, cB);
+    for (int i = ia; i <= ib; i++, cR = nR, cG = nG, cB = nB) {
+        int xs, xe, sR, sG, sB, qR, qG, qB;
+        YH_GEN_COL(i + 1, nR, nG, nB);
+        if (!(cR | cG | cB | nR | nG | nB))
+            continue;
+        xs = 8 * i + 4; xe = xs + 8;
+        sR = nR - cR; sG = nG - cG; sB = nB - cB;
+        qR = 8 * cR + sR; qG = 8 * cG + sG; qB = 8 * cB + sB;
+        sR *= 2; sG *= 2; sB *= 2;
+        if (xs < xa) {
+            int m = (xa - xs) >> 1;
+            qR += m * sR; qG += m * sG; qB += m * sB; xs = xa;
+        }
+        if (xe > xb) xe = xb;
+        yh_gen_cell(g, p + ((xs - x0) >> 1), p + ((xe - x0) >> 1), qR, qG, qB, sR, sG, sB);
+    }
+#undef YH_GEN_COL
 }
