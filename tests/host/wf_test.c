@@ -248,7 +248,7 @@ static uint32_t fnv(uint32_t h, const uint8_t *p, size_t n) { while (n--) h = (h
 static void le32(uint8_t *p, uint32_t v) { p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24; }
 
 struct pk { int k, v; const uint32_t *T; };
-static const uint32_t *tabs[128][3];             /* the table of (catalogue row, variant) written into the pack */
+static const uint32_t *tabs[128][WF_NPRINTS];    /* the table of (catalogue row, variant) written into the pack */
 /* bad: 0 good, 'M' magic, 'I' index checksum, 'T' a word with its top byte set (entry 0), 'F' entry 0's checksum,
  *      'C' entry 0's code, 'D' entry 0 twice (the second with another table), 'G' entry 0's flags */
 static void pack_write(const struct pk *e, int n, int bad)
@@ -1366,6 +1366,7 @@ static void t_pack(const char *cs, const char *file)
         int nf = 0, nh = 0, nv = 0;
         for (int k = 0; k < wf_nfilms; k++) {
             if (!colour_film(k) && (wf_films[k].flags & (WF_F_READY | WF_F_LUTCAN)) != WF_F_READY) continue;
+            if (!(wf_films[k].prints & 1)) continue;   /* a chain film: no Scan variant (print stocks only) */
             nf++;
             nh += wf_ws_has(k, 0);
             nv += wf_ws_has(k, 1) + wf_ws_has(k, 2);
@@ -1517,6 +1518,50 @@ static void t_print(void)
     wf_out = WF_OUT_LOG;
     chk(!wf_row_avail(WF_ROW_PRINT), "plain log: Print greyed");
     wf_out = WF_OUT_FILM;
+    mod_deinit();
+}
+
+/* ------------------------------------------------------------------ PRINT:chain (own process: the pack index of an
+ * earlier mod_init stays in the statically linked module) */
+/* a chain film: no Scan / Cine / Paper, only print stocks (bits WF_PRINT_STOCK0..). Its catalogue row must be READY
+ * (else the browser leaves it off the strip and wf_load says "Film table not on the card"), it loads, the Print stock
+ * row starts on its first stock and steps to the next, and each shot uses that stock's table. */
+static void t_print_chain(void)
+{
+    int kc = -1, v1 = -1, v2 = -1;
+    for (int k = 0; k < wf_nfilms && kc < 0; k++)
+        if (!(wf_films[k].flags & WF_F_LUTCAN) && (wf_films[k].prints >> WF_PRINT_STOCK0))
+            kc = k;
+    if (kc < 0) {
+        printf("  (no chain film in this catalogue: chain part skipped)\n");
+        return;
+    }
+    for (int v = WF_PRINT_STOCK0; v < WF_NPRINTS; v++)
+        if (wf_films[kc].prints & (1u << v)) {
+            if (v1 < 0) v1 = v;
+            else if (v2 < 0) v2 = v;
+        }
+    chk(wf_films[kc].flags & WF_F_READY, "chain film %d %s: READY (its print tables were there at build time)",
+        wf_films[kc].id, wf_films[kc].code);
+    chk(v1 >= 0 && v2 >= 0 && !(wf_films[kc].prints & 7), "chain film: two print stocks, no Scan / Cine / Paper");
+    if (v2 < 0)
+        return;
+    struct pk ec[] = { { kc, v1, tab_make(12, 0, 0, 0) }, { kc, v2, tab_make(-10, 0, 0, 0) } };
+    pack_write(ec, 2, 0);
+    put_cfg("film=%d\noutput=film\nprint=scan\ngrain=off\nhalation=off\nmist=off\n", wf_films[kc].id);
+    mod_init(1);
+    gen_frame(in, FW, FH, 0);
+    chk(WAIT(wf_avail(wf_films[kc].id), 5000) && wf_load(wf_films[kc].id) == WF_LOAD_OK && wf_loaded() == wf_films[kc].id,
+        "chain film: on the card and loads");
+    char t1[16] = "", t2[16] = "";
+    snprintf(t1, sizeof t1, "%s", wf_row_text(WF_ROW_PRINT));
+    chk(wf_row_avail(WF_ROW_PRINT) && strcmp(t1, "Scan") && strcmp(t1, "Cine") && strcmp(t1, "Paper"),
+        "chain film: Print stock row on its first stock (%s), not Scan", t1);
+    film_shot("chain film, first print stock", kc, v1, 1, 12, 1.5);
+    chk(wf_row_step(WF_ROW_PRINT, 1), "chain film: Print stock steps");
+    snprintf(t2, sizeof t2, "%s", wf_row_text(WF_ROW_PRINT));
+    chk(strcmp(t1, t2) != 0, "chain film: the next stock (%s -> %s)", t1, t2);
+    film_shot("chain film, second print stock", kc, v2, 1, -10, 1.5);
     mod_deinit();
 }
 
@@ -3415,6 +3460,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "PACK")) t_pack(cs, argc > 3 ? argv[3] : 0);
     else if (!strcmp(mode, "LIGHT")) t_light();
     else if (!strcmp(mode, "PRINT")) t_print();
+    else if (!strcmp(mode, "PRINT:chain")) t_print_chain();
     else if (!strcmp(mode, "LOG")) t_log(cs);
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();
