@@ -24,6 +24,7 @@
 #include "wf_cr2.h"
 #include "wf_dev.h"
 #include "wf_jpe.h"
+#include "wf_print.h"
 #endif
 
 /* ML core (EOSM_202.sym / 5D2_212.sym both export these) */
@@ -592,6 +593,19 @@ int wf_clock_hm(void)
     return tm[2] * 100 + tm[1];
 }
 
+int wf_clock_ymd(void)
+{
+    int tm[16];
+    memset(tm, 0, sizeof tm);
+    LoadCalendarFromRTC(tm);                     /* struct tm: ..., mday [3], mon [4] (0..11), year [5] (since 1900) */
+    if (tm[3] < 1 || tm[3] > 31 || tm[4] < 0 || tm[4] > 11 || tm[5] < 100 || tm[5] > 299)
+        return -1;
+    return (1900 + tm[5]) * 10000 + (tm[4] + 1) * 100 + tm[3];
+}
+
+/* print finishes (wf_dark.h, DESIGN 3.9): the settings; a run takes them at its start */
+volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date;
+
 #if WF_DARK_CAN
 /* the develop tables a run builds for a look, B's choice (wf_rawb.c): Leica Vivid (WF_FLUT_DISP) = the sRGB develop + the
  * owner's display cube <CODE>SR.CUB on its codes, no log step; every other Film LUT can (V-Log, Canon Log 2 ...) = log +
@@ -606,6 +620,10 @@ static struct wf_cr2_dec dk_dec;
 static struct wf_cr2_info dk_inf;
 static uint32_t dk_jpe[1024] __attribute__((aligned(8)));   /* struct wf_jpe (wf_jpe_bytes() <= 4096) */
 static struct wf_dk_thumb dk_th;
+static struct wf_dk_shot dk_cs;                  /* the CR2's own details (its head, read at load): the finishes' gaps */
+static int dk_pfr, dk_pin, dk_pdt;               /* this run's print finishes (wf_pr_* at its start, DESIGN 3.9) */
+static int dk_pf_said;                           /* WFPRINT.DAT missing / bad: said once a run */
+#define DK_PF_PACK "ML/DATA/WFPRINT.DAT"
 
 static int dk_battery(void)
 {
@@ -776,6 +794,78 @@ static void dk_yield(void)
     wf_task_yield(0);
 }
 
+/* ------------------------------------------------------------------ print finishes (DESIGN 3.9, wf_print.h) */
+static const char *const dk_pfr_name[WF_PFR_N] = { "off", "white", "black", "white wide", "black wide" };
+
+/* before the encode, in M.raw (the develop is done with the raw): the date stamp into the frame; with a frame its layout,
+ * the caption band (WFPRINT.DAT read into the scratch, the shot's details from Canon's APP1 and the CR2's for the gaps,
+ * the look from the print's comment text) and a row buffer, and the APP1's pixel size. L->frame 0: the print as before. */
+static void dk_finish(int i, uint32_t ao, uint32_t al, const char *look, struct wf_pf_lay *L, uint8_t **band,
+                      uint32_t **rowbuf)
+{
+    int t0 = get_ms_clock();
+    struct wf_dk_shot s;
+    memset(&s, 0, sizeof s);
+    if (al > 10)
+        wf_dk_shot(M.app1 + ao + 10, al - 10, &s);
+    int orient = s.orient ? s.orient : 1;        /* the print turns by its own APP1 (none: shown as stored) */
+    wf_dk_shot_gaps(&s, &dk_cs);
+    uint8_t *scr = M.raw;
+    char b[24];
+    *band = 0;
+    *rowbuf = 0;
+    if (dk_pdt) {
+        uint32_t need = 0;
+        if (!wf_pf_date(&s, dk_pdt, b, sizeof b))
+            wf_log("dark: F%02d no date in the shot (APP1, CR2): no date stamp", i + 1);
+        else if ((need = wf_pf_stamp_bytes(DK_W, DK_H, b)) == 0 || need > DK_RAW_N
+                 || wf_pf_stamp((uint32_t *)M.frame, DK_W * 2, DK_W, DK_H, orient, b, scr, need) != 0)
+            wf_log("dark: F%02d date stamp %s not drawn", i + 1, b);
+        else
+            wf_log("dark: F%02d date stamp %s o%d %dms", i + 1, b, orient, get_ms_clock() - t0);
+    }
+    if (!wf_pf_layout(L, dk_pfr, dk_pin, DK_W, DK_H, orient))
+        return;
+    int t1 = get_ms_clock();
+    uint32_t nb = (wf_pf_band_bytes(L) + 3) & ~3u, nr = (uint32_t)L->cw * 2 * 16;
+    if (WF_PF_MAXB + nb + nr > DK_RAW_N) {       /* cannot happen at 5184 x 3456 (about 4.5 MB of 32 MB) */
+        wf_log("dark: F%02d frame needs %d KB of scratch: none", i + 1, (int)((WF_PF_MAXB + nb + nr) >> 10));
+        wf_pf_layout(L, WF_PFR_OFF, 0, DK_W, DK_H, orient);
+        return;
+    }
+    *band = scr + WF_PF_MAXB;
+    *rowbuf = (uint32_t *)(scr + WF_PF_MAXB + nb);
+    static struct wf_pf_font F[WF_PF_NFONT];      /* (wf_task: 8 KB of stack) */
+    int fok = 0;
+    if (L->tw) {                                 /* the details: the print font pack (167 KB) into the scratch */
+        uint32_t pn = 0;
+        if (FIO_GetFileSize(DK_PF_PACK, &pn) == 0 && pn > 0 && pn <= WF_PF_MAXB) {
+            void *g = FIO_OpenFile(DK_PF_PACK, 0);
+            if (WF_FH_OK(g)) {
+                fok = dk_read_at(g, 0, scr, pn) == 0 && wf_pf_fonts(F, scr, pn) == 0;
+                FIO_CloseFile(g);
+            }
+        }
+        if (!fok && !dk_pf_said) {
+            dk_pf_said = 1;
+            wf_log("dark: %s missing or bad (%d B): frames without the details", DK_PF_PACK, (int)pn);
+        }
+    }
+    static struct wf_pf_txt tx;                  /* (wf_task's stack is small) */
+    struct wf_pf_cap c;
+    char rl[40], dr[200];
+    rl[0] = 0;
+    if (dk_pin == WF_PIN_ROLL)
+        snprintf(rl, sizeof rl, "ROLL %03d " WF_PF_DOT " %02d/%02d", roll.num, i + 1, roll.exp);
+    wf_pf_caption(&s, look, rl, &tx, &c);
+    wf_pf_band(L, fok ? F : 0, &c, *band, dr, sizeof dr);
+    int dims = al ? wf_dk_dims(M.app1 + ao, al, L->cw, L->ch) : -1;
+    wf_log("dark: F%02d frame %s o%d %dx%d (Exif size %s), band %d KB, %dms", i + 1, dk_pfr_name[L->frame], orient, L->cw,
+           L->ch, dims == 0 ? "set" : "not set", (int)(nb >> 10), get_ms_clock() - t1);
+    if (fok)
+        wf_log("dark: F%02d caption %s", i + 1, dr);
+}
+
 static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
 {
     char cr2[96], jpg[96], out[96], root[16], txt[200], t2[200];
@@ -797,6 +887,9 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     if (!WF_FH_OK(f)) { dk_why = "open CR2"; return DK_ERR; }
     uint32_t nh = fsize < WF_CR2_HEAD ? fsize : WF_CR2_HEAD;
     rc = dk_read_at(f, 0, M.in, nh) ? WF_CR2_E_READ : wf_cr2_parse(M.in, nh, fsize, &dk_inf);
+    memset(&dk_cs, 0, sizeof dk_cs);
+    if (rc == 0 && (dk_pfr || dk_pdt))
+        wf_dk_shot(M.in, nh, &dk_cs);            /* the print finishes: the CR2's own details while its head is here */
     if (rc == 0) {
         uint32_t nl = fsize - dk_inf.strip_off < WF_CR2_LJHEAD ? fsize - dk_inf.strip_off : WF_CR2_LJHEAD;
         rc = dk_read_at(f, dk_inf.strip_off, M.in, nl) ? WF_CR2_E_READ : wf_cr2_parse_ljpeg(M.in, nl, &dk_inf);
@@ -902,6 +995,12 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     snprintf(txt, sizeof txt, "WindyFilm Darkroom: %s | ROLL %03d F%02d", body, roll.num, i + 1);
     if (al && wf_dk_comment(M.app1 + ao, al, txt) != 0)
         wf_log("dark: F%02d no UserComment field in Canon's APP1", i + 1);
+    struct wf_pf_lay L;                          /* the canvas: = the frame (5184 x 3456) without the finishes */
+    uint8_t *band = 0;
+    uint32_t *rowbuf = 0;
+    wf_pf_layout(&L, WF_PFR_OFF, 0, DK_W, DK_H, 1);
+    if (dk_pfr || dk_pdt)
+        dk_finish(i, ao, al, t2, &L, &band, &rowbuf);
     struct wf_fe e = { 0, 0 };
     uint32_t osz = 0;
     if (FIO_GetFileSize(out, &osz) == 0 && wf_fremove(out, &e) != 0) {
@@ -912,16 +1011,18 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     if (!o) { dk_why = "create print"; return DK_FATAL; }
     struct dk_wr wr = { o, 0, 0 };
     struct wf_jpe *je = (struct wf_jpe *)dk_jpe;
-    rc = wf_jpe_bytes() <= sizeof dk_jpe ? wf_jpe_begin(je, DK_W, DK_H, 95, al ? M.app1 + ao : 0, (int)al, M.ob, DK_OB,
+    rc = wf_jpe_bytes() <= sizeof dk_jpe ? wf_jpe_begin(je, L.cw, L.ch, 95, al ? M.app1 + ao : 0, (int)al, M.ob, DK_OB,
                                                         dk_write_cb, &wr) : WF_JPE_E_ARG;
     wf_dk_thumb_begin(&dk_th, DK_W, DK_H);
     int stopped = 0;
-    for (int y = 0; rc == WF_JPE_OK && y < DK_H; y += 16) {
-        int n = DK_H - y < 16 ? DK_H - y : 16;
-        rc = wf_jpe_rows(je, frm + y * (DK_W / 2), DK_W * 2, n);
-        wf_dk_thumb_rows(&dk_th, frm + y * (DK_W / 2), DK_W * 2, y, n, dv_print);
+    for (int y = 0; rc == WF_JPE_OK && y < L.ch; y += 16) {   /* no frame: the frame's own rows, as before */
+        const uint32_t *rows;
+        int pitch, n = wf_pf_band_rows(&L, y, frm, DK_W * 2, band, rowbuf, &rows, &pitch), py = y - L.iy;
+        rc = wf_jpe_rows(je, rows, pitch, n);
+        if (py >= 0 && py < DK_H)                /* the thumbnails: the picture's rows (16-row aligned in the canvas) */
+            wf_dk_thumb_rows(&dk_th, frm + py * (DK_W / 2), DK_W * 2, py, n, dv_print);
         if (!(y & 255)) {
-            dv.prog = 800 + y * 200 / DK_H;
+            dv.prog = 800 + y * 200 / L.ch;
             dv_bump();
             if (dk_should_stop()) { stopped = 1; break; }
             wf_task_yield(0);
@@ -1021,7 +1122,12 @@ static void dk_task(void)
     dv.total = roll.nshot;
     dv.done = wf_roll_ndev(&roll);
     dv.left = wf_roll_left(&roll);
-    wf_log("dark: roll %03d start, %d of %d to develop, look output %d", roll.num, dv.left, dv.total, lk.output);
+    dk_pfr = wf_pr_frame > WF_PFR_OFF && wf_pr_frame < WF_PFR_N ? wf_pr_frame : WF_PFR_OFF;   /* the whole run's */
+    dk_pin = wf_pr_info > WF_PIN_OFF && wf_pr_info < WF_PIN_N ? wf_pr_info : WF_PIN_OFF;
+    dk_pdt = wf_pr_date > WF_PDT_OFF && wf_pr_date < WF_PDT_N ? wf_pr_date : WF_PDT_OFF;
+    dk_pf_said = 0;
+    wf_log("dark: roll %03d start, %d of %d to develop, look output %d, print frame %d info %d date %d", roll.num, dv.left,
+           dv.total, lk.output, dk_pfr, dk_pin, dk_pdt);
     dk_look(&lk);
     if (lv) {
         PauseLiveView();

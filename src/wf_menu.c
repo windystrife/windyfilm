@@ -19,6 +19,8 @@
  *                    its halation / spk as bloom=off, unless the file has its own bloom= line)
  *   preview=off|on|fast   exposure=camera|smooth   exptrim=<1/8 EV>   exif=on|off
  *   blind=on|off     Roll + Darkroom: no image review / PLAY while a roll is in the camera (docs/DESIGN.md 3.6)
+ *   frame=off|white|black|whitewide|blackwide   info=off|on|roll   date=off|ymd|dmy|mdy   the Darkroom's print finishes
+ *                    (docs/DESIGN.md 3.9: a frame with the shot's details under the picture, a date stamp)
  *   userwb=<mode>,<kelvin>,<gm>,<ba>   the user's white balance while Light holds it (restored on Auto / unload, also
  *                    after a power cycle in between) */
 #include <dryos.h>
@@ -34,6 +36,7 @@
 #include "wf_expsim.h"
 #include "wf_dark.h"
 #include "wf_rawb.h"
+#include "wf_print.h"                             /* the print finishes' settings (WF_PFR_*, WF_PIN_*, WF_PDT_*) */
 
 extern int shooting_mode;                         /* Canon mode dial: 3 = M */
 extern int lv;
@@ -193,6 +196,45 @@ static const char *wf_inc_name[WF_INC_N] = { "sRGB", "Canon Film 1", "Canon Neut
 static const char *const wf_inc_key[WF_INC_N] = { "srgb", "film1", "neutral" };
 
 static const char *wf_pick(const char *const *t, int n, int v) { return t[v >= 0 && v < n ? v : 0]; }
+
+/* ------------------------------------------------------------------ the Darkroom's print finishes (DESIGN 3.9) */
+static const char *const wf_pfr_key[WF_PFR_N] = { "off", "white", "black", "whitewide", "blackwide" };
+static const char *const wf_pfr_name[WF_PFR_N] = { "Off", "White", "Black", "White wide", "Black wide" };
+static const char *const wf_pin_key[WF_PIN_N] = { "off", "on", "roll" };
+static const char *const wf_pin_name[WF_PIN_N] = { "Off", "On", "On + roll" };
+static const char *const wf_pdt_key[WF_PDT_N] = { "off", "ymd", "dmy", "mdy" };
+static const char *const wf_popt_nm[WF_PO_N] = { "Frame", "Info", "Date" };
+static volatile int *const wf_popt_v[WF_PO_N] = { &wf_pr_frame, &wf_pr_info, &wf_pr_date };
+static const int wf_popt_n[WF_PO_N] = { WF_PFR_N, WF_PIN_N, WF_PDT_N };
+
+const char *wf_popt_name(int k) { return k >= 0 && k < WF_PO_N ? wf_popt_nm[k] : ""; }
+int wf_popt_avail(int k) { return k != WF_PO_INFO || (wf_pr_frame > WF_PFR_OFF && wf_pr_frame < WF_PFR_N); }
+void wf_popt_step(int k, int d)
+{
+    if (k < 0 || k >= WF_PO_N || !d)
+        return;
+    int n = wf_popt_n[k], v = *wf_popt_v[k];
+    v = v < 0 || v >= n ? 0 : v;
+    *wf_popt_v[k] = (v + (d > 0 ? 1 : n - 1)) % n;
+    wf_dirty();
+}
+/* the date formats with today's date ("'26 11 15", "15 11 '26", "11 15 '26"), the way the print shows it */
+const char *wf_popt_text(int k, char *b, int n)
+{
+    int v = k >= 0 && k < WF_PO_N ? *wf_popt_v[k] : 0;
+    if (k == WF_PO_FRAME)
+        return wf_pick(wf_pfr_name, WF_PFR_N, v);
+    if (k == WF_PO_INFO)
+        return wf_pick(wf_pin_name, WF_PIN_N, v);
+    if (k != WF_PO_DATE || v <= WF_PDT_OFF || v >= WF_PDT_N)
+        return "Off";
+    int t = wf_clock_ymd(), y = t < 0 ? 26 : t / 10000 % 100, m = t < 0 ? 1 : t / 100 % 100, d = t < 0 ? 1 : t % 100;
+    if (v == WF_PDT_YMD)
+        snprintf(b, n, "'%02d %02d %02d", y, m, d);
+    else
+        snprintf(b, n, "%02d %02d '%02d", v == WF_PDT_DMY ? d : m, v == WF_PDT_DMY ? m : d, y);
+    return b;
+}
 static int wf_cur(void) { int c = wf_curve; return c >= 1 && c <= WF_NCURVE ? c : WF_CURVE_VLOG; }
 
 const char *wf_out_name(int out, int curve)
@@ -696,6 +738,12 @@ void wf_cfg_load(void)
             wf_exif_off = wf_cfg_word(v, (const char *const[]){ "on", "off" }, 2, 0);
         } else if ((v = wf_cfg_val(l, "blind"))) {
             wf_blind = !wf_cfg_word(v, (const char *const[]){ "on", "off" }, 2, 0);
+        } else if ((v = wf_cfg_val(l, "frame"))) {
+            wf_pr_frame = wf_cfg_word(v, wf_pfr_key, WF_PFR_N, WF_PFR_OFF);
+        } else if ((v = wf_cfg_val(l, "info"))) {
+            wf_pr_info = wf_cfg_word(v, wf_pin_key, WF_PIN_N, WF_PIN_ON);
+        } else if ((v = wf_cfg_val(l, "date"))) {
+            wf_pr_date = wf_cfg_word(v, wf_pdt_key, WF_PDT_N, WF_PDT_OFF);
         } else if ((v = wf_cfg_val(l, "input"))) {
             ;                                     /* reserved: "jpeg" is the only input path */
         } else if ((v = wf_cfg_val(l, "userwb"))) {
@@ -732,7 +780,7 @@ static int wf_cfg_save(void)
     int n = snprintf(b, sizeof b,
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
                      "strength=%s\nhl=%d\nsh=%d\ngrain=%s\nhalation=%s\nbloom=%s\nmist=%s\npreview=%s\nexposure=%s\nexptrim=%d\n"
-                     "exif=%s\nblind=%s\n",
+                     "exif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
@@ -740,7 +788,8 @@ static int wf_cfg_save(void)
                      wf_hl_t(), wf_sh_t(), wf_pick(wf_grain_key, WF_GRAIN_MAX + 1, wf_grain), wf_pick(wf_halo_key, WF_HALO_MAX + 1, wf_halo),
                      wf_pick(wf_bloom_key, WF_BLOOM_MAX + 1, wf_bloom), wf_pick(wf_mist_key, WF_MIST_MAX + 1, wf_mist), wf_pick(wf_pv_key, 3, wf_pv_mode),
                      wf_pick(wf_exp_key, 2, wf_exp_mode), wf_exp_trim >= -16 && wf_exp_trim <= 16 ? (int)wf_exp_trim : 0,
-                     wf_exif_off ? "off" : "on", wf_blind ? "on" : "off");
+                     wf_exif_off ? "off" : "on", wf_blind ? "on" : "off", wf_pick(wf_pfr_key, WF_PFR_N, wf_pr_frame),
+                     wf_pick(wf_pin_key, WF_PIN_N, wf_pr_info), wf_pick(wf_pdt_key, WF_PDT_N, wf_pr_date));
     if (wf_wb_saved && n > 0 && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, "userwb=%d,%d,%d,%d\n", wf_wb_mode, wf_wb_kelvin, wf_wb_gm, wf_wb_ba);
     if (n <= 0 || n >= (int)sizeof b)
@@ -1389,6 +1438,17 @@ static MENU_UPDATE_FUNC(wf_roll_update)
 }
 static MENU_SELECT_FUNC(wf_blind_select) { (void)priv; (void)delta; wf_blind = !wf_blind; wf_dirty(); }
 static MENU_SELECT_FUNC(wf_dark_select) { (void)priv; (void)delta; wf_ui_open_scr(WF_UI_SCR_DARK); gui_stop_menu(); }
+static MENU_SELECT_FUNC(wf_popt_select) { wf_popt_step((int)(intptr_t)priv - 1, delta); }
+static MENU_UPDATE_FUNC(wf_popt_update)
+{
+    char b[24];
+    int k = (int)(intptr_t)entry->priv - 1;       /* priv = WF_PO_* + 1 */
+    MENU_SET_VALUE("%s", wf_popt_text(k, b, sizeof b));
+    if (wf_cam() != WF_CAM_EOSM)
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "The Darkroom runs on the EOS M first.");
+    else if (!wf_popt_avail(k))
+        MENU_SET_WARNING(MENU_WARN_INFO, "The details go under a frame: set Print frame first.");
+}
 static MENU_UPDATE_FUNC(wf_dark_update)
 {
     const struct wf_roll *r = wf_roll_now();
@@ -1432,6 +1492,15 @@ static struct menu_entry wf_menu[] = {
               .help = "On: no image review and no PLAY while a roll is in the camera." },
             { .name = "Darkroom", .select = wf_dark_select, .update = wf_dark_update, .icon_type = IT_ACTION,
               .help = "Develop the roll's RAW files with its film into ROLLS/ROLLnnn (about 1 min each)." },
+            { .name = "Print frame", .priv = (void *)(intptr_t)(WF_PO_FRAME + 1), .select = wf_popt_select,
+              .update = wf_popt_update, .icon_type = IT_DICE,
+              .help = "Darkroom prints: a white or black border round the picture (thin or wide)." },
+            { .name = "Print info", .priv = (void *)(intptr_t)(WF_PO_INFO + 1), .select = wf_popt_select,
+              .update = wf_popt_update, .icon_type = IT_DICE,
+              .help = "Camera, lens, exposure and the film under the framed picture; + roll: ROLL / frame." },
+            { .name = "Date stamp", .priv = (void *)(intptr_t)(WF_PO_DATE + 1), .select = wf_popt_select,
+              .update = wf_popt_update, .icon_type = IT_DICE,
+              .help = "Darkroom prints: the day of the shot in orange digits, like a film camera's date back." },
             { .name = "End roll now", .select = wf_rewind_select, .icon_type = IT_ACTION,
               .help = "End the roll early: the Darkroom develops the frames shot so far." },
             { .name = "Close roll", .select = wf_close_select, .icon_type = IT_ACTION,
