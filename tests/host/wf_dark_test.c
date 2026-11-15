@@ -781,6 +781,7 @@ static void devset(const char *list, const char *od)
             nf++;
         } else if (sscanf(ln, "D %63s %63s %d %d %511s %d %7s", a, c, &curve, &flut, cube, &down, hk) >= 6) {
             int hue = hk[0] == 'i' ? WF_DEV_HUE_I : hk[0] == 'd' ? WF_DEV_HUE_D : WF_DEV_HUE_A;
+            int trim = hue == WF_DEV_HUE_I && strcmp(hk, "i0");   /* i = the camera's (+ its colour trim), i0 = without */
             int src = !strcmp(c, "srgb") ? WF_DEV_SRGB : !strcmp(c, "cube") ? WF_DEV_CUBE : !strcmp(c, "disp") ? WF_DEV_DISP : 0;
             const char *cf = strcmp(cube, "-") ? cube : 0;
             struct wf_ll_info li;
@@ -790,6 +791,8 @@ static void devset(const char *list, const char *od)
             CHECK(rc == 0, "develop %s: build %s curve %d %s: %d", a, c, curve, cube, rc);
             if (rc)
                 continue;
+            if (trim)
+                wf_dev_trim(&T, WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB);
             for (int i = 0; i < nf; i++) {
                 struct wf_dev_job j = fr[i].j;
                 j.roll = src != WF_DEV_LOG;
@@ -816,8 +819,8 @@ static void devset(const char *list, const char *od)
                 } else {
                     put_third(p, frm, W, H);
                 }
-                printf("develop %s %s: %s (roll %d k %d c %d, shoulder %s)\n", fr[i].name, a, p, st.roll, st.ro_k, st.ro_c,
-                       wf_dev_hue_name(st.hue));
+                printf("develop %s %s: %s (roll %d k %d c %d, shoulder %s%s)\n", fr[i].name, a, p, st.roll, st.ro_k,
+                       st.ro_c, wf_dev_hue_name(st.hue), trim ? ", trim" : "");
             }
         }
     }

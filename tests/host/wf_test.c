@@ -3946,6 +3946,7 @@ static int rb_ref_curve;                         /* WF_DEV_CUBE: the curve and c
 static const char *rb_ref_cube;
 static int rb_ref_auto = 1;                      /* WF_DEV_CUBE: 0 = no auto exposure (a chain film's log table) */
 static int rb_ref_hue;                           /* WF_DEV_HUE_* of the reference (A: each channel on its own) */
+static int rb_ref_trim;                          /* 1: i's colour trim on the reference's table (wf_rawb_logpk_build) */
 static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
 {
     static struct wf_dev_tabs T;
@@ -3954,6 +3955,8 @@ static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
     int rc = src == WF_DEV_DISP ? wf_dev_build_disp(&T, WF_DEV_EOSM, "ML/DATA/LEICAVSR.CUB", 0, rb_ref_hl, rb_ref_sh, &inf)
                                 : wf_dev_build(&T, src, cu ? rb_ref_curve : 0, WF_DEV_EOSM, cu ? rb_ref_cube : 0, 0,
                                                cu && rb_ref_auto, &inf);
+    if (!rc && rb_ref_trim)
+        wf_dev_trim(&T, WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB);
     void *scr = memalign(32, wf_dev_scratch_bytes(FW, FH));
     struct wf_dev_job j;
     memset(&j, 0, sizeof j);
@@ -3971,8 +3974,8 @@ static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
     struct wf_dev_stat st;
     int rp = wf_dev_prepare(scr, &T, &j, &st);
     wf_dev_rows(scr, 0, FH, dst, FW * 2);
-    printf("reference develop: build %d, levels %d / %d, prepare %d, wb %d, clip %d, roll %d, shoulder %d\n", rc, lb, lw,
-           rp, st.wb_src, st.clip_quads, st.roll, st.hue);
+    printf("reference develop: build %d, levels %d / %d, prepare %d, wb %d, clip %d, roll %d, shoulder %d, trim %d\n", rc,
+           lb, lw, rp, st.wb_src, st.clip_quads, st.roll, st.hue, rb_ref_trim);
     free(scr);
 }
 /* B table cache (.RBT) helpers: switch the Film LUT and wait for B's tables line holding `expect` (ms = its time) */
@@ -4518,20 +4521,41 @@ static void t_rawb_chain(void)
     rb_ref_cube = "ML/DATA/LGREF.CUB";
     rb_ref_auto = 0;
     rb_ref_hue = WF_DEV_HUE_I;
+    rb_ref_trim = 1;
     rb_ref(ref, in, WF_DEV_CUBE, 1);
     chk(wf_rb_hue == WF_DEV_HUE_I, "no shoulder= in WINDYFLM.CFG: the chain films' shoulder I (%d)", wf_rb_hue);
     chk(sb == 0 && ndiff(out, ref, NW) == 0, "log pack shot: bit-exact vs the direct develop with its table as a .cube "
-        "(S-Log3, LUT EI 0, no auto exposure, shoulder I), no film table after it (%d words differ)", ndiff(out, ref, NW));
+        "(S-Log3, LUT EI 0, no auto exposure, shoulder I + its colour trim), no film table after it (%d words differ)",
+        ndiff(out, ref, NW));
+    /* the trim moves chroma only: without it every Y byte is the same, U / V nearer 0 with it */
+    rb_ref_trim = 0;
+    rb_ref(ref, in, WF_DEV_CUBE, 1);
+    {
+        long ydiff = 0, cdiff = 0, cin = 0, cout = 0;
+        for (int i = 0; i < NW; i++) {
+            ydiff += (out[i] & 0xff00ff00u) != (ref[i] & 0xff00ff00u);
+            cdiff += (out[i] & 0x00ff00ffu) != (ref[i] & 0x00ff00ffu);
+            cin += abs((int8_t)(ref[i] & 255)) + abs((int8_t)(ref[i] >> 16));
+            cout += abs((int8_t)(out[i] & 255)) + abs((int8_t)(out[i] >> 16));
+        }
+        chk(ydiff == 0 && cdiff > 0 && cout < cin, "i's colour trim: %ld words with another Y (want 0), %ld with other U / V, "
+            "mean |U| + |V| %.2f -> %.2f", ydiff, cdiff, (double)cin / NW, (double)cout / NW);
+        printf("trim: %ld of %d words change U / V, Y none; mean |U| + |V| %.2f -> %.2f (%.1f %%)\n", cdiff, NW,
+               (double)cin / NW, (double)cout / NW, cin ? 100.0 * (cout - cin) / cin : 0.0);
+    }
     chk(LOGW("rawb: done rows 3456,", 5000) && strstr(log_line("rawb: black"), "roll 1")
         && strstr(log_line("rawb: black"), "shoulder i "), "developed, shoulder I: '%s'", log_line("rawb: black"));
     chk(LOGW(": film ", 3000) && strstr(log_line(": film "), " raw"), "shot line marks the develop: '%s'", log_line(": film "));
     memcpy(out2, out, NW * 4);
-    /* shoulder=a: the frame as before the owner's pick (RAWB14), bit for bit; shoulder=d: the hue-locked one. Per shot, no
-       table rebuild. */
+    /* shoulder=a: the frame as before the owner's pick (RAWB14), bit for bit; shoulder=d: the hue-locked one. Leaving i
+       rebuilds the table (i's colour trim lives in it: rb_key), a -> d does not. */
     static const char hk[3] = { 'a', 'i', 'd' };
     for (int hv = WF_DEV_HUE_A; hv <= WF_DEV_HUE_D; hv += WF_DEV_HUE_D - WF_DEV_HUE_A) {
         log_mark();
         wf_rb_hue = hv;
+        if (hv == WF_DEV_HUE_A)
+            chk(LOGW(want, 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 2000), "shoulder=a: the table again without the "
+                "trim ('%s')", log_line("rawb: tables"));
         sb = shot(in, out, FW, FH);
         rb_ref_hue = hv;
         rb_ref(ref, in, WF_DEV_CUBE, 1);

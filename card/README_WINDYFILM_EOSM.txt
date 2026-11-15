@@ -204,6 +204,10 @@ Bật:
   tới hết, để so), shoulder=i là mặc định. Lon Log + LUT và phim thường không đổi. Log mỗi tấm:
     rawb: black ..., roll 1 c.. y.., shoulder i NNms
   (NN = thời gian dựng bảng vai sáng của tấm đó).
+  Với i, màu còn được giảm nhẹ: saturation -10 %, vibrance -10 % (màu nhạt giảm
+  10 %, màu đậm nhất giảm khoảng 19 %). Độ sáng và chi tiết giữ nguyên, chỉ màu đổi.
+  Phần giảm màu làm một lần lúc dựng bảng, nên dòng "rawb: tables log pack" dài
+  thêm khoảng 20 ms; shoulder=a và shoulder=d không có nó.
 - Tạm thời (chờ quyết định): bảng log chưa chứa các hàng knob, Strength hay
   Highlights / Shadows. Một trong các hàng đó khác mặc định (knob khác 0 / Off /
   100 %, Strength khác 100 %, Highlights / Shadows khác 0) thì lon Film stage đi

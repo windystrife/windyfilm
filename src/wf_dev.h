@@ -119,6 +119,15 @@ struct wf_dev_job {
  *      one more lookup and multiply-add (src/wf_dev_arm.S wf_dv_span_hs; CORE-NOTES 10.9). */
 enum { WF_DEV_HUE_A = 0, WF_DEV_HUE_I = 1, WF_DEV_HUE_D = 2, WF_DEV_HUE_N };
 const char *wf_dev_hue_name(int hue);           /* "a" / "i" / "d" (logs, WINDYFLM.CFG shoulder=), "?" out of range */
+/* the colour trim the chain films take with I (wf_rawb_logpk_build, on the built table; the owner 2026-11-15: i a little
+   less saturated): saturation and vibrance in %, wf_dev_trim */
+#define WF_DEV_HUE_I_SAT (-10)
+#define WF_DEV_HUE_I_VIB (-10)
+/* on built tables (any src): Y' of every node kept (the tone and every detail stay, a neutral is untouched), Cb / Cr x
+   (1 + sat / 100) (1 + vib / 100 x s), s = max - min of the node's R'G'B' (0 .. 1): sat on every colour, vib weighted by
+   the colour's own saturation (negative: the strong colours cut most, the muted ones left to sat). Once per build, no
+   per-pixel cost; sat = vib = 0 leaves the table as built. */
+void wf_dev_trim(struct wf_dev_tabs *t, int sat, int vib);
 
 /* per-shot results (log line, tests) */
 struct wf_dev_stat {

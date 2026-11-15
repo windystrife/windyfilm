@@ -647,6 +647,40 @@ int wf_dev_build_pack(struct wf_dev_tabs *t, int cam, const char *pack, int id, 
     return rc;
 }
 
+/* the colour trim (wf_dev.h): each node's R'G'B' back from its Y'CbCr (BT.601 full range, 9-bit half codes), s = its
+   max - min / 510, chroma x ks kv (Q15) rounded half away from 0 */
+void wf_dev_trim(struct wf_dev_tabs *t, int sat, int vib)
+{
+    if (!t || (!sat && !vib))
+        return;
+    sat = sat < -100 ? -100 : sat > 100 ? 100 : sat;
+    vib = vib < -100 ? -100 : vib > 100 ? 100 : vib;
+    const int32_t ks = 32768 + sat * 32768 / 100;
+    for (int b = 0; b < WF_DEV_G; b++)
+        for (int g = 0; g < WF_DEV_G; g++)
+            for (int r = 0; r < WF_DEV_G; r++) {
+                uint32_t *nd = t->node + 2 * (r + WF_DEV_G * g + WF_DEV_BSTR * b);
+                int y = (int)(nd[0] & 0xffff) - 1, c[2] = { (int)(nd[0] >> 16) - 257, (int)nd[1] - 257 };
+                if (!c[0] && !c[1])
+                    continue;                    /* a neutral */
+                int R = y + ((91881 * c[1] + 32768) >> 16), G = y - ((22554 * c[0] + 46802 * c[1] + 32768) >> 16),
+                    B = y + ((116130 * c[0] + 32768) >> 16);
+                int mx = R > G ? R : G, mn = R < G ? R : G;
+                if (B > mx) mx = B;
+                if (B < mn) mn = B;
+                int s = mx - mn > 510 ? 510 : mx - mn;
+                int32_t kv = 32768 + vib * s * 32768 / 51000;      /* |vib s 32768| <= 100 x 510 x 32768 < 2^31 */
+                int32_t k = (int32_t)(((int64_t)ks * kv + 16384) >> 15);
+                for (int q = 0; q < 2; q++) {
+                    int32_t v = c[q] * k;
+                    v = (v >= 0 ? (v + 16384) >> 15 : -((-v + 16384) >> 15)) + 256;
+                    c[q] = v < 0 ? 0 : v > 510 ? 510 : v;
+                }
+                nd[0] = (uint32_t)(y + 1) | (uint32_t)(c[0] + 1) << 16;
+                nd[1] = (uint32_t)(c[1] + 1);
+            }
+}
+
 const char *wf_dev_pk_errstr(int rc)
 {
     switch (rc) {

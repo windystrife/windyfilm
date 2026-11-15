@@ -126,6 +126,8 @@ int wf_rawb_logpk_build(struct wf_dev_tabs *t, const struct wf_look *lk, int *ms
     struct wf_ll_info li;
     int t0 = get_ms_clock();
     int rc = wf_dev_build_pack(t, RB_CAM, RB_LG_PACK, f->id, lk->variant, f->code, 0, &li, pi);
+    if (!rc && wf_rb_hue == WF_DEV_HUE_I)        /* i's colour trim lives in the table (rb_key holds it) */
+        wf_dev_trim(t, WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB);
     *ms = get_ms_clock() - t0;
     if (rc == WF_LL_E_OPEN || rc == WF_DEV_PK_E_FORMAT || rc == WF_DEV_PK_E_INDEX)
         rb_lg_none = 1;                          /* no usable pack: never tried again this boot */
@@ -142,7 +144,7 @@ static int rb_key(const struct wf_look *lk)
     switch (lk->output) {
     case WF_OUT_FILM:                                             /* a chain film's log table (the whole look) */
         if (wf_rawb_logpk(lk) == WF_RLG_OK)
-            return RB_K_LG | lk->row << 4 | lk->variant << 16;
+            return RB_K_LG | lk->row << 4 | lk->variant << 16 | (wf_rb_hue == WF_DEV_HUE_I) << 24;   /* + i's trim */
         return 1;                                                 /* the sRGB base develop, the film tables after */
     case WF_OUT_LOG:  return 2 | lk->curve << 4;                  /* the log code itself */
     case WF_OUT_LLUT:

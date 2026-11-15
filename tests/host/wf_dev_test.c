@@ -526,7 +526,10 @@ static void mode_span(void)
       shoulder on, 4 Bayer phases x 9 WB scales, I and D; every one of the kernel's paths taken (the pre-test's plain
       lookups, w = 0, w > 0); A with roll stays wf_dv_span_s;
    3. on a neutral exposure ramp through the clip (roll's raw), I and D stay within 2 codes of A everywhere (a neutral's
-      luma index is its own: the same knee and target) and differ from it nowhere below the knee. */
+      luma index is its own: the same knee and target) and differ from it nowhere below the knee;
+   4. the colour trim i takes on the chain films (wf_dev_trim, WF_DEV_HUE_I_SAT / _VIB): 0 / 0 leaves the table as built;
+      -10 / -10 keeps every node's Y' and every neutral, touches nothing but the nodes, and scales each node's Cb and Cr by
+      0.9 x (0.9 .. 1) with its sign kept (within a code of rounding). */
 extern const int16_t *wf_dev_hue_luma(int curve);
 extern uint32_t wf_dev_hue_paths[3];
 static const int roll_gdn[3];                    /* roll's ramp (below) */
@@ -680,6 +683,53 @@ static void mode_hue(void)
                    hue == WF_DEV_HUE_I ? "I" : "D", dmax, ek);
         }
         free(sr); free(fa); free(fh); free(row); free(raw);
+    }
+
+    /* 4. the colour trim */
+    {
+        static struct wf_dev_tabs T1;
+        CHECK(wf_dev_build(D, WF_DEV_CUBE, WF_LL_SLOG3, 0, "HUE.CUB", 0, 0, 0) == 0, "trim build");
+        memcpy(&T1, D, sizeof T1);
+        wf_dev_trim(&T1, 0, 0);
+        CHECK(!memcmp(&T1, D, sizeof T1), "trim 0 / 0: the table as built");
+        memcpy(&T1, D, sizeof T1);
+        wf_dev_trim(&T1, WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB);
+        CHECK(!memcmp((const char *)&T1 + sizeof T1.node, (const char *)D + sizeof T1.node, sizeof T1 - sizeof T1.node),
+              "trim: only the nodes change");
+        int nn = 0, nch = 0, bad = 0;
+        double kmin = 2, kmax = 0;
+        for (int b = 0; b < WF_DEV_G; b++)
+            for (int g = 0; g < WF_DEV_G; g++)
+                for (int r = 0; r < WF_DEV_G; r++) {
+                    const uint32_t *p = D->node + 2 * (r + WF_DEV_G * g + WF_DEV_BSTR * b), *q = T1.node + (p - D->node);
+                    int c0[2] = { (int)(p[0] >> 16) - 257, (int)p[1] - 257 }, c1[2] = { (int)(q[0] >> 16) - 257, (int)q[1] - 257 };
+                    nn++;
+                    if ((p[0] & 0xffff) != (q[0] & 0xffff)) {
+                        if (bad++ < 4) printf("  node %d %d %d: Y' %u -> %u\n", r, g, b, p[0] & 0xffff, q[0] & 0xffff);
+                        continue;
+                    }
+                    if (!c0[0] && !c0[1]) {
+                        if (c1[0] || c1[1]) bad++;
+                        continue;
+                    }
+                    nch += c1[0] != c0[0] || c1[1] != c0[1];
+                    for (int k = 0; k < 2; k++) {
+                        int a = abs(c0[k]), z = abs(c1[k]);
+                        if ((c0[k] > 0 && c1[k] < 0) || (c0[k] < 0 && c1[k] > 0) || z > a || z < (int)(0.81 * a) - 1 ||
+                            z > (int)(0.9 * a + 0.5) + 1) {
+                            if (bad++ < 8) printf("  node %d %d %d: c%d %d -> %d\n", r, g, b, k, c0[k], c1[k]);
+                        }
+                        if (a >= 64) {
+                            double kk = (double)z / a;
+                            if (kk < kmin) kmin = kk;
+                            if (kk > kmax) kmax = kk;
+                        }
+                    }
+                }
+        CHECK(bad == 0 && nch > nn / 2, "trim -10 / -10: %d nodes off (Y', a neutral, sign or a scale outside 0.81 .. 0.9), "
+              "%d of %d nodes moved", bad, nch, nn);
+        printf("hue: trim %d / %d: %d of %d nodes moved, Y' and neutrals kept, chroma x %.3f .. %.3f (nodes with |c| >= 64)\n",
+               WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB, nch, nn, kmin, kmax);
     }
     remove("HUE.CUB");
 }

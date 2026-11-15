@@ -114,6 +114,8 @@ int main(int argc, char **argv)
     prof_mark(1);
     int rc = srgb ? wf_dev_build(t, WF_DEV_SRGB, 0, cam, 0, 0, 0, &inf)
                   : wf_dev_build(t, WF_DEV_CUBE, curve, cam, cube, 0, 0, &inf);
+    if (hue == WF_DEV_HUE_I && !rc)              /* as wf_rawb_logpk_build: i's colour trim on the built table */
+        wf_dev_trim(t, WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB);
     prof_mark(2);
     if ((srgb || hue >= 0) && !rc) {             /* as wf_rawb.c: levels, then the shoulder */
         wf_dev_levels(scr, &j, 16, 64, &lb, &lw);

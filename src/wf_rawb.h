@@ -43,12 +43,14 @@ int  wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk);
  * 8-bit chain exactly as before: film-stage knob rows away from neutral (a composed table), strength other than 100 %,
  * Highlights / Shadows. So does a pair without a usable table (no pack, not a pack, not listed, bad checksum: one log
  * line, then the 8-bit chain until the next boot). wf_rawb_logpk_build (wf_task: file I/O) builds the tables for B and
- * the Darkroom and logs a failure; *ms = the whole SD read + build. */
+ * the Darkroom and logs a failure; *ms = the whole SD read + build (+ i's colour trim). */
 enum { WF_RLG_OK = 0, WF_RLG_NOTCHAIN, WF_RLG_KNOBS, WF_RLG_STRENGTH, WF_RLG_HS, WF_RLG_NOPACK, WF_RLG_NOENT, WF_RLG_N };
 /* the chain films' film shoulder on RAW (B and the Darkroom), WINDYFLM.CFG shoulder=i|a|d (wf_menu.c), WF_DEV_HUE_* of
  * wf_dev.h: I (default, the owner's pick 2026-11-15: lights keep their colour up to the look's white, then roll into
- * cream / white), A (each channel on its own, as RAWB14 and before: the old frames bit for bit), D (the hue kept
- * throughout; comparisons). The Log + LUT cans and the sRGB base develop always take A. */
+ * cream / white; with it the table takes the colour trim WF_DEV_HUE_I_SAT / _VIB, the owner's "a little less
+ * saturated", in wf_rawb_logpk_build, so rb_key holds it), A (each channel on its own, as RAWB14 / RAWB15 and before:
+ * the old frames bit for bit), D (the hue kept throughout; comparisons; no trim). The Log + LUT cans and the sRGB base
+ * develop always take A. */
 extern volatile int wf_rb_hue;
 struct wf_dev_tabs;
 struct wf_dev_pkinfo;
