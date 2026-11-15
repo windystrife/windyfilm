@@ -10,6 +10,8 @@
  *     JPEG.UYVY (tools/dr_dark_check.sh: Canon's JPEG as its UYVY frame) adds the develop's WB / exposure fit against
  *     Canon's own frame, for the per-ISO trim table: "trim ISO n: fit vs scene scale +x.xx EV, WB R/G .. B/G ..".
  *   wf_dark_test units     wf_darkp.c on synthetic input (APP1 walk, comment, scales, thumbnails)
+ *   wf_dark_test devset LIST OUTDIR   several CR2s through several develop tables (sRGB / cube / display cube), full-size
+ *                          UYVY or third-size PPM: the look sweep's base frames (tools/look_sweep.sh)
  * Prints RESULT pass / fail. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -277,14 +279,165 @@ static void frame(const char *cr2, const char *jpg, const char *od, const char *
     free(e); free(jh); free(frm); free(scr); free(raw);
 }
 
+/* ------------------------------------------------------------------ several frames x several develops (the look sweep) */
+/* devset LIST OUTDIR: the Darkroom's develop (dk_frame's steps 1-2: decode, levels, as-shot WB + scene scale + ISO trim,
+ * the develop tables of a look) of several CR2s through several tables, for the look sweep (tools/look_sweep.sh). LIST:
+ *   F <name> <cr2>                                          a frame, decoded once and kept
+ *   D <tag> <srgb|cube|disp> <curve> <flut> <cube|-> <1|3>  a develop, as wf_dark.c builds it for a look (cube: LUT EI 0,
+ *                                                           auto exposure when flut; disp: Highlights / Shadows 0), then
+ *        every frame through it: 1 = OUTDIR/<name>_<tag>.uyvy (5184 x 3456), 3 = OUTDIR/<name>_<tag>.ppm (a third, 3 x 3
+ *        box, the JFIF matrix) */
+struct dsf { char name[64]; struct wf_cr2_info inf; uint8_t *raw; struct wf_dev_job j; };
+
+static uint8_t *decode_cr2(const char *cr2, struct wf_cr2_info *inf)
+{
+    FILE *f = fopen(cr2, "rb");
+    CHECK(f != 0, "open %s", cr2);
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    uint32_t fsize = (uint32_t)ftell(f);
+    fseek(f, 0, SEEK_SET);
+    static uint8_t head[WF_CR2_HEAD];
+    uint32_t nh = (uint32_t)fread(head, 1, sizeof head, f);
+    int rc = wf_cr2_parse(head, nh, fsize, inf);
+    uint8_t lj[WF_CR2_LJHEAD];
+    if (rc == 0) {
+        fseek(f, inf->strip_off, SEEK_SET);
+        rc = wf_cr2_parse_ljpeg(lj, (uint32_t)fread(lj, 1, sizeof lj, f), inf);
+    }
+    CHECK(rc == 0, "%s: parse %s", cr2, wf_cr2_err(rc));
+    uint8_t *raw = rc ? 0 : malloc((size_t)inf->pitch * inf->h + 4096), *ib = rc ? 0 : malloc(256 * 1024);
+    static struct wf_cr2_dec d;
+    if (raw && ib) {
+        fseek(f, inf->strip_off, SEEK_SET);
+        rc = wf_cr2_dec_begin(&d, inf, raw, inf->pitch, ib, 256 * 1024, rd, f);
+        while (rc >= 0 && (rc = wf_cr2_dec_step(&d, 64)) > 0)
+            ;
+        CHECK(rc == 0, "%s: decode %s", cr2, wf_cr2_err(rc));
+    }
+    fclose(f);
+    free(ib);
+    if (rc) { free(raw); return 0; }
+    return raw;
+}
+
+static void put_third(const char *p, const uint32_t *frm, int W, int H)
+{
+    FILE *f = fopen(p, "wb");
+    CHECK(f != 0, "create %s", p);
+    if (!f) return;
+    int ow = W / 3, oh = H / 3;
+    fprintf(f, "P6\n%d %d\n255\n", ow, oh);
+    uint8_t *row = malloc((size_t)ow * 3);
+    for (int oy = 0; oy < oh; oy++) {
+        for (int ox = 0; ox < ow; ox++) {
+            int sy = 0, su = 0, sv = 0;
+            for (int y = 3 * oy; y < 3 * oy + 3; y++)
+                for (int x = 3 * ox; x < 3 * ox + 3; x++) {
+                    uint32_t q = frm[(size_t)y * (W / 2) + x / 2];
+                    sy += (int)(x & 1 ? q >> 24 : q >> 8 & 255);
+                    su += (int8_t)(q & 255);
+                    sv += (int8_t)(q >> 16 & 255);
+                }
+            int c[3] = { 1000 * sy + 1402 * sv, 1000 * sy - 344 * su - 714 * sv, 1000 * sy + 1772 * su };
+            for (int k = 0; k < 3; k++) {
+                int q = (c[k] + 4500) / 9000;
+                row[3 * ox + k] = (uint8_t)(q < 0 ? 0 : q > 255 ? 255 : q);
+            }
+        }
+        fwrite(row, 1, (size_t)ow * 3, f);
+    }
+    free(row);
+    fclose(f);
+}
+
+static void devset(const char *list, const char *od)
+{
+    enum { NF = 16 };
+    static struct dsf fr[NF];
+    int nf = 0, W = 5184, H = 3456;
+    void *scr = malloc(wf_dev_scratch_bytes(W, H));
+    uint32_t *frm = malloc((size_t)W * H * 2);
+    static struct wf_dev_tabs T;
+    FILE *l = fopen(list, "r");
+    CHECK(l != 0, "open %s", list);
+    char ln[1024];
+    while (l && fgets(ln, sizeof ln, l)) {
+        char a[64], b[512], c[64], cube[512];
+        int curve = 0, flut = 0, down = 3;
+        if (sscanf(ln, "F %63s %511[^\n]", a, b) == 2 && nf < NF) {
+            struct dsf *s = &fr[nf];
+            snprintf(s->name, sizeof s->name, "%s", a);
+            if (!(s->raw = decode_cr2(b, &s->inf)))
+                continue;
+            struct wf_dev_job *j = &s->j;
+            memset(j, 0, sizeof *j);
+            j->raw = s->raw; j->pitch = s->inf.pitch;
+            j->ax0 = 72; j->ay0 = 52; j->ax1 = s->inf.w; j->ay1 = s->inf.h;
+            j->x0 = 84; j->y0 = 64; j->w = W; j->h = H; j->cfa = 0;
+            int lb = 0, lw = 0;
+            wf_dev_levels(scr, j, 16, 64, &lb, &lw);
+            j->black = lb ? lb : 2048;
+            j->white = lw ? lw : wf_dk_white(WF_DK_EOSM, s->inf.iso);
+            int as = wf_dk_scales(WF_DK_EOSM, s->inf.wb, j->black, j->white, s->inf.iso, j->wb_q8);
+            printf("frame %s: ISO %d %u/%u s f/%u/%u = EV8 %d, black %d white %d, WB %s, trim %+d/10 EV\n", a, s->inf.iso,
+                   s->inf.et_n, s->inf.et_d, s->inf.fn_n, s->inf.fn_d,
+                   wf_dk_ev8(s->inf.iso, s->inf.et_n, s->inf.et_d, s->inf.fn_n, s->inf.fn_d), j->black, j->white,
+                   as ? "as-shot" : "daylight", wf_dk_trim10(WF_DK_EOSM, s->inf.iso));
+            nf++;
+        } else if (sscanf(ln, "D %63s %63s %d %d %511s %d", a, c, &curve, &flut, cube, &down) == 6) {
+            int src = !strcmp(c, "srgb") ? WF_DEV_SRGB : !strcmp(c, "cube") ? WF_DEV_CUBE : !strcmp(c, "disp") ? WF_DEV_DISP : 0;
+            const char *cf = strcmp(cube, "-") ? cube : 0;
+            struct wf_ll_info li;
+            int rc = src == WF_DEV_DISP ? wf_dev_build_disp(&T, WF_DEV_EOSM, cf, 0, 0, 0, &li)
+                   : src ? wf_dev_build(&T, src, src == WF_DEV_SRGB ? 0 : curve, WF_DEV_EOSM, cf, 0, src == WF_DEV_CUBE && flut != 0, &li)
+                   : -1;
+            CHECK(rc == 0, "develop %s: build %s curve %d %s: %d", a, c, curve, cube, rc);
+            if (rc)
+                continue;
+            for (int i = 0; i < nf; i++) {
+                struct wf_dev_job j = fr[i].j;
+                j.roll = src != WF_DEV_LOG;
+                struct wf_dev_stat st;
+                memset(&st, 0, sizeof st);
+                rc = wf_dev_prepare(scr, &T, &j, &st);
+                CHECK(rc == 0, "%s %s: prepare %d", fr[i].name, a, rc);
+                if (rc)
+                    continue;
+                for (int y = 0; y < H; y += 64)
+                    wf_dev_rows(scr, y, y + 64 < H ? y + 64 : H, frm + y * (W / 2), W * 2);
+                char p[700];
+                int pn = snprintf(p, sizeof p, "%s/%s_%s.%s", od, fr[i].name, a, down == 1 ? "uyvy" : "ppm");
+                CHECK(pn < (int)sizeof p, "%s %s: output path too long", fr[i].name, a);
+                if (pn >= (int)sizeof p)
+                    continue;
+                if (down == 1) {
+                    FILE *u = fopen(p, "wb");
+                    CHECK(u && fwrite(frm, 2, (size_t)W * H, u) == (size_t)W * H, "write %s", p);
+                    if (u) fclose(u);
+                } else {
+                    put_third(p, frm, W, H);
+                }
+                printf("develop %s %s: %s\n", fr[i].name, a, p);
+            }
+        }
+    }
+    if (l) fclose(l);
+    for (int i = 0; i < nf; i++)
+        free(fr[i].raw);
+    free(frm); free(scr);
+}
+
 int main(int argc, char **argv)
 {
     if (argc >= 2 && !strcmp(argv[1], "units"))
         units();
     else if (argc >= 5 && !strcmp(argv[1], "frame"))
         frame(argv[2], strcmp(argv[3], "-") ? argv[3] : 0, argv[4], argc > 5 ? argv[5] : 0);
+    else if (argc >= 4 && !strcmp(argv[1], "devset"))
+        devset(argv[2], argv[3]);
     else {
-        fprintf(stderr, "usage: wf_dark_test units | frame CR2 JPG|- OUTDIR [JPEG.UYVY]\n");
+        fprintf(stderr, "usage: wf_dark_test units | frame CR2 JPG|- OUTDIR [JPEG.UYVY] | devset LIST OUTDIR\n");
         return 2;
     }
     printf("RESULT %d / %d\n", pass, fail);

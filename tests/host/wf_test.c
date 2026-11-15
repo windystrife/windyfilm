@@ -2024,6 +2024,148 @@ static void t_mist_levels(void)
     mod_deinit();
 }
 
+/* ------------------------------------------------------------------ LOOK:sweep (harness only, tools/look_sweep.sh)
+ * The real pack (WF_LOOK_PACK = a build's WFFILMS.DAT) and a job file (WF_LOOK_JOBS), one shot per line:
+ *   <frame.uyvy> <ev8> <film id> <print 0..2> <strength 0..2> <grain 0..3> <halation 0..2> <bloom 0..3> <mist 0..8> <out.ppm> <c|d>
+ *   [X,Y]  (also <out>_c.ppm: 960 x 640 at 1:1 round X, Y)
+ * c = the camera's hook (the in-camera path), d = the Darkroom's look stage (wf_shot_run with devd, as wf_dark.c). The
+ * frames are the Darkroom's sRGB develop of the owner's CR2s (wf_dark_test devset), outside the repository; the output a
+ * third-size PPM (3 x 3 box). Prints "look <out> | <log line>" per job. Not in test.sh's list: it needs the env. */
+static void dump_third(const char *path, const uint32_t *p)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    int ow = FW / 3, oh = FH / 3;
+    fprintf(f, "P6\n%d %d\n255\n", ow, oh);
+    unsigned char *row = malloc((size_t)ow * 3);
+    for (int oy = 0; row && oy < oh; oy++) {
+        for (int ox = 0; ox < ow; ox++) {
+            int sy = 0, su = 0, sv = 0;
+            for (int y = 3 * oy; y < 3 * oy + 3; y++)
+                for (int x = 3 * ox; x < 3 * ox + 3; x++) {
+                    uint32_t q = p[(size_t)y * (FW / 2) + x / 2];
+                    sy += (int)(x & 1 ? q >> 24 : (q >> 8) & 255);
+                    su += (int8_t)(q & 255);
+                    sv += (int8_t)((q >> 16) & 255);
+                }
+            int c[3] = { 1000 * sy + 1402 * sv, 1000 * sy - 344 * su - 714 * sv, 1000 * sy + 1772 * su };
+            for (int k = 0; k < 3; k++)
+                row[3 * ox + k] = (unsigned char)clampi((c[k] + 4500) / 9000, 0, 255);
+        }
+        fwrite(row, 1, (size_t)ow * 3, f);
+    }
+    free(row);
+    fclose(f);
+}
+static void dump_crop1(const char *path, const uint32_t *p, int cx, int cy)   /* 960 x 640 at 1:1 round cx, cy */
+{
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    int w = 960, h = 640, x0 = clampi(cx - w / 2, 0, FW - w) & ~1, y0 = clampi(cy - h / 2, 0, FH - h);
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
+    unsigned char *row = malloc((size_t)w * 3);
+    for (int y = 0; row && y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            uint32_t q = p[(size_t)(y0 + y) * (FW / 2) + (x0 + x) / 2];
+            int yy = (int)(x & 1 ? q >> 24 : (q >> 8) & 255), u = (int8_t)(q & 255), v = (int8_t)((q >> 16) & 255);
+            row[3 * x] = (unsigned char)clampi(yy + (1402 * v + 500) / 1000, 0, 255);
+            row[3 * x + 1] = (unsigned char)clampi(yy - (344 * u + 714 * v) / 1000, 0, 255);
+            row[3 * x + 2] = (unsigned char)clampi(yy + (1772 * u + 500) / 1000, 0, 255);
+        }
+        fwrite(row, 1, (size_t)w * 3, f);
+    }
+    free(row);
+    fclose(f);
+}
+static void t_look_sweep(void)
+{
+    const char *pk = getenv("WF_LOOK_PACK"), *jobs = getenv("WF_LOOK_JOBS");
+    long n = 0;
+    char *b = pk ? get_file(pk, &n) : 0;
+    chk(b && jobs, "WF_LOOK_PACK %s (%ld B), WF_LOOK_JOBS %s", pk ? pk : "-", n, jobs ? jobs : "-");
+    if (!b || !jobs) {
+        free(b);
+        return;
+    }
+    put_file("ML/DATA/WFFILMS.DAT", b, n);
+    free(b);
+    put_cfg("film=26\noutput=film\nprint=scan\nstrength=normal\ngrain=off\nhalation=off\nbloom=off\nmist=off\n");
+    wf_fx_retry_ms = 500;
+    mod_init(1);
+#ifndef WF_BUILD_5D2
+    h_prop_send(PROP_ASPECT, 0);
+#endif
+    FILE *f = fopen(jobs, "r");
+    chk(f != 0, "open %s", jobs);
+    char ln[1200], cur[512] = "";
+    int nj = 0, bad = 0;
+    while (f && fgets(ln, sizeof ln, f)) {
+        char fp[512], op[512], pth[8];
+        int ev8, id, pr, sg, gr, ha, bl, mi, ccx = -1, ccy = -1;
+        int nf = sscanf(ln, "%511s %d %d %d %d %d %d %d %d %511s %7s %d,%d", fp, &ev8, &id, &pr, &sg, &gr, &ha, &bl, &mi, op,
+                        pth, &ccx, &ccy);
+        if (nf != 11 && nf != 13)
+            continue;
+        if (strcmp(fp, cur)) {
+            char *fb = get_file(fp, &n);
+            int ok = fb && n == (long)NW * 4;
+            chk(ok, "the frame %s (%ld bytes)", fp, n);
+            if (ok)
+                memcpy(in, fb, NW * 4);
+            free(fb);
+            if (!ok) {
+                cur[0] = 0;
+                continue;
+            }
+            snprintf(cur, sizeof cur, "%s", fp);
+        }
+        ms_ev(ev8);
+        int lr = wf_loaded() == id ? WF_LOAD_OK : wf_load(id);
+        wf_print = pr;
+        wf_strength = sg;
+        wf_grain = gr;
+        wf_halo = ha;
+        wf_bloom = bl;
+        wf_mist = mi;
+        struct wf_look lk;
+        int hk = 0, gk = 0, mk;
+        wf_look_now(&lk);
+        wf_fx_keys(lk.post, &hk, &gk);
+        mk = wf_fx_mkey(lk.post);
+        int rdy = lr == WF_LOAD_OK && WAIT(look_table_ready(), 20000)
+               && WAIT(wf_fx_hk == hk && wf_fx_gk == gk && (wf_fx_mk & 15) == mk, 120000);
+        wf_look_now(&lk);
+        if (!rdy || lk.row < 0 || wf_films[lk.row].id != id || lk.variant != pr) {
+            chk(0, "look %s: film %d print %d not ready (load %d, row %d variant %d, keys %x/%x %x/%x %x/%x)", op, id, pr, lr,
+                lk.row, lk.variant, wf_fx_hk, hk, wf_fx_gk, gk, wf_fx_mk, mk);
+            bad++;
+            continue;
+        }
+        log_mark();
+        if (pth[0] == 'd') {                     /* the Darkroom's stage on the developed frame, the frame's EV */
+            printf("look %s | %s\n", op, dk_stage(in, out, ev8));
+        } else {
+            shot(in, out, FW, FH);
+            LOGW("shot #", 5000);
+            printf("look %s | %s\n", op, log_line("shot #"));
+        }
+        dump_third(op, out);
+        if (nf == 13) {                          /* "X,Y": also <out>_c.ppm, 960 x 640 at 1:1 (grain, halation edges) */
+            char cp[520];
+            snprintf(cp, sizeof cp, "%.*s_c.ppm", (int)(strlen(op) > 4 ? strlen(op) - 4 : 0), op);
+            dump_crop1(cp, out, ccx, ccy);
+        }
+        nj++;
+    }
+    if (f)
+        fclose(f);
+    chk(bad == 0, "look sweep: %d shots, %d not ready", nj, bad);
+    wf_mist = wf_halo = wf_bloom = wf_grain = 0;
+    mod_deinit();
+}
+
 /* ------------------------------------------------------------------ CFG */
 static void t_cfg(void)
 {
@@ -4769,6 +4911,7 @@ int main(int argc, char **argv)
     if (!strcmp(mode, "SHOT")) t_shot(cs);
     else if (!strcmp(mode, "FX")) { if (!strcmp(cs, "bloom")) t_fx_bloom(); else t_fx(); }
     else if (!strcmp(mode, "MIST")) { if (!strcmp(cs, "levels")) t_mist_levels(); else t_mist(); }
+    else if (!strcmp(mode, "LOOK")) t_look_sweep();
     else if (!strcmp(mode, "EXIF")) t_exif();
     else if (!strcmp(mode, "EXPSIM")) t_expsim();
     else if (!strcmp(mode, "CFG")) t_cfg();
