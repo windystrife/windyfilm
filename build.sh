@@ -14,7 +14,8 @@
 #   3. ld -r, strip debug, objcopy --keep-global-symbols (only ML's __module_*_windyflm stay global); printf format
 #      check (tools/fmt_check.py: only %d %x %X %s, Canon's vsnprintf has no %u / %lu / %zu / %+d and breaks %c)
 #   4. checksyms against the camera's card .sym; TCC link check with the camera's own loader object (image size)
-#   5. card packs (tools/mk_wfpack.py, mk_wfcans.py, mk_wffont.py; a failing pack tool is reported, not fatal)
+#   5. card packs (tools/mk_wfpack.py, mk_wfcans.py, mk_wffont.py; EOS M also mk_wffont.py --print-only WFPRINT.DAT, the
+#      Darkroom's print fonts; a failing pack tool is reported, not fatal)
 #   6. provenance gate (tools/provenance_gate.py): any finding fails the build (check 5: card files are made / removed /
 #      renamed only through src/wf_fio.h)
 set -e
@@ -105,6 +106,8 @@ if true; then                                   # RAW develop "B": the develop +
   cc wf_jpe.o    $MODFLAGS -O2 $S/wf_jpe.c
   cc wf_darkp.o  $MODFLAGS $S/wf_darkp.c
 fi
+# the Darkroom's print finishes (frame + details, date stamp; DESIGN 3.9): EOS M only, where the Darkroom runs
+[ $CAM = EOSM ] && cc wf_print.o $MODFLAGS -O2 $S/wf_print.c
 # Roll + Darkroom: the roll state machine and the core (the 5D2 build: the darkroom stubs, WF_DARK_CAN 0)
 cc wf_roll.o     $MODFLAGS $S/wf_roll.c
 cc wf_dark.o     $MODFLAGS $S/wf_dark.c
@@ -175,9 +178,10 @@ grep -q "__module_info_windyflm: .* -> OK" tcc.log || { echo "TCC: module_info n
 
 # ---------------------------------------------------------------- 5. card packs
 if [ "${PACKS:-1}" = 1 ]; then
-  for p in "mk_wfpack.py WFFILMS.DAT" "mk_wfcans.py WFCANS.DAT" "mk_wffont.py WFFONTS.DAT"; do
+  for p in "mk_wfpack.py WFFILMS.DAT" "mk_wfcans.py WFCANS.DAT" "mk_wffont.py WFFONTS.DAT" "mk_wffont.py WFPRINT.DAT --print-only"; do
     set -- $p
-    if $PY $R/tools/$1 $B/$2 > pack_$2.log 2>&1; then echo "pack $2: $(stat -c %s $B/$2) B"
+    [ $2 = WFPRINT.DAT ] && [ $CAM != EOSM ] && continue   # the Darkroom's print fonts (DESIGN 3.9): EOS M
+    if $PY $R/tools/$1 $B/$2 ${3:-} > pack_$2.log 2>&1; then echo "pack $2: $(stat -c %s $B/$2) B"
     else echo "pack $2: NOT built ($1 failed, see $O/pack_$2.log)"; rm -f $B/$2; fi
   done
 fi
