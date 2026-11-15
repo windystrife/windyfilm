@@ -22,7 +22,190 @@ static inline uint32_t hash3(uint32_t a, uint32_t b, uint32_t s)
     return hmix(a * 0x9E3779B1u ^ b * 0x85EBCA77u ^ s);
 }
 
-void yg_set_shot(yg_ctx *g, uint32_t shot) { g->seed = hmix(shot * 0x9E3779B1u + 0x632BE5ABu); }
+void yg_set_shot(yg_ctx *g, uint32_t shot)
+{
+    g->seed = hmix(shot * 0x9E3779B1u + 0x632BE5ABu);
+    if (g->gen) g->gseed = hmix(g->gseed0 ^ (shot * 0x9E3779B1u) ^ 0x632BE5ABu);
+}
+
+/* ================================================================== Genesis grain ("WindyGrain") */
+/* The three 64-point quantile tables of Genesis Pro 1.6.6 (CreateFilmGrain, kernel_source.cl:2745; the dump is
+ * halation_performance_grain_head.cl.txt), converted once to Q8 display levels (float table value * 255 * 256,
+ * rounded). This is the plugin's DATA, not its code: docs/DESIGN.md 1a declares it, and the routines below are
+ * written for this module (integer only, no divide, no float per pixel). The table is the inverse CDF the plugin
+ * uses for the rank it draws per pixel and channel: r has the smallest amplitudes, b the largest. The dump is not
+ * exactly centred (b's middle entries are -28 and +59) and its last entry is the tail (0.038 / 0.038 / 0.0999),
+ * which the kernel also uses as the value at rank 0, below the table's first entry. */
+static const int16_t yg_gt_r[64] = {
+     -1343,  -1157,  -1032,   -948,   -880,   -822,   -767,   -716,
+      -665,   -622,   -581,   -541,   -506,   -476,   -445,   -415,
+      -386,   -361,   -337,   -312,   -287,   -263,   -239,   -214,
+      -190,   -166,   -141,   -115,    -86,    -57,    -29,      0,
+        29,     57,     86,    115,    141,    166,    190,    214,
+       239,    263,    287,    312,    337,    361,    386,    415,
+       445,    476,    506,    541,    581,    622,    665,    716,
+       767,    822,    880,    948,   1032,   1157,   1343,   2481
+};
+static const int16_t yg_gt_g[64] = {
+     -1518,  -1299,  -1163,  -1055,   -974,   -902,   -847,   -792,
+      -746,   -701,   -656,   -617,   -579,   -541,   -504,   -469,
+      -434,   -399,   -369,   -340,   -311,   -282,   -253,   -226,
+      -198,   -171,   -143,   -117,    -93,    -69,    -44,      0,
+        44,     69,     93,    117,    143,    171,    198,    226,
+       253,    282,    311,    340,    369,    399,    434,    469,
+       504,    541,    579,    617,    656,    701,    746,    792,
+       847,    902,    974,   1055,   1163,   1299,   1518,   2481
+};
+static const int16_t yg_gt_b[64] = {
+     -4348,  -3724,  -3362,  -3138,  -2853,  -2681,  -2506,  -2356,
+     -2229,  -2103,  -1974,  -1862,  -1756,  -1647,  -1538,  -1441,
+     -1286,  -1195,  -1109,  -1025,   -943,   -851,   -755,   -662,
+      -517,   -442,   -365,   -287,   -210,   -132,    -59,    -28,
+        59,    132,    210,    287,    365,    442,    517,    662,
+       755,    851,    943,   1025,   1109,   1195,   1286,   1441,
+      1538,   1647,   1756,   1862,   1974,   2103,   2229,   2356,
+      2506,   2681,   2853,   3138,   3362,   3724,   4348,   6528
+};
+#define YG_GT_R_TAIL (-2481)          /* the value at rank 0: -0.0380001 (kernel_source.cl:2768) */
+#define YG_GT_G_TAIL (-2481)          /*                        -0.0380001 (:2776) */
+#define YG_GT_B_TAIL (-6528)          /*                        -0.0999999 (:2786) */
+
+/* Genesis's prng(x, y, seed, channel) exactly (halation_performance_grain_head.cl.txt): [0, 2^24) = [0, 1) x 2^24.
+ * The first term is shared by the three channels, so the caller computes it once (yg_gbase) and adds
+ * channel * 2246822519. */
+static inline uint32_t yg_gmix(uint32_t h)
+{
+    h ^= h >> 13; h *= 1274126177u; h ^= h >> 16;
+    return h & 0x00FFFFFFu;
+}
+#define YG_GCH 2246822519u
+
+/* one channel: the table at rank u (Q24 of the rank), linear between the two entries, and the kernel's straight line
+ * to the tail for the lowest 1/64 of the rank (CreateFilmGrain: "straight line from (0.015625, tab[0]) to (0, tail)").
+ * Entry i sits at rank (i + 1) / 64: tab[0] at 1/64 where the line ends, tab[63] (the + tail) at rank 1. Continuous at
+ * 1/64, and the mean over the rank is 0 (to 0.01 level); until 11-15 the line ran the other way (tab[0] at rank 0, the
+ * tail at 1/64, a jump to tab[1]) and the rest used rank * 63: a mean of +0.08 / +0.09 / +0.25 level per pixel (r g b,
+ * amount 1), a brighter, bluer frame. */
+static inline int yg_gtab(const int16_t *t, int tail, uint32_t u)
+{
+    if (u < 262144u) {                                   /* 0.015625 * 2^24 */
+        int wq8 = (int)(u >> 10);                        /* rank / 0.015625, Q8: 0 at rank 0, 256 at 1/64 */
+        return tail + (((t[0] - tail) * wq8 + 128) >> 8);
+    }
+    {
+        uint32_t f = (u >> 2) - 65536u;                  /* rank * 64 - 1, Q16: 0 at 1/64, < 63 << 16 below rank 1 */
+        int i = (int)(f >> 16), fr = (int)((f >> 8) & 255u);
+        return t[i] + (((t[i + 1] - t[i]) * fr + 128) >> 8);
+    }
+}
+
+/* one lattice point: the three amplitudes in Q8 display levels, the saturation mix of CreateFilmGrain
+ * (r = (1 - sat) * g + sat * r, b = (1 - sat) * g + sat * b, g unchanged). `base` is the pixel's first term of the
+ * prng, kept by the row loop as a running sum (adding 374761393 per column is exactly x * 374761393 mod 2^32). */
+static inline void yg_gpoint_b(const yg_ctx *g, uint32_t base, int *o)
+{
+    int s = g->gsat_q8;
+    int tr = yg_gtab(yg_gt_r, YG_GT_R_TAIL, yg_gmix(base));
+    int tg = yg_gtab(yg_gt_g, YG_GT_G_TAIL, yg_gmix(base + YG_GCH));
+    int tb = yg_gtab(yg_gt_b, YG_GT_B_TAIL, yg_gmix(base + 2 * YG_GCH));
+    o[0] = ((256 - s) * tg + s * tr + 128) >> 8;
+    o[1] = tg;
+    o[2] = ((256 - s) * tg + s * tb + 128) >> 8;
+}
+static inline void yg_gpoint(const yg_ctx *g, int x, int y, int *o)
+{
+    yg_gpoint_b(g, (uint32_t)x * 374761393u + (uint32_t)y * 668265263u + g->gseed * 2654435761u, o);
+}
+
+/* one pixel: the lattice point, or the bilinear mix of four when the grain lattice is coarser than the frame
+ * (ApplyFilmGrain's upsample with wrapping; the jitter is 0 for every ratio we can produce, see yg_grain.h) */
+static void yg_gpix(const yg_ctx *g, int x, int y, int *d)
+{
+    int sh = g->gshift;
+    if (!sh) {
+        yg_gpoint(g, x, y, d);
+        return;
+    }
+    {
+        int m = (1 << sh) - 1, ax = x >> sh, ay = y >> sh, k;
+        int fx = (x & m) << (8 - sh), fy = (y & m) << (8 - sh);
+        int p00[3], p10[3], p01[3], p11[3];
+        yg_gpoint(g, ax, ay, p00);         yg_gpoint(g, ax + 1, ay, p10);
+        yg_gpoint(g, ax, ay + 1, p01);     yg_gpoint(g, ax + 1, ay + 1, p11);
+        for (k = 0; k < 3; k++) {
+            int t0 = p00[k] * (256 - fx) + p10[k] * fx, t1 = p01[k] * (256 - fx) + p11[k] * fx;
+            d[k] = (t0 * (256 - fy) + t1 * fy) >> 16;
+        }
+    }
+}
+
+void yg_gen_uyvy_row(const yg_ctx *g, uint32_t *w, int npix, int x0, int y)
+{
+    int nw = npix >> 1, x = x0, amp = g->gamp_q8, sh = g->gshift;
+    uint32_t base = (uint32_t)x0 * 374761393u + (uint32_t)y * 668265263u + g->gseed * 2654435761u;
+    for (int i = 0; i < nw; i++, x += 2, base += 2 * 374761393u) {
+        int p0[3], p1[3], dR0, dG0, dB0, dR1, dG1, dB1, sR, sG, sB;
+        uint32_t v = w[i];
+        int U = (int8_t)v, Y0 = (v >> 8) & 255, V = (int8_t)(v >> 16), Y1 = (int)(v >> 24);
+        if (sh) {
+            yg_gpix(g, x, y, p0);
+            yg_gpix(g, x + 1, y, p1);
+        } else {
+            yg_gpoint_b(g, base, p0);
+            yg_gpoint_b(g, base + 374761393u, p1);
+        }
+        dR0 = (p0[0] * amp) >> 8; dG0 = (p0[1] * amp) >> 8; dB0 = (p0[2] * amp) >> 8;
+        dR1 = (p1[0] * amp) >> 8; dG1 = (p1[1] * amp) >> 8; dB1 = (p1[2] * amp) >> 8;
+        sR = dR0 + dR1; sG = dG0 + dG1; sB = dB0 + dB1;
+        Y0 += (77 * dR0 + 150 * dG0 + 29 * dB0 + 32768) >> 16;
+        Y1 += (77 * dR1 + 150 * dG1 + 29 * dB1 + 32768) >> 16;
+        U += (-43 * sR - 85 * sG + 128 * sB + 65536) >> 17;      /* the pair average, as the word's U / V */
+        V += (128 * sR - 107 * sG - 21 * sB + 65536) >> 17;
+        Y0 = Y0 < 0 ? 0 : Y0 > 255 ? 255 : Y0;
+        Y1 = Y1 < 0 ? 0 : Y1 > 255 ? 255 : Y1;
+        U = U < -128 ? -128 : U > 127 ? 127 : U;
+        V = V < -128 ? -128 : V > 127 ? 127 : V;
+        w[i] = (uint32_t)(U & 255) | ((uint32_t)Y0 << 8) | ((uint32_t)(V & 255) << 16) | ((uint32_t)Y1 << 24);
+    }
+}
+
+void yg_gen_rgb_strip(const yg_ctx *g, uint8_t *rgb, int w, int nrows, int y0)
+{
+    int r, x, k, sh = g->gshift;
+    for (r = 0; r < nrows; r++) {
+        uint8_t *px = rgb + (size_t)r * w * 3;
+        uint32_t base = (uint32_t)(y0 + r) * 668265263u + g->gseed * 2654435761u;
+        for (x = 0; x < w; x++, px += 3, base += 374761393u) {
+            int d[3];
+            if (sh) yg_gpix(g, x, y0 + r, d);
+            else yg_gpoint_b(g, base, d);
+            for (k = 0; k < 3; k++) {
+                int val = px[k] + ((d[k] * g->gamp_q8) >> 8);
+                px[k] = (uint8_t)(val < 0 ? 0 : val > 255 ? 255 : val);
+            }
+        }
+    }
+}
+
+int yg_gen_init(yg_ctx *g, const yg_gen_params *p, uint32_t shot)
+{
+    int sz, gg, sh;
+    memset(g, 0, sizeof *g);
+    g->gen = 1; g->mode = YG_NEG; g->nlayers = 3; g->tier = YG_FULL;
+    g->gamp_q8 = p->amp_q8 < 0 ? 0 : p->amp_q8 > 1024 ? 1024 : p->amp_q8;
+    g->gsat_q8 = p->sat_q8 < 0 ? 0 : p->sat_q8 > 256 ? 256 : p->sat_q8;
+    sz = p->size_q8 < 64 ? 64 : p->size_q8;
+    gg = p->gauge_q8 < 64 ? 64 : p->gauge_q8;
+    for (sh = 0; sh < 2 && sz >= (gg << (sh + 1)); sh++)       /* cell = size / gauge, powers of two only */
+        ;
+    if (gg > sz)                       /* finer than a pixel (65 mm): the buffer is bigger than the frame, so each pixel
+                                          is the mean of (gauge / size)^2 samples - the amplitude x size / gauge. GUESS */
+        g->gamp_q8 = (g->gamp_q8 * sz + gg / 2) / gg;
+    g->gshift = sh;
+    g->gseed0 = p->seed;
+    yg_set_shot(g, shot);
+    return 0;
+}
 
 /* ------------------------------------------------------------------ windows */
 typedef struct { const uint8_t *p; int d; } yg_win;   /* p = template addr of col i=0 at row j */
@@ -249,6 +432,7 @@ void yg_uyvy_row(const yg_ctx *g, uint32_t *w, int npix, int x0, int y)
 {
     int by = y >> 5, j = y & 31, x = x0, xe = x0 + npix;
     yg_mix m;
+    if (g->gen) { yg_gen_uyvy_row(g, w, npix, x0, y); return; }
     if (g->seam) { uyvy_row_cut(g, w, npix, x0, y); return; }
     while (x < xe) {
         int bx = x >> 5, i = x & 31, se = (bx + 1) << 5;
@@ -338,6 +522,7 @@ void yg_rgb_strip(const yg_ctx *g, uint8_t *rgb, int w, int nrows, int y0)
 {
     int r;
     yg_mix m;
+    if (g->gen) { yg_gen_rgb_strip(g, rgb, w, nrows, y0); return; }
     for (r = 0; r < nrows; r++) {
         int y = y0 + r, by = y >> 5, j = y & 31, x = 0;
         uint8_t *px = rgb + (size_t)r * w * 3;

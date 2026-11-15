@@ -19,6 +19,11 @@ const char *wfui_host_msg(void);
 void wfui_host_beat(int ph, int ago_ms);
 const char *wfdr_host_msg(void);
 int wfdr_host_confirm(void);
+int wfdr_host_pfoc(void);
+const char *wfdr_host_tab_name(void);
+const char *wfdr_host_process(void);
+int wfdr_host_shelf_n(int t);
+int wfdr_host_nshelves(void);
 
 static const char *outdir;
 static int fails, closed;
@@ -149,6 +154,63 @@ int main(int argc, char **argv)
     int colour = first_of(WF_GRP_COLOUR, 0), slide = first_of(WF_GRP_COLOUR, 1), bw = first_of(WF_GRP_BW, 0);
     CHECK(colour && bw, "catalogue without colour / B&W films");
 
+    /* 0. shelves (11-15): every ready film sits on a shelf (none dropped by the 64 per shelf), the film-stage chain
+     * films on their own STAGE shelf with an ECN-2 chip (Double-X 5222 B&W), no longer on COLOUR with C-41 */
+    {
+        int nready = 0, nstage = 0, nshelf = 0, dx = 0, cine_neg = 0, worst = 0;
+        for (int i = 0; i < wf_nfilms; i++)
+        {
+            const struct wf_film *f = &wf_films[i];
+            if (!(f->flags & WF_F_READY)) continue;
+            nready++;
+            if (f->group != WF_GRP_STAGE) continue;
+            nstage++;
+            if (f->shortname && !strcmp(f->shortname + (strlen(f->shortname) > 3 ? strlen(f->shortname) - 3 : 0), "B&W"))
+                dx = f->id;
+            else if (!cine_neg) cine_neg = f->id;
+        }
+        fake_set_loaded(colour);
+        open_scr(WFUI_SCR_ROLL);                            /* the shelves are built on the first entry */
+        for (int t = 0; t < wfdr_host_nshelves(); t++)
+        {
+            nshelf += wfdr_host_shelf_n(t);
+            if (wfdr_host_shelf_n(t) > worst) worst = wfdr_host_shelf_n(t);
+        }
+        CHECK(nshelf == nready, "%d of %d ready films on a shelf", nshelf, nready);
+        CHECK(worst <= 64, "a shelf holds %d films (64 at most)", worst);
+        CHECK(!strcmp(wfdr_host_tab_name(), "COLOUR") && !strcmp(wfdr_host_process(), "C-41"),
+              "colour film on %s / %s", wfdr_host_tab_name(), wfdr_host_process());
+        close_ui();
+        CHECK(nstage > 0, "catalogue without film-stage films");
+        if (cine_neg)
+        {
+            fake_set_loaded(cine_neg);
+            open_scr(WFUI_SCR_ROLL);
+            CHECK(wfdr_host_sel_id() == cine_neg, "picker not on the chain film %d (%d)", cine_neg, wfdr_host_sel_id());
+            CHECK(!strcmp(wfdr_host_tab_name(), "STAGE"), "chain film %d on %s", cine_neg, wfdr_host_tab_name());
+            CHECK(!strcmp(wfdr_host_process(), "ECN-2"), "chain film chip %s", wfdr_host_process());
+            int st = wfdr_host_tab();
+            for (int t = 0; t < wfdr_host_nshelves(); t++)
+                if (t == st) CHECK(wfdr_host_shelf_n(t) == nstage, "STAGE shelf %d of %d", wfdr_host_shelf_n(t), nstage);
+            shot("roll_stage");
+            key(MODULE_KEY_TOUCH_1_FINGER);                 /* STAGE -> the next shelf, all the way round back */
+            CHECK(wfdr_host_tab() != st, "TAP stayed on STAGE");
+            for (int k = 0; k < wfdr_host_nshelves() && wfdr_host_tab() != st; k++) key(MODULE_KEY_TOUCH_1_FINGER);
+            CHECK(wfdr_host_tab() == st && wfdr_host_sel_id() == cine_neg, "TAP round trip lost the STAGE shelf");
+            close_ui();
+        }
+        if (dx)
+        {
+            fake_set_loaded(dx);
+            open_scr(WFUI_SCR_ROLL);
+            CHECK(!strcmp(wfdr_host_tab_name(), "STAGE") && !strcmp(wfdr_host_process(), "B&W"),
+                  "Double-X on %s / %s", wfdr_host_tab_name(), wfdr_host_process());
+            shot("roll_stage_bw");
+            close_ui();
+        }
+        printf("shelves: %d ready films, %d on STAGE (Double-X %d)\n", nready, nstage, dx);
+    }
+
     /* 1. roll picker, no roll: Colour shelf, the loaded film in the centre */
     fake_set_loaded(colour);
     open_scr(WFUI_SCR_ROLL);
@@ -221,8 +283,40 @@ int main(int argc, char **argv)
     fake_view()->battery = 76;
     open_scr(WFUI_SCR_DARK);
     shot("dark_ready");
+    /* 3b. the print finishes (owner 11-15, DESIGN 3.9): Frame / Info / Date rows; UP / DOWN pick, LEFT / RIGHT / wheel */
+    CHECK(wfdr_host_pfoc() == 0 && wf_pr_frame == 0 && wf_pr_info == 1 && wf_pr_date == 0, "finishes not at their "
+          "defaults: focus %d frame %d info %d date %d", wfdr_host_pfoc(), wf_pr_frame, wf_pr_info, wf_pr_date);
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wf_pr_frame == 1, "RIGHT on Frame: %d (want White)", wf_pr_frame);
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfdr_host_pfoc() == 1 && wf_pr_info == 2, "Info: focus %d value %d (want On + roll)", wfdr_host_pfoc(), wf_pr_info);
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wfdr_host_pfoc() == 2 && wf_pr_date == 1, "Date: focus %d value %d (want '26 11 15)", wfdr_host_pfoc(), wf_pr_date);
+    CHECK(fake_nstart() == 0 && !closed, "the finish rows started or closed something");
+    shot("dark_print_white_info_date");
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfdr_host_pfoc() == 0, "DOWN from Date: focus %d (want Frame, wraps)", wfdr_host_pfoc());
+    key(MODULE_KEY_PRESS_LEFT);
+    key(MODULE_KEY_PRESS_LEFT);
+    CHECK(wf_pr_frame == 4, "LEFT LEFT from White: %d (want Black wide, wraps)", wf_pr_frame);
+    key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wfdr_host_pfoc() == 2 && wf_pr_date == 0, "UP to Date, wheel left: focus %d date %d", wfdr_host_pfoc(), wf_pr_date);
+    shot("dark_print_black_wide");
+    key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wf_pr_frame == 0, "Frame back to Off: %d", wf_pr_frame);
+    key(MODULE_KEY_PRESS_DOWN);
+    shot("dark_print_info_greyed");                          /* frame Off: Info greyed */
+    key(MODULE_KEY_PRESS_LEFT);                              /* On + roll -> On: the defaults again */
+    CHECK(wf_pr_frame == 0 && wf_pr_info == 1 && wf_pr_date == 0, "finishes back to defaults: %d %d %d", wf_pr_frame,
+          wf_pr_info, wf_pr_date);
     key(MODULE_KEY_PRESS_SET);
     CHECK(fake_nstart() == 1, "SET did not start the darkroom");
+    CHECK(wf_pr_frame == 0 && wf_pr_date == 0, "SET changed the finishes");
 
     /* 4. frame 1 loading: blank paper */
     struct wf_dark_view *v = fake_view();

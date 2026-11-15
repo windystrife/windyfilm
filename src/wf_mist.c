@@ -336,27 +336,31 @@ static void up_add(mist_ctx *g, int32_t *dst, const int32_t *src, int sw, int sh
     }
 }
 
-/* TOP half: the rows below the seam = the rows above it, mirrored, and eroded (min of light over +-2 cells and the
- * rows next to it, all three channels from the same cell), so a small source above the seam leaves no phantom glow */
+/* TOP half: the rows below the seam = the rows above it, mirrored, a LIGHT only where it reaches the seam. Going away
+ * from the seam row in each column, a cell brighter than a cell all at code MIST_R0 (a light: clipped, or a lamp's hot
+ * gain) is taken only while it is no brighter than the cell taken before it, else that cell again (all three channels
+ * of one cell). A round light ON the seam comes out whole (its own lower half); a light above it, not touching it, leaves
+ * nothing below, so no phantom glow; the rest (sky, walls) mirrors as it is. Until 11-15 the mirror was eroded instead
+ * (min over +-2 cells and the rows next to it): a light on the seam lost 2 cells a side and the bottom half's pull
+ * (mist_build) drew two dark lobes under it, -32 / -64 codes at white / black 1 against the whole frame, while a light
+ * 24 px above the seam still left +33 / +41 under it (owner 11-15 mist strips; the 5D2's seam crosses every frame). */
 static void mirror_rows(mist_ctx *g, int s)
 {
     int gw = g->gw, gh = g->gh;
+    int32_t tb = (int32_t)(g->sl[MIST_R0] >> 4), *pr = g->rowL;   /* Q20 a sample -> the cells' Q16 mean (flush); rowL:
+                                                                    * per column the row last taken (free until the apply) */
+    for (int x = 0; x < gw; x++)
+        pr[x] = s - 1;
     for (int j = 0; s + j < gh; j++) {
         int sr = s - 1 - j < 0 ? 0 : s - 1 - j;
+        const int32_t *src = g->L0 + 3 * gw * sr;
         int32_t *d = g->L0 + 3 * gw * (s + j);
         for (int x = 0; x < gw; x++) {
-            int bx = x, by = sr, bl = g->L0[3 * (gw * sr + x)];
-            for (int dx = -2; dx <= 2; dx++) {
-                int xx = x + dx < 0 ? 0 : x + dx >= gw ? gw - 1 : x + dx;
-                int l = g->L0[3 * (gw * sr + xx)];
-                if (l < bl) { bl = l; bx = xx; by = sr; }
-            }
-            for (int dy = -1; dy <= 1; dy += 2) {
-                int yy = sr + dy < 0 ? 0 : sr + dy > s - 1 ? s - 1 : sr + dy;
-                int l = g->L0[3 * (gw * yy + x)];
-                if (l < bl) { bl = l; bx = x; by = yy; }
-            }
-            const int32_t *c = g->L0 + 3 * (gw * by + bx);
+            const int32_t *c = src + 3 * x, *p = g->L0 + 3 * (gw * pr[x] + x);
+            if (c[0] > tb && c[0] > p[0])
+                c = p;
+            else
+                pr[x] = sr;
             d[3 * x] = c[0]; d[3 * x + 1] = c[1]; d[3 * x + 2] = c[2];
         }
     }
@@ -448,7 +452,8 @@ static __attribute__((noinline)) uint32_t hot_pair(const mist_ctx *g, uint32_t w
        dark / bright edge pair's chroma by ~ slope ratio / 4 (a green line round every sky gap). Glow chroma: output codes. */
     int yr = Y0 > Y1 ? Y0 : Y1;
     int32_t c = (int32_t)g->oc[yr], rdi = (int32_t)g->rd[yr], rdo = (int32_t)((g->rd[o0] + g->rd[o1]) >> 1);
-    int u = (int)(((int64_t)(U * c) * rdi + (int64_t)gu * rdo) >> 24), v = (int)(((int64_t)(V * c) * rdi + (int64_t)gv * rdo) >> 24);
+    int u = (int)(((int64_t)(U * c) * rdi + (int64_t)gu * rdo + (1 << 23)) >> 24);   /* rounded, as smulsh */
+    int v = (int)(((int64_t)(V * c) * rdi + (int64_t)gv * rdo + (1 << 23)) >> 24);
     u = u < -128 ? -128 : u > 127 ? 127 : u;
     v = v < -128 ? -128 : v > 127 ? 127 : v;
     return (uint32_t)(u & 255) | (uint32_t)o0 << 8 | (uint32_t)(v & 255) << 16 | (uint32_t)o1 << 24;
@@ -461,10 +466,13 @@ static inline int enc2(const uint8_t *e, uint32_t L)
     if (L < 1048576) return e[1024 + (L >> 9)];
     return 255;
 }
-static inline int32_t smulsh(int32_t a, int32_t b)   /* (a * b) >> 24, signed 64-bit product (SMULL) */
+/* (a * b + 2^23) >> 24: the signed 64-bit product, rounded (SMLAL onto 2^23). A plain >> 24 rounds down: U and V of every
+ * pixel lost up to a code (the dark of a frame -0.5 with white mist, -1.0 with black: a green cast in the shadows, found by
+ * MIST:levels 11-15) */
+static inline int32_t smulsh(int32_t a, int32_t b)
 {
-    int32_t lo, hi;
-    __asm__("smull %0, %1, %2, %3" : "=&r"(lo), "=&r"(hi) : "r"(a), "r"(b));
+    int32_t lo = 1 << 23, hi = 0;
+    __asm__("smlal %0, %1, %2, %3" : "+&r"(lo), "+&r"(hi) : "r"(a), "r"(b));
     return (int32_t)(((uint32_t)lo >> 24) | ((uint32_t)hi << 8));
 }
 

@@ -53,6 +53,8 @@ struct wf_cr2_info {
     uint32_t fsize;                     /* file size (from the caller) */
     uint32_t need;                      /* WF_CR2_E_SHORT: head bytes needed (else the bytes the IFDs reached) */
     int      iso;                       /* EXIF ISOSpeedRatings, 0 = not given */
+    uint32_t et_n, et_d;                /* EXIF ExposureTime (0x829A) et_n / et_d s, 0 0 = not given */
+    uint32_t fn_n, fn_d;                /* EXIF FNumber (0x829D) fn_n / fn_d, 0 0 = not given */
     int      wb[4];                     /* Canon's as-shot RGGB levels from ColorData (MakerNote 0x4001), 0 = none */
     int      cd_count;                  /* ColorData entries (its version), 0 = none */
     int      orient;                    /* EXIF orientation 1..8 of IFD0, 0 = not given */

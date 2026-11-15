@@ -9,20 +9,36 @@
 #define WF_FX_GRN 2
 #define WF_FX_MST 4                  /* Mist (wf_mist.c): diffusion filter on the camera's words, before our colour pass */
 
-/* menu choices (wf_menu.c, WINDYFLM.CFG "grain" / "halation" / "bloom"); the browser rows show and change the same values */
-#define WF_GRAIN_MAX 3               /* 0 off, 1 fine (amount 0.6), 2 normal (1.0, default), 3 strong (1.5) */
-#define WF_HALO_MAX  2               /* 0 off, 1 film (the catalogue profile), 2 spektrafilm (the film's catalogue spk profile) */
+/* menu choices (wf_menu.c, WINDYFLM.CFG "grain" / "halation" / "bloom" / "gauge"); the browser rows show and change the
+ * same values. The rows are Grain, Halation, Bloom and Gauge since 11-15 (Grain / Halation were "WindyGrain" /
+ * "WindyHalation"). The last choice of Grain and of Halation is the Genesis Pro 1.6.6 model (DESIGN 1a): Genesis's own
+ * grain (its amplitude tables, yg_gen_* in yg_grain.c, "Even") and the plugin's light wrap (yh_gen_* in yh_halo.c,
+ * "Wrap"). The Yedlin grain and the per-film / 3-bounce halation before them stay as they were. */
+#define WF_GRAIN_MAX 6               /* 0 off, 1 fine (0.6), 2 normal (1.0, default), 3 strong (1.5) - Yedlin;
+                                        4..6 the same three amounts of the Genesis grain (Even) */
+#define WF_GRAIN_GEN0 4              /* first Genesis choice */
+#define WF_GRAIN_GEN(g) ((g) >= WF_GRAIN_GEN0)
+#define WF_HALO_MAX  3               /* 0 off, 1 Wide (the film's catalogue profile, default), 2 Tight (the film's
+                                        spektrafilm 3-bounce profile), 3 Wrap (the Genesis light wrap) */
 #define WF_HALO_SPK(h) ((h) == 2)
-/* Bloom: its own row since RAWB11 (owner 11-15, "tách cái bloom ra 1 UI riêng"; it was the "+ bloom" halation
- * choices). A soft glow in the light's own colour (halation is the red edge from the film base). It runs in the
- * halation stage: either one on runs the stage, both off = no stage (the old Off). */
-#define WF_BLOOM_MAX 3               /* 0 off, 1 low, 2 normal (the old "+ bloom"), 3 strong */
+#define WF_HALO_GEN(h) ((h) == 3)
+/* Bloom: its own row since 11-15, as on the darkroom branch (RAWB11); it was the "+ Glow" halation choices. A soft
+ * glow in the light's own colour, run in the halation stage: either one on runs the stage, both off = no stage. The
+ * light wrap has no bloom: with Halation Wrap the Bloom row keeps its value but does not run (WF_FXS_UNUSED). */
+#define WF_BLOOM_MAX 3               /* 0 off, 1 low, 2 normal (the old "+ Glow"), 3 strong */
+/* Gauge (11-15): the film format the grain and the halation stage are sized for. 35 mm = the stages as they were (the
+ * grain pitch of a 36 mm frame, the halation profiles as fitted); 16 mm = the same film on a frame half as wide (grain
+ * twice the size and twice the RMS in pixels, halo and bloom twice as wide), 65 mm = 1.85x as wide (finer, tighter).
+ * The ratios 0.5 / 1 / 1.85 are Genesis's film_gauge (DESIGN 1a); the light wrap takes them as its own gauge. */
+#define WF_GAUGE_MAX 2               /* 0 16 mm, 1 35 mm (default), 2 65 mm */
+#define WF_GAUGE_DEF 1
+#define WF_GAUGE_Q8(v) ((v) == 0 ? 128 : (v) == 2 ? 474 : 256)
 #define WF_GRAIN_DEF WF_GRAIN_DEF_CAM   /* wf_cam.h (included by wf_core.h before any use): EOS M normal, 5D2 off */
-#define WF_HALO_DEF  WF_HALO_DEF_CAM    /* wf_cam.h: EOS M film, 5D2 off */
+#define WF_HALO_DEF  WF_HALO_DEF_CAM    /* wf_cam.h: EOS M Wide, 5D2 off */
 #define WF_BLOOM_DEF WF_BLOOM_DEF_CAM   /* wf_cam.h: EOS M normal, 5D2 off */
 #define WF_MIST_MAX 8                /* Mist: 0 Off, 1..4 white 1/8 1/4 1/2 1, 5..8 black 1/8 .. 1 (WINDYFLM.CFG "mist") */
 #define WF_MIST_DEF 0
-extern volatile int wf_grain, wf_halo, wf_bloom, wf_mist;
+extern volatile int wf_grain, wf_halo, wf_bloom, wf_gauge, wf_mist;
 #define WF_FX_BLM 8                  /* wf_fx_state only: the Bloom row (its stage is WF_FX_HAL's) */
 
 /* wf_shot.c is the ONE place that says which shots get our post (our colour pass, then these effects): the post code
@@ -37,13 +53,15 @@ int  wf_aspect_has_halo(int aspect);                     /* wf_shot.c: halation 
                                                             (3:2, or -1 = not reported): worker, wf_task, menu */
 
 /* key of the effect state that is ready (published last by wf_task), 0 = none.
- * halation stage: (halation set + 1) | halation 0..2 << 6 | bloom 0..3 << 8 (WF_FXK_*); grain: (grain set + 1) |
- * amount level << 6. The sets are the
+ * halation stage: (halation set + 1) | halation 0..3 << 6 | bloom 0..3 << 8 | gauge << 10, when halation or bloom
+ * runs; grain: (grain set + 1) | amount level 1..3 << 6 | 256 for the Genesis grain | gauge << 9. The sets are the
  * catalogue's (wf_catalog.h wf_cat_hsets / wf_cat_gsets: profile or yg_stocks row, strength / amount scale,
  * rho_max), one per distinct film parameter set; set 0 is the + LUT modes' */
 extern volatile int wf_fx_hk, wf_fx_gk, wf_fx_mk;   /* wf_fx_mk: mist level | 16 for a B&W film, 0 = none */
-#define WF_FXK_HALO(k)  (((k) >> 6) & 3)             /* a halation-stage key's halation choice (WF_HALO_*) */
-#define WF_FXK_BLOOM(k) (((k) >> 8) & 3)             /* its bloom level */
+#define WF_FXK_HALO(k)   (((k) >> 6) & 3)            /* a halation-stage key's halation choice (WF_HALO_*) */
+#define WF_FXK_BLOOM(k)  (((k) >> 8) & 3)            /* its bloom level */
+#define WF_FXK_HGAUGE(k) (((k) >> 10) & 3)           /* its gauge */
+#define WF_FXK_GGAUGE(k) (((k) >> 9) & 3)            /* a grain key's gauge */
 extern volatile int wf_fx_retry_ms;          /* "no memory": the same setting is tried again after this (10 s) */
 
 /* wf_fx_state(): what the menu shows for one effect (NOLUT: a + LUT mode whose cube is not loaded) */
@@ -62,8 +80,11 @@ int  wf_fx_state(int which);                             /* menu: WF_FXS_* of WF
 const char *wf_fx_gstock_name(void);                     /* menu: grain stock of the current mode */
 
 /* worker task only, between a ready key check and the end of the request (kind 0 NN, 1 TOP, 2 BOT) */
-void wf_fx_begin(int kind, int fx, uint32_t seed);    /* NN / TOP: also the shot's exposure -> clipped gain (fx_hot) */
+/* NN / TOP: also the shot's exposure -> clipped gain (fx_hot): ev8 = WF_EV_LIVE takes the camera's (wf_shot_ev8), a
+ * Darkroom frame passes its CR2's own (wf_dk_ev8, log source 'R'; WF_EV_BAD when the CR2 does not tell) */
+void wf_fx_begin(int kind, int fx, uint32_t seed, int ev8);
 #define WF_EV_BAD (-9999)
+#define WF_EV_LIVE (-9998)
 int  wf_shot_ev8(int *src);                              /* wf_menu.c: EV100 x 8 of the shot, WF_EV_BAD; *src 'M' / 'L' / 'F' */
 extern volatile int wf_fx_ev8, wf_fx_evsrc;              /* the last NN / TOP request's (log line " ev<EV><src>") */
 void wf_fx_gather(const uint32_t *w, int nw, int x0, int y);

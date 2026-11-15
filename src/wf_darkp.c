@@ -36,6 +36,27 @@ int wf_dk_trim10(int cam, int iso)
     return best;
 }
 
+/* 256 x log2(v), v >= 1: the top bit's place, then 256 x log2(1 + i / 32) of the next five bits, linear between */
+static int dk_log2q8(uint32_t v)
+{
+    static const uint16_t t[33] = { 0, 11, 22, 33, 44, 54, 63, 73, 82, 92, 100, 109, 118, 126, 134, 142, 150, 157, 165, 172,
+                                    179, 186, 193, 200, 207, 213, 220, 226, 232, 238, 244, 250, 256 };
+    int e = 31 - __builtin_clz(v);
+    uint32_t m = e >= 13 ? v >> (e - 13) : v << (13 - e);   /* 1.13: 8192 .. 16383 */
+    uint32_t i = (m >> 8) & 31, f = m & 255;
+    return 256 * e + t[i] + (int)(((t[i + 1] - t[i]) * f + 128) >> 8);
+}
+
+/* EV100 = log2(N^2 / t) - log2(ISO / 100), N = fn_n / fn_d, t = et_n / et_d: sums of log2 of 32-bit values only */
+int wf_dk_ev8(int iso, uint32_t et_n, uint32_t et_d, uint32_t fn_n, uint32_t fn_d)
+{
+    if (iso <= 0 || !et_n || !et_d || !fn_n || !fn_d)
+        return WF_DK_EV_BAD;
+    int q = 2 * dk_log2q8(fn_n) - 2 * dk_log2q8(fn_d) + dk_log2q8(et_d) - dk_log2q8(et_n) + dk_log2q8(100)
+          - dk_log2q8((uint32_t)iso);
+    return (q + 16) >> 5;                        /* Q8 -> x 8, rounded (an arithmetic shift for EV < 0) */
+}
+
 int wf_dk_scales(int cam, const int wb[4], int black, int white, int iso, int32_t m[3])
 {
     static const int32_t day[2][3] = { { 9892, 4096, 5590 }, { 10542, 4096, 5683 } };   /* = wf_dev.c wf_dev_day */
@@ -98,22 +119,170 @@ static uint32_t wf_dk_u(const uint8_t *p, int n, int le)
     return v;
 }
 
-/* tag in the IFD at TIFF offset ifd of t[0 .. tn): e = type, count, value; 0 = not there */
-static int wf_dk_find(const uint8_t *t, uint32_t tn, int le, uint32_t ifd, unsigned tag, uint32_t e[3])
+/* the 12-byte entry of tag in the IFD at TIFF offset ifd of t[0 .. tn): its offset, 0 = not there */
+static uint32_t wf_dk_entry(const uint8_t *t, uint32_t tn, int le, uint32_t ifd, unsigned tag)
 {
     if (ifd < 8 || ifd + 2 > tn)
         return 0;
     uint32_t cnt = wf_dk_u(t + ifd, 2, le);
-    for (uint32_t i = 0; i < cnt && i < 256 && ifd + 2 + i * 12 + 12 <= tn; i++) {
-        const uint8_t *q = t + ifd + 2 + i * 12;
-        if (wf_dk_u(q, 2, le) == tag) {
-            e[0] = wf_dk_u(q + 2, 2, le);
-            e[1] = wf_dk_u(q + 4, 4, le);
-            e[2] = wf_dk_u(q + 8, 4, le);
-            return 1;
+    for (uint32_t i = 0; i < cnt && i < 256 && ifd + 2 + i * 12 + 12 <= tn; i++)
+        if (wf_dk_u(t + ifd + 2 + i * 12, 2, le) == tag)
+            return ifd + 2 + i * 12;
+    return 0;
+}
+
+/* tag in the IFD at TIFF offset ifd of t[0 .. tn): e = type, count, value; 0 = not there */
+static int wf_dk_find(const uint8_t *t, uint32_t tn, int le, uint32_t ifd, unsigned tag, uint32_t e[3])
+{
+    uint32_t o = wf_dk_entry(t, tn, le, ifd, tag);
+    if (!o)
+        return 0;
+    e[0] = wf_dk_u(t + o + 2, 2, le);
+    e[1] = wf_dk_u(t + o + 4, 4, le);
+    e[2] = wf_dk_u(t + o + 8, 4, le);
+    return 1;
+}
+
+/* the TIFF header: 1 = little endian, 0 = big, -1 = not a TIFF; *ifd0 = IFD0's offset */
+static int wf_dk_tiff(const uint8_t *t, uint32_t tn, uint32_t *ifd0)
+{
+    if (tn < 16)
+        return -1;
+    int le = t[0] == 'I' && t[1] == 'I';
+    if (!le && !(t[0] == 'M' && t[1] == 'M'))
+        return -1;
+    if (wf_dk_u(t + 2, 2, le) != 42)
+        return -1;
+    *ifd0 = wf_dk_u(t + 4, 4, le);
+    return le;
+}
+
+/* an ASCII tag into d (n bytes, trailing spaces dropped): 1 = something copied */
+static int wf_dk_str(const uint8_t *t, uint32_t tn, int le, uint32_t ifd, unsigned tag, char *d, int n)
+{
+    uint32_t e[3], o = wf_dk_entry(t, tn, le, ifd, tag);
+    if (!o || !wf_dk_find(t, tn, le, ifd, tag, e) || e[0] != 2 || e[1] < 2 || e[1] > 4096)
+        return 0;
+    const uint8_t *p = e[1] <= 4 ? t + o + 8 : e[2] < tn && e[2] + e[1] <= tn ? t + e[2] : 0;
+    if (!p)
+        return 0;
+    int k = 0;
+    for (uint32_t i = 0; i < e[1] && k < n - 1 && p[i]; i++)
+        d[k++] = p[i] >= 32 && p[i] < 127 ? (char)p[i] : '?';
+    while (k && d[k - 1] == ' ')
+        k--;
+    d[k] = 0;
+    return k > 0;
+}
+
+/* a RATIONAL tag (num, den): 1 = read (den != 0) */
+static int wf_dk_rat(const uint8_t *t, uint32_t tn, int le, uint32_t ifd, unsigned tag, uint32_t r[2])
+{
+    uint32_t e[3];
+    if (!wf_dk_find(t, tn, le, ifd, tag, e) || e[0] != 5 || e[1] < 1 || e[2] < 8 || e[2] + 8 > tn)
+        return 0;
+    uint32_t a = wf_dk_u(t + e[2], 4, le), b = wf_dk_u(t + e[2] + 4, 4, le);
+    if (!b)
+        return 0;
+    r[0] = a;
+    r[1] = b;
+    return 1;
+}
+
+/* a SHORT / LONG tag (count 1): its value, -1 = none */
+static int wf_dk_int(const uint8_t *t, uint32_t tn, int le, uint32_t ifd, unsigned tag)
+{
+    uint32_t e[3];
+    if (!wf_dk_find(t, tn, le, ifd, tag, e) || e[1] < 1)
+        return -1;
+    if (e[0] == 3)
+        return (int)(le ? e[2] & 0xFFFF : e[2] >> 16);
+    return e[0] == 4 && e[2] < 0x7FFFFFFFu ? (int)e[2] : -1;
+}
+
+int wf_dk_shot(const uint8_t *t, uint32_t tn, struct wf_dk_shot *s)
+{
+    uint32_t i0, e[3], r[2];
+    int le = wf_dk_tiff(t, tn, &i0), got = 0, v;
+    if (le < 0)
+        return 0;
+    if (!s->model[0] && wf_dk_str(t, tn, le, i0, 0x0110, s->model, sizeof s->model))
+        got |= WF_DKS_MODEL;
+    if (!s->orient && (v = wf_dk_int(t, tn, le, i0, 0x0112)) >= 1 && v <= 8) {
+        s->orient = v;
+        got |= WF_DKS_ORIENT;
+    }
+    if (!wf_dk_find(t, tn, le, i0, 0x8769, e) || (e[0] != 4 && e[0] != 13))
+        return got;
+    uint32_t ex = e[2];
+    if (!s->lens[0] && wf_dk_str(t, tn, le, ex, 0xA434, s->lens, sizeof s->lens))
+        got |= WF_DKS_LENS;
+    if (!s->fl[1] && wf_dk_rat(t, tn, le, ex, 0x920A, r) && r[0]) {
+        s->fl[0] = r[0]; s->fl[1] = r[1];
+        got |= WF_DKS_FL;
+    }
+    if (!s->fn[1] && wf_dk_rat(t, tn, le, ex, 0x829D, r) && r[0]) {
+        s->fn[0] = r[0]; s->fn[1] = r[1];
+        got |= WF_DKS_FN;
+    }
+    if (!s->et[1] && wf_dk_rat(t, tn, le, ex, 0x829A, r) && r[0]) {
+        s->et[0] = r[0]; s->et[1] = r[1];
+        got |= WF_DKS_ET;
+    }
+    if (!s->iso && (v = wf_dk_int(t, tn, le, ex, 0x8827)) > 0) {
+        s->iso = v;
+        got |= WF_DKS_ISO;
+    }
+    char d[20];
+    if (!s->dt[0] && wf_dk_str(t, tn, le, ex, 0x9003, d, sizeof d) && d[4] == ':' && d[7] == ':') {
+        for (int k = 0; k < 20; k++)
+            s->dt[k] = d[k];
+        got |= WF_DKS_DATE;
+    }
+    return got;
+}
+
+void wf_dk_shot_gaps(struct wf_dk_shot *s, const struct wf_dk_shot *c)
+{
+    int k;
+    if (!s->model[0])
+        for (k = 0; k < (int)sizeof s->model; k++) s->model[k] = c->model[k];
+    if (!s->lens[0])
+        for (k = 0; k < (int)sizeof s->lens; k++) s->lens[k] = c->lens[k];
+    if (!s->fl[1]) { s->fl[0] = c->fl[0]; s->fl[1] = c->fl[1]; }
+    if (!s->fn[1]) { s->fn[0] = c->fn[0]; s->fn[1] = c->fn[1]; }
+    if (!s->et[1]) { s->et[0] = c->et[0]; s->et[1] = c->et[1]; }
+    if (!s->iso) s->iso = c->iso;
+    if (!s->dt[0])
+        for (k = 0; k < (int)sizeof s->dt; k++) s->dt[k] = c->dt[k];
+}
+
+int wf_dk_dims(uint8_t *app1, uint32_t len, int w, int h)
+{
+    if (len < 18 || w < 1 || h < 1)
+        return -1;
+    uint8_t *t = app1 + 10;
+    uint32_t tn = len - 10, i0, e[3];
+    int le = wf_dk_tiff(t, tn, &i0), ok = 0;
+    if (le < 0 || !wf_dk_find(t, tn, le, i0, 0x8769, e))
+        return -1;
+    for (int k = 0; k < 2; k++) {
+        uint32_t o = wf_dk_entry(t, tn, le, e[2], k ? 0xA003 : 0xA002), v = (uint32_t)(k ? h : w);
+        if (!o)
+            continue;
+        uint32_t ty = wf_dk_u(t + o + 2, 2, le);
+        uint8_t *p = t + o + 8;
+        if (ty == 3 && v <= 0xFFFF) {
+            p[0] = (uint8_t)(le ? v : v >> 8);
+            p[1] = (uint8_t)(le ? v >> 8 : v);
+            ok++;
+        } else if (ty == 4) {
+            for (int i = 0; i < 4; i++)
+                p[i] = (uint8_t)(v >> (le ? 8 * i : 24 - 8 * i));
+            ok++;
         }
     }
-    return 0;
+    return ok == 2 ? 0 : -1;
 }
 
 int wf_dk_comment(uint8_t *app1, uint32_t len, const char *txt)

@@ -19,10 +19,26 @@ WFFONTS.DAT v1 (little endian, own format):
   bitmaps       rows top to bottom, MSB first, rows padded to whole bytes
 Pen positions are 26.6 fixed point; a glyph is drawn at ((pen + 32) >> 6) + x, as PIL places mono glyphs.
 
---icons OUT.h  also writes the 10 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
-               as the mockup's icon() (Light, Print, Grain, Halation, Bloom, Mist, Strength, Highlights, Shadows, Film LUT).
+--icons OUT.h  also writes the 18 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
+               as the mockup's icon() (Light, Print, Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights, Shadows,
+               Film LUT, and the film-stage knobs Film exp, Push, Exp comp, Printer R / G / B, Interlayer), and the 3
+               Darkroom print rows' icons (Frame, Info, Date) as wf_picons.
 --check        renders sample strings with the pack's own algorithm and compares them with PIL (pixel mismatches).
 --render DIR   writes a PNG sample sheet of the three fonts.
+--print-only   OUT is that print font pack alone (build.sh's pack step: mk_wffont.py WFPRINT.DAT --print-only).
+--print P.DAT  also writes the Darkroom's print font pack ML/DATA/WFPRINT.DAT (src/wf_print.c, DESIGN 3.9): the caption
+               under a framed print, at print size and anti-aliased (16 levels), same font file:
+  font 0: 84 px, wght 500   (line 1: camera / lens)
+  font 1: 62 px, wght 400   (lines 2 / 3, the roll)
+  WFPRINT.DAT v1 (little endian, own format):
+  header 16 B   "WFPF", u16 version 1, u16 nfonts, u32 file bytes, u32 FNV-1a of every byte after the header
+  font dir      nfonts x 24 B: u16 px, u16 wght, u8 wdth, u8 first (32), u8 count (96), u8 0, u16 ascent, u16 descent,
+                u16 nkern, u16 0, u32 glyph table offset, u32 kern table offset
+  glyph table   96 x 16 B (ASCII 32..126, then 127 = U+00B7 middle dot): u16 advance (1/64 px), s16 x (bitmap left from
+                the pen), s16 y (bitmap top from the ascender line), u16 w, u16 h, u16 bytes per row, u32 bitmap offset
+  kern table    nkern x 4 B, sorted by (left, right): u8 left, u8 right, s16 dx (1/64 px)
+  bitmaps       rows top to bottom, 2 px per byte (high nibble first), coverage 0..15
+  A glyph is drawn at ((pen + 32) >> 6) + x with pen in 26.6 fixed point, its top at baseline - ascent + y.
 Deterministic: same inputs, same bytes."""
 import sys, os, struct, argparse
 
@@ -216,7 +232,8 @@ def check(fonts):
 
 
 # ------------------------------------------------------------------ row icons (mockup.py icon(), our own drawing)
-ICONS = ('Light', 'Print', 'Grain', 'Halation', 'Bloom', 'Mist', 'Strength', 'Highlights', 'Shadows', 'Film LUT')
+ICONS = ('Light', 'Print', 'Grain', 'Halation', 'Bloom', 'Gauge', 'Mist', 'Strength', 'Highlights', 'Shadows', 'Film LUT',
+         'Film exp', 'Push', 'Exp comp', 'Printer R', 'Printer G', 'Printer B', 'Interlayer')
 
 
 def icon_img(k):
@@ -246,6 +263,12 @@ def icon_img(k):
                 r2 = (xx - 7.5) ** 2 + (yy - 7.5) ** 2
                 if r2 <= 2.6 ** 2 or (r2 <= 4.9 ** 2 and (xx + yy) % 2 == 0) or (r2 <= 7.4 ** 2 and xx % 2 == 0 and yy % 2 == 0):
                     d.point((x + xx, y + yy), fill=col)
+    elif k == 'Gauge':                             # a strip of film: the frame between two rows of perforations
+        d.rectangle([x + 1, y + 0, x + 14, y + 15], outline=col)
+        d.rectangle([x + 5, y + 4, x + 10, y + 11], outline=col)
+        for yy in (2, 6, 10, 14):
+            d.point((x + 3, y + yy), fill=col)
+            d.point((x + 12, y + yy), fill=col)
     elif k == 'Mist':
         for yy in (4, 8, 12):
             d.arc([x + 1, y + yy - 3, x + 8, y + yy + 3], 200, 340, fill=col)
@@ -266,7 +289,75 @@ def icon_img(k):
         d.line([x + 8, y + 7, x + 8, y + 14], fill=col)
         d.line([x + 2, y + 4, x + 8, y + 7], fill=col)
         d.line([x + 14, y + 4, x + 8, y + 7], fill=col)
+    elif k == 'Film exp':                          # a square cut on its diagonal: plus above, minus below
+        d.rectangle([x + 1, y + 1, x + 14, y + 14], outline=col)
+        d.line([x + 14, y + 1, x + 1, y + 14], fill=col)
+        d.line([x + 3, y + 5, x + 7, y + 5], fill=col)
+        d.line([x + 5, y + 3, x + 5, y + 7], fill=col)
+        d.line([x + 8, y + 10, x + 12, y + 10], fill=col)
+    elif k == 'Push':                              # a double arrow, up and down, on a frame line
+        d.line([x + 8, y + 1, x + 8, y + 14], fill=col)
+        d.polygon([(x + 8, y + 0), (x + 4, y + 4), (x + 12, y + 4)], fill=col)
+        d.polygon([(x + 8, y + 15), (x + 4, y + 11), (x + 12, y + 11)], fill=col)
+        d.line([x + 2, y + 7, x + 5, y + 7], fill=col)
+        d.line([x + 11, y + 7, x + 14, y + 7], fill=col)
+    elif k == 'Exp comp':                          # a balance: a beam level on its pivot
+        d.line([x + 1, y + 5, x + 14, y + 5], fill=col)
+        d.polygon([(x + 8, y + 6), (x + 4, y + 13), (x + 12, y + 13)], outline=col)
+        d.line([x + 1, y + 5, x + 1, y + 8], fill=col)
+        d.line([x + 14, y + 5, x + 14, y + 8], fill=col)
+        d.line([x + 2, y + 14, x + 13, y + 14], fill=col)
+    elif k in ('Printer R', 'Printer G', 'Printer B'):   # three printer lights, the row's own one lit
+        lit = ('Printer R', 'Printer G', 'Printer B').index(k)
+        for i in range(3):
+            box = [x + 1 + i * 5, y + 3, x + 4 + i * 5, y + 12]
+            if i == lit:
+                d.rectangle(box, fill=col)
+            else:
+                d.rectangle(box, outline=col)
+        d.line([x + 1, y + 14, x + 14, y + 14], fill=col)
+    elif k == 'Interlayer':                        # three emulsion layers, the effect crossing between them
+        for yy in (2, 7, 12):
+            d.rectangle([x + 1, y + yy, x + 14, y + yy + 2], outline=col)
+        for xx in (5, 10):
+            d.line([x + xx, y + 5, x + xx, y + 6], fill=col)
+            d.line([x + xx, y + 10, x + xx, y + 11], fill=col)
     return im
+
+
+PICONS = ('Frame', 'Info', 'Date')               # the Darkroom's print rows (src/ui/wf_dark_ui.c)
+
+
+def picon_img(k):
+    from PIL import Image, ImageDraw
+    im = Image.new('1', (16, 16), 0)
+    d = ImageDraw.Draw(im)
+    if k == 'Frame':                               # a print: border, the picture, a caption line under it
+        d.rectangle([1, 1, 14, 14], outline=1)
+        d.rectangle([3, 3, 12, 9], fill=1)
+        d.line([3, 12, 9, 12], fill=1)
+    elif k == 'Info':                              # three lines of text, the first one bold
+        d.rectangle([2, 3, 13, 4], fill=1)
+        d.line([2, 8, 10, 8], fill=1)
+        d.line([2, 12, 12, 12], fill=1)
+    elif k == 'Date':                              # two slanted seven-segment digits, "2" and "6"
+        for ox, segs in ((1, 'abged'), (8, 'afgedc')):
+            for s in segs:
+                x0, y0, x1, y1 = {'a': (2, 2, 5, 2), 'b': (6, 3, 6, 6), 'c': (5, 9, 5, 12), 'd': (1, 13, 4, 13),
+                                  'e': (0, 9, 0, 12), 'f': (1, 3, 1, 6), 'g': (1, 7, 5, 7)}[s]
+                d.line([ox + x0, y0, ox + x1, y1], fill=1)
+    return im
+
+
+def icon_rows(im):
+    b = []
+    for y in range(16):
+        v = 0
+        for x in range(16):
+            if im.getpixel((x, y)):
+                v |= 0x8000 >> x
+        b += [v >> 8, v & 0xFF]
+    return b
 
 
 def write_icons(path):
@@ -276,15 +367,11 @@ def write_icons(path):
            '#ifndef WF_ICONS_H', '#define WF_ICONS_H', '#include <stdint.h>',
            'static const uint8_t wf_icons[%d][32] = {' % len(ICONS)]
     for k in ICONS:
-        im = icon_img(k)
-        b = []
-        for y in range(16):
-            v = 0
-            for x in range(16):
-                if im.getpixel((x, y)):
-                    v |= 0x8000 >> x
-            b += [v >> 8, v & 0xFF]
-        out.append('    /* %-10s */ {%s},' % (k, ', '.join('0x%02x' % v for v in b)))
+        out.append('    /* %-10s */ {%s},' % (k, ', '.join('0x%02x' % v for v in icon_rows(icon_img(k)))))
+    out += ['};', '/* the Darkroom\'s print rows (Frame, Info, Date), same format */',
+            'static const uint8_t wf_picons[%d][32] = {' % len(PICONS)]
+    for k in PICONS:
+        out.append('    /* %-10s */ {%s},' % (k, ', '.join('0x%02x' % v for v in icon_rows(picon_img(k)))))
     out += ['};', '#endif', '']
     with open(path, 'w', newline='\n') as fp:
         fp.write('\n'.join(out))
@@ -305,13 +392,138 @@ def sheet(fonts, d):
     im.save(os.path.join(d, 'wffonts_sheet.png'))
 
 
+# ------------------------------------------------------------------ print font pack (WFPRINT.DAT, src/wf_print.c)
+PRINT_FONTS = ((84, 100, 500), (62, 100, 400))
+PRINT_CHARS = [chr(o) for o in range(32, 127)] + ['·']   # code 127 = the middle dot
+
+
+def print_glyph(f, c):
+    """anti-aliased glyph (16 levels) drawn at a whole-pixel pen, relative to the pen and to the ascender line"""
+    from PIL import Image, ImageDraw
+    O = f.size
+    im = Image.new('L', (4 * O, 3 * O), 0)
+    d = ImageDraw.Draw(im)
+    d.text((O, O), c, font=f, fill=255, anchor='la')
+    bb = im.getbbox()
+    if not bb:
+        return 0, 0, 0, 0, []
+    x0, y0, x1, y1 = bb
+    px = im.load()
+    rows = [[(px[x, y] * 15 + 127) // 255 for x in range(x0, x1)] for y in range(y0, y1)]
+    return x0 - O, y0 - O, x1 - x0, y1 - y0, rows
+
+
+def build_print_font(px, wdth, wght):
+    f = load(px, wdth, wght)
+    asc, desc = f.getmetrics()
+    gl = []
+    for c in PRINT_CHARS:
+        adv = int(round(f.getlength(c) * 64))
+        gl.append((adv,) + print_glyph(f, c))
+    single = {c: f.getlength(c) for c in PRINT_CHARS}
+    kern = []
+    for i, a in enumerate(PRINT_CHARS):
+        for j, b in enumerate(PRINT_CHARS):
+            k = int(round((f.getlength(a + b) - single[a] - single[b]) * 64))
+            if k:
+                kern.append((32 + i, 32 + j, k))
+    return dict(px=px, wdth=wdth, wght=wght, asc=asc, desc=desc, gl=gl, kern=sorted(kern), f=f)
+
+
+def pack_print(fonts):
+    nf = len(fonts)
+    pos = 16 + nf * 24
+    dirs, blobs = [], []
+    for F in fonts:
+        g_off = pos
+        pos += len(F['gl']) * 16
+        k_off = pos
+        pos += len(F['kern']) * 4
+        bpos = pos
+        recs, bms = [], []
+        for adv, x, y, w, h, rows in F['gl']:
+            bpr = (w + 1) // 2
+            data = bytearray()
+            for r in rows:
+                for bx in range(bpr):
+                    hi = r[2 * bx]
+                    lo = r[2 * bx + 1] if 2 * bx + 1 < w else 0
+                    data.append(hi << 4 | lo)
+            recs.append(struct.pack('<HhhHHHI', adv, x, y, w, h, bpr, bpos if data else 0))
+            bms.append(bytes(data))
+            bpos += len(data)
+        kb = b''.join(struct.pack('<BBh', a, b, k) for a, b, k in F['kern'])
+        blobs.append(b''.join(recs) + kb + b''.join(bms))
+        pos = bpos
+        dirs.append(struct.pack('<HHBBBBHHHHII', F['px'], F['wght'], F['wdth'], 32, len(F['gl']), 0, F['asc'], F['desc'],
+                                len(F['kern']), 0, g_off, k_off))
+    body = b''.join(dirs) + b''.join(blobs)
+    return b'WFPF' + struct.pack('<HHII', 1, nf, 16 + len(body), fnv(body)) + body
+
+
+def print_render_own(F, s):
+    """wf_print.c's algorithm in Python: {(x, y): coverage 0..15}, relative to the pen and the baseline"""
+    kern = {(a, b): k for a, b, k in F['kern']}
+    pen, prev, px = 0, None, {}
+    for c in s:
+        o = 127 if c == '·' else ord(c)
+        if not 32 <= o <= 127:
+            o = ord('?')
+        if prev is not None:
+            pen += kern.get((prev, o), 0)
+        adv, x, y, w, h, rows = F['gl'][o - 32]
+        gx = ((pen + 32) >> 6) + x
+        for j, r in enumerate(rows):
+            for i, v in enumerate(r):
+                if v:
+                    px[(gx + i, y - F['asc'] + j)] = max(v, px.get((gx + i, y - F['asc'] + j), 0))
+        pen += adv
+        prev = o
+    return px, (pen + 32) >> 6
+
+
+def print_check(fonts):
+    """the pack's rendering against PIL's own (whole string, anchor at the baseline): mean / max coverage error"""
+    from PIL import Image, ImageDraw
+    worst = 0.0
+    for F in fonts:
+        for s in ('Canon EOS M  /  EF-M15-45mm f/3.5-6.3 IS STM', '45mm   f/6.3   1/320s   ISO 320',
+                  'Portra 400  ·  Print Cine  ·  Grain Normal', 'ROLL 021 · 07/24', 'AVATAR To WAVY'):
+            own, w = print_render_own(F, s)
+            O = F['px']
+            im = Image.new('L', (w + 4 * O, 3 * O), 0)
+            ImageDraw.Draw(im).text((2 * O, 2 * O), s, font=F['f'], fill=255, anchor='ls')
+            ref = im.load()
+            err, n = 0, 0
+            for y in range(im.size[1]):
+                for x in range(im.size[0]):
+                    a = own.get((x - 2 * O, y - 2 * O), 0) * 17
+                    b = ref[x, y]
+                    if a or b:
+                        err += abs(a - b)
+                        n += 1
+            m = err / max(n, 1)
+            worst = max(worst, m)
+            print('print font %d px %r: mean |own - PIL| %.1f of 255 over %d px' % (F['px'], s, m, n))
+    return worst
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('out')
     ap.add_argument('--icons')
     ap.add_argument('--check', action='store_true')
     ap.add_argument('--render')
+    ap.add_argument('--print', dest='prt')
+    ap.add_argument('--print-only', action='store_true', help='OUT is the print font pack (WFPRINT.DAT) alone')
     a = ap.parse_args()
+    if a.print_only:
+        pf =[build_print_font(*p) for p in PRINT_FONTS]
+        pd = pack_print(pf)
+        with open(a.out, 'wb') as fp:
+            fp.write(pd)
+        print('%s: %d bytes, %d print fonts, kern pairs %s' % (a.out, len(pd), len(pf), [len(F['kern']) for F in pf]))
+        sys.exit(1 if a.check and print_check(pf) > 12 else 0)
     fonts = [build_font(*p) for p in FONTS]
     data = pack(fonts)
     with open(a.out, 'wb') as fp:
@@ -322,8 +534,16 @@ def main():
         print('icons ->', a.icons)
     if a.render:
         sheet(fonts, a.render)
-    if a.check:
-        sys.exit(1 if check(fonts) else 0)
+    bad = check(fonts) if a.check else 0
+    if a.prt:
+        pf = [build_print_font(*p) for p in PRINT_FONTS]
+        pd = pack_print(pf)
+        with open(a.prt, 'wb') as fp:
+            fp.write(pd)
+        print('%s: %d bytes, %d print fonts, kern pairs %s' % (a.prt, len(pd), len(pf), [len(F['kern']) for F in pf]))
+        if a.check and print_check(pf) > 12:
+            bad += 1
+    sys.exit(1 if bad else 0)
 
 
 if __name__ == '__main__':

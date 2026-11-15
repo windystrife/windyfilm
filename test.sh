@@ -23,9 +23,9 @@ S=$R/src
 H=$R/tests/host
 case $CAM in
   EOSM) ML=/root/ml/expsim/mls; PLAT=EOSM.202; CAMDEF=; CAMSRC=wf_cam_eosm.c
-        ALL="SHOT SHOT:nocam SHOT:busy FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA CLOG2 CUBE65 PROBE PROBE:boot RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy FX FXAB MIST EXIF EXPSIM CFG PACK LIGHT PRINT PRINT:chain SLOTS GREY STAGE STAGE:bad STAGE:missing HS LEICA CLOG2 CUBE65 PROBE PROBE:boot RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
   5D2)  ML=/root/ml/q5d2/ml; PLAT=5D2.212; CAMDEF=-DWF_BUILD_5D2; CAMSRC=wf_cam_5d2.c
-        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX MIST EXIF EXPSIM CFG PACK LIGHT PRINT HS LEICA CLOG2 CUBE65 RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
+        ALL="SHOT SHOT:nocam SHOT:busy 5D2 PROBE FX FXAB MIST EXIF EXPSIM CFG PACK LIGHT PRINT PRINT:chain SLOTS GREY STAGE STAGE:bad STAGE:missing HS LEICA CLOG2 CUBE65 RAWB ROLL LOG LOG:big LOG:new LOGCHK" ;;
   *) echo "CAM must be EOSM or 5D2"; exit 2 ;;
 esac
 ALL="$ALL SHOT:late SHOT:noworker"                 # the worker's late start (DryOS refused its task at boot)
@@ -33,6 +33,8 @@ ALL="$ALL LOG:odd"                                 # file handles odd as often a
 ALL="$ALL ROLL:save ROLL:short ROLL:back ROLL:lock" # the roll file on RAWB8's card (odd handles, empty file)
 ALL="$ALL ROLL:dark ROLL:boot"                     # RAWB9: roll frames without the look, the Darkroom with a full task table
 ALL="$ALL FX:bloom"                                # RAWB11: Bloom on its own row (halation alone, bloom alone, the old config)
+ALL="$ALL MIST:levels"                             # owner 11-15: every Mist level, the combo with Bloom + Halation, the long shot line
+ALL="$ALL STAGE:dark"                              # 11-15: the Darkroom's stage of a chain film, knob rows set, vs the camera's shot
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
 B=${OUT:-$R/build/$cam}
@@ -63,11 +65,11 @@ arm-none-eabi-gcc $MODFLAGS $MLFLAGS -Wno-unused-function -c -o $T/obj/wf_expoff
 HCC="arm-linux-gnueabi-gcc -O1 -marm -march=armv5te -Wall -Wno-unused-function -Wno-comment -Wno-format-truncation $CAMDEF -I$S -I$H -I$G"
 $HCC -c -o $T/obj/host_ml.o $H/host_ml.c
 $HCC -c -o $T/obj/wf_test.o $H/wf_test.c
-MOD="wf_main.o wf_menu.o wf_shot.o wf_pv.o wf_probe.o wf_loglut.o wf_llk.o wf_llk_arm.o wf_film.o yh_halo.o wf_mist.o yg_grain.o yg_stocks.o
+MOD="wf_main.o wf_menu.o wf_shot.o wf_pv.o wf_probe.o wf_loglut.o wf_llk.o wf_llk_arm.o wf_film.o wf_stagek.o yh_halo.o wf_mist.o yg_grain.o yg_stocks.o
  wf_fx.o wf_expsim.o wf_catalog.o wf_logout.o wf_rawb.o wf_roll.o wf_dark.o"
 [ -f $O/wf_expk.o ] && MOD="$MOD wf_expk.o"
 MOD="$MOD wf_dev.o wf_rsrc.o"                                     # RAW develop "B": the develop and the buffer check
-[ $CAM = EOSM ] && MOD="$MOD wf_darkp.o wf_cr2.o wf_jpe.o"        # Roll + Darkroom (DESIGN 3.6): linked, idle here
+[ $CAM = EOSM ] && MOD="$MOD wf_darkp.o wf_cr2.o wf_jpe.o wf_print.o"   # Roll + Darkroom (DESIGN 3.6, 3.9): linked, idle here
 arm-linux-gnueabi-gcc -static -pthread -o $T/wf_test $T/obj/wf_test.o $T/obj/host_ml.o $(for o in $MOD; do echo $O/$o; done) \
   $T/obj/wf_cam_host.o $T/obj/wf_ui_stub.o $T/obj/wf_expoff.o -lm -Wl,--no-enum-size-warning -Wl,--no-wchar-size-warning -Wl,--no-warn-execstack
 set +e
@@ -97,6 +99,20 @@ for m in $MODES; do
           done ;;
     PACK:real) [ -f $REAL ] && run PACK real $REAL || echo "  PACK_real      skipped (no $REAL)" ;;
     *:*) run ${m%%:*} ${m#*:} ;;
+    SLOTS|GREY)  # camera-independent table checks: SLOTS = the chain print stocks' label slots vs their tables
+                 # (tools/check_print_slots.py), GREY = the chain films' mid-grey vs the catalogue's (check_chain_grey.py)
+      t0=$(date +%s)
+      [ $m = SLOTS ] && chk=check_print_slots.py || chk=check_chain_grey.py
+      python3 -I -B $R/tools/$chk > $T/$m.log 2>&1
+      rc=$?
+      res=$(grep "^RESULT" $T/$m.log | tail -1)
+      p=$(echo "$res" | sed -n 's/.*: \([0-9]*\) pass.*/\1/p'); f=$(echo "$res" | sed -n 's/.* \([0-9]*\) fail.*/\1/p')
+      p=${p:-0}; f=${f:-1}
+      [ $rc = 0 ] || [ "$f" != 0 ] || f=1
+      TP=$((TP + p)); TF=$((TF + f))
+      printf "  %-14s %3d pass %3d fail  %4ds%s\n" $m $p $f $(( $(date +%s) - t0 )) "$([ $rc = 0 ] || echo "  (exit $rc, see $T/$m.log)")"
+      [ "$f" = 0 ] || { BAD="$BAD $m"; grep "^FAIL" $T/$m.log | head -8 | sed 's/^/      /'; }
+      grep "^note" $T/$m.log | sed 's/^/      /' ;;
     LOGCHK)
       arm-none-eabi-gcc $MODFLAGS -Dwf_log_words=ref_log_words -Dwf_lenc=ref_lenc -c -o $T/obj/logref.o $H/wf_logout_ref.c &&
       arm-linux-gnueabi-gcc -O2 -marm -march=armv5te -static -o $T/logchk $R/tools/logchk.c $T/obj/logref.o $O/wf_logout.o \

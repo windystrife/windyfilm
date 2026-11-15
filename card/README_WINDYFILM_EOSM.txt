@@ -4,6 +4,8 @@ WindyFilm cho Canon EOS M (firmware 2.0.2) - thẻ thử đầu tiên, 14/11/202
 Module Magic Lantern tạo màu phim cho ảnh JPEG ngay lúc chụp.
 Tác giả: WindyStrife. Giấy phép GPL-2.0 (LICENSE_WINDYFILM.txt).
 Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
+Bảng Film stage (lon G00..G44 trong WFFILMS.DAT và WFSTAGE.DAT) là dữ liệu dẫn xuất
+(DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
 Bản này sửa các lỗi thấy ở lần chạy thật đầu tiên (14/11, RAW probe): giờ
 trong log hiện "u.u", dòng log bị mất khi thẻ bận, WFPROBE.BIN thiếu một bản
@@ -50,17 +52,30 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
   2 giây các phím lại về Canon / menu ML: chạm 2 ngón vẫn mở menu ML.
 - Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
   WB của bạn được trả lại khi về Auto hoặc khi tắt module.
-- Hàng Print: Scan / Cine print / Paper (chỉ với phim có mô hình in).
-- Hàng Halation / Bloom (từ 15/11, hai hàng riêng; mặc định Film + Normal): Halation = viền đỏ cam quanh
-  điểm sáng (ánh sáng dội từ đế phim): Off / Film / Spektra. Bloom = quầng sáng mềm
-  cùng màu với chính điểm sáng: Off / Low / Normal / Strong. Bật riêng từng cái được
-  (Bloom không cần Halation và ngược lại); tắt cả hai thì không tốn thời gian. File
-  cài đặt cũ: "Film + bloom" thành Film + Bloom Normal, "Spektra + bloom" thành
-  Spektra + Bloom Normal. Cũng có trong menu ML (mục Bloom ngay dưới Halation).
+- Hàng Print stock (trước gọi là Print): Scan / Cine print / Paper với phim có mô
+  hình in; với lon Film stage là 15 print stock (mục 6).
+- Hàng Grain: Off / Fine / Normal / Strong (độ hạt đổi theo độ sáng của vùng ảnh) và
+  Even Fine / Even Normal / Even Strong (hạt như nhau ở mọi độ sáng). Mặc định Normal.
+- Hàng Halation / Bloom (từ 15/11, hai hàng riêng; mặc định Wide + Normal):
+  Halation = viền đỏ cam quanh điểm sáng (ánh sáng dội từ đế phim): Off / Wide /
+  Tight / Wrap. Wide = quầng rộng, đo theo từng phim (setting cũ "Film"). Tight =
+  quầng hẹp, sát điểm sáng (setting cũ "Spektra"). Wrap = ánh sáng tràn qua mép vật
+  sáng sang vùng tối kề bên; Wrap không đi cùng Bloom.
+  Bloom = quầng sáng mềm cùng màu với chính điểm sáng: Off / Low / Normal / Strong.
+  Bật riêng từng cái được (Bloom không cần Halation và ngược lại); tắt cả hai thì
+  không tốn thời gian. File cài đặt cũ: Film thành Wide, Spektra thành Tight, "Film +
+  bloom" thành Wide + Bloom Normal, "Spektra + bloom" thành Tight + Bloom Normal.
+  Cũng có trong menu ML (mục Bloom ngay dưới Halation). Halation và Bloom chỉ chạy
+  với ảnh 3:2.
+- Hàng Gauge: 16 mm / 35 mm / 65 mm (mặc định 35 mm = như trước). Khổ phim giả lập:
+  16 mm hạt thô hơn và quầng halation / bloom rộng hơn; 65 mm hạt mịn hơn, quầng hẹp
+  hơn. Chỉ có tác dụng khi Grain, Halation hoặc Bloom đang bật. EXIF ghi "| Gauge
+  16 mm" (không ghi khi 35 mm).
 - Hàng Highlights / Shadows: -5 .. +5, mặc định 0. Dương làm sáng vùng sáng /
   nâng vùng tối, âm làm tối. Áp cho phim và Log + LUT (cả lon Film LUT), không
-  áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 10 hàng: hiện 7,
-  danh sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
+  áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 18 hàng (7 hàng cuối
+  chỉ dùng với lon Film stage, mục 6; hàng không dùng được thì mờ): hiện 7, danh
+  sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.
 - Lon Leica Vivid (nhóm Film LUT, cần ML/data/LEICAVSR.CUB): look "L Leica 2"
@@ -108,7 +123,9 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 1. ML/LOGS/WINDYFLM.LOG sau khi bật máy phải có:
      hook NN ff169414 rom e92d41fc err 0
      hooks: installed (0)
-     pack ok: 49 tables
+     pack ok: 692 tables, index NNms, catalog 97 films
+     stage ok: 643 of 643 pairs match the pack (44 negatives, 15 prints), index NNms
+   (dòng "stage ok" là của Film stage, xem mục 7).
 2. Chụp một ảnh mỗi chế độ: phim (Print Scan / Cine / Paper), Log, Log + LUT,
    một lon Film LUT. Mỗi ảnh có dòng "yuv NN ..." trong log.
 3. Light Day / Cloudy / Tungsten rồi về Auto: WB trở lại như cũ.
@@ -197,12 +214,129 @@ Mỗi tấm có các dòng "rawb: ..." trong log: bộ đệm RAW đã chọn, �
 mức đen / trắng và thời gian từng bước.
 
 
-6. FILE TRÊN THẺ
+6. FILM STAGE: ÂM BẢN x PRINT STOCK (15/11)
+-------------------------------------------
+Vào: trong trình chọn phim, chạm 1 ngón để qua nhóm kế tiếp: Colour -> Cine -> B&W
+-> Film LUT -> Film stage (nhóm cuối, biểu tượng lon tím). Nhóm có 44 lon, mã G00 ..
+G44 (không có G33), vẽ theo màu hãng: Kodak Vision3 / Vision2 / Vision / EXR / ECN /
+Double-X / Primetime, Fujifilm Eterna / Eterna Vivid / Reala / Super F / Color A.
+
+Phim chuỗi (chain film): mỗi lon là một phim âm bản điện ảnh (ví dụ Vision3 5219
+500T). Ảnh cuối = âm bản đó được in lên một print stock (phim in chiếu rạp), chọn ở
+hàng Print stock. Mỗi cặp âm bản x print có bảng màu 17^3 riêng trong WFFILMS.DAT.
+- ISO và nhiệt độ màu trên header là của âm bản thật: 33 phim T (tungsten) 3200 K,
+  11 phim D (daylight) 5200 K, Double-X 5222 EI 250. Light Day với phim T đặt 3200 K:
+  ảnh ngoài trời ngả xanh như phim tungsten không kính lọc. Light Auto giữ WB của
+  bạn (giống gắn kính lọc 85).
+
+Hàng Print stock: 15 print:
+    2302      Kodak B&W Print Film 2302              (ĐEN TRẮNG)
+    2383      Kodak Vision Color 2383                (MẶC ĐỊNH)
+    2393      Kodak Vision Premier Color 2393
+    2395      Kodak Vision Color Teleprint 2395 500T
+    5380      Eastman Color Print LC 5380
+    5381/50   Eastman Color Print 5381 (1950)
+    5381/72   Eastman Color Print 5381 (1972)
+    5382      Eastman Color Print 5382
+    5384/82   Eastman Color Print 5384 (1982)
+    5384/92   Eastman Color Print 5384 (1992)
+    5385/93   Eastman Color Print LC 5385 (1993)
+    5385/62   Eastman Color Print 5385 (1962)
+    5386      Eastman EXR Color Print 5386
+    5383      Eastman Color Print 5383
+    3523XD    Fuji Eterna-CP 3523XD
+- Mặc định là 2383 (bản in rạp phổ biến nhất): lon Film stage không có Scan. Khi
+  hàng Print stock đang là Scan (mặc định của mọi phim) hoặc là print mà âm bản đó
+  không có, máy dùng Kodak Vision Color 2383. Chỉ 2302 là bản in đen trắng.
+- Double-X 5222 (G09) là âm bản đen trắng: chỉ in lên 2302 (hàng Print stock chỉ có
+  2302 và đứng sẵn ở đó), nhãn B&W NEG, ảnh đen trắng, hạt và halation kiểu phim đen
+  trắng. 43 lon còn lại là âm bản màu.
+- Không có Fuji Eterna-CP Type 3513D: chuỗi không có bảng của print này.
+- Năm cặp cho ảnh giống hệt nhau trên mọi âm bản (cùng một bảng): 2383 = 2393,
+  5380 = 5381/72, 2395 = 5384/82, 5384/92 = 5385/93, 5385/62 = 5386. Cả hai tên được
+  giữ như danh sách gốc; thực tế có 10 kiểu in khác nhau.
+- ECN-I 5248 25T (G17) chỉ có 12 print (thiếu 2302, 5383, 3523XD).
+- Trình chọn hiện tên đầy đủ khi vừa chỗ; menu ML hiện mã, tên đầy đủ ở dòng help.
+  EXIF ghi tên đầy đủ ("| Print Kodak Vision Color 2383").
+- Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights / Shadows dùng như phim
+  thường (mục 2).
+
+7 hàng cuối (hàng knob) chỉnh chính chuỗi âm bản -> print. Chỉ dùng được khi: lon
+Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ thì hàng mờ.
+    Film exp ....... -2 .. +2 stop, bước 1/3, mặc định 0. Phơi sáng âm bản: dương =
+                     phơi dư (ảnh sáng hơn), âm = phơi thiếu (tối hơn).
+    Push / pull .... Pull 1 .. Push 1, bước 1/3, mặc định 0. Trong mô hình này push /
+                     pull chỉ là dịch phơi sáng, cộng dồn với Film exp.
+    Exp comp ....... Off / On. On: bỏ Film exp và Push / pull (hai hàng mờ đi), giữ
+                     phơi sáng đã khớp (xám 18 % ra đúng xám giữa).
+    Printer R / G / B  -12 .. +12 điểm, mặc định 0; mỗi điểm 0,025 logE. Đèn in từng
+                     màu như máy in phim: thêm điểm = thêm ánh sáng màu đó lên print,
+                     bản in ngả về màu đối (R+ ngả xanh lơ, G+ ngả hồng tím, B+ ngả
+                     vàng) và tối hơn chút. Cả ba cùng +: tối hơn, cùng -: sáng hơn.
+    Interlayer ..... 0 .. 200 %, bước 25 %, mặc định 100 % (= của chuỗi). Hiệu ứng
+                     giữa các lớp màu: thấp = màu nhạt và lẫn hơn, cao = màu tách và
+                     đậm hơn.
+- Để mặc định hết (0 / 0 / Off / 0 0 0 / 100 %) thì máy dùng bảng có sẵn trong
+  WFFILMS.DAT như mọi phim, không đọc WFSTAGE.DAT.
+- Đổi một hàng knob (hoặc đổi phim / print khi knob khác mặc định): máy dựng bảng mới
+  từ WFSTAGE.DAT. Không đọc cả file 22,4 MB: lúc bật máy chỉ đọc mục lục (khoảng
+  20 KB); mỗi lần dựng đọc khoảng 650 KB của đúng cặp đó (nửa âm bản 435 KB, rồi
+  nửa print 217 KB, cần khoảng 470 KB bộ nhớ tạm, trả lại ngay), tính toán khoảng
+  20 ms trên EOS M. Log: "stage G08 v4 composed NNms k..." (bảng dựng từ knob) hoặc
+  "pack G08 v4 loaded NNms" (bảng có sẵn). G08 = mã lon, v4 = print (v3 = 2302, v4 =
+  2383 .. v18 = 3523XD).
+- Cấu hình ghi dòng "stage=fexp,push,comp,r,g,b,iie". EXIF thêm "| Film exp +1",
+  "| Push 1/3", "| Exp comp", "| Printer R+6 G0 B0", "| Interlayer 50%" khi khác mặc định.
+- Darkroom (cuộn phim) dùng cùng bảng và cùng các hàng: xem HUONGDAN_DARKROOM_EOSM.txt.
+
+
+7. FILM STAGE: LẦN CHẠY ĐẦU
+---------------------------
+1. Thẻ phải có ML/DATA/WFSTAGE.DAT (22 409 848 B; md5 trong MD5SUMS.txt). Bật máy,
+   WINDYFLM.LOG phải có:
+     pack ok: 692 tables, index NNms, catalog 97 films
+     stage ok: 643 of 643 pairs match the pack (44 negatives, 15 prints), index NNms
+   Ghi lại hai số "index NNms" (thời gian đọc mục lục). Nếu thay vào đó là
+   "stage ML/DATA/WFSTAGE.DAT missing (-1): film-stage knob rows hidden" thì thẻ thiếu
+   file; "... bad (-N) ..." là file hỏng hoặc khác bản: chép lại và kiểm MD5SUMS.txt.
+   Thiếu file thì lon Film stage vẫn chụp được, chỉ mất 7 hàng knob.
+2. Nhóm Film stage: lon có màu hãng, header đúng phim (ví dụ G08 Vision3 5219 500T:
+   ISO 500, 3200 K). Nạp G08, để Print stock mặc định: hàng hiện "Kodak Vision Color
+   2383". Chụp 1 tấm: ảnh màu. Log "pack G08 v4 loaded NNms".
+3. Print stock 2302: chụp, ảnh ĐEN TRẮNG, log "pack G08 v3 loaded". Rồi 2393, cùng cảnh
+   với tấm ở bước 2: ảnh phải giống hệt tấm 2383 (cặp trùng). Trong hàng Print stock
+   không có 3513D. Nạp G09 Double-X 5222: hàng Print stock chỉ có 2302, ảnh đen trắng,
+   log "pack G09 v3 loaded". Nạp lại G08 cho các bước sau.
+4. Print stock về 2383, Film exp +1, chụp. Log
+   "stage G08 v4 composed NNms k...": ghi lại NN (dự tính
+   khoảng 20 ms tính + thời gian đọc khoảng 650 KB từ thẻ). Ảnh sáng hơn tấm ở bước 2.
+   EXIF có "| Film exp +1". Chụp thêm 1 tấm ngay sau: không dựng lại (không có dòng
+   composed mới).
+5. Film exp về 0, Printer R +6: ảnh ngả xanh lơ so với bước 2 (ghi lại nếu ngả đỏ).
+   EXIF "| Printer R+6 G0 B0". Printer R về 0, Printer B +6: ngả vàng.
+6. Film exp +1, Exp comp On: Film exp và Push / pull mờ đi, ảnh như bước 2; EXIF có
+   "| Exp comp".
+7. Exp comp Off, Film exp 0, Interlayer 0 % rồi 200 %: màu nhạt rồi đậm hơn.
+8. Grain Normal, Halation Wide, Gauge 16 mm: hạt to hơn, quầng rộng hơn so với 35 mm;
+   65 mm: mịn hơn, quầng hẹp hơn. EXIF "| Gauge 16 mm".
+9. Bộ nhớ: lặp bước 4 với LiveView đang bật, và một lần với RAW develop On. Nếu log có
+   "stage: no memory for a half (N B) in 3000ms: film-stage knobs dropped" thì máy bỏ
+   các hàng knob và dùng bảng mặc định: ghi lại lúc đó đang làm gì.
+10. Đổi nhanh nhiều hàng knob rồi chụp ngay: ghi lại tấm đầu có phải chờ không.
+11. Tắt máy bật lại: 7 hàng knob giữ giá trị đã đặt.
+Gửi: ML/LOGS/WINDYFLM.LOG, ML/SETTINGS/WINDYFLM.CFG và các JPG (kèm CR2 nếu chụp RAW+L).
+
+
+8. FILE TRÊN THẺ
 ----------------
 ML/modules/windyflm.mo    module
-ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper)
+ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper, và 643 cặp Film stage)
+ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 643 cặp Film stage (22,4 MB),
+                          cho 7 hàng knob (mục 6); thiếu thì các hàng đó mờ.
+                          Dữ liệu dẫn xuất, chỉ dùng riêng
 ML/data/WFCANS.DAT        hình lon phim
 ML/data/WFFONTS.DAT       font chữ của giao diện (Ubuntu Sans, UBUNTU_FONT_LICENCE.txt)
+ML/data/WFPRINT.DAT       font chữ in dưới ảnh của Darkroom (viền + thông tin, Ubuntu Sans)
 ML/data/*.CUB             cube Film LUT (README_FILMLUT.txt)
 ML/SETTINGS/WINDYFLM.CFG  cấu hình (module tự ghi)
 ML/LOGS/WINDYFLM.LOG      nhật ký, ghi nối tiếp qua các lần bật máy; mỗi lần

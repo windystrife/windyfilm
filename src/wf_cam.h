@@ -32,7 +32,7 @@
 #define WF_MIST_CAN             1
 #define WF_MIST_SCALE           256
 #define WF_GRAIN_DEF_CAM        2
-#define WF_HALO_DEF_CAM         1        /* Film + Bloom Normal = the old "Film + bloom" default */
+#define WF_HALO_DEF_CAM         1        /* Wide + Bloom Normal = the old default "Wide + Glow" */
 #define WF_BLOOM_DEF_CAM        2
 #define WF_HALO_W               5184
 #define WF_HALO_H               3456

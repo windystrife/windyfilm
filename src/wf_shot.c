@@ -105,13 +105,32 @@ static uint32_t wf_dt(uint32_t a, uint32_t b) { return b - a; }
 
 /* ------------------------------------------------------------------ the look of a shot */
 int wf_cat_index(int id);
+/* the variant a shot really uses: the wanted one if the film HAS it, else the film's first variant (a chain film:
+ * WF_PRINT_CHAIN_DEF when it has it, as wf_menu.c wf_print_first, so the shot uses the print the row shows); and if
+ * the pack does not CARRY that variant at all, the first variant it does carry (the chain films have no Scan - their
+ * variants are the print stocks - so the fallback is what makes them usable). A variant the pack carries but whose
+ * table fails its checksum is kept, not swapped: the shot then ends with ": notab" as it always did. */
 static int wf_variant_eff(int k, int v)
 {
     const struct wf_film *f = &wf_films[k];
-    if (v < 0 || v >= WF_NPRINTS || !(f->prints & (1u << v)))
-        v = WF_PRINT_SCAN;
-    if (v != WF_PRINT_SCAN && wf_ws_state() == 1 && !wf_ws_has(k, v) && wf_ws_has(k, WF_PRINT_SCAN))
-        v = WF_PRINT_SCAN;                       /* the pack lacks that print: the scan */
+    int w;
+    if (v < 0 || v >= WF_NPRINTS || !(f->prints & (1u << v))) {
+        if (!(f->prints & (1u << WF_PRINT_SCAN)) && (f->prints & (1u << WF_PRINT_CHAIN_DEF)))
+            v = WF_PRINT_CHAIN_DEF;
+        else {
+            for (v = 0; v < WF_NPRINTS && !(f->prints & (1u << v)); v++)
+                ;
+            if (v >= WF_NPRINTS)
+                v = WF_PRINT_SCAN;
+        }
+    }
+    if (wf_ws_state() == 1 && !wf_ws_listed(k, v)) {
+        for (w = 0; w < WF_NPRINTS; w++)
+            if ((f->prints & (1u << w)) && wf_ws_listed(k, w)) {
+                v = w;
+                break;
+            }
+    }
     return v;
 }
 
@@ -125,7 +144,8 @@ int wf_look_now(struct wf_look *lk)
     lk->lei = (int8_t)wf_lut_ei_t();
     lk->incurve = (uint8_t)wf_incurve_t();
     lk->strength = s >= 0 && s < WF_NSTRENGTH ? s : 1;
-    lk->grain = (uint8_t)wf_grain; lk->halo = (uint8_t)wf_halo; lk->mist = (uint8_t)wf_mist; lk->bloom = (uint8_t)wf_bloom;
+    lk->grain = (uint8_t)wf_grain; lk->halo = (uint8_t)wf_halo; lk->mist = (uint8_t)wf_mist;
+    lk->bloom = (uint8_t)wf_bloom; lk->gauge = (uint8_t)wf_gauge;
     lk->light = (uint8_t)wf_light;
     switch (out) {
     case WF_OUT_FILM:
@@ -137,6 +157,19 @@ int wf_look_now(struct wf_look *lk)
         lk->output = WF_OUT_FILM;
         lk->row = (int16_t)k;
         lk->variant = (uint8_t)wf_variant_eff(k, wf_print);
+        if (wf_sg_has(k, lk->variant)) {         /* a film-stage pair: its knob rows pick a composed table */
+            struct wf_sg_knobs kn;
+            wf_sg_knobs_now(&kn);
+            lk->stk = wf_sg_key(&kn);
+            if (lk->stk) {
+                lk->sexp = (int8_t)kn.fexp;
+                lk->spush = (int8_t)kn.push;
+                lk->scomp = (uint8_t)kn.comp;
+                for (int c = 0; c < 3; c++)
+                    lk->sprn[c] = (int8_t)kn.prn[c];
+                lk->siie = (uint8_t)kn.iie;
+            }
+        }
         lk->hl = (int8_t)wf_hl_t();
         lk->sh = (int8_t)wf_sh_t();
         lk->ftflags = wf_cat_ftflags[k] | WF_FT_S(wf_strength_pct(lk->strength)) | WF_FT_HS(lk->hl, lk->sh);
@@ -339,7 +372,7 @@ static void wf_ll_poll(void)
 #define WF_WS_MAXROW 128                         /* catalogue rows (ids 26..127: at most 102) */
 #define WF_WS_KEYS   (WF_WS_MAXROW * WF_NPRINTS)
 #define WF_WS_KEY(row, v) ((row) * WF_NPRINTS + (v))
-struct wf_wsbuf { uint32_t T[WF_WS_WORDS]; int key; uint32_t ser; };
+struct wf_wsbuf { uint32_t T[WF_WS_WORDS]; int key; uint32_t ser, stk; };   /* stk: film-stage knob key, 0 = pack's */
 static struct wf_wsbuf wf_wsb[2];
 static struct wf_wsbuf *volatile wf_ws_pub;
 static const struct wf_wsbuf *volatile wf_ws_hold;
@@ -349,7 +382,7 @@ static uint8_t wf_ws_checked[WF_WS_KEYS];
 static volatile int wf_ws_st;                    /* 0 index not read, 1 read, < 0 missing (-1) / bad (-2..) */
 static uint32_t wf_ws_serial;
 static int wf_ws_sweep_i, wf_ws_shot_key = -1, wf_ws_waited;
-static uint32_t wf_ws_shot_ser;
+static uint32_t wf_ws_shot_ser, wf_ws_shot_stk;
 static int wf_half_ws;
 
 int wf_ws_state(void) { return wf_ws_st; }
@@ -357,6 +390,14 @@ int wf_ws_has(int row, int v)
 {
     return row >= 0 && row < wf_nfilms && row < WF_WS_MAXROW && v >= 0 && v < WF_NPRINTS && wf_ws_st == 1
         && wf_ws_ok[WF_WS_KEY(row, v)];
+}
+/* the pack's index LISTS this film and variant, whatever became of its table afterwards: a table that fails its
+ * checksum is listed but not good, and that difference is what keeps a corrupt table from being swapped for another
+ * look (the shot must end with ": notab") while a variant the pack simply does not carry falls back to one it does. */
+int wf_ws_listed(int row, int v)
+{
+    return row >= 0 && row < wf_nfilms && row < WF_WS_MAXROW && v >= 0 && v < WF_NPRINTS && wf_ws_st == 1
+        && wf_ws_off[WF_WS_KEY(row, v)] != 0;
 }
 
 static uint32_t wf_fnv1(uint32_t h, const uint8_t *p, uint32_t n)
@@ -446,7 +487,7 @@ static void wf_ws_index(void)
     if (rc)
         wf_log("pack %s %s (%d): films stay plain", WF_WS_PACK, rc == -1 ? "missing" : "bad", rc);
     else
-        wf_log("pack ok: %d tables, index %dms", nok, get_ms_clock() - t0);
+        wf_log("pack ok: %d tables, index %dms, catalog %d films", nok, get_ms_clock() - t0, wf_nfilms);
     wf_gen_bump();
 }
 
@@ -470,12 +511,187 @@ static void wf_ws_bad(int key, int rc)
     wf_gen_bump();
 }
 
-/* the table the next shot (and the preview) uses: key + 1, 0 = none */
-static int wf_ws_want(void)
+/* ------------------------------------------------------------------ ML/DATA/WFSTAGE.DAT (film-stage knobs, wf_stagek.h)
+ * The film-stage films' two halves (tools/mk_wfstage.py): at default knobs a shot uses the pack's table as before; when a
+ * knob row moves, wf_task reads the film's negative half, runs pass 1, frees it, reads the print half, runs pass 2 into
+ * the spare table buffer and publishes it like a loaded table (key + knob key). An entry is taken only when WFFILMS.DAT
+ * holds the very table it was made with (FNV of the .T17), so a stage pack never composes against another build's
+ * tables; any read / checksum / memory failure drops the knobs (the film keeps its pack table), never the film. */
+#define WF_SG_PACK   "ML/DATA/WFSTAGE.DAT"
+#define WF_SG_HDR    64
+#define WF_SG_IENT   28
+#define WF_SG_MAXE   768                         /* entries (the catalogue's chain pairs: about 700) */
+#define WF_SG_MAXN   64                          /* negative halves */
+#define WF_SG_MAXP   32                          /* print halves */
+#define WF_SG_NOMEM_MS 3000                      /* no memory for a half this long: the knobs are dropped */
+struct wf_sg_ent { uint8_t nb, pb; struct wf_sg_pair pr; };
+static struct wf_sg_ent wf_sg_e[WF_SG_MAXE];
+static uint16_t wf_sg_map[WF_WS_KEYS];           /* key -> entry + 1, 0 = none */
+static uint32_t wf_sg_noff, wf_sg_poff, wf_sg_nfnv[WF_SG_MAXN], wf_sg_pfnv[WF_SG_MAXP];
+static volatile uint8_t wf_sg_nbad[WF_SG_MAXN], wf_sg_pbad[WF_SG_MAXP];
+static volatile int wf_sg_st;                    /* 0 not read, 1 read, < 0 missing (-1) / bad (-2..) / no memory (-7) */
+static int wf_sg_nomem_t0;
+
+int wf_sg_state(void) { return wf_sg_st; }
+int wf_sg_has(int row, int v)
+{
+    if (wf_sg_st != 1 || row < 0 || row >= wf_nfilms || row >= WF_WS_MAXROW || v < 0 || v >= WF_NPRINTS)
+        return 0;
+    int key = WF_WS_KEY(row, v), e = wf_sg_map[key];
+    return e && wf_ws_ok[key] && !wf_sg_nbad[wf_sg_e[e - 1].nb] && !wf_sg_pbad[wf_sg_e[e - 1].pb];
+}
+
+static void wf_sg_index(void)
+{
+    uint32_t sz = 0, h = 2166136261u;
+    int rc = -1, nok = 0, t0 = get_ms_clock();
+    uint32_t n = 0, nn = 0, np = 0;
+    void *f = 0;
+    uint8_t *ix = 0;
+    char *dma = __mem_malloc(WF_WS_CHUNK, WF_MEM_DMA | WF_MEM_TMP, "wf_shot.c", __LINE__);
+    if (!dma)
+        return;
+    if (FIO_GetFileSize(WF_SG_PACK, &sz) == 0 && (f = FIO_OpenFile(WF_SG_PACK, 0)) != 0) {
+        uint8_t hd[WF_SG_HDR];
+        rc = wf_ws_rd(f, dma, 0, hd, WF_SG_HDR, &h, 0) ? -2 : 0;
+        n = hd[6] | hd[7] << 8;
+        nn = hd[8] | hd[9] << 8;
+        np = hd[10] | hd[11] << 8;
+        uint32_t io = wf_u32(hd + 28), no = wf_u32(hd + 32), po = wf_u32(hd + 36), dof = wf_u32(hd + 40);
+        uint32_t pof = wf_u32(hd + 44);
+        if (!rc && (hd[0] != 'W' || hd[1] != 'F' || hd[2] != 'S' || hd[3] != 'G' || (hd[4] | hd[5] << 8) != 1
+                    || (hd[12] | hd[13] << 8) != WF_SG_NA || (hd[14] | hd[15] << 8) != WF_SG_NB
+                    || (hd[16] | hd[17] << 8) != WF_SG_N1 || (hd[18] | hd[19] << 8) != WF_SG_NX
+                    || wf_u32(hd + 20) != sizeof(struct wf_sg_neg) || wf_u32(hd + 24) != sizeof(struct wf_sg_prn)
+                    || n == 0 || n > WF_SG_MAXE || nn == 0 || nn > WF_SG_MAXN || np == 0 || np > WF_SG_MAXP
+                    || io != WF_SG_HDR || no != io + n * WF_SG_IENT || po != no + 4 * nn || dof < po + 4 * np
+                    || (dof & 3) || pof != dof + nn * sizeof(struct wf_sg_neg)
+                    || wf_u32(hd + 52) != sz || sz != pof + np * sizeof(struct wf_sg_prn)))
+            rc = -3;                             /* not our pack (format / version / size) */
+        if (!rc && !(ix = __mem_malloc(po + 4 * np - io, WF_MEM_TMP, "wf_shot.c", __LINE__)))
+            rc = -4;
+        h = 2166136261u;
+        if (!rc && (wf_ws_rd(f, dma, io, ix, po + 4 * np - io, &h, 0) || h != wf_u32(hd + 48)))
+            rc = -5;                             /* index unreadable / its checksum */
+        if (!rc) {
+            wf_sg_noff = dof;
+            wf_sg_poff = pof;
+            for (uint32_t i = 0; i < nn; i++)
+                wf_sg_nfnv[i] = wf_u32(ix + (no - io) + 4 * i);
+            for (uint32_t i = 0; i < np; i++)
+                wf_sg_pfnv[i] = wf_u32(ix + (po - io) + 4 * i);
+        }
+        for (uint32_t i = 0; !rc && i < n; i++) {
+            const uint8_t *e = ix + i * WF_SG_IENT;
+            int k = wf_cat_index(e[0]), v = e[1];
+            if (k < 0 || k >= WF_WS_MAXROW || v >= WF_NPRINTS || e[2] >= nn || e[3] >= np || !wf_u32(e + 20))
+                continue;
+            int key = WF_WS_KEY(k, v);
+            const char *code = wf_films[k].code;
+            int same = 1, end = 0;
+            for (int c = 0; c < 8; c++) {
+                char cc = end ? 0 : code[c];
+                if (!cc)
+                    end = 1;
+                same &= e[4 + c] == (uint8_t)cc;
+            }
+            if (!same || wf_sg_map[key] || !wf_ws_off[key] || wf_ws_fnv[key] != wf_u32(e + 24))
+                continue;                        /* id, code and the very table WFFILMS.DAT holds (and once) */
+            struct wf_sg_ent *s = &wf_sg_e[nok];
+            s->nb = e[2];
+            s->pb = e[3];
+            s->pr.fit = (int32_t)wf_u32(e + 12);
+            s->pr.bk = (int32_t)wf_u32(e + 16);
+            s->pr.inv = wf_u32(e + 20);
+            wf_sg_map[key] = (uint16_t)(++nok);
+        }
+    }
+    if (ix) __mem_free(ix);
+    if (dma) __mem_free(dma);
+    if (f) FIO_CloseFile(f);
+    if (rc == -4)
+        return;                                  /* no memory for the index: next poll */
+    wf_sg_st = rc ? rc : 1;
+    if (rc)
+        wf_log("stage %s %s (%d): film-stage knob rows hidden", WF_SG_PACK, rc == -1 ? "missing" : "bad", rc);
+    else
+        wf_log("stage ok: %d of %d pairs match the pack (%d negatives, %d prints), index %dms", nok, (int)n, (int)nn,
+               (int)np, get_ms_clock() - t0);
+    wf_gen_bump();
+}
+
+/* the composed table of pack key and knob key stk into T: 0, -2 no memory now (next poll), else the half that failed
+ * is marked bad (-4 negative, -5 print; a failed open drops the whole stage pack) */
+static int wf_sg_make(int key, uint32_t stk, uint32_t *T)
+{
+    const struct wf_sg_ent *e = &wf_sg_e[wf_sg_map[key] - 1];
+    struct wf_sg_knobs kn;
+    uint32_t h = 2166136261u;
+    int rc;
+    void *mem;
+    wf_sg_unkey(stk, &kn);
+    void *f = FIO_OpenFile(WF_SG_PACK, 0);
+    char *dma = f ? __mem_malloc(WF_WS_CHUNK, WF_MEM_DMA | WF_MEM_TMP, "wf_shot.c", __LINE__) : 0;
+    uint16_t *pd = dma ? __mem_malloc(WF_SG_NODES * 3 * sizeof(uint16_t), WF_MEM_TMP, "wf_shot.c", __LINE__) : 0;
+    mem = pd ? __mem_malloc(sizeof(struct wf_sg_neg), WF_MEM_TMP, "wf_shot.c", __LINE__) : 0;
+    rc = !f ? -1 : !mem ? -2 : 0;
+    if (!rc && (wf_ws_rd(f, dma, wf_sg_noff + e->nb * sizeof(struct wf_sg_neg), mem, sizeof(struct wf_sg_neg), &h, 0)
+                || h != wf_sg_nfnv[e->nb]))
+        rc = -4;                                 /* negative half unreadable / its checksum */
+    if (!rc)
+        wf_sg_neg_pass(mem, &e->pr, &kn, pd);
+    if (mem) __mem_free(mem);
+    mem = 0;
+    if (!rc) {
+        h = 2166136261u;
+        mem = __mem_malloc(sizeof(struct wf_sg_prn), WF_MEM_TMP, "wf_shot.c", __LINE__);
+        rc = !mem ? -2 : 0;
+        if (!rc && (wf_ws_rd(f, dma, wf_sg_poff + e->pb * sizeof(struct wf_sg_prn), mem, sizeof(struct wf_sg_prn), &h, 0)
+                    || h != wf_sg_pfnv[e->pb]))
+            rc = -5;                             /* print half unreadable / its checksum */
+        if (!rc)
+            wf_sg_prn_pass(mem, &e->pr, pd, (wf_films[key / WF_NPRINTS].flags & WF_F_BW) != 0, T);
+    }
+    if (mem) __mem_free(mem);
+    if (pd) __mem_free(pd);
+    if (dma) __mem_free(dma);
+    if (f) FIO_CloseFile(f);
+    if (rc == -2 && f && dma) {                  /* the DMA buffer alone is retried quietly; a half's memory is timed */
+        if (!wf_sg_nomem_t0)
+            wf_sg_nomem_t0 = get_ms_clock() | 1;
+        else if (get_ms_clock() - wf_sg_nomem_t0 >= WF_SG_NOMEM_MS) {
+            wf_sg_st = -7;
+            wf_log("stage: no memory for a half (%d B) in %dms: film-stage knobs dropped", (int)sizeof(struct wf_sg_neg),
+                   WF_SG_NOMEM_MS);
+            wf_gen_bump();
+        }
+        return -2;
+    }
+    wf_sg_nomem_t0 = 0;
+    if (rc == -1) {
+        wf_sg_st = -1;
+        wf_log("stage %s: cannot open, film-stage knob rows hidden", WF_SG_PACK);
+        wf_gen_bump();
+    } else if (rc == -4 || rc == -5) {
+        if (rc == -4)
+            wf_sg_nbad[e->nb] = 1;
+        else
+            wf_sg_pbad[e->pb] = 1;
+        wf_log("stage %s half %d bad: its films keep their pack tables", rc == -4 ? "negative" : "print",
+               rc == -4 ? e->nb : e->pb);
+        wf_gen_bump();
+    }
+    return rc;
+}
+
+/* the table the next shot (and the preview) uses: key + 1, 0 = none; *stk its knob key (0 = the pack's table) */
+static int wf_ws_want(uint32_t *stk)
 {
     struct wf_look lk;
+    *stk = 0;
     if (wf_look_now(&lk) != WF_OUT_FILM || lk.row >= WF_WS_MAXROW)
         return 0;
+    *stk = lk.stk;
     return WF_WS_KEY(lk.row, lk.variant) + 1;
 }
 
@@ -489,27 +705,36 @@ void wf_ws_poll(void)
         wf_ws_index();
     if (wf_ws_st <= 0)
         return;
-    int w = wf_ws_want() - 1;
+    if (!wf_sg_st)
+        wf_sg_index();                           /* after the pack's: an entry must name a table the pack holds */
+    uint32_t stk;
+    int w = wf_ws_want(&stk) - 1;
+    if (w >= 0 && stk && !wf_sg_has(w / WF_NPRINTS, w % WF_NPRINTS))
+        return;                                  /* the knobs were just dropped: the next look has stk 0 */
     struct wf_wsbuf *p = wf_ws_pub;
-    if (w >= 0 && wf_ws_ok[w] && !(p && p->key == w)) {
+    if (w >= 0 && wf_ws_ok[w] && !(p && p->key == w && p->stk == stk)) {
         struct wf_wsbuf *x = p == &wf_wsb[0] ? &wf_wsb[1] : &wf_wsb[0];
         if (x == wf_ws_hold)
             return;                              /* the worker still builds from it */
         int t0 = get_ms_clock();
         x->key = -1;
-        int rc = wf_ws_read(w, x->T);
+        int rc = stk ? wf_sg_make(w, stk, x->T) : wf_ws_read(w, x->T);
         if (rc == -2)
-            return;                              /* no DMA buffer now: next poll */
+            return;                              /* no memory now: next poll */
         if (rc) {
-            wf_ws_bad(w, rc);
+            if (!stk)
+                wf_ws_bad(w, rc);                /* (a stage failure is logged and marked by wf_sg_make) */
             return;
         }
         x->ser = ++wf_ws_serial;
+        x->stk = stk;
         x->key = w;
         WF_BARRIER();
         wf_ws_pub = x;
-        wf_ws_checked[w] = 1;
-        wf_log("pack %s v%d loaded %dms", wf_films[w / WF_NPRINTS].code, w % WF_NPRINTS, get_ms_clock() - t0);
+        if (!stk)
+            wf_ws_checked[w] = 1;
+        wf_log(stk ? "stage %s v%d composed %dms k%x" : "pack %s v%d loaded %dms", wf_films[w / WF_NPRINTS].code,
+               w % WF_NPRINTS, get_ms_clock() - t0, (int)stk);
         return;
     }
     int nk = wf_nfilms * WF_NPRINTS;
@@ -542,20 +767,22 @@ static void wf_park_sleep(void)
     WF_BARRIER();
 }
 
-/* worker: the published table of key, held until the caller clears wf_ws_hold; 0 = not within ~1 s / not in the pack */
-static const struct wf_wsbuf *wf_ws_take(int key)
+/* worker: the published table of key made for knob key stk, held until the caller clears wf_ws_hold; 0 = not within
+ * ~1 s / not in the pack / its knobs dropped meanwhile */
+static const struct wf_wsbuf *wf_ws_take(int key, uint32_t stk)
 {
     int t0 = get_ms_clock();
     for (;;) {
         const struct wf_wsbuf *b = wf_ws_pub;
         wf_ws_hold = b;
         WF_BARRIER();
-        if (b && b == wf_ws_pub && b->key == key) {
+        if (b && b == wf_ws_pub && b->key == key && b->stk == stk) {
             wf_ws_waited = get_ms_clock() - t0;
             return b;
         }
         wf_ws_hold = 0;
-        if (get_ms_clock() - t0 >= WF_WS_WAIT_MS || wf_ws_st < 0 || (wf_ws_st && !wf_ws_ok[key])) {
+        if (get_ms_clock() - t0 >= WF_WS_WAIT_MS || wf_ws_st < 0 || (wf_ws_st && !wf_ws_ok[key])
+            || (stk && !wf_sg_has(key / WF_NPRINTS, key % WF_NPRINTS))) {
             wf_ws_waited = get_ms_clock() - t0;
             return 0;
         }
@@ -565,20 +792,21 @@ static const struct wf_wsbuf *wf_ws_take(int key)
 
 /* worker: 1 = the film kernel's shot set holds (row, variant) with these build flags (built from the pack when needed);
  * a BOT uses exactly what its TOP got */
-static int wf_ws_shot(int kind, int bot, int row, int v, int flags)
+static int wf_ws_shot(int kind, int bot, int row, int v, uint32_t stk, int flags)
 {
     int key = WF_WS_KEY(row, v);
     if (bot)
-        return wf_half_ws && wf_ws_shot_key == key;
+        return wf_half_ws && wf_ws_shot_key == key && wf_ws_shot_stk == stk;
     int use = 0;
     if (wf_film_shot_ok() && row < WF_WS_MAXROW) {
-        use = wf_ws_shot_key == key && wf_ws_shot_ser && wf_film_shot_key() == wf_ws_shot_ser
-              && wf_film_shot_flags() == flags;
+        use = wf_ws_shot_key == key && wf_ws_shot_stk == stk && wf_ws_shot_ser
+              && wf_film_shot_key() == wf_ws_shot_ser && wf_film_shot_flags() == flags;
         if (!use) {
-            const struct wf_wsbuf *b = wf_ws_take(key);
+            const struct wf_wsbuf *b = wf_ws_take(key, stk);
             if (b) {
                 wf_ws_shot_key = -1;
                 wf_film_prepare(b->T, b->ser, flags);
+                wf_ws_shot_stk = stk;
                 wf_ws_shot_key = key;
                 wf_ws_shot_ser = b->ser;
                 WF_BARRIER();
@@ -592,11 +820,11 @@ static int wf_ws_shot(int kind, int bot, int row, int v, int flags)
     return use;
 }
 
-/* preview (wf_pv.c, wf_task): the published table when it is the one of key (row, variant), else 0 */
-const uint32_t *wf_ws_table(int row, int v)
+/* preview (wf_pv.c, wf_task): the published table when it is the one of key (row, variant) and knob key stk, else 0 */
+const uint32_t *wf_ws_table(int row, int v, uint32_t stk)
 {
     const struct wf_wsbuf *p = wf_ws_pub;
-    return p && row >= 0 && row < WF_WS_MAXROW && p->key == WF_WS_KEY(row, v) ? p->T : 0;
+    return p && row >= 0 && row < WF_WS_MAXROW && p->key == WF_WS_KEY(row, v) && p->stk == stk ? p->T : 0;
 }
 
 /* ------------------------------------------------------------------ the event ring (worker -> wf_task) */
@@ -685,7 +913,7 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
             wf_chunks(buf, nw, fn, arg);
         return;
     }
-    wf_fx_begin(k, fx, seed);
+    wf_fx_begin(k, fx, seed, f->devd ? f->dev_ev8 : WF_EV_LIVE);
     uint32_t th = 0, tg = 0, tm = 0, t, t2;
     int y0 = f->y0, wpr = f->w / 2;
     if (fx & WF_FX_MST) {                        /* the mist's low-res light map: every 2nd row of this request */
@@ -796,7 +1024,7 @@ static int wf_dispatch(struct wf_frame *f, int bot, struct wf_look *lk, int *llu
         wf_rb_res = 1;
         switch (lk->output) {
         case WF_OUT_FILM:
-            if (!wf_ws_shot(f->part, bot, lk->row, lk->variant, lk->ftflags))
+            if (!wf_ws_shot(f->part, bot, lk->row, lk->variant, lk->stk, lk->ftflags))
                 return WF_ST_NOTAB;
             wf_colour_fx(f, bot, lk, wf_film_words, 0);
             return WF_ST_FILM;
@@ -825,7 +1053,7 @@ static int wf_dispatch(struct wf_frame *f, int bot, struct wf_look *lk, int *llu
     }
     switch (lk->output) {
     case WF_OUT_FILM:
-        if (wf_ws_shot(f->part, bot, lk->row, lk->variant, lk->ftflags)) {
+        if (wf_ws_shot(f->part, bot, lk->row, lk->variant, lk->stk, lk->ftflags)) {
             if (raw && wf_rawb_run(f, bot, lk, llut, lei, &st))
                 return st;
             wf_colour_fx(f, bot, lk, wf_film_words, 0);
@@ -1011,7 +1239,9 @@ static void wf_apt(char *o, int n, int *l, int ms)          /* tenths of a secon
 }
 
 /* "shot #3 Portra 400 WS: 16.4 s = look 4.6 + mist 9.2 + halation+bloom normal 1.8 + grain 0.6 (TOP 8.1, BOT 8.3) EV12";
- * the halation stage is named by what ran in it: "halation", "bloom low", "halation+bloom strong" */
+ * the halation stage is named by what ran in it: "halation", "bloom low", "halation+bloom strong" (Wrap: no bloom).
+ * A log line keeps WF_SHOT_LINE - 1 characters: a longer one (every effect on, the halves, a long title: the 5D2's lost its EV, RAWB11
+ * note) goes on two lines, cut before an effect, the halves or the EV, the second "shot #3 ... + grain 0.6 (TOP ..) EV12" */
 static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const struct wf_look *lk, int st, int ev)
 {
     if (!WF_ST_TOUCHED(st)) {
@@ -1020,11 +1250,11 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
     }
     static const char *const bn[WF_BLOOM_MAX + 1] = { "", "bloom low", "bloom normal", "bloom strong" };
     char hn[32];
-    int hb = lk->bloom <= WF_BLOOM_MAX ? lk->bloom : 0;
+    int hb = lk->bloom <= WF_BLOOM_MAX && !WF_HALO_GEN(lk->halo) ? lk->bloom : 0;
     snprintf(hn, sizeof hn, " + %s%s%s ", lk->halo || !hb ? "halation" : "", lk->halo && hb ? "+" : "", bn[hb]);
     const char *const en[3] = { " + mist ", hn, " + grain " };
-    char line[WF_SHOT_LINE], title[48];
-    int l = 0;
+    char line[2 * WF_SHOT_LINE], title[48];
+    int l = 0, cut[5], nc = 0;
     char nb[16];
     snprintf(nb, sizeof nb, "shot #%d ", ++wf_shot_n);
     line[0] = 0;
@@ -1043,6 +1273,7 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
         int ms = e == 0 ? a->m + (b ? b->m : 0) : e == 1 ? a->h + (b ? b->h : 0) : a->g + (b ? b->g : 0);
         if (!sa && !sb)
             continue;
+        cut[nc++] = l;
         wf_ap(line, sizeof line, &l, en[e]);
         if (sa == 1 && (!b || sb == 1))
             wf_apt(line, sizeof line, &l, ms);
@@ -1050,6 +1281,7 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
             wf_ap(line, sizeof line, &l, "-");
     }
     if (b) {
+        cut[nc++] = l;
         wf_ap(line, sizeof line, &l, " (TOP ");
         wf_apt(line, sizeof line, &l, a->ms);
         wf_ap(line, sizeof line, &l, ", BOT ");
@@ -1057,12 +1289,30 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
         wf_ap(line, sizeof line, &l, ")");
     }
     if (ev != WF_EV_NONE) {
+        cut[nc++] = l;
         snprintf(nb, sizeof nb, " EV%d", ev);
         wf_ap(line, sizeof line, &l, nb);
     }
-    wf_log("%s", line);
+    if (l < WF_SHOT_LINE) {
+        wf_log("%s", line);
+    } else {
+        int c = WF_SHOT_LINE - 1, n2 = 0;        /* no cut point that fits: a hard cut */
+        for (int i = nc - 1; i >= 0; i--)
+            if (cut[i] > 0 && cut[i] < WF_SHOT_LINE) {
+                c = cut[i];
+                break;
+            }
+        char l2[WF_SHOT_LINE];
+        snprintf(nb, sizeof nb, "shot #%d ...", wf_shot_n);
+        l2[0] = 0;
+        wf_ap(l2, sizeof l2, &n2, nb);
+        wf_ap(l2, sizeof l2, &n2, line + c);
+        line[c] = 0;
+        wf_log("%s", line);
+        wf_log("%s", l2);
+    }
     int hr = a->hst == 1 && (!b || b->hst == 1), gr = a->gst == 1 && (!b || b->gst == 1), mr = a->mst == 1 && (!b || b->mst == 1);
-    wf_exif_shot(lk, gr ? lk->grain : 0, hr ? lk->halo : 0, hr ? lk->bloom : 0, mr ? lk->mist : 0, ev);
+    wf_exif_shot(lk, gr ? lk->grain : 0, hr ? lk->halo : 0, hr && !WF_HALO_GEN(lk->halo) ? lk->bloom : 0, mr ? lk->mist : 0, ev);
 }
 
 static void wf_shot_note(const struct wf_ev *e)

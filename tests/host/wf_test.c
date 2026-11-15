@@ -10,6 +10,11 @@
  *   FX                 grain + halation through the shot: ready keys, glow round a light, grain texture, no memory, free
  *   FX bloom           Bloom on its own row (RAWB11): halation alone, bloom alone, both, both off, levels, rows, EXIF text;
  *                      WF_FX_DUMP=1 [WF_FX_UYVY=frame] also writes bloom_<level>.ppm (the harness strip)
+ *   FXAB               Even grain / Wrap (the Genesis Pro 1.6.6 model, DESIGN 1a) against the stages before; Bloom alone,
+ *                      the Gauge (16 / 35 / 65 mm: halo reach, grain size)
+ *                      them on the same frame: the halo round a light, the core of a light (difference of blur keeps
+ *                      it), no pixel darker than the plain look, the three grain amounts monotonic, and the frames
+ *                      not equal to the old ones
  *   MIST               white / black mist: glow, veil, halves vs whole frame, seam
  *   EXIF               wf_ex_write on LE / BE files and odd files; the ring vs IMG_nnnn.JPG numbers (RAW-only gap, JPEG M)
  *   EXPSIM             dEV, smoothing, gain tables, ExpSim off / back / stuck, the display filter (EOS M; 5D2: stays off)
@@ -50,6 +55,7 @@
  *                      512 KB becomes WINDYFLM.OLD at boot
  * Output: PASS / FAIL lines, then "RESULT MODE CASE: P pass, F fail"; exit status 1 on any failure. */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <malloc.h>
 #include <math.h>
@@ -257,7 +263,7 @@ static uint32_t fnv(uint32_t h, const uint8_t *p, size_t n) { while (n--) h = (h
 static void le32(uint8_t *p, uint32_t v) { p[0] = v; p[1] = v >> 8; p[2] = v >> 16; p[3] = v >> 24; }
 
 struct pk { int k, v; const uint32_t *T; };
-static const uint32_t *tabs[128][3];             /* the table of (catalogue row, variant) written into the pack */
+static const uint32_t *tabs[128][WF_NPRINTS];    /* the table of (catalogue row, variant) written into the pack */
 /* bad: 0 good, 'M' magic, 'I' index checksum, 'T' a word with its top byte set (entry 0), 'F' entry 0's checksum,
  *      'C' entry 0's code, 'D' entry 0 twice (the second with another table), 'G' entry 0's flags */
 static void pack_write(const struct pk *e, int n, int bad)
@@ -548,7 +554,7 @@ static void mod_deinit(void)
 static int look_table_ready(void)
 {
     struct wf_look lk;
-    return wf_look_now(&lk) != WF_OUT_FILM || wf_ws_table(lk.row, lk.variant) != 0;
+    return wf_look_now(&lk) != WF_OUT_FILM || wf_ws_table(lk.row, lk.variant, lk.stk) != 0;
 }
 
 /* a film shot of the current look; checks bit-exact vs the direct kernel, the mean luma shift, the log status */
@@ -965,7 +971,7 @@ static void t_fx(void)
     /* no shoot memory for a new halation key: the shot goes without, then the retry */
     h_shoot_fail = 1;
     log_mark();
-    chk(wf_halo == 1 && wf_bloom == 2, "halation=bloom (before RAWB11) read as Film + Bloom Normal (%d, %d)", wf_halo, wf_bloom);
+    chk(wf_halo == 1 && wf_bloom == 2, "halation=bloom (before RAWB11) read as Wide + Bloom Normal (%d, %d)", wf_halo, wf_bloom);
     wf_bloom = 1;                                /* a new halation-stage key */
     chk(LOGW("fx halation: no memory", 20000), "no memory: %s", log_line("fx halation"));
     log_mark();
@@ -1043,7 +1049,7 @@ static void t_fx_bloom(void)
     memcpy(ref, in, NW * 4);
     ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
     chk(WAIT(look_table_ready(), 10000), "table published");
-    chk(WAIT(wf_fx_hk != 0, 120000) && strstr(log_line("fx halation "), ", bloom off ready") && !strstr(log_line("fx halation "), "off ("),
+    chk(WAIT(wf_fx_hk != 0, 120000) && strstr(log_line("fx halation "), ", bloom off, 35mm ready") && !strstr(log_line("fx halation "), "off ("),
         "halation alone: ready line '%s'", log_line("fx halation "));
     double rvh, rvb, rvhb, rv0;
     double ryh = fx_bloom_shot("halation alone", 1, 0, &rvh);
@@ -1057,7 +1063,7 @@ static void t_fx_bloom(void)
     sl = log_line("shot #");
     chk(strstr(sl, " + bloom normal ") && !strstr(sl, "halation") && fx_line_ok(log_line(": film "), " h", 0),
         "bloom alone: shot line '%s'", sl);
-    chk(strstr(log_line("fx halation "), "fx halation off (") && strstr(log_line("fx halation "), ", bloom normal ready"),
+    chk(strstr(log_line("fx halation "), "fx halation off (") && strstr(log_line("fx halation "), ", bloom normal, 35mm ready"),
         "bloom alone: ready line '%s'", log_line("fx halation "));
     chk(ryb > 0.3 && fabs(rvb) < rvh / 2, "bloom alone: a glow in the light's own colour (dY %+.2f, dV %+.2f; halation dV %+.2f)",
         ryb, rvb, rvh);
@@ -1084,13 +1090,15 @@ static void t_fx_bloom(void)
     wf_halo = 2;
     wf_bloom = 3;
     chk(!strcmp(wf_row_name(WF_ROW_BLOOM), "Bloom") && WF_ROW_BLOOM == WF_ROW_HALO + 1 && !strcmp(wf_row_text(WF_ROW_BLOOM), "Strong")
-        && !strcmp(wf_row_text(WF_ROW_HALO), "Spektra"), "rows: '%s' = '%s', Halation '%s'", wf_row_name(WF_ROW_BLOOM),
+        && !strcmp(wf_row_text(WF_ROW_HALO), "Tight"), "rows: '%s' = '%s', Halation '%s'", wf_row_name(WF_ROW_BLOOM),
         wf_row_text(WF_ROW_BLOOM), wf_row_text(WF_ROW_HALO));
     chk(wf_row_avail(WF_ROW_BLOOM) == wf_row_avail(WF_ROW_HALO) && wf_row_avail(WF_ROW_BLOOM) == 1, "Bloom available like Halation");
     wf_row_step(WF_ROW_BLOOM, 1);
     chk(wf_bloom == 0 && wf_halo == 2, "Bloom Strong + 1 wraps to Off, Halation untouched (%d, %d)", wf_bloom, wf_halo);
     wf_row_step(WF_ROW_HALO, 1);
-    chk(wf_halo == 0 && wf_bloom == 0, "Halation Spektra + 1 wraps to Off (%d, %d)", wf_halo, wf_bloom);
+    chk(wf_halo == 3 && wf_bloom == 0, "Halation Tight + 1 = Wrap (%d, %d)", wf_halo, wf_bloom);
+    wf_row_step(WF_ROW_HALO, 1);
+    chk(wf_halo == 0 && wf_bloom == 0, "Halation Wrap + 1 wraps to Off (%d, %d)", wf_halo, wf_bloom);
 #ifndef WF_BUILD_5D2
     h_prop_send(PROP_ASPECT, 1);
     chk(WAIT(!wf_row_avail(WF_ROW_BLOOM), 2000) && !wf_row_avail(WF_ROW_HALO), "1:1 aspect: Bloom greyed like Halation");
@@ -1102,11 +1110,11 @@ static void t_fx_bloom(void)
     char tb[200];
     wf_look_now(&lk);
     const char *t = wf_exif_text(&lk, 0, 1, 2, 0, WF_EV_NONE, tb, sizeof tb);
-    chk(strstr(t, " | Halation Film | Bloom Normal") != 0, "EXIF text, both: '%s'", t);
+    chk(strstr(t, " | Halation Wide | Bloom Normal") != 0, "EXIF text, both: '%s'", t);
     t = wf_exif_text(&lk, 0, 0, 1, 0, WF_EV_NONE, tb, sizeof tb);
     chk(strstr(t, " | Bloom Low") && !strstr(t, "Halation"), "EXIF text, bloom alone: '%s'", t);
     t = wf_exif_text(&lk, 0, 2, 0, 0, WF_EV_NONE, tb, sizeof tb);
-    chk(strstr(t, " | Halation Spektra") && !strstr(t, "Bloom"), "EXIF text, halation alone: '%s'", t);
+    chk(strstr(t, " | Halation Tight") && !strstr(t, "Bloom"), "EXIF text, halation alone: '%s'", t);
 
     /* the bloom strip (harness only): halation off, each bloom level on one frame */
     if (getenv("WF_FX_DUMP")) {
@@ -1125,6 +1133,241 @@ static void t_fx_bloom(void)
             dump_half(pth, out, FW, FH);
         }
     }
+    mod_deinit();
+}
+
+/* ------------------------------------------------------------------ FXAB: WindyGrain / WindyHalation against the old stages */
+/* the most negative (b - a) luma of an annulus round the frame centre, and how many pixels it darkened */
+static double ring_neg(const uint32_t *a, const uint32_t *b, int w, int h, int r0, int r1, int *nneg)
+{
+    int wpr = w / 2, mn = 0;
+    *nneg = 0;
+    for (int y = h / 2 - r1; y <= h / 2 + r1; y++)
+        for (int x = (w / 2 - r1) / 2; x <= (w / 2 + r1) / 2; x++) {
+            int dx = 2 * x - w / 2, dy = y - h / 2, d2 = dx * dx + dy * dy;
+            if (y < 0 || y >= h || x < 0 || x >= wpr || d2 < r0 * r0 || d2 >= r1 * r1) continue;
+            int d = (WY0(b[y * wpr + x]) - WY0(a[y * wpr + x]) + WY1(b[y * wpr + x]) - WY1(a[y * wpr + x])) / 2;
+            if (d < 0) { (*nneg)++; if (d < mn) mn = d; }
+        }
+    return mn;
+}
+
+/* mean (b - a) luma over the pixels x0 <= x < x1, y0 <= y < y1 of a w-wide frame (x0, x1 even) */
+static double box_dy(const uint32_t *a, const uint32_t *b, int w, int x0, int x1, int y0, int y1)
+{
+    int wpr = w / 2;
+    int64_t s = 0;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0 / 2; x < x1 / 2; x++)
+            s += WY0(b[y * wpr + x]) - WY0(a[y * wpr + x]) + WY1(b[y * wpr + x]) - WY1(a[y * wpr + x]);
+    return (double)s / ((double)(x1 - x0) * (y1 - y0));
+}
+
+/* over n words: the mean and sd of the (b - a) luma, the mean (b - a) of U and V */
+static void flat_stats(const uint32_t *a, const uint32_t *b, int n, double *my, double *sy, double *mu, double *mv)
+{
+    int64_t s = 0, s2 = 0, su = 0, sv = 0;
+    for (int i = 0; i < n; i++) {
+        int d0 = WY0(b[i]) - WY0(a[i]), d1 = WY1(b[i]) - WY1(a[i]);
+        s += d0 + d1;
+        s2 += d0 * d0 + d1 * d1;
+        su += WU(b[i]) - WU(a[i]);
+        sv += WV(b[i]) - WV(a[i]);
+    }
+    *my = (double)s / (2.0 * n);
+    *sy = sqrt((double)s2 / (2.0 * n) - *my * *my);
+    *mu = (double)su / n;
+    *mv = (double)sv / n;
+}
+
+static void t_fxab(void)
+{
+    struct pk e[] = { { fC, 0, tab_make(0, 0, 0, 0) } };
+    int hk = 0, gk = 0, nneg, post;
+    double sd, sd_f, sd_n, sd_s, cm, ho, hi, hl;
+    pack_write(e, 1, 0);
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\n", wf_films[fC].id);
+    wf_fx_retry_ms = 500;
+    mod_init(1);
+#ifndef WF_BUILD_5D2
+    h_prop_send(PROP_ASPECT, 0);
+#endif
+    disc_r = 60;
+    gen_frame(in, FW, FH, 1);
+    chk(WAIT(look_table_ready(), 10000), "table published");
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+    shot(in, out2, FW, FH);
+    chk(ndiff(ref, out2, NW) == 0, "both effects off: the frame is the film look alone");
+
+    /* ---- the stages as they were: Yedlin grain Normal, halation Wide + Glow (cfg bloom) */
+    wf_grain = 2;
+    wf_halo = 1;
+    wf_bloom = 2;
+    post = wf_fx_mode();
+    chk(wf_fx_keys(post, &hk, &gk) && WAIT(wf_fx_hk == hk && wf_fx_gk == gk, 120000), "old keys ready (%s | %s)",
+        log_line("fx halation"), log_line("fx grain"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    cm = corner(ref, out, FW, &sd);
+    double sd_old = sd, cm_old = cm;
+    double ho_old = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'y', 0);
+    double hi_old = ring(ref, out, FW, FH, 6, disc_r - 8, 'y', 0);
+    memcpy(out2, out, NW * 4);                       /* the old stages' frame, for the difference below */
+
+    /* ---- WindyHalation: the Genesis light wrap (no grain, so the ring measures the halo alone) */
+    wf_grain = 0;
+    wf_halo = 3;                                     /* Bloom stays Normal: the light wrap has none (no bloom in the key) */
+    chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_HALO(hk) == 3 && WF_FXK_BLOOM(hk) == 0 && WAIT(wf_fx_hk == hk, 120000),
+        "Wrap ready, no bloom with it (%s)", log_line("fx halation"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    chk(ndiff(ref, out, NW) > 2000, "WindyHalation changes the frame (%d of %d words)", ndiff(ref, out, NW), NW);
+    ho = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'y', 0);
+    hi = ring(ref, out, FW, FH, 6, disc_r - 8, 'y', 0);
+    hl = ring_neg(ref, out, FW, FH, disc_r + 6, disc_r + 40, &nneg);
+    chk(ho > 1.0, "halo round the light: dY %+.2f (old stages %+.2f)", ho, ho_old);
+    chk(nneg == 0 && hl == 0, "the halo only adds light (%d darker pixels, worst %+.0f)", nneg, hl);
+    chk(fabs(hi) < 3.0, "difference of blur keeps the core of the light (dY %+.2f, old stages %+.2f)", hi, hi_old);
+    chk(fabs(ho - ho_old) > 0.3, "not the old halation: %+.2f vs %+.2f", ho, ho_old);
+#ifndef WF_BUILD_5D2
+    /* ---- 11-15: WindyHalation in Diana halves (TOP + BOT builds) against the whole frame. The light crosses the seam
+     * (the centre row): its glow in the 6 rows above and below the seam, beside and over the disc. */
+    {
+        int x0 = FW / 2 - disc_r - 40, x1 = FW / 2 + disc_r + 40;
+        double wa = box_dy(ref, out, FW, x0, x1, FH / 2 - 6, FH / 2), wb = box_dy(ref, out, FW, x0, x1, FH / 2, FH / 2 + 6);
+        double wa2 = box_dy(ref, out, FW, x0, x1, FH / 2 - 60, FH / 2 - 6), wb2 = box_dy(ref, out, FW, x0, x1, FH / 2 + 6, FH / 2 + 60);
+        halves = 1;
+        log_mark();
+        shot(in, out2, FW, FH);
+        halves = 0;
+        chk(LOGW("(TOP ", 5000), "WindyHalation halves shot: %s", log_line("(TOP "));
+        double ha = box_dy(ref, out2, FW, x0, x1, FH / 2 - 6, FH / 2), hb = box_dy(ref, out2, FW, x0, x1, FH / 2, FH / 2 + 6);
+        double ha2 = box_dy(ref, out2, FW, x0, x1, FH / 2 - 60, FH / 2 - 6), hb2 = box_dy(ref, out2, FW, x0, x1, FH / 2 + 6, FH / 2 + 60);
+        printf("INFO halves seam: whole %+.2f | %+.2f (wide %+.2f | %+.2f), halves %+.2f | %+.2f (wide %+.2f | %+.2f), max diff %d,"
+               " mean %+.3f\n", wa, wb, wa2, wb2, ha, hb, ha2, hb2, max_d(out, out2, NW), mean_dy(out, out2, NW));
+        chk(fabs(ha - wa) < 1.0 && fabs(hb - wb) < 1.0, "WindyHalation halves = whole frame at the seam: above %+.2f (whole %+.2f),"
+            " below %+.2f (whole %+.2f)", ha, wa, hb, wb);
+        chk(fabs(ha2 - wa2) < 1.0 && fabs(hb2 - wb2) < 1.0, "WindyHalation halves = whole frame near the seam: above %+.2f"
+            " (whole %+.2f), below %+.2f (whole %+.2f)", ha2, wa2, hb2, wb2);
+    }
+#else
+    /* ---- 11-15: every 5D2 shot is TOP + BOT (seam at the centre row): the light's glow is the same above and below */
+    {
+        int x0 = FW / 2 - disc_r - 40, x1 = FW / 2 + disc_r + 40;
+        double a = box_dy(ref, out, FW, x0, x1, FH / 2 - 6, FH / 2), b = box_dy(ref, out, FW, x0, x1, FH / 2, FH / 2 + 6);
+        double a2 = box_dy(ref, out, FW, x0, x1, FH / 2 - 60, FH / 2 - 6), b2 = box_dy(ref, out, FW, x0, x1, FH / 2 + 6, FH / 2 + 60);
+        printf("INFO TOP / BOT seam: %+.2f | %+.2f (wide %+.2f | %+.2f)\n", a, b, a2, b2);
+        chk(fabs(a - b) < 1.0 && fabs(a2 - b2) < 1.0, "WindyHalation over the TOP / BOT seam: above %+.2f, below %+.2f (wide"
+            " %+.2f, %+.2f)", a, b, a2, b2);
+    }
+#endif
+
+    /* ---- WindyGrain: the Genesis grain, its three amounts */
+    wf_halo = 0;
+    wf_bloom = 0;
+    wf_grain = 4;
+    chk(wf_fx_keys(post, &hk, &gk) && (gk & 256) && WAIT(wf_fx_gk == gk, 120000), "WindyGrain fine ready (%s)",
+        log_line("fx grain"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    corner(ref, out, FW, &sd_f);
+    wf_grain = 5;
+    chk(wf_fx_keys(post, &hk, &gk) && WAIT(wf_fx_gk == gk, 120000), "WindyGrain normal ready (%s)", log_line("fx grain"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    cm = corner(ref, out, FW, &sd_n);
+    chk(fabs(cm) < 3 && sd_n > 0.8 && sd_n < 25, "grain in the dark: mean %+.2f, sd %.2f", cm, sd_n);
+    wf_grain = 6;
+    chk(wf_fx_keys(post, &hk, &gk) && WAIT(wf_fx_gk == gk, 120000), "WindyGrain strong ready (%s)", log_line("fx grain"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    corner(ref, out, FW, &sd_s);
+    chk(sd_f < sd_n && sd_n < sd_s, "grain amount is monotonic: fine %.2f < normal %.2f < strong %.2f", sd_f, sd_n, sd_s);
+    chk(sd_n < sd_old * 0.9 + 6 && sd_n > 0.3, "not the Yedlin grain: sd %.2f vs %.2f", sd_n, sd_old);
+    chk(fabs(cm_old) < 3, "the old grain was centred too (mean %+.2f, sd %.2f)", cm_old, sd_old);
+
+    /* ---- 11-15: WindyGrain (Strong) is centred and the same at every level, it adds in display space. Flat grey
+     * frames, the whole frame: the old rank mapping of yg_gtab gave about dY +0.15, dU +0.12 here. */
+    {
+        static const int lv[2] = { 70, 150 };
+        double fm[2], fs[2], fu[2], fv[2];
+        for (int k = 0; k < 2; k++) {
+            for (int i = 0; i < NW; i++) in[i] = word(0, lv[k], 0, lv[k]);
+            memcpy(ref, in, NW * 4);
+            ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+            shot(in, out, FW, FH);
+            flat_stats(ref, out, NW, &fm[k], &fs[k], &fu[k], &fv[k]);
+        }
+        chk(fabs(fm[0]) < 0.05 && fabs(fm[1]) < 0.05, "WindyGrain is centred: dY %+.3f at Y %d, %+.3f at Y %d", fm[0], lv[0],
+            fm[1], lv[1]);
+        chk(fabs(fu[0]) < 0.05 && fabs(fv[0]) < 0.05 && fabs(fu[1]) < 0.05 && fabs(fv[1]) < 0.05,
+            "WindyGrain chroma is centred: dU %+.3f / %+.3f, dV %+.3f / %+.3f", fu[0], fu[1], fv[0], fv[1]);
+        chk(fs[0] > 0.5 && fabs(fs[1] / fs[0] - 1) < 0.05, "WindyGrain is the same at both levels: sd %.3f / %.3f", fs[0],
+            fs[1]);
+    }
+
+    /* ---- 11-15: Bloom on its own row, the Gauge. Bloom alone (Halation Off) glows; the Wide halo reaches further on a
+     * narrower gauge (16 mm > 35 mm > 65 mm); the Yedlin grain is stronger at 16 mm and weaker at 65 mm, the Even grain
+     * weaker at 65 mm (finer than a pixel) */
+    {
+        double bo, far[3], near[3], gsd[3], esd[3];
+        gen_frame(in, FW, FH, 1);
+        memcpy(ref, in, NW * 4);
+        ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+        wf_grain = 0;
+        wf_halo = 0;
+        wf_bloom = 2;
+        wf_gauge = 1;
+        chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_HALO(hk) == 0 && WF_FXK_BLOOM(hk) == 2 && WAIT(wf_fx_hk == hk && !wf_fx_gk, 120000),
+            "bloom alone ready (%s)", log_line("fx halation"));
+        usleep(200000);
+        shot(in, out, FW, FH);
+        bo = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'y', 0);
+        chk(bo > 0.5, "Bloom alone glows round the light: dY %+.2f", bo);
+        wf_bloom = 0;
+        wf_halo = 1;
+        for (int ga = 0; ga <= WF_GAUGE_MAX; ga++) {
+            wf_gauge = ga;
+            chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_HGAUGE(hk) == ga && WAIT(wf_fx_hk == hk, 120000), "Wide at gauge %d ready (%s)",
+                ga, log_line("fx halation"));
+            usleep(200000);
+            shot(in, out, FW, FH);
+            near[ga] = ring(ref, out, FW, FH, disc_r + 6, disc_r + 30, 'y', 0);
+            far[ga] = ring(ref, out, FW, FH, disc_r + 60, disc_r + 160, 'y', 0);
+        }
+        /* the weights move to the coarser bases on a narrower gauge: more of the halo leaves the disc's edge for
+         * r+6..30 (11-15: EOS M 7.18 / 3.10 / 1.39, 5D2 6.33 / 2.62 / 1.31); r+60..160 stays near 0 for Wide */
+        chk(near[0] > near[1] * 1.5 && near[1] > near[2] * 1.4 && near[1] > 1.0 && far[0] >= far[1] && far[1] >= far[2] - 0.02,
+            "the halo spreads wider on a narrower gauge: dY at r+6..30 16 mm %+.2f, 35 mm %+.2f, 65 mm %+.2f (r+60..160:"
+            " %+.2f %+.2f %+.2f)", near[0], near[1], near[2], far[0], far[1], far[2]);
+        wf_halo = 0;
+        for (int ga = 0; ga <= WF_GAUGE_MAX; ga++) {
+            wf_gauge = ga;
+            wf_grain = 2;
+            chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_GGAUGE(gk) == ga && WAIT(wf_fx_gk == gk && !wf_fx_hk, 120000),
+                "Normal grain at gauge %d ready (%s)", ga, log_line("fx grain"));
+            usleep(200000);
+            shot(in, out, FW, FH);
+            corner(ref, out, FW, &gsd[ga]);
+            wf_grain = 5;
+            chk(wf_fx_keys(post, &hk, &gk) && WAIT(wf_fx_gk == gk, 120000), "Even Normal at gauge %d ready (%s)", ga,
+                log_line("fx grain"));
+            usleep(200000);
+            shot(in, out, FW, FH);
+            corner(ref, out, FW, &esd[ga]);
+        }
+        chk(gsd[0] > gsd[1] * 1.3 && gsd[1] > gsd[2] * 1.2, "Yedlin grain sd by gauge: 16 mm %.2f > 35 mm %.2f > 65 mm %.2f",
+            gsd[0], gsd[1], gsd[2]);
+        chk(esd[2] < esd[1] * 0.8 && esd[0] > esd[1] * 0.7, "Even grain sd by gauge: 16 mm %.2f, 35 mm %.2f, 65 mm %.2f (finer"
+            " than a pixel: weaker)", esd[0], esd[1], esd[2]);
+        wf_gauge = WF_GAUGE_DEF;
+    }
+
+    wf_grain = 0;
+    wf_halo = 0;
+    wf_bloom = 0;
+    chk(WAIT(!wf_fx_hk && !wf_fx_gk, 20000), "effects off: both keys cleared");
     mod_deinit();
 }
 
@@ -1438,6 +1681,777 @@ static void t_expsim(void)
 #endif
 }
 
+/* ------------------------------------------------------------------ MIST:levels
+ * Owner 11-15 ("kiểm tra luôn cái mist đi bạn"): every Mist level with Halation and Bloom Off on one scene: a white light
+ * (the disc, centre), an orange lamp (left), green leaves with 4 x 4 px sky gaps (right). Per level: the ready line, the
+ * shot line, the EXIF text, the glow round the light (near, wide), the dark far away, no colour cast round the white light,
+ * the lamp's glow in the lamp's colour, the glow round the sky gaps, the 16 px cell pattern of the glow along a row and a
+ * column, the TOP / BOT seam (5D2: every shot; EOS M: Diana halves at white 1), the time. Then the ML menu entry, the
+ * leaves in daylight (no glowing dots) and at night, a sky / shadow edge at white 1 and black 1 (how far the shadows lift),
+ * Mist 1/4 + Bloom Normal + Halation Wide (the glows add, no white wash), and the shot line with every effect on (halves):
+ * it keeps its EV. Harness (tests/ui/mist_strip.sh), WF_FX_DUMP=1: mist_<level>.ppm (1/2 size) and mist_<level>_c<k>.ppm
+ * (1:1 crops round WF_FX_CROP "X,Y;X,Y", frame pixels), combo_<i>[_c<k>].ppm (Off, Mist 1/4, Bloom Normal + Halation
+ * Film, all three); with WF_FX_UYVY (an FW x FH UYVY frame) and WF_FX_EV8 (that photo's EV100 x 8) only the strip runs. */
+#define MS_LX (FW / 4)                           /* the orange lamp: centre x (row FH / 2), radius */
+#define MS_LR 40
+#define MS_GX (3 * FW / 4)                       /* the leaves: centre x (row FH / 2), half size; a 4 x 4 px clipped sky gap every
+                                                    MS_GS px (the owner's 11-12 canopy: every gap glowed as a round dot) */
+#define MS_GR 480
+#define MS_GS 160
+extern const int wf_t_me_help;
+static uint8_t *menu_named(const char *nm);
+static int menu_set(const char *nm);
+static void mist_scene(uint32_t *p)
+{
+    int wpr = FW / 2;
+    gen_frame(p, FW, FH, 1);
+    for (int y = FH / 2 - MS_GR; y < FH / 2 + MS_GR; y++)
+        for (int x = (MS_GX - MS_GR) / 2; x < (MS_GX + MS_GR) / 2; x++) {
+            uint32_t r = rnd();
+            int gx = (2 * x) % MS_GS, gy = y % MS_GS;
+            int gap = gx >= MS_GS / 2 - 2 && gx < MS_GS / 2 + 2 && gy >= MS_GS / 2 - 2 && gy < MS_GS / 2 + 2;
+            p[y * wpr + x] = gap ? word(0, 255, 0, 255)
+                                 : word(-14 + (int)(r & 3), 72 + (int)(r >> 4 & 7) - 4, -22 + (int)(r >> 8 & 3), 72 + (int)(r >> 12 & 7) - 4);
+        }
+    for (int y = FH / 2 - MS_LR; y <= FH / 2 + MS_LR; y++)
+        for (int x = (MS_LX - MS_LR) / 2; x <= (MS_LX + MS_LR) / 2; x++) {
+            int dx = 2 * x + 1 - MS_LX, dy = y - FH / 2;
+            if (dx * dx + dy * dy <= MS_LR * MS_LR)
+                p[y * wpr + x] = word(-40, 225, 70, 225);   /* R clipped (323), G 189, B 154 */
+        }
+}
+static void sky_scene(uint32_t *p)               /* a light blue sky (232) over a shadow (30), the edge at FH / 2 */
+{
+    int wpr = FW / 2;
+    for (int y = 0; y < FH; y++)
+        for (int x = 0; x < wpr; x++) {
+            uint32_t r = rnd();
+            int sky = y < FH / 2, Y = sky ? 232 : 30;
+            p[y * wpr + x] = word((int)(r & 3) - 2 + (sky ? 6 : 0), Y + (int)(r >> 4 & 7) - 4, (int)(r >> 8 & 3) - 2 - (sky ? 4 : 0),
+                                  Y + (int)(r >> 12 & 7) - 4);
+        }
+}
+/* a clipped white disc of radius 80 on a dark grey (Y 30), its centre at x FW / 2, row FH / 2 + oy: a light ON the TOP /
+ * BOT seam (oy 0), or above it (oy < -80) */
+static void seam_scene(uint32_t *p, int oy)
+{
+    int wpr = FW / 2, cx = FW / 2, cy = FH / 2 + oy;
+    for (int y = 0; y < FH; y++)
+        for (int x = 0; x < wpr; x++) {
+            int d0 = (2 * x - cx) * (2 * x - cx) + (y - cy) * (y - cy), d1 = (2 * x + 1 - cx) * (2 * x + 1 - cx) + (y - cy) * (y - cy);
+            p[y * wpr + x] = word(0, d0 < 80 * 80 ? 255 : 30, 0, d1 < 80 * 80 ? 255 : 30);
+        }
+}
+/* halves against the whole frame (the truth) round the seam: the worst mean (b - a) of 16 x 16 boxes, rows FH / 2 - 64 ..
+ * FH / 2 + 255, x FW / 2 +-320 */
+static double seam_err(const uint32_t *a, const uint32_t *b)
+{
+    int wpr = FW / 2;
+    double worst = 0;
+    for (int y0 = FH / 2 - 64; y0 < FH / 2 + 256; y0 += 16)
+        for (int x0 = FW / 2 - 320; x0 < FW / 2 + 320; x0 += 16) {
+            double s = 0;
+            for (int y = y0; y < y0 + 16; y++)
+                for (int x = x0 / 2; x < x0 / 2 + 8; x++)
+                    s += WY0(b[y * wpr + x]) - WY0(a[y * wpr + x]) + WY1(b[y * wpr + x]) - WY1(a[y * wpr + x]);
+            s /= 2 * 16 * 8;
+            if (fabs(s) > fabs(worst))
+                worst = s;
+        }
+    return worst;
+}
+/* mean (b - a) over an annulus r0 <= r < r1 round (cx, cy): lane 'y' luma, 'u' / 'v' chroma, 't' / 'b' luma of its top /
+ * bottom half only (rows above / below cy) */
+static double ring_at(const uint32_t *a, const uint32_t *b, int cx, int cy, int r0, int r1, int lane)
+{
+    double s = 0;
+    long n = 0;
+    int wpr = FW / 2;
+    for (int y = cy - r1; y <= cy + r1; y++)
+        for (int x = (cx - r1) / 2; x <= (cx + r1) / 2; x++) {
+            int dx = 2 * x + 1 - cx, dy = y - cy, d2 = dx * dx + dy * dy;
+            if (y < 0 || y >= FH || x < 0 || x >= wpr || d2 < r0 * r0 || d2 >= r1 * r1 || (lane == 't' && y >= cy)
+                || (lane == 'b' && y < cy))
+                continue;
+            uint32_t A = a[y * wpr + x], B = b[y * wpr + x];
+            s += lane == 'u' ? WU(B) - WU(A) : lane == 'v' ? WV(B) - WV(A) : (WY0(B) - WY0(A) + WY1(B) - WY1(A)) * 0.5;
+            n++;
+        }
+    return n ? s / n : 0;
+}
+/* a light centred on row cy, a TOP / BOT seam through it (5D2: every shot; EOS M: Diana halves): its glow below against
+ * the same place above, the worst dY below - dY above of 16 x 16 boxes at x cx +-320, 32 .. 223 rows away (dY = b - a;
+ * the disc is round: a whole frame gives ~0). Mirror rows only eroded (until 11-15): -40 codes at Black 1, two dark lobes */
+static double seam_lobe(const uint32_t *a, const uint32_t *b, int cx, int cy)
+{
+    int wpr = FW / 2;
+    double worst = 0;
+    for (int dy = 32; dy < 224; dy += 16)
+        for (int dx = -320; dx < 320; dx += 16) {
+            double s = 0;
+            for (int yy = 0; yy < 16; yy++)
+                for (int xx = 0; xx < 8; xx++) {
+                    int x = (cx + dx) / 2 + xx, yb = cy + dy + yy, ya = cy - dy - yy;
+                    uint32_t A = a[yb * wpr + x], B = b[yb * wpr + x], C = a[ya * wpr + x], D = b[ya * wpr + x];
+                    s += (WY0(B) - WY0(A) + WY1(B) - WY1(A)) - (WY0(D) - WY0(C) + WY1(D) - WY1(C));
+                }
+            s /= 2 * 16 * 8;
+            if (fabs(s) > fabs(worst))
+                worst = s;
+        }
+    return worst;
+}
+static double ring_hi(const uint32_t *b, int cx, int cy, int r0, int r1, int thr)   /* share of pixels with Y >= thr */
+{
+    long n = 0, h = 0;
+    int wpr = FW / 2;
+    for (int y = cy - r1; y <= cy + r1; y++)
+        for (int x = (cx - r1) / 2; x <= (cx + r1) / 2; x++) {
+            int dx = 2 * x + 1 - cx, dy = y - cy, d2 = dx * dx + dy * dy;
+            if (y < 0 || y >= FH || x < 0 || x >= wpr || d2 < r0 * r0 || d2 >= r1 * r1)
+                continue;
+            h += (WY0(b[y * wpr + x]) >= thr) + (WY1(b[y * wpr + x]) >= thr);
+            n += 2;
+        }
+    return n ? (double)h / n : 0;
+}
+/* round the leaves' sky gaps (the patch's outer gaps left out): mean dY at 6..40 px minus at 56..72 px (between gaps) */
+static double gap_dots(const uint32_t *a, const uint32_t *b)
+{
+    double s = 0;
+    int n = 0;
+    for (int gy = (FH / 2 - MS_GR) / MS_GS * MS_GS + 2 * MS_GS; gy + MS_GS < FH / 2 + MS_GR - MS_GS; gy += MS_GS)
+        for (int gx = (MS_GX - MS_GR) / MS_GS * MS_GS + 2 * MS_GS; gx + MS_GS < MS_GX + MS_GR - MS_GS; gx += MS_GS) {
+            int x = gx + MS_GS / 2, y = gy + MS_GS / 2;
+            s += ring_at(a, b, x, y, 6, 40, 'y') - ring_at(a, b, x, y, 56, 72, 'y');
+            n++;
+        }
+    return n ? s / n : 0;
+}
+static void corner_uv(const uint32_t *a, const uint32_t *b, double *du, double *dv)   /* corner()'s box: mean dU, dV */
+{
+    double su = 0, sv = 0;
+    long n = 0;
+    int wpr = FW / 2;
+    for (int y = 100; y < 400; y++)
+        for (int x = 50; x < 200; x++, n++) {
+            su += WU(b[y * wpr + x]) - WU(a[y * wpr + x]);
+            sv += WV(b[y * wpr + x]) - WV(a[y * wpr + x]);
+        }
+    *du = su / n;
+    *dv = sv / n;
+}
+/* the 16 px cell pattern of the glow: its dY profile from the disc outwards along the centre row (vert 0) or column (1),
+ * 17 lines averaged, minus its 33 px running mean, averaged by phase (frame x or y) % 16: max - min of the 16 means */
+static double cell_pattern(const uint32_t *a, const uint32_t *b, int vert)
+{
+    enum { NP = 600 };                           /* ends short of the leaves */
+    static double p[NP];
+    double ph[16] = { 0 };
+    int nph[16] = { 0 }, wpr = FW / 2, cx = FW / 2, cy = FH / 2, d0 = disc_r + 64;
+    for (int i = 0; i < NP; i++) {
+        double s = 0;
+        for (int k = -8; k <= 8; k++) {
+            int x = vert ? cx + 2 * k : cx + d0 + i, y = vert ? cy - d0 - i : cy + k;
+            uint32_t A = a[y * wpr + x / 2], B = b[y * wpr + x / 2];
+            s += (x & 1) ? WY1(B) - WY1(A) : WY0(B) - WY0(A);
+        }
+        p[i] = s / 17;
+    }
+    for (int i = 16; i < NP - 16; i++) {
+        double m = 0;
+        for (int k = -16; k <= 16; k++)
+            m += p[i + k];
+        int pos = vert ? cy - d0 - i : cx + d0 + i;
+        ph[pos & 15] += p[i] - m / 33;
+        nph[pos & 15]++;
+    }
+    double lo = 1e9, hi = -1e9;
+    for (int k = 0; k < 16; k++) {
+        double v = ph[k] / nph[k];
+        lo = v < lo ? v : lo;
+        hi = v > hi ? v : hi;
+    }
+    return hi - lo;
+}
+static void dump_crop(const char *path, const uint32_t *p, int cx, int cy)   /* 480 x 320 at 1:1 round (cx, cy) */
+{
+    enum { CW = 480, CH = 320 };
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    int x0 = clampi(cx - CW / 2, 0, FW - CW) & ~1, y0 = clampi(cy - CH / 2, 0, FH - CH), wpr = FW / 2;
+    unsigned char row[CW * 3];
+    fprintf(f, "P6\n%d %d\n255\n", CW, CH);
+    for (int y = y0; y < y0 + CH; y++) {
+        for (int x = 0; x < CW; x++) {
+            uint32_t q = p[(size_t)y * wpr + (x0 + x) / 2];
+            int u = WU(q), v = WV(q), yy = ((x0 + x) & 1) ? WY1(q) : WY0(q);
+            row[x * 3] = (unsigned char)clampi(yy + 1402 * v / 1000, 0, 255);
+            row[x * 3 + 1] = (unsigned char)clampi(yy - (344 * u + 714 * v) / 1000, 0, 255);
+            row[x * 3 + 2] = (unsigned char)clampi(yy + 1772 * u / 1000, 0, 255);
+        }
+        fwrite(row, 1, sizeof row, f);
+    }
+    fclose(f);
+}
+static int ms_ncrop, ms_crop[4][2];
+static void ms_dump(const char *stem, const uint32_t *p)
+{
+    char pth[48];
+    if (!getenv("WF_FX_DUMP"))
+        return;
+    snprintf(pth, sizeof pth, "%s.ppm", stem);
+    dump_half(pth, p, FW, FH);
+    for (int k = 0; k < ms_ncrop; k++) {
+        snprintf(pth, sizeof pth, "%s_c%d.ppm", stem, k);
+        dump_crop(pth, p, ms_crop[k][0], ms_crop[k][1]);
+    }
+}
+static void ms_ev(int ev8)                       /* the shot's EV100 x 8: lens_info's shutter for wf_shot_ev8 'M' (the host's
+                                                 * shooting_mode 3), the LiveView frame's for 'F' */
+{
+    int sv = h_li_get("iso") ? h_li_get("iso") : h_li_get("iso_auto");
+    h_li_set("shutter", clampi(ev8 - 8 - h_li_get("aperture") + sv, 8, 200));
+    vp_bytes[2] = (uint8_t)clampi(ev8 - 8 - vp_bytes[1] + vp_bytes[0] + h_li_get("ae"), 8, 200);
+}
+extern int get_ms_clock(void);
+/* the Darkroom's stage (wf_dark.c step 3) on a developed frame src -> dst, the CR2's EV ev8 (fr.dev_ev8): after a log
+ * mark, its "yuv DARK" line */
+static const char *dk_stage(const uint32_t *src, uint32_t *dst, int ev8)
+{
+    memcpy(dst, src, NW * 4);
+    struct wf_frame fr;
+    memset(&fr, 0, sizeof fr);
+    fr.fmt = WF_FMT_UYVY8;
+    fr.part = WF_PART_FULL;
+    fr.devd = 1;
+    fr.dev_ev8 = ev8;
+    fr.w = fr.fw = FW;
+    fr.h = fr.fh = FH;
+    fr.pitch = FW * 2;
+    fr.data = fr.dst = dst;
+    fr.t_post = get_ms_clock();
+    log_mark();
+    int st = -1, tries = 0;
+    while (wf_shot_run(&fr, &st) != 0 && ++tries < 100)
+        usleep(100000);
+    LOGW("yuv DARK", 5000);
+    return log_line("yuv DARK");
+}
+/* the mist level (halation / bloom as set), after a log mark: its key, then a shot of src; the mist's seconds from the
+ * shot line (" + mist 9.2", -1 none) */
+static double ms_shot(int lv, const uint32_t *src, uint32_t *dst)
+{
+    log_mark();
+    wf_mist = lv;
+    chk(WAIT(lv ? wf_fx_mk == lv : !wf_fx_mk, 60000), "mist %d: key %d", lv, wf_fx_mk);
+    shot(src, dst, FW, FH);
+    LOGW("shot #", 5000);
+    const char *s = strstr(log_line("shot #"), " + mist ");
+    return s ? atof(s + 8) : -1;
+}
+/* Off, Mist 1/4, Bloom Normal + Halation Wide, all three on `in`: combo_<i> dumps; with g: the disc's near glow of each,
+ * with hi: the share of its pixels at Y >= 250 */
+static void ms_combo(double *g, double *hi)
+{
+    static const int M[4] = { 0, 2, 0, 2 }, HB[4] = { 0, 0, 1, 1 };
+    for (int i = 0; i < 4; i++) {
+        char st[16];
+        wf_halo = HB[i];
+        wf_bloom = HB[i] ? 2 : 0;
+        chk(WAIT(HB[i] ? wf_fx_hk && WF_FXK_HALO(wf_fx_hk) == 1 && WF_FXK_BLOOM(wf_fx_hk) == 2 : !wf_fx_hk, 60000),
+            "combo %d: halation-stage key %x", i, wf_fx_hk);
+        ms_shot(M[i], in, out);
+        printf("  combo %d: %s\n", i, log_line("shot #"));
+        snprintf(st, sizeof st, "combo_%d", i);
+        ms_dump(st, out);
+        if (g) {
+            g[i] = ring_at(ref, out, FW / 2, FH / 2, disc_r + 8, disc_r + 60, 'y');
+            hi[i] = ring_hi(out, FW / 2, FH / 2, disc_r + 8, disc_r + 60, 250);
+        }
+    }
+    wf_halo = wf_bloom = 0;
+}
+static void t_mist_levels(void)
+{
+    static const char *const nm[WF_MIST_MAX + 1] = { "off", "white 1/8", "white 1/4", "white 1/2", "white 1", "black 1/8",
+                                                     "black 1/4", "black 1/2", "black 1" };
+    static const char *const ex[WF_MIST_MAX + 1] = { "", " | Mist 1/8", " | Mist 1/4", " | Mist 1/2", " | Mist 1",
+                                                     " | Black Mist 1/8", " | Black Mist 1/4", " | Black Mist 1/2", " | Black Mist 1" };
+    const char *src = getenv("WF_FX_UYVY"), *crop = getenv("WF_FX_CROP"), *evs = getenv("WF_FX_EV8");
+    int ev0 = 64;                                /* EV 8: a lamp-lit room, the hot ramp at 5/6 */
+    struct pk e[] = { { fC, 0, tab_make(0, 0, 0, 0) } };
+    pack_write(e, 1, 0);
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nbloom=off\nmist=off\n", wf_films[fC].id);
+    mod_init(1);
+#ifndef WF_BUILD_5D2
+    h_prop_send(PROP_ASPECT, 0);
+#endif
+    disc_r = 80;
+    ms_ncrop = 0;
+    for (const char *c = crop; c && *c && ms_ncrop < 4;) {
+        if (sscanf(c, "%d,%d", &ms_crop[ms_ncrop][0], &ms_crop[ms_ncrop][1]) == 2)
+            ms_ncrop++;
+        if ((c = strchr(c, ';')))
+            c++;
+    }
+    if (src) {                                   /* the harness strip on a photo */
+        long n = 0;
+        char *b = get_file(src, &n);
+        int ok = b && n == (long)NW * 4;
+        chk(ok, "the frame %s (%ld bytes)", src, n);
+        if (ok)
+            memcpy(in, b, NW * 4);
+        free(b);
+        if (ok) {
+            ms_ev(evs ? atoi(evs) : ev0);
+            chk(WAIT(look_table_ready(), 10000), "table published");
+            printf("mist strip on %s, EV8 %d\n", src, evs ? atoi(evs) : ev0);
+            for (int lv = 0; lv <= WF_MIST_MAX; lv++) {
+                char st[16];
+                ms_shot(lv, in, out);
+                printf("  %s\n", log_line("shot #"));
+                snprintf(st, sizeof st, "mist_%d", lv);
+                ms_dump(st, out);
+            }
+            ms_combo(0, 0);
+        }
+        ms_ev(ev0);
+        mod_deinit();
+        return;
+    }
+
+    /* every level on the scene */
+    ms_ev(ev0);
+    mist_scene(in);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+    chk(WAIT(look_table_ready(), 10000), "table published");
+    ms_dump("mist_0", ref);
+    const int cx = FW / 2, cy = FH / 2;
+    double nr[WF_MIST_MAX + 1], wd[WF_MIST_MAX + 1], far[WF_MIST_MAX + 1], du[WF_MIST_MAX + 1], dv[WF_MIST_MAX + 1];
+    double lu[WF_MIST_MAX + 1], lv_[WF_MIST_MAX + 1], gd[WF_MIST_MAX + 1], ch[WF_MIST_MAX + 1], cv[WF_MIST_MAX + 1];
+    double sm[WF_MIST_MAX + 1], sec[WF_MIST_MAX + 1], fu[WF_MIST_MAX + 1], fv[WF_MIST_MAX + 1], nt[WF_MIST_MAX + 1];
+    double nbt[WF_MIST_MAX + 1], lb[WF_MIST_MAX + 1];
+    struct wf_look lk;
+    char tb[200];
+    wf_look_now(&lk);
+    printf("  level        near (top / bottom)        wide    far (dU dV)  | disc dU   dV | lamp dU   dV | gaps | cells h  v |"
+           " seam  lobe | mist s (qemu), EV8 %d\n", ev0);
+    for (int lv = 1; lv <= WF_MIST_MAX; lv++) {
+        char st[16];
+        sec[lv] = ms_shot(lv, in, out);
+        const char *sl = log_line("shot #");
+        snprintf(tb, sizeof tb, "fx mist %s ready", nm[lv]);
+        chk(log_has(tb), "%s: ready line '%s'", nm[lv], log_line("fx mist"));
+        chk(strstr(sl, " + mist ") && !strstr(sl, "halation") && !strstr(sl, "bloom") && !strstr(sl, " + mist -"),
+            "%s: shot line '%s'", nm[lv], sl);
+        const char *t = wf_exif_text(&lk, 0, 0, 0, lv, WF_EV_NONE, tb, sizeof tb);
+        chk(strstr(t, ex[lv]) && (lv > 4 || !strstr(t, "Black")), "%s: EXIF text '%s'", nm[lv], t);
+        nr[lv] = ring_at(ref, out, cx, cy, disc_r + 8, disc_r + 60, 'y');
+        wd[lv] = ring_at(ref, out, cx, cy, disc_r + 300, disc_r + 700, 'y');
+        far[lv] = corner(ref, out, FW, 0);
+        corner_uv(ref, out, &fu[lv], &fv[lv]);
+        nt[lv] = ring_at(ref, out, cx, cy, disc_r + 8, disc_r + 60, 't');
+        nbt[lv] = ring_at(ref, out, cx, cy, disc_r + 8, disc_r + 60, 'b');
+        du[lv] = ring_at(ref, out, cx, cy, disc_r + 8, disc_r + 120, 'u');
+        dv[lv] = ring_at(ref, out, cx, cy, disc_r + 8, disc_r + 120, 'v');
+        lu[lv] = ring_at(ref, out, MS_LX, cy, MS_LR + 6, MS_LR + 60, 'u');
+        lv_[lv] = ring_at(ref, out, MS_LX, cy, MS_LR + 6, MS_LR + 60, 'v');
+        gd[lv] = gap_dots(ref, out);
+        ch[lv] = cell_pattern(ref, out, 0);
+        cv[lv] = cell_pattern(ref, out, 1);
+        sm[lv] = rows_dy(ref, out, FW, FH / 2 - 3, FH / 2 - 1) - rows_dy(ref, out, FW, FH / 2, FH / 2 + 2);
+        lb[lv] = seam_lobe(ref, out, cx, cy);
+        printf("  %-10s %+7.2f (%+7.2f / %+7.2f) %+6.2f %+5.2f (%+5.2f %+5.2f) | %+5.2f %+5.2f | %+6.2f %+5.2f | %+5.2f |"
+               " %5.2f %5.2f | %+5.2f %+5.1f | %.1f\n", nm[lv], nr[lv], nt[lv], nbt[lv], wd[lv], far[lv], fu[lv], fv[lv], du[lv],
+               dv[lv], lu[lv], lv_[lv], gd[lv], ch[lv], cv[lv], sm[lv], lb[lv], sec[lv]);
+        snprintf(st, sizeof st, "mist_%d", lv);
+        ms_dump(st, out);
+        if (lv == 4)
+            memcpy(out2, out, NW * 4);
+    }
+    for (int s = 1; s < 4; s++) {
+        chk(nr[s + 1] > nr[s] && wd[s + 1] > wd[s], "white %s > %s: near %+.2f > %+.2f, wide %+.2f > %+.2f", nm[s + 1] + 6,
+            nm[s] + 6, nr[s + 1], nr[s], wd[s + 1], wd[s]);
+        chk(nr[s + 5] > nr[s + 4], "black %s > %s: near %+.2f > %+.2f", nm[s + 5] + 6, nm[s + 4] + 6, nr[s + 5], nr[s + 4]);
+    }
+    for (int s = 1; s <= 4; s++)
+        chk(wd[s + 4] < wd[s], "black %s: less wide glow than white (%+.2f < %+.2f)", nm[s + 4] + 6, wd[s + 4], wd[s]);
+    chk(nr[5] > 1.0, "black 1/8 is visible: near glow %+.2f", nr[5]);
+    int bad_far = 0, bad_cast = 0, bad_lamp = 0, bad_cell = 0, bad_seam = 0, bad_dark = 0, bad_lobe = 0;
+    double wlb = 0;
+    (void)bad_seam;
+    for (int lv = 1; lv <= WF_MIST_MAX; lv++) {
+        bad_lobe += fabs(lb[lv]) >= 3.0;
+        if (fabs(lb[lv]) > fabs(wlb))
+            wlb = lb[lv];
+        bad_far += fabs(far[lv]) >= 1.0;
+        bad_dark += fabs(fu[lv]) >= 0.2 || fabs(fv[lv]) >= 0.2;   /* 11-15: -0.5 / -1.0 in U and V, rounded down */
+        bad_cast += fabs(du[lv]) >= 1.0 || fabs(dv[lv]) >= 1.0;
+        bad_lamp += !(lv_[lv] > 0.2 && lu[lv] < 0);
+        bad_cell += ch[lv] >= 0.5 || cv[lv] >= 0.5;
+#ifdef WF_BUILD_5D2
+        bad_seam += fabs(sm[lv]) >= 1.5;
+#endif
+    }
+    chk(!bad_far, "the dark far from any light stays (%d levels moved it 1 code or more)", bad_far);
+    chk(!bad_dark, "the dark far from any light keeps its colour (%d levels moved U or V 0.2 code or more)", bad_dark);
+    chk(!bad_cast, "no colour cast round the white light (%d levels with |dU| or |dV| >= 1)", bad_cast);
+    chk(!bad_lamp, "the orange lamp's glow is orange: V up, U down (%d levels not)", bad_lamp);
+    chk(!bad_cell, "no 16 px cell pattern in the glow (%d levels at 0.5 code or more)", bad_cell);
+#ifdef WF_BUILD_5D2
+    chk(!bad_seam, "no step at the TOP / BOT seam (%d levels at 1.5 codes or more)", bad_seam);
+    chk(!bad_lobe, "the light on the TOP / BOT seam glows alike above and below (%d levels at 3 codes or more, worst %+.1f)",
+        bad_lobe, wlb);
+#else
+    chk(!bad_lobe, "whole frame: the light's glow alike above and below (%d levels at 3 codes or more, worst %+.1f)", bad_lobe,
+        wlb);
+    /* Diana halves at white 1 and black 1: the TOP has no rows below the seam (it mirrors its own, a light only where it
+     * reaches the seam) and the BOT meets it there; a light on the seam: no step, no dark lobes under it, the whole frame's
+     * glow (until 11-15: -0.55 code over the frame, near glow top / bottom 120 / 109 against 133 at white 1) */
+    for (int lv = 4; lv <= 8; lv += 4) {
+        if (lv == 8)
+            ms_shot(lv, in, out2);               /* the whole frame's black 1 (out2 holds white 1) */
+        halves = 1;
+        ms_shot(lv, in, out);
+        halves = 0;
+        double hm = mean_dy(out2, out, NW), hl = seam_lobe(ref, out, cx, cy);
+        double sa = rows_dy(ref, out, FW, FH / 2 - 3, FH / 2 - 1), sb = rows_dy(ref, out, FW, FH / 2, FH / 2 + 2);
+        chk(LOGW("(TOP ", 3000) && fabs(hm) < 0.5 && fabs(sa - sb) < 1.5 && fabs(hl) < 3.0, "%s, Diana halves: vs whole frame "
+            "dY %+.3f, seam rows above %+.2f, below %+.2f, lobe %+.1f ('%s')", nm[lv], hm, sa, sb, hl, log_line("shot #"));
+        printf("  %s, halves: near glow top %+.2f / bottom %+.2f (whole frame %+.2f / %+.2f)\n", nm[lv],
+               ring_at(ref, out, cx, cy, disc_r + 8, disc_r + 60, 't'), ring_at(ref, out, cx, cy, disc_r + 8, disc_r + 60, 'b'),
+               nt[lv], nbt[lv]);
+        snprintf(tb, sizeof tb, "halves_%d", lv);
+        ms_dump(tb, out);
+    }
+    /* a light on the seam, just above it (no phantom of it below) and further up: halves against the whole frame (eroded
+     * mirror until 11-15: -32 / -64, +33 / +41, +20 / +18 at white / black 1). The horizon: no light, the sky mirrors as sky
+     * and the BOT's pull lays a skirt over the ground below the seam, the same before and after (a limit of the halves) */
+    {
+        static const int OY[3] = { 0, -104, -200 };
+        double se[2][3];
+        uint32_t *keep = malloc(NW * 4);
+        memcpy(keep, in, NW * 4);
+        double sh[2];                            /* and a horizon on the seam (sky above, shadow below): no light, mirrored */
+        for (int i = 0; i < 4; i++) {
+            if (i < 3)
+                seam_scene(in, OY[i]);
+            else
+                sky_scene(in);
+            for (int k = 0; k < 2; k++) {
+                ms_shot(k ? 8 : 4, in, out2);
+                halves = 1;
+                ms_shot(k ? 8 : 4, in, out);
+                halves = 0;
+                *(i < 3 ? &se[k][i] : &sh[k]) = seam_err(out2, out);
+            }
+        }
+        printf("  halves - whole round the seam (worst 16 px box): light on it white 1 %+.1f black 1 %+.1f; 24 px above it %+.1f"
+               " %+.1f; 120 px above %+.1f %+.1f; horizon %+.1f %+.1f\n", se[0][0], se[1][0], se[0][1], se[1][1], se[0][2],
+               se[1][2], sh[0], sh[1]);
+        int bad = 0;
+        for (int i = 0; i < 3; i++)
+            bad += fabs(se[0][i]) >= 4.0 || fabs(se[1][i]) >= 4.0;
+        chk(!bad, "a light on / above the seam: halves within 4 codes of the whole frame (%d cases not)", bad);
+        chk(sh[0] < 45 && sh[1] < 45, "the horizon's skirt no worse than before 11-15 (+41.5 / +42.6): %+.1f / %+.1f", sh[0], sh[1]);
+        memcpy(in, keep, NW * 4);
+        free(keep);
+    }
+#endif
+
+    /* the ML menu entry */
+    uint8_t *me = menu_named("Mist");
+    const char *hp = me ? *(const char **)(me + wf_t_me_help) : 0;
+    chk(me && hp && strstr(hp, "Diffusion"), "ML menu: a 'Mist' entry, help '%s'", hp ? hp : "");
+    wf_mist = WF_MIST_MAX;
+    chk(menu_set("Mist") == 0 && wf_mist == 0, "ML menu Mist: SET on Black 1 wraps to Off (%d)", wf_mist);
+    chk(menu_set("Mist") == 0 && wf_mist == 1 && !strcmp(wf_row_text(WF_ROW_MIST), "1/8"), "ML menu Mist: then '%s'",
+        wf_row_text(WF_ROW_MIST));
+    chk(wf_row_avail(WF_ROW_MIST) == 1, "the Mist row is available for a film");
+
+    /* the leaves' sky gaps at white 1: daylight (EV 15: a gap is sky, barely over the clip) and night (EV 5: a gap is a lamp) */
+    ms_ev(15 * 8);
+    ms_shot(4, in, out);
+    chk(strstr(log_line("shot #"), " EV15") != 0, "the test sets the shot's EV: '%s'", log_line("shot #"));
+    double gday = gap_dots(ref, out);
+    ms_ev(5 * 8);
+    ms_shot(4, in, out);
+    double gnight = gap_dots(ref, out), lnight = ring_at(ref, out, MS_LX, cy, MS_LR + 6, MS_LR + 60, 'y');
+    ms_ev(ev0);
+    printf("  white 1 gaps: EV15 %+.2f, EV%d %+.2f, EV5 %+.2f (lamp ring at EV5 %+.2f)\n", gday, ev0 / 8, gd[4], gnight, lnight);
+    chk(gday < 2.0, "white 1 in daylight: no glowing dots in the leaves' sky gaps (%+.2f codes round a gap)", gday);
+    chk(gnight > gday, "at night a gap glows more than in daylight (%+.2f > %+.2f)", gnight, gday);
+
+    /* a Darkroom print: the effects' EV is the CR2's own (fr.dev_ev8), not the dials' at develop time (EV5 here) */
+    {
+        uint32_t *dref = malloc(NW * 4);
+        ms_ev(5 * 8);
+        wf_mist = 0;
+        chk(WAIT(!wf_fx_mk, 60000), "darkroom: mist off, key %d", wf_fx_mk);
+        dk_stage(in, dref, 15 * 8);
+        wf_mist = 4;
+        chk(WAIT(wf_fx_mk == 4, 60000), "darkroom: mist white 1, key %d", wf_fx_mk);
+        const char *dl = dk_stage(in, out, 15 * 8);
+        chk(strstr(dl, " ev15R") != 0, "darkroom, CR2 EV15 under dials at EV5: '%s'", dl);
+        double dday = gap_dots(dref, out);
+        dl = dk_stage(in, out, 5 * 8);
+        chk(strstr(dl, " ev5R") != 0, "darkroom, CR2 EV5: '%s'", dl);
+        double dnight = gap_dots(dref, out);
+        dl = dk_stage(in, out, WF_EV_BAD);
+        chk(strstr(dl, " ev?") != 0, "darkroom, a CR2 without exposure tags: '%s'", dl);
+        ms_ev(ev0);
+        printf("  darkroom white 1 gaps, dials at EV5: CR2 EV15 %+.2f, CR2 EV5 %+.2f\n", dday, dnight);
+        chk(dday < 2.0, "darkroom, a daylight CR2 under night dials: no glowing dots (%+.2f)", dday);
+        chk(dnight > dday, "darkroom: the CR2's night glows more than its day (%+.2f > %+.2f)", dnight, dday);
+        free(dref);
+    }
+
+    /* Mist 1/4 + Bloom Normal + Halation Wide: the glows add, no white wash */
+    double g[4], hi[4];
+    ms_combo(g, hi);
+    printf("  combo near glow: off %+.2f, mist 1/4 %+.2f, bloom+halation %+.2f, all %+.2f; Y >= 250: %.3f %.3f %.3f %.3f\n", g[0],
+           g[1], g[2], g[3], hi[0], hi[1], hi[2], hi[3]);
+    chk(g[3] > g[1] && g[3] > g[2] && g[3] < g[1] + g[2] + 2.0, "the glows add: %+.2f between max(%+.2f, %+.2f) and their sum",
+        g[3], g[1], g[2]);
+    chk(hi[3] < 0.05, "no white wash round the light: %.1f %% of the near ring at Y >= 250", 100 * hi[3]);
+
+    /* a sky over a shadow at white 1 and black 1: how far the shadows lift */
+    sky_scene(in);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+    double sn[2], sf[2], sk[2];
+    for (int k = 0; k < 2; k++) {
+        ms_shot(k ? 8 : 4, in, out);
+        sk[k] = rows_dy(ref, out, FW, FH / 2 - 500, FH / 2 - 200);
+        sn[k] = rows_dy(ref, out, FW, FH / 2 + 200, FH / 2 + 500);
+        sf[k] = rows_dy(ref, out, FW, FH - 400, FH - 100);
+        snprintf(tb, sizeof tb, "sky_%d", k);
+        ms_dump(tb, out);
+    }
+    double s0 = rows_dy(in, ref, FW, FH - 400, FH - 100) + 30, k0 = rows_dy(in, ref, FW, 100, 400) + 232;
+    printf("  sky / shadow (film: shadow ~%.0f, sky ~%.0f): white 1 shadow near %+.2f far %+.2f sky %+.2f; black 1 near %+.2f far "
+           "%+.2f sky %+.2f\n", s0, k0, sn[0], sf[0], sk[0], sn[1], sf[1], sk[1]);
+    chk(sn[1] < sn[0] && sf[1] < sf[0], "black 1 lifts the shadows less than white 1 (%+.2f < %+.2f)", sn[1], sn[0]);
+    chk(sn[0] < 40.0, "white 1: the shadow by the sky lifts %+.2f codes (under 40)", sn[0]);
+
+    /* the shot line with every effect on, halves: it keeps its EV (5D2 RAWB11 note: it lost it past 110 characters) */
+    mist_scene(in);
+    wf_mist = 2;
+    wf_halo = 1;
+    wf_bloom = 3;
+    wf_grain = WF_GRAIN_CAN ? 2 : 0;
+    wf_hl = 3;
+    wf_sh = -2;
+    chk(WAIT(wf_fx_mk == 2 && wf_fx_hk && WF_FXK_BLOOM(wf_fx_hk) == 3 && (!WF_GRAIN_CAN || wf_fx_gk), 120000)
+        && WAIT(look_table_ready(), 10000), "every effect ready");
+    halves = 1;
+    log_mark();
+    shot(in, out, FW, FH);
+    halves = 0;
+    LOGW("shot #", 5000);
+    usleep(300000);
+    const char *l1 = log_line(" s = look "), *l2 = log_line("shot #");
+    char all[400];
+    snprintf(all, sizeof all, "%s%s", l1, l1 == l2 || !strcmp(l1, l2) ? "" : l2);
+    printf("  long line: '%s'\n             '%s'\n", l1, l2);
+    chk(strstr(all, " + mist ") && strstr(all, " + halation+bloom strong ") && (!WF_GRAIN_CAN || strstr(all, " + grain "))
+        && strstr(all, "(TOP ") && strstr(all, " EV"), "the shot line keeps every part and its EV: '%s' / '%s'", l1, l2);
+    chk(strlen(l1) <= 120 && strlen(l2) <= 120, "each log line fits (%d, %d characters)", (int)strlen(l1), (int)strlen(l2));
+    wf_mist = wf_halo = wf_bloom = wf_grain = 0;
+    wf_hl = wf_sh = 0;
+    chk(WAIT(!wf_fx_mk && !wf_fx_hk && !wf_fx_gk && h_arena_live == 0, 30000), "all off: memory given back (%d live)",
+        h_arena_live);
+    mod_deinit();
+}
+
+/* ------------------------------------------------------------------ LOOK:sweep (harness only, tools/look_sweep.sh)
+ * The real pack (WF_LOOK_PACK = a build's WFFILMS.DAT) and a job file (WF_LOOK_JOBS), one shot per line:
+ *   <frame.uyvy> <ev8> <film id> <print 0..18> <strength 0..2> <grain 0..6> <halation 0..3> <bloom 0..3> <mist 0..8>
+ *   <gauge 0..2> <out.ppm> <c|d> [X,Y]  (also <out>_c.ppm: 960 x 640 at 1:1 round X, Y)
+ * The print is the variant (a chain film's print stock: WF_PRINT_STOCK0 + n); a film without it falls back as the
+ * camera does (wf_variant_eff) and the job fails as not ready.
+ * c = the camera's hook (the in-camera path), d = the Darkroom's look stage (wf_shot_run with devd, as wf_dark.c). The
+ * frames are the Darkroom's develop of the owner's CR2s (wf_dark_test devset: sRGB for the films, each Film LUT can's
+ * own cube for that can), outside the repository; the output a third-size PPM (3 x 3 box). Film id 0 = the frame as it
+ * is (the neutral develop, through the same third-size and 1:1 dumps). WF_LOOK_CUBES = a card's ML/DATA: its cubes are
+ * linked into this card so a can loads (wf_load wants its cube on the card; the stage itself uses the develop). An
+ * <out> ending in .uyvy is the full frame as it is (5184 x 3456 UYVY8: the print finishes' input). Prints
+ * "look <out> | <log line> | exif <the look text the print's comment gets>" per job. Not in test.sh's list: it needs
+ * the env. */
+static void dump_third(const char *path, const uint32_t *p)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    int ow = FW / 3, oh = FH / 3;
+    fprintf(f, "P6\n%d %d\n255\n", ow, oh);
+    unsigned char *row = malloc((size_t)ow * 3);
+    for (int oy = 0; row && oy < oh; oy++) {
+        for (int ox = 0; ox < ow; ox++) {
+            int sy = 0, su = 0, sv = 0;
+            for (int y = 3 * oy; y < 3 * oy + 3; y++)
+                for (int x = 3 * ox; x < 3 * ox + 3; x++) {
+                    uint32_t q = p[(size_t)y * (FW / 2) + x / 2];
+                    sy += (int)(x & 1 ? q >> 24 : (q >> 8) & 255);
+                    su += (int8_t)(q & 255);
+                    sv += (int8_t)((q >> 16) & 255);
+                }
+            int c[3] = { 1000 * sy + 1402 * sv, 1000 * sy - 344 * su - 714 * sv, 1000 * sy + 1772 * su };
+            for (int k = 0; k < 3; k++)
+                row[3 * ox + k] = (unsigned char)clampi((c[k] + 4500) / 9000, 0, 255);
+        }
+        fwrite(row, 1, (size_t)ow * 3, f);
+    }
+    free(row);
+    fclose(f);
+}
+static void dump_crop1(const char *path, const uint32_t *p, int cx, int cy)   /* 960 x 640 at 1:1 round cx, cy */
+{
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    int w = 960, h = 640, x0 = clampi(cx - w / 2, 0, FW - w) & ~1, y0 = clampi(cy - h / 2, 0, FH - h);
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
+    unsigned char *row = malloc((size_t)w * 3);
+    for (int y = 0; row && y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            uint32_t q = p[(size_t)(y0 + y) * (FW / 2) + (x0 + x) / 2];
+            int yy = (int)(x & 1 ? q >> 24 : (q >> 8) & 255), u = (int8_t)(q & 255), v = (int8_t)((q >> 16) & 255);
+            row[3 * x] = (unsigned char)clampi(yy + (1402 * v + 500) / 1000, 0, 255);
+            row[3 * x + 1] = (unsigned char)clampi(yy - (344 * u + 714 * v) / 1000, 0, 255);
+            row[3 * x + 2] = (unsigned char)clampi(yy + (1772 * u + 500) / 1000, 0, 255);
+        }
+        fwrite(row, 1, (size_t)w * 3, f);
+    }
+    free(row);
+    fclose(f);
+}
+static void t_look_sweep(void)
+{
+    const char *pk = getenv("WF_LOOK_PACK"), *jobs = getenv("WF_LOOK_JOBS");
+    long n = 0;
+    char *b = pk ? get_file(pk, &n) : 0;
+    chk(b && jobs, "WF_LOOK_PACK %s (%ld B), WF_LOOK_JOBS %s", pk ? pk : "-", n, jobs ? jobs : "-");
+    if (!b || !jobs) {
+        free(b);
+        return;
+    }
+    put_file("ML/DATA/WFFILMS.DAT", b, n);
+    free(b);
+    put_cfg("film=26\noutput=film\nprint=scan\nstrength=normal\ngrain=off\nhalation=off\nbloom=off\nmist=off\n");
+    const char *cubes = getenv("WF_LOOK_CUBES");
+    if (cubes) {
+        DIR *dd = opendir(cubes);
+        struct dirent *de;
+        int nc = 0;
+        while (dd && (de = readdir(dd))) {
+            size_t l = strlen(de->d_name);
+            if (l < 5 || (strcmp(de->d_name + l - 4, ".CUB") && strcmp(de->d_name + l - 4, ".cub")))
+                continue;
+            char sp[800], dp[300];
+            snprintf(sp, sizeof sp, "%s/%s", cubes, de->d_name);
+            snprintf(dp, sizeof dp, "ML/DATA/%s", de->d_name);
+            nc += link(sp, dp) == 0 || symlink(sp, dp) == 0;
+        }
+        if (dd)
+            closedir(dd);
+        chk(nc > 0, "WF_LOOK_CUBES %s: %d cubes linked", cubes, nc);
+    }
+    wf_fx_retry_ms = 500;
+    mod_init(1);
+#ifndef WF_BUILD_5D2
+    h_prop_send(PROP_ASPECT, 0);
+#endif
+    FILE *f = fopen(jobs, "r");
+    chk(f != 0, "open %s", jobs);
+    char ln[1200], cur[512] = "";
+    int nj = 0, bad = 0;
+    while (f && fgets(ln, sizeof ln, f)) {
+        char fp[512], op[512], pth[8];
+        int ev8, id, pr, sg, gr, ha, bl, mi, ga, ccx = -1, ccy = -1;
+        int nf = sscanf(ln, "%511s %d %d %d %d %d %d %d %d %d %511s %7s %d,%d", fp, &ev8, &id, &pr, &sg, &gr, &ha, &bl, &mi,
+                        &ga, op, pth, &ccx, &ccy);
+        if (nf != 12 && nf != 14)
+            continue;
+        if (strcmp(fp, cur)) {
+            char *fb = get_file(fp, &n);
+            int ok = fb && n == (long)NW * 4;
+            chk(ok, "the frame %s (%ld bytes)", fp, n);
+            if (ok)
+                memcpy(in, fb, NW * 4);
+            free(fb);
+            if (!ok) {
+                cur[0] = 0;
+                continue;
+            }
+            snprintf(cur, sizeof cur, "%s", fp);
+        }
+        if (id == 0) {                           /* the neutral develop as it is: no look, no stage */
+            memcpy(out, in, NW * 4);
+            printf("look %s | neutral develop\n", op);
+            goto dump;
+        }
+        ms_ev(ev8);
+        int lr = wf_loaded() == id ? WF_LOAD_OK : wf_load(id);
+        wf_print = pr;
+        wf_strength = sg;
+        wf_grain = gr;
+        wf_halo = ha;
+        wf_bloom = bl;
+        wf_mist = mi;
+        wf_gauge = ga;
+        struct wf_look lk;
+        int hk = 0, gk = 0, mk;
+        wf_look_now(&lk);
+        wf_fx_keys(lk.post, &hk, &gk);
+        mk = wf_fx_mkey(lk.post);
+        int rdy = lr == WF_LOAD_OK && WAIT(look_table_ready(), 20000)
+               && WAIT(wf_fx_hk == hk && wf_fx_gk == gk && (wf_fx_mk & 15) == mk, 120000);
+        wf_look_now(&lk);
+        if (!rdy || lk.row < 0 || wf_films[lk.row].id != id || lk.variant != pr) {
+            chk(0, "look %s: film %d print %d not ready (load %d, row %d variant %d, keys %x/%x %x/%x %x/%x)", op, id, pr, lr,
+                lk.row, lk.variant, wf_fx_hk, hk, wf_fx_gk, gk, wf_fx_mk, mk);
+            bad++;
+            continue;
+        }
+        log_mark();
+        char et[200];
+        wf_exif_text(&lk, lk.grain, lk.halo, lk.bloom, lk.mist, WF_EV_NONE, et, sizeof et);
+        if (pth[0] == 'd') {                     /* the Darkroom's stage on the developed frame, the frame's EV */
+            printf("look %s | %s | exif %s\n", op, dk_stage(in, out, ev8), et);
+        } else {
+            shot(in, out, FW, FH);
+            LOGW("shot #", 5000);
+            printf("look %s | %s | exif %s\n", op, log_line("shot #"), et);
+        }
+    dump:
+        if (strlen(op) > 5 && !strcmp(op + strlen(op) - 5, ".uyvy")) {
+            FILE *uf = fopen(op, "wb");          /* the full frame (the print finishes' input) */
+            chk(uf && fwrite(out, 4, NW, uf) == (size_t)NW, "write %s", op);
+            if (uf)
+                fclose(uf);
+            nj++;
+            continue;
+        }
+        dump_third(op, out);
+        if (nf == 14) {                          /* "X,Y": also <out>_c.ppm, 960 x 640 at 1:1 (grain, halation edges) */
+            char cp[520];
+            snprintf(cp, sizeof cp, "%.*s_c.ppm", (int)(strlen(op) > 4 ? strlen(op) - 4 : 0), op);
+            dump_crop1(cp, out, ccx, ccy);
+        }
+        nj++;
+    }
+    if (f)
+        fclose(f);
+    chk(bad == 0, "look sweep: %d shots, %d not ready", nj, bad);
+    wf_mist = wf_halo = wf_bloom = wf_grain = 0;
+    wf_gauge = WF_GAUGE_DEF;
+    mod_deinit();
+}
+
 /* ------------------------------------------------------------------ CFG */
 static void t_cfg(void)
 {
@@ -1445,19 +2459,21 @@ static void t_cfg(void)
     const char *code1 = wf_flut_code[1];
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
-            "blind=OFF\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1);
+            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
     chk(wf_incurve == WF_INC_FILM1 && wf_incurve_t() == (wf_ll_curve_have(WF_INC_FILM1) ? WF_INC_FILM1 : WF_INC_SRGB),
         "incurve %d (in use %d)", wf_incurve, wf_incurve_t());
     chk(wf_print == 1 && wf_light == 3 && wf_strength == 2 && wf_grain == 1 && wf_halo == 2 && wf_bloom == 2 && wf_mist == 7
-        && wf_pv_mode == 2, "print %d light %d strength %d grain %d halation %d bloom %d mist %d preview %d", wf_print, wf_light,
-        wf_strength, wf_grain, wf_halo, wf_bloom, wf_mist, wf_pv_mode);
+        && wf_pv_mode == 2 && wf_gauge == WF_GAUGE_DEF, "print %d light %d strength %d grain %d halation %d bloom %d mist %d "
+        "preview %d", wf_print, wf_light, wf_strength, wf_grain, wf_halo, wf_bloom, wf_mist, wf_pv_mode);
     chk(wf_hl == 3 && wf_sh == -2, "hl %d sh %d", wf_hl, wf_sh);
     chk(wf_exp_mode == (WF_EXP_CAN ? WF_EXP_SMOOTH : WF_EXP_CANON) && wf_exp_trim == -5 && wf_exif_off == 1,
         "exposure %d exptrim %d exif off %d", wf_exp_mode, wf_exp_trim, wf_exif_off);
     chk(wf_blind == 0, "blind=OFF read: Blind roll off (%d)", wf_blind);
+    chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2, "print finishes read: frame %d info %d date %d (want 4 2 2)",
+        wf_pr_frame, wf_pr_info, wf_pr_date);
     chk(WAIT(h_kelvin_last == 3200, 5000), "Light Tungsten applied at start (%dK)", h_kelvin_last);
     wf_row_step(WF_ROW_GRAIN, 1);
     h_clock_add_ms += 2000;
@@ -1466,8 +2482,9 @@ static void t_cfg(void)
     char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
-             "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spk\nbloom=normal\nmist=b2\npreview=fast\nexposure=%s\nexptrim=-5\n"
-             "exif=off\nblind=off\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
+             "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\nexposure=%s\n"
+             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\nstage=0,0,0,0,0,0,4\n"
+             "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
     free(b);
     /* Canon busy with a shot: the save waits (a create then could leave two WINDYFLM.CFG entries), then follows */
@@ -1501,6 +2518,52 @@ static void t_cfg(void)
     chk(wf_incurve == WF_INC_NEUTRAL && wf_incurve_t() == (wf_ll_curve_have(WF_INC_NEUTRAL) ? WF_INC_NEUTRAL : WF_INC_SRGB),
         "incurve=Neutral read: %d (in use %d)", wf_incurve, wf_incurve_t());
     wf_incurve = inc0;
+    /* the film-stage words: since 11-15 (evennormal, wrap, bloom=, gauge=) and the earlier ones (genstrong, gen, and the
+     * halation words bloom / spkbloom that held the bloom) */
+    int gr0 = wf_grain, ha0 = wf_halo, bl0 = wf_bloom, ga0 = wf_gauge;
+    put_cfg("grain=EvenNormal\nhalation=wrap\n");
+    wf_cfg_load();
+    chk(wf_grain == 5 && wf_halo == 3 && wf_bloom == 0, "grain=EvenNormal / halation=wrap read: %d %d (bloom %d)", wf_grain,
+        wf_halo, wf_bloom);
+    put_cfg("grain=genstrong\nhalation=gen\n");
+    wf_cfg_load();
+    chk(wf_grain == 6 && wf_halo == 3, "grain=genstrong / halation=gen (before 11-15) read: %d %d", wf_grain, wf_halo);
+    put_cfg("halation=spkbloom\n");
+    wf_cfg_load();
+    chk(wf_halo == 2 && wf_bloom == 2, "halation=spkbloom (before 11-15): Tight + Bloom Normal (%d %d)", wf_halo, wf_bloom);
+    put_cfg("halation=bloom\nbloom=strong\ngauge=16\n");
+    wf_cfg_load();
+    chk(wf_halo == 1 && wf_bloom == 3 && wf_gauge == 0, "halation=bloom with a bloom= line: Wide + Strong, gauge 16 mm (%d %d %d)",
+        wf_halo, wf_bloom, wf_gauge);
+    put_cfg("bloom=low\nhalation=halation\ngauge=65\n");
+    wf_cfg_load();
+    chk(wf_halo == 1 && wf_bloom == 1 && wf_gauge == 2, "bloom= before halation= still counts, gauge 65 mm (%d %d %d)", wf_halo,
+        wf_bloom, wf_gauge);
+    put_cfg("grain=even\nhalation=wrapx\nbloom=x\ngauge=70\n");
+    wf_cfg_load();
+    chk(wf_grain == WF_GRAIN_DEF && wf_halo == WF_HALO_DEF && wf_bloom == WF_BLOOM_DEF && wf_gauge == WF_GAUGE_DEF,
+        "unknown grain / halation / bloom / gauge words: the defaults (%d %d %d %d)", wf_grain, wf_halo, wf_bloom, wf_gauge);
+    /* the rows and labels name no product: Grain / Halation / Bloom / Gauge; the halo by its look (per-film profiles Wide,
+     * 3-bounce Tight, light wrap Wrap) */
+    wf_grain = 5;
+    wf_halo = 1;
+    wf_bloom = 3;
+    wf_gauge = 0;
+    int lw = !strcmp(wf_row_text(WF_ROW_HALO), "Wide") && !strcmp(wf_row_text(WF_ROW_BLOOM), "Strong")
+             && !strcmp(wf_row_text(WF_ROW_GAUGE), "16 mm");
+    wf_halo = 2;
+    wf_gauge = 2;
+    lw = lw && !strcmp(wf_row_text(WF_ROW_HALO), "Tight") && !strcmp(wf_row_text(WF_ROW_GAUGE), "65 mm");
+    wf_halo = 3;
+    chk(lw && !strcmp(wf_row_text(WF_ROW_HALO), "Wrap") && !strcmp(wf_row_text(WF_ROW_GRAIN), "Even Normal")
+        && !strcmp(wf_row_name(WF_ROW_GRAIN), "Grain") && !strcmp(wf_row_name(WF_ROW_HALO), "Halation")
+        && !strcmp(wf_row_name(WF_ROW_BLOOM), "Bloom") && !strcmp(wf_row_name(WF_ROW_GAUGE), "Gauge"),
+        "rows Grain / Halation / Bloom / Gauge; Wide / Tight / Wrap, Bloom Strong, 16 / 65 mm, Even Normal (%s, %s, %s)",
+        wf_row_name(WF_ROW_HALO), wf_row_text(WF_ROW_HALO), wf_row_text(WF_ROW_GRAIN));
+    wf_grain = gr0;
+    wf_halo = ha0;
+    wf_bloom = bl0;
+    wf_gauge = ga0;
     char big[700];
     memset(big, '#', sizeof big);
     memcpy(big, "film=0\n", 7);
@@ -1525,6 +2588,19 @@ static void t_cfg(void)
     put_cfg("halation=bogus\nbloom=bogus\n");
     wf_cfg_load();
     chk(wf_halo == WF_HALO_DEF && wf_bloom == WF_BLOOM_DEF, "unknown words: the defaults (%d %d)", wf_halo, wf_bloom);
+    /* Mist: every word, unchanged since the first Mist commit (4d10a0b), reads its level; an unknown word is Off */
+    static const char *const mw[] = { "off", "w8", "w4", "w2", "w1", "b8", "b4", "b2", "b1" };
+    int mbad = 0;
+    for (int i = 0; i <= WF_MIST_MAX; i++) {
+        put_cfg("mist=%s\n", mw[i]);
+        wf_cfg_load();
+        mbad += wf_mist != (WF_MIST_CAN ? i : 0);
+    }
+    put_cfg("mist=b2\n");
+    wf_cfg_load();
+    put_cfg("mist=bogus\n");
+    wf_cfg_load();
+    chk(!mbad && wf_mist == 0, "config mist=off..b1 read as levels 0..8 (%d wrong), mist=bogus is Off (%d)", mbad, wf_mist);
     wf_row_step(WF_ROW_GRAIN, -1);
     h_nchanges = 0;
     mod_deinit();
@@ -1563,6 +2639,7 @@ static void t_pack(const char *cs, const char *file)
         int nf = 0, nh = 0, nv = 0;
         for (int k = 0; k < wf_nfilms; k++) {
             if (!colour_film(k) && (wf_films[k].flags & (WF_F_READY | WF_F_LUTCAN)) != WF_F_READY) continue;
+            if (!(wf_films[k].prints & 1)) continue;   /* a chain film: no Scan variant (print stocks only) */
             nf++;
             nh += wf_ws_has(k, 0);
             nv += wf_ws_has(k, 1) + wf_ws_has(k, 2);
@@ -1714,6 +2791,470 @@ static void t_print(void)
     wf_out = WF_OUT_LOG;
     chk(!wf_row_avail(WF_ROW_PRINT), "plain log: Print greyed");
     wf_out = WF_OUT_FILM;
+    mod_deinit();
+}
+
+/* ------------------------------------------------------------------ PRINT:chain (own process: the pack index of an
+ * earlier mod_init stays in the statically linked module) */
+/* a chain film: no Scan / Cine / Paper, only print stocks (bits WF_PRINT_STOCK0..). Its catalogue row must be READY
+ * (else the browser leaves it off the strip and wf_load says "Film table not on the card"), it loads, the Print stock
+ * row starts on WF_PRINT_CHAIN_DEF (2383; since 11-15, not the first stock 2302, the B&W print) and steps to the next,
+ * and each shot uses that stock's table (the shot's own fallback, wf_shot.c wf_variant_eff, picks the same print). */
+/* a chain film's start print (WF_PRINT_CHAIN_DEF when it has it, else its first stock) and the next one it has, -1 if none
+ * (also the STAGE cases' first / second print) */
+static void chain_prints(int kc, int *v1, int *v2)
+{
+    *v1 = *v2 = -1;
+    for (int v = WF_PRINT_STOCK0; v < WF_NPRINTS && *v1 < 0; v++)
+        if (wf_films[kc].prints & (1u << v))
+            *v1 = v;
+    if (wf_films[kc].prints & (1u << WF_PRINT_CHAIN_DEF))
+        *v1 = WF_PRINT_CHAIN_DEF;
+    for (int i = 1; i < WF_NPRINTS && *v1 >= 0 && *v2 < 0; i++)
+        if (wf_films[kc].prints & (1u << ((*v1 + i) % WF_NPRINTS)))
+            *v2 = (*v1 + i) % WF_NPRINTS;
+}
+static void t_print_chain(void)
+{
+    int kc = -1, v1 = -1, v2 = -1;
+    for (int k = 0; k < wf_nfilms && kc < 0; k++)
+        if (!(wf_films[k].flags & WF_F_LUTCAN) && (wf_films[k].prints >> WF_PRINT_STOCK0))
+            kc = k;
+    if (kc < 0) {
+        printf("  (no chain film in this catalogue: chain part skipped)\n");
+        return;
+    }
+    int nchain = 0, nbw = 0, kb = -1;
+    for (int k = 0; k < wf_nfilms; k++)
+        if (!(wf_films[k].flags & WF_F_LUTCAN) && (wf_films[k].prints >> WF_PRINT_STOCK0)) {
+            nchain++;
+            if (wf_films[k].flags & WF_F_BW) {       /* Double-X 5222: the chain renders it grey only on 2302 */
+                nbw++;
+                kb = k;
+                chk((wf_films[k].prints >> WF_PRINT_STOCK0) == 1 && !(wf_films[k].prints & 7),
+                    "B&W chain film %s offers 2302 only, the B&W print", wf_films[k].code);
+            } else
+                chk(wf_films[k].prints & (1u << WF_PRINT_CHAIN_DEF), "chain film %s offers 2383, the default print",
+                    wf_films[k].code);
+            chk(!(wf_films[k].prints & (1u << (WF_PRINT_STOCK0 + 14))), "chain film %s offers no 3513D (no table)",
+                wf_films[k].code);
+        }
+    printf("  %d chain films (%d B&W)\n", nchain, nbw);
+    chk(nbw == 1, "one B&W chain film, Double-X 5222 (%d)", nbw);
+    chain_prints(kc, &v1, &v2);
+    chk(wf_films[kc].flags & WF_F_READY, "chain film %d %s: READY (its print tables were there at build time)",
+        wf_films[kc].id, wf_films[kc].code);
+    chk(v1 >= 0 && v2 >= 0 && !(wf_films[kc].prints & 7), "chain film: two print stocks, no Scan / Cine / Paper");
+    if (v2 < 0)
+        return;
+    /* one pack for the whole case: the module keeps the first pack index of this process */
+    struct pk ec[] = { { kc, v1, tab_make(12, 0, 0, 0) }, { kc, v2, tab_make(-10, 0, 0, 0) },
+                       { kb, WF_PRINT_STOCK0, tab_make(8, 0, 0, 1) } };
+    pack_write(ec, kb >= 0 ? 3 : 2, 0);
+    put_cfg("film=%d\noutput=film\nprint=scan\ngrain=off\nhalation=off\nmist=off\n", wf_films[kc].id);
+    mod_init(1);
+    gen_frame(in, FW, FH, 0);
+    chk(WAIT(wf_avail(wf_films[kc].id), 5000) && wf_load(wf_films[kc].id) == WF_LOAD_OK && wf_loaded() == wf_films[kc].id,
+        "chain film: on the card and loads");
+    char t1[16] = "", t2[16] = "";
+    snprintf(t1, sizeof t1, "%s", wf_row_text(WF_ROW_PRINT));
+    chk(wf_row_avail(WF_ROW_PRINT) && strcmp(t1, "Scan") && strcmp(t1, "Cine") && strcmp(t1, "Paper"),
+        "chain film: Print stock row on a print stock (%s), not Scan", t1);
+    chk(v1 != WF_PRINT_CHAIN_DEF || !strcmp(t1, "2383"), "chain film: Print = Scan starts on 2383, the default print (%s)", t1);
+    film_shot("chain film, default print stock", kc, v1, 1, 12, 1.5);
+    chk(wf_row_step(WF_ROW_PRINT, 1), "chain film: Print stock steps");
+    snprintf(t2, sizeof t2, "%s", wf_row_text(WF_ROW_PRINT));
+    chk(strcmp(t1, t2) != 0, "chain film: the next stock (%s -> %s)", t1, t2);
+    film_shot("chain film, second print stock", kc, v2, 1, -10, 1.5);
+    if (kb >= 0) {
+        /* the B&W chain film has no 2383: the Print row falls back to its one stock, 2302, and the shot uses that table */
+        chk(WAIT(wf_avail(wf_films[kb].id), 5000) && wf_load(wf_films[kb].id) == WF_LOAD_OK
+            && wf_loaded() == wf_films[kb].id, "B&W chain film %s: on the card and loads", wf_films[kb].code);
+        snprintf(t1, sizeof t1, "%s", wf_row_text(WF_ROW_PRINT));
+        chk(!strcmp(t1, "2302"), "B&W chain film: the Print row is on 2302, its only print (%s)", t1);
+        film_shot("B&W chain film, 2302", kb, WF_PRINT_STOCK0, 1, 8, 1.5);
+    }
+    mod_deinit();
+}
+
+/* ------------------------------------------------------------------ STAGE: film-stage knob rows (ML/DATA/WFSTAGE.DAT)
+ * A synthetic stage pack whose halves compose to the identity at default knobs: X, A1 and B1 straight lines, A2 and B2
+ * the grid itself, an interlayer part of 0.05 taken out of A2's base. So Film exp / Push move Y up, a printer point
+ * takes 0.025 off its channel, interlayer 0 / 200 % gives -0.05 / +0.05. Entries: (film, start print: 2383) naming the pack's
+ * table of it, (film, second print) naming a table the pack does not hold (must be refused).
+ * Cases: "" the rows and shots, "bad" a byte of the negative half flipped, "missing" no WFSTAGE.DAT (+ CFG parsing),
+ * "dark" the Darkroom's stage with knob rows set against the camera's shot (stage_dark). */
+static struct wf_sg_neg *sg_n;
+static struct wf_sg_prn *sg_p;
+static struct wf_sg_pair sg_pr;
+static void stage_halves(void)
+{
+    sg_n = calloc(1, sizeof *sg_n);
+    sg_p = calloc(1, sizeof *sg_p);
+    for (int i = 0; i <= WF_SG_NX; i++)
+        sg_n->X[i] = (uint16_t)clampi((int)((int64_t)i * 65536 / (WF_SG_NX - 1)), 0, 65535);
+    for (int c = 0; c < 3; c++) {
+        sg_n->lo[c] = sg_p->lo[c] = 0;
+        sg_n->sc[c] = sg_p->sc[c] = 32 * 65536;  /* density 0..1 over the 33 nodes */
+        for (int i = 0; i < WF_SG_N1; i++) {
+            sg_n->A1[c][i] = (uint16_t)(i * 64);   /* density = x (Q14) */
+            sg_p->B1[c][i] = (uint16_t)(i * 64);   /* print density = 4 x printing density / 4 (Q12) */
+        }
+    }
+    for (int i = 0; i < WF_SG_A3; i++) {
+        int nd[3] = { i / (33 * 33), i / 33 % 33, i % 33 };
+        for (int c = 0; c < 3; c++) {
+            sg_n->A2[i][c] = (int16_t)(nd[c] * 4096 / 32 - 205);   /* base: the node less the interlayer part */
+            sg_n->A2[i][3 + c] = 205;                              /* interlayer part 0.05 (Q12) */
+        }
+    }
+    for (int i = 0; i < WF_SG_B3; i++) {
+        int nd[3] = { i / (33 * 33), i / 33 % 33, i % 33 };
+        for (int c = 0; c < 3; c++)
+            sg_p->B2[i][c] = (uint16_t)(nd[c] * 65535 / 32);
+    }
+    sg_pr.fit = 0;
+    sg_pr.bk = 0;
+    sg_pr.inv = 65537;                           /* 2^32 / 65535 */
+}
+static void stage_write(int k, int v1, int v2, const uint32_t *T1, int bad)
+{
+    uint32_t nb = sizeof *sg_n, pb = sizeof *sg_p, io = 64, no = io + 28 * 2, po = no + 4, dof = (po + 4 + 3) & ~3u;
+    uint32_t pof = dof + nb, sz = pof + pb;
+    uint8_t *b = calloc(1, sz);
+    memcpy(b, "WFSG", 4);
+    uint16_t h[8] = { 1, 2, 1, 1, WF_SG_NA, WF_SG_NB, WF_SG_N1, WF_SG_NX };
+    memcpy(b + 4, h, 16);
+    le32(b + 20, nb); le32(b + 24, pb); le32(b + 28, io); le32(b + 32, no); le32(b + 36, po); le32(b + 40, dof);
+    le32(b + 44, pof); le32(b + 52, sz);
+    for (int e = 0; e < 2; e++) {
+        uint8_t *x = b + io + 28 * e;
+        x[0] = wf_films[k].id; x[1] = e ? v2 : v1; x[2] = 0; x[3] = 0;
+        strncpy((char *)x + 4, wf_films[k].code, 8);
+        le32(x + 12, sg_pr.fit); le32(x + 16, sg_pr.bk); le32(x + 20, sg_pr.inv);
+        le32(x + 24, fnv(2166136261u, (const uint8_t *)T1, TW * 4));   /* entry 1 names T1 too: not its print's table */
+    }
+    memcpy(b + dof, sg_n, nb);
+    memcpy(b + pof, sg_p, pb);
+    le32(b + no, fnv(2166136261u, b + dof, nb));
+    le32(b + po, fnv(2166136261u, b + pof, pb));
+    le32(b + 48, fnv(2166136261u, b + io, po + 4 - io));
+    if (bad == 'N')
+        b[dof + nb / 2] ^= 0x10;                 /* after the checksum: the negative half fails it */
+    put_file("ML/DATA/WFSTAGE.DAT", b, sz);
+    free(b);
+}
+/* a film shot through the composed table of these knobs: bit-exact vs wf_sg_compose run here on the same halves */
+static double stage_shot(const char *what, int k, int v, const struct wf_sg_knobs *kn)
+{
+    static uint32_t Te[TW];
+    static uint16_t pd[TW * 3];
+    wf_sg_compose(sg_n, sg_p, &sg_pr, kn, 0, pd, Te);
+    tabs[k][v] = Te;
+    chk(WAIT(look_table_ready(), 10000), "%s: composed table published", what);
+    log_mark();
+    int sb = shot(in, out, FW, FH);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, Te, flags_of(k, 1));
+    int d = ndiff(out, ref, NW);
+    double m = mean_dy(in, out, NW);
+    chk(d == 0 && sb == 0, "%s: bit-exact vs the table wf_sg_compose makes from the same halves (%d words differ)", what, d);
+    chk(LOGW(": film ", 3000), "%s: log '%s'", what, log_line(": film "));
+    return m;
+}
+static int stage_rows_avail(void)
+{
+    int n = 0;
+    for (int r = WF_ROW_SEXP; r <= WF_ROW_SIIE; r++)
+        n += wf_row_avail(r) != 0;
+    return n;
+}
+/* the spread of Y(a) - Y(b) over the frame (grain) */
+static double sd_dy(const uint32_t *a, const uint32_t *b, int n)
+{
+    double s = 0, s2 = 0;
+    for (int i = 0; i < n; i++) {
+        int d0 = (int)((a[i] >> 8) & 255) - (int)((b[i] >> 8) & 255), d1 = (int)(a[i] >> 24) - (int)(b[i] >> 24);
+        s += d0 + d1;
+        s2 += d0 * d0 + d1 * d1;
+    }
+    double m = s / (2.0 * n);
+    return sqrt(s2 / (2.0 * n) - m * m);
+}
+/* mean |dY| of the 16 x 16 block means: two grain fields with other seeds average out, a look that differs does not */
+static double blk_dy(const uint32_t *a, const uint32_t *b)
+{
+    double t = 0;
+    int nb = 0;
+    for (int by = 0; by + 16 <= FH; by += 16)
+        for (int bx = 0; bx + 16 <= FW; bx += 16) {
+            int s = 0;
+            for (int y = by; y < by + 16; y++)
+                for (int x = bx; x < bx + 16; x += 2) {
+                    uint32_t p = a[(size_t)y * (FW / 2) + x / 2], q = b[(size_t)y * (FW / 2) + x / 2];
+                    s += (int)((p >> 8) & 255) + (int)(p >> 24) - (int)((q >> 8) & 255) - (int)(q >> 24);
+                }
+            t += fabs(s / 256.0);
+            nb++;
+        }
+    return t / nb;
+}
+/* STAGE:dark (wf-print-frame's gap, 11-15): the Darkroom's stage (wf_shot_run with devd, as wf_dark.c step 3: the
+ * develop's frame through the look) of a chain film with knob rows set and the finish off its defaults, against the
+ * camera's shot of the same frame at the same EV. Film exp +1 and Printer G +2 make a composed table (lk->stk): both
+ * paths use it (bit-exact vs wf_sg_compose with effects off). Halation Tight + Bloom Strong at Gauge 16 mm: the two
+ * paths word for word, and not the 35 mm stage. Grain Even Normal at Gauge 65 mm (its seed is per shot, so not word
+ * for word): the same look under the grain (16 px block means) and the same grain spread. */
+static void stage_dark(int kc, int v1)
+{
+    static uint32_t Te[TW];
+    static uint16_t pd[TW * 3];
+    struct wf_look lk;
+    char cl[200];
+    const int ev = 12 * 8;
+    int hk = 0, gk = 0;
+    ms_ev(ev);
+    for (int i = 0; i < 3; i++)
+        wf_row_step(WF_ROW_SEXP, 1);
+    for (int i = 0; i < 2; i++)
+        wf_row_step(WF_ROW_SPG, 1);
+    chk(!strcmp(wf_row_text(WF_ROW_SEXP), "+1") && !strcmp(wf_row_text(WF_ROW_SPG), "+2"), "knob rows: Film exp %s, Printer G %s",
+        wf_row_text(WF_ROW_SEXP), wf_row_text(WF_ROW_SPG));
+    struct wf_sg_knobs kn = { 3, 0, 0, { 0, 2, 0 }, WF_SG_IIE_DEF };
+    wf_sg_compose(sg_n, sg_p, &sg_pr, &kn, 0, pd, Te);
+    tabs[kc][v1] = Te;
+    wf_look_now(&lk);
+    chk(lk.stk != 0 && lk.row == kc && lk.variant == v1 && WAIT(look_table_ready(), 10000),
+        "knobs set: the look asks for a composed table (key %x), published", lk.stk);
+
+    /* effects off: the composed table on both paths */
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, Te, flags_of(kc, 1));
+    const char *dl = dk_stage(in, out, ev);
+    int d = ndiff(out, ref, NW);
+    chk(d == 0 && strstr(dl, ": film ") && strstr(dl, wf_films[kc].code), "darkroom, knobs set, effects off: bit-exact vs "
+        "the composed table (%d words differ; '%s')", d, dl);
+    chk(mean_dy(in, out, NW) > 4, "darkroom: the knobs' table, not the pack's (Film exp +1 brighter: mean dY %+.2f)",
+        mean_dy(in, out, NW));
+    log_mark();
+    shot(in, out2, FW, FH);
+    d = ndiff(out2, out, NW);
+    chk(d == 0, "camera shot, same knobs: = the darkroom's frame word for word (%d differ)", d);
+#ifdef WF_BUILD_5D2
+    /* the 5D2 has no Darkroom, and its shots are TOP + BOT halves: the halation stage at the seam is not the whole
+     * frame's, so the effects are compared on the EOS M only */
+    (void)cl;
+    (void)hk;
+    (void)gk;
+    chk(1, "5D2: no Darkroom, effects compared on the EOS M");
+#else
+    /* Halation Tight + Bloom Strong at Gauge 16 mm, no grain */
+    wf_grain = 0;
+    wf_halo = 2;
+    wf_bloom = 3;
+    wf_gauge = 0;
+    wf_look_now(&lk);
+    wf_fx_keys(lk.post, &hk, &gk);
+    chk(WAIT(hk && wf_fx_hk == hk && !wf_fx_gk, 120000) && WAIT(look_table_ready(), 10000) && WF_FXK_HALO(hk) == 2
+        && WF_FXK_BLOOM(hk) == 3 && WF_FXK_HGAUGE(hk) == 0, "Halation Tight + Bloom Strong at 16 mm ready (key %x)", wf_fx_hk);
+    log_mark();
+    shot(in, out2, FW, FH);
+    LOGW("shot #", 5000);
+    snprintf(cl, sizeof cl, "%s", log_line("shot #"));
+    dl = dk_stage(in, out, ev);
+    d = ndiff(out, out2, NW);
+    chk(d == 0 && strstr(cl, " + halation+bloom strong ") && strstr(dl, " h"), "Tight + Strong at 16 mm: darkroom = camera "
+        "word for word (%d differ; '%s' / '%s')", d, cl, dl);
+    int dh = ndiff(out, ref, NW);
+    chk(dh > NW / 100, "the halation stage ran on the composed look (%d words of %d moved)", dh, NW);
+    memcpy(ref, out, NW * 4);                    /* the 16 mm frame */
+    wf_gauge = WF_GAUGE_DEF;
+    wf_look_now(&lk);
+    wf_fx_keys(lk.post, &hk, &gk);
+    chk(WAIT(wf_fx_hk == hk && WF_FXK_HGAUGE(wf_fx_hk) == WF_GAUGE_DEF, 120000), "35 mm: key %x", wf_fx_hk);
+    dk_stage(in, out, ev);
+    d = ndiff(out, ref, NW);
+    chk(d > 0, "darkroom: Gauge 16 mm is not the 35 mm stage (%d words differ, mean dY %+.2f)", d, mean_dy(ref, out, NW));
+
+#if WF_GRAIN_CAN
+    /* Grain Even Normal at Gauge 65 mm: the grain's seed is per shot */
+    wf_gauge = 2;
+    wf_look_now(&lk);
+    wf_fx_keys(lk.post, &hk, &gk);
+    chk(WAIT(wf_fx_hk == hk && WF_FXK_HGAUGE(wf_fx_hk) == 2, 120000), "65 mm, no grain: key %x", wf_fx_hk);
+    dk_stage(in, ref, ev);                       /* the 65 mm look without grain */
+    wf_grain = 5;
+    wf_look_now(&lk);
+    wf_fx_keys(lk.post, &hk, &gk);
+    chk(WAIT(gk && wf_fx_gk == gk && wf_fx_hk == hk, 120000) && WF_FXK_GGAUGE(gk) == 2 && !strcmp(wf_row_text(WF_ROW_GRAIN),
+        "Even Normal"), "Grain %s at 65 mm ready (grain key %x)", wf_row_text(WF_ROW_GRAIN), wf_fx_gk);
+    log_mark();
+    shot(in, out2, FW, FH);
+    LOGW("shot #", 5000);
+    usleep(300000);                              /* a long shot line comes in two: " + grain" may be on the first */
+    int cg = log_has(" + grain ");
+    snprintf(cl, sizeof cl, "%s", log_line("shot #"));
+    dl = dk_stage(in, out, ev);
+    double sc = sd_dy(out2, ref, NW), sdk = sd_dy(out, ref, NW), bd = blk_dy(out, out2);
+    printf("  grain Even Normal 65 mm: spread camera %.2f, darkroom %.2f; 16 px blocks |dY| %.3f\n", sc, sdk, bd);
+    chk(cg && strstr(dl, " g"), "grain ran on both paths ('%s' / '%s')", cl, dl);
+    chk(sc > 0.5 && sdk > 0.8 * sc && sdk < 1.25 * sc, "the same grain spread (camera %.2f, darkroom %.2f)", sc, sdk);
+    chk(bd < 0.5, "the same look under the grain: 16 px block means within %.3f codes", bd);
+#endif
+#endif
+    wf_grain = wf_halo = wf_bloom = 0;
+    wf_gauge = WF_GAUGE_DEF;
+}
+static void t_stage(const char *cs)
+{
+    int kc = -1, v1 = -1, v2 = -1;
+    for (int k = 0; k < wf_nfilms && kc < 0; k++)
+        if (!(wf_films[k].flags & WF_F_LUTCAN) && (wf_films[k].prints >> WF_PRINT_STOCK0))
+            kc = k;
+    if (kc < 0) {
+        printf("  (no chain film in this catalogue: STAGE skipped)\n");
+        return;
+    }
+    chain_prints(kc, &v1, &v2);                  /* v1 = the print the film starts on (2383), v2 the next one */
+    if (v2 < 0) {
+        printf("  (chain film with one print: STAGE skipped)\n");
+        return;
+    }
+    uint32_t *T1 = tab_make(0, 0, 0, 0), *T2 = tab_make(-10, 0, 0, 0);
+    struct pk ec[] = { { kc, v1, T1 }, { kc, v2, T2 } };
+    pack_write(ec, 2, 0);
+    stage_halves();
+    struct wf_sg_knobs k0 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF };
+    {   /* the synthetic halves: identity at default knobs on the in-gamut nodes (the composition clamps a node's RGB) */
+        static uint32_t Te[TW];
+        static uint16_t pd[TW * 3];
+        int md = 0;
+        wf_sg_compose(sg_n, sg_p, &sg_pr, &k0, 0, pd, Te);
+        for (int i = 0; i < TW; i++) {
+            int y = clampi(16 * (i / 289), 0, 255), u = clampi(16 * (i / 17 % 17), 0, 255) - 128;
+            int v = clampi(16 * (i % 17), 0, 255) - 128;
+            double r = y + 1.402 * v, g = y - 0.344136 * u - 0.714136 * v, bl = y + 1.772 * u;
+            if (r < 0 || r > 255 || g < 0 || g > 255 || bl < 0 || bl > 255)
+                continue;
+            for (int s = 0; s < 24; s += 8) {
+                int a = (int8_t)(Te[i] >> s), c = (int8_t)(T1[i] >> s);
+                if (s == 8) { a = (Te[i] >> 8) & 255; c = (T1[i] >> 8) & 255; }
+                md = abs(a - c) > md ? abs(a - c) : md;
+            }
+        }
+        chk(md <= 2, "synthetic halves: default composition within 2 codes of the identity, in-gamut nodes (max %d)", md);
+    }
+    if (strcmp(cs, "missing"))
+        stage_write(kc, v1, v2, T1, !strcmp(cs, "bad") ? 'N' : 0);
+    put_cfg("film=%d\noutput=film\nprint=scan\ngrain=off\nhalation=off\nmist=off\n%s", wf_films[kc].id,
+            !strcmp(cs, "missing") ? "stage=-6,3,1,-12,12,5,0\n" : !strcmp(cs, "bad") ? "stage=1,2,x,0,0,0,4\n" : "");
+    mod_init(1);
+    gen_frame(in, FW, FH, 0);
+    {
+        int av = WAIT(wf_avail(wf_films[kc].id), 5000), ld = wf_load(wf_films[kc].id);
+        chk(av && ld == WF_LOAD_OK, "chain film %s loads (avail %d, load %d, flags %x, prints %x, ws %d)", wf_films[kc].code,
+            av, ld, wf_films[kc].flags, wf_films[kc].prints, wf_ws_state());
+    }
+    if (!strcmp(cs, "missing")) {
+        chk(WAIT(wf_sg_state() == -1, 5000) && LOGW("stage ML/DATA/WFSTAGE.DAT missing", 3000),
+            "no stage pack: state %d, log '%s'", wf_sg_state(), log_line("stage"));
+        chk(!strcmp(wf_row_text(WF_ROW_SEXP), "-2") && !strcmp(wf_row_text(WF_ROW_SPUSH), "Push 1")
+            && !strcmp(wf_row_text(WF_ROW_SCOMP), "On") && !strcmp(wf_row_text(WF_ROW_SPR), "-12")
+            && !strcmp(wf_row_text(WF_ROW_SPG), "+12") && !strcmp(wf_row_text(WF_ROW_SPB), "+5")
+            && !strcmp(wf_row_text(WF_ROW_SIIE), "0%"), "CFG stage=-6,3,1,-12,12,5,0 read: %s %s %s %s %s %s %s",
+            wf_row_text(WF_ROW_SEXP), wf_row_text(WF_ROW_SPUSH), wf_row_text(WF_ROW_SCOMP), wf_row_text(WF_ROW_SPR),
+            wf_row_text(WF_ROW_SPG), wf_row_text(WF_ROW_SPB), wf_row_text(WF_ROW_SIIE));
+        chk(stage_rows_avail() == 0, "no stage pack: the seven knob rows greyed");
+        tabs[kc][v1] = T1;
+        film_shot("no stage pack, knobs set: the pack's table", kc, v1, 1, 0, 0.5);
+        put_cfg("stage=7,0,0,0,0,0,4\n");          /* Film exp out of range: the whole line is ignored */
+        wf_cfg_load();
+        chk(wf_sg_exp == -6 && wf_sg_iie == 0, "CFG: a stage line with a value out of range is ignored");
+        put_cfg("stage=1,-1,0,2,-3,4,6\n");
+        wf_cfg_load();
+        chk(wf_sg_exp == 1 && wf_sg_push == -1 && wf_sg_comp == 0 && wf_sg_prn[0] == 2 && wf_sg_prn[1] == -3
+            && wf_sg_prn[2] == 4 && wf_sg_iie == 6, "CFG: stage=1,-1,0,2,-3,4,6 read");
+        mod_deinit();
+        return;
+    }
+    chk(WAIT(wf_sg_state() == 1, 5000) && LOGW("stage ok: 1 of 2 pairs match", 3000),
+        "stage pack read, the entry naming another table refused: state %d, '%s'", wf_sg_state(), log_line("stage"));
+    chk(stage_rows_avail() == 7 && wf_sg_has(kc, v1) && !wf_sg_has(kc, v2), "first print: the seven knob rows on");
+    chk(!strcmp(wf_row_text(WF_ROW_SEXP), "0") && !strcmp(wf_row_text(WF_ROW_SPUSH), "0")
+        && !strcmp(wf_row_text(WF_ROW_SCOMP), "Off") && !strcmp(wf_row_text(WF_ROW_SPG), "0")
+        && !strcmp(wf_row_text(WF_ROW_SIIE), "100%"), "default knob texts (a bad stage line keeps them)");
+    tabs[kc][v1] = T1;
+    film_shot("default knobs: the pack's table", kc, v1, 1, 0, 0.5);
+    struct wf_look lk;
+    if (!strcmp(cs, "dark")) {
+        stage_dark(kc, v1);
+        mod_deinit();
+        return;
+    }
+    if (!strcmp(cs, "bad")) {
+        log_mark();
+        for (int i = 0; i < 3; i++)
+            wf_row_step(WF_ROW_SEXP, 1);
+        chk(LOGW("stage negative half 0 bad", 5000), "a bad negative half: logged ('%s')", log_line("stage"));
+        chk(WAIT(stage_rows_avail() == 0, 3000) && wf_look_now(&lk) == WF_OUT_FILM && lk.stk == 0,
+            "a bad negative half: knob rows greyed, the look back on the pack's table");
+        film_shot("bad negative half: the pack's table", kc, v1, 1, 0, 0.5);
+        mod_deinit();
+        return;
+    }
+    /* Film exp +1 */
+    log_mark();
+    for (int i = 0; i < 3; i++)
+        chk(wf_row_step(WF_ROW_SEXP, 1), "Film exp steps up");
+    chk(!strcmp(wf_row_text(WF_ROW_SEXP), "+1"), "Film exp text '%s'", wf_row_text(WF_ROW_SEXP));
+    chk(LOGW("composed", 5000), "composed: '%s'", log_line("composed"));
+    struct wf_sg_knobs k1 = { 3, 0, 0, { 0, 0, 0 }, WF_SG_IIE_DEF };
+    double m = stage_shot("Film exp +1", kc, v1, &k1);
+    chk(m > 7 && m < 14, "Film exp +1: brighter, mean dY %+.2f (the synthetic axis: +0.05 = +12.75 codes unclipped)", m);
+    wf_look_now(&lk);
+    uint32_t key1 = lk.stk;
+    /* Film exp +2/3 and Push +1/3: the same exposure axis, the same key and table */
+    chk(wf_row_step(WF_ROW_SEXP, -1) && wf_row_step(WF_ROW_SPUSH, 1) && !strcmp(wf_row_text(WF_ROW_SPUSH), "Push 1/3"),
+        "Film exp +0.7, Push 1/3 ('%s', '%s')", wf_row_text(WF_ROW_SEXP), wf_row_text(WF_ROW_SPUSH));
+    wf_look_now(&lk);
+    chk(lk.stk == key1 && key1, "Film exp +2/3 + Push +1/3 = the key of Film exp +1 (%x / %x)", lk.stk, key1);
+    stage_shot("Film exp +2/3 + Push +1/3", kc, v1, &k1);
+    /* Exp comp: both out, the pack's table again */
+    chk(wf_row_step(WF_ROW_SCOMP, 1) && !strcmp(wf_row_text(WF_ROW_SCOMP), "On"), "Exp comp On");
+    wf_look_now(&lk);
+    chk(lk.stk == 0 && !wf_row_avail(WF_ROW_SEXP) && !wf_row_avail(WF_ROW_SPUSH) && wf_row_avail(WF_ROW_SPR),
+        "Exp comp: no offset left (key %x), Film exp / Push greyed", lk.stk);
+    tabs[kc][v1] = T1;
+    film_shot("Exp comp: the pack's table", kc, v1, 1, 0, 0.5);
+    /* Printer G +4: green down 0.1 */
+    chk(wf_row_step(WF_ROW_SCOMP, 1) && wf_row_step(WF_ROW_SEXP, -1) && wf_row_step(WF_ROW_SEXP, -1)
+        && wf_row_step(WF_ROW_SPUSH, -1), "knobs back to 0");
+    for (int i = 0; i < 4; i++)
+        wf_row_step(WF_ROW_SPG, 1);
+    chk(!strcmp(wf_row_text(WF_ROW_SPG), "+4"), "Printer G '%s'", wf_row_text(WF_ROW_SPG));
+    struct wf_sg_knobs k2 = { 0, 0, 0, { 0, 4, 0 }, WF_SG_IIE_DEF };
+    m = stage_shot("Printer G +4", kc, v1, &k2);
+    chk(m < -5, "Printer G +4: darker (green down), mean dY %+.2f", m);
+    /* Interlayer 200 %: +0.05 on every channel; the row stops there */
+    for (int i = 0; i < 4; i++)
+        wf_row_step(WF_ROW_SPG, -1);
+    for (int i = 0; i < 4; i++)
+        wf_row_step(WF_ROW_SIIE, 1);
+    chk(!strcmp(wf_row_text(WF_ROW_SIIE), "200%") && !wf_row_step(WF_ROW_SIIE, 1), "Interlayer 200%%, no further step");
+    struct wf_sg_knobs k3 = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_MAX };
+    m = stage_shot("Interlayer 200%", kc, v1, &k3);
+    chk(m > 7, "Interlayer 200%%: the synthetic interlayer part adds 0.05, mean dY %+.2f", m);
+    /* the second print: its entry names another table, refused; its pack table as it is, knobs or not */
+    chk(wf_row_step(WF_ROW_PRINT, 1), "Print stock steps to the second print");
+    chk(stage_rows_avail() == 0, "second print (no matching stage entry): the knob rows greyed");
+    film_shot("second print, Interlayer 200 percent set: its own pack table", kc, v2, 1, -10, 1.5);
+    /* the knob rows are saved */
+    h_clock_add_ms += 2000;
+    usleep(400000);
+    long n;
+    char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(b && strstr(b, "stage=0,0,0,0,0,0,8\n"), "CFG: stage=0,0,0,0,0,0,8 saved");
+    free(b);
     mod_deinit();
 }
 
@@ -2474,7 +4015,6 @@ static void rb_stopped(const char *what, const char *want_buf)
     chk(LOGW(": rbstop", 3000) && strstr(log_line(": rbstop"), "raw-stop"), "%s: status '%s'", what, log_line(": rbstop"));
 }
 
-extern int get_ms_clock(void);
 static void t_rawb(void)
 {
     uint32_t *R = rb_map ? rb_map : map_at(RB_Z, 0x8000000u - 4096), *alt = malloc(NW * 4);
@@ -2537,6 +4077,24 @@ static void t_rawb(void)
         "levels measured on the raw, shoulder on: '%s'", log_line("rawb: black"));
     chk(LOGW(": film ", 3000) && strstr(log_line(": film "), " raw"), "shot line marks the develop: '%s'", log_line(": film "));
     chk(h_notify_n > n0 && strstr(h_notify, "RAW develop"), "progress box shown %d times (last '%s')", h_notify_n - n0, h_notify);
+
+    /* Mist with the develop (owner 11-15): on the developed codes, before the film table (as on an 8-bit shot); off again:
+     * its block given back, the develop bit-exact as before */
+    wf_mist = 2;
+    chk(WAIT(wf_fx_mk == 2, 60000) && h_arena_live == live0 + 2, "B + Mist 1/4: the mist block next to the develop's (%d blocks)",
+        h_arena_live - live0);
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    chk(sb == 0 && ndiff(out, ref, NW) > NW / 50, "B + Mist 1/4: the developed frame misted (%d words differ from the plain "
+        "develop)", ndiff(out, ref, NW));
+    chk(LOGW(": film ", 3000) && strstr(log_line(": film "), " raw") && strstr(log_line(": film "), " m")
+        && LOGW("shot #", 3000) && strstr(log_line("shot #"), " + mist "),
+        "B + Mist 1/4 logged: '%s' / '%s'", log_line(": film "), log_line("shot #"));
+    wf_mist = 0;
+    chk(WAIT(!wf_fx_mk && h_arena_live == live0 + 1, 20000), "Mist off: its block given back (%d)", h_arena_live - live0);
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    chk(sb == 0 && ndiff(out, ref, NW) == 0, "Mist off: developed bit-exact again");
 
     /* the pointer at the previous shot (another picture): candidate 1 is this shot's raw */
     rb_point(RB_P, 0);
@@ -3066,6 +4624,26 @@ static void t_rawb(void)
     sb = shot(in, out, FW, FH);
     chk(sb == 0 && ndiff(out, ref, NW) == 0, "after the stop: developed again, bit-exact");
 
+    /* Mist with the develop (owner 11-15): on the developed codes of both halves, before the film table (as on an 8-bit
+     * shot); off again: its block given back, the develop bit-exact as before */
+    wf_mist = 2;
+    chk(WAIT(wf_fx_mk == 2, 60000) && h_arena_live == live0 + 2, "B + Mist 1/4: the mist block next to the develop's (%d blocks)",
+        h_arena_live - live0);
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    usleep(500000);
+    chk(sb == 0 && LOGW("BOT half continues", 3000) && ndiff(out, ref, nh) > nh / 50 && ndiff(out + nh, ref + nh, NW - nh) > nh / 50,
+        "B + Mist 1/4: both developed halves misted (%d / %d words differ from the plain develop)", ndiff(out, ref, nh),
+        ndiff(out + nh, ref + nh, NW - nh));
+    chk(LOGW(": film ", 3000) && strstr(log_line(": film "), " raw") && strstr(log_line(": film "), " m")
+        && strstr(log_line("shot #"), " + mist ") && strstr(log_line("shot #"), "(TOP "),
+        "B + Mist 1/4 logged: '%s' / '%s'", log_line(": film "), log_line("shot #"));
+    wf_mist = 0;
+    chk(WAIT(!wf_fx_mk && h_arena_live == live0 + 1, 20000), "Mist off: its block given back (%d)", h_arena_live - live0);
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    chk(sb == 0 && ndiff(out, ref, NW) == 0, "Mist off: developed bit-exact again");
+
     /* Leica Vivid (WF_FLUT_DISP): both halves developed through the display cube on the sRGB codes */
     int out0 = wf_out, fl0 = wf_flut;
     {
@@ -3345,7 +4923,7 @@ static void t_roll_dark(const char *cs)
 #else
     std_pack();
     const int film = wf_films[fC].id;
-    put_cfg("film=%d\noutput=film\ngrain=normal\nhalation=bloom\nmist=off\n", film);
+    put_cfg("film=%d\noutput=film\ngrain=normal\nhalation=bloom\nmist=w4\n", film);   /* Mist in: owner 11-15 */
     wf_fx_retry_ms = 500;
     h_set_folder_number(100);
     if (!strcmp(cs, "boot")) {
@@ -3361,30 +4939,31 @@ static void t_roll_dark(const char *cs)
         chk(LOGW("roll: 001 loaded film", 3000) && wf_roll_now()->state == WF_RS_LOADED, "the roll read back at boot (%s)",
             log_line("roll: "));
         usleep(1500000);
-        chk(!log_has("fx grain") && !log_has("fx halation") && !wf_fx_hk && !wf_fx_gk,
+        chk(!log_has("fx grain") && !log_has("fx halation") && !log_has("fx mist") && !wf_fx_hk && !wf_fx_gk && !wf_fx_mk,
             "a roll at boot: nothing of the look built ('%s')", log_line("fx "));
         log_mark();
         chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "the roll closes");
-        chk(WAIT(wf_fx_hk && wf_fx_gk, 120000) && LOGW("fx grain", 3000), "closed: the look built for shots again ('%s')",
+        chk(WAIT(wf_fx_hk && wf_fx_gk && wf_fx_mk == 2, 120000) && LOGW("fx grain", 3000), "closed: the look built for shots again ('%s')",
             log_line("fx grain"));
         mod_deinit();
         return;
     }
     h_set_file_number(500);
     mod_init(1);
-    chk(WAIT(wf_fx_hk && wf_fx_gk, 120000), "no roll: the look built for shots, as before ('%s')", log_line("fx grain"));
+    chk(WAIT(wf_fx_hk && wf_fx_gk && wf_fx_mk == 2, 120000), "no roll: the look built for shots, as before ('%s')", log_line("fx grain"));
     h_prop_send(PROP_ASPECT, 0);
     disc_r = 60;
     gen_frame(in, FW, FH, 1);
     chk(WAIT(look_table_ready(), 10000), "table published");
     log_mark();
     int sb = shot(in, out, FW, FH);
-    chk(sb == 0 && ndiff(out, in, NW) > 0 && LOGW("shot #1 ", 5000), "no roll: a shot gets the look ('%s')", log_line("shot #"));
+    chk(sb == 0 && ndiff(out, in, NW) > 0 && LOGW("shot #1 ", 5000) && strstr(log_line("shot #"), " + mist "),
+        "no roll: a shot gets the look, Mist in ('%s')", log_line("shot #"));
     dump_frame("frame_canon.ppm", in, FW, FH);
     dump_frame("frame_look_noroll.ppm", out, FW, FH);
     int rc = wf_roll_req_load(film, 3);
     chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000), "a roll of 3 loads (%d)", rc);
-    chk(WAIT(!wf_fx_hk && !wf_fx_gk && h_arena_live == 0, 20000), "a roll in the camera: the effects given back (%d blocks)",
+    chk(WAIT(!wf_fx_hk && !wf_fx_gk && !wf_fx_mk && h_arena_live == 0, 20000), "a roll in the camera: the effects given back (%d blocks)",
         h_arena_live);
     log_mark();
     sb = shot(in, out, FW, FH);
@@ -3394,7 +4973,7 @@ static void t_roll_dark(const char *cs)
         log_line("roll frame"));
     chk(roll_shoot(501, 3) && wf_roll_now()->state == WF_RS_FULL, "3 frames: the roll is full (%d/3)", wf_roll_now()->nshot);
     usleep(1000000);
-    chk(!log_has("fx grain") && !log_has("fx halation") && !wf_fx_hk && !wf_fx_gk,
+    chk(!log_has("fx grain") && !log_has("fx halation") && !log_has("fx mist") && !wf_fx_hk && !wf_fx_gk && !wf_fx_mk,
         "nothing of the look built while the roll is in the camera");
     ui_hold = 1;                                 /* DryOS's table full, the UI task on its last slot (RAWB9 216.1 s) */
     h_task_slots = 1;
@@ -3405,11 +4984,20 @@ static void t_roll_dark(const char *cs)
     chk(ds == 0 && !log_has("dark: no task") && h_task_refused == r0,
         "the Darkroom starts with the task table full (%d, %d task_create refused)", ds, h_task_refused - r0);
     chk(LOGW("dark: roll 001 start, 3 of 3 to develop", 5000), "the run goes ('%s')", log_line("dark: roll"));
-    chk(LOGW("dark: look ", 120000) && strstr(log_line("dark: look "), "halation") && strstr(log_line("dark: look "), "grain"),
-        "the run builds the look first ('%s')", log_line("dark: look "));
+    chk(LOGW("dark: look ", 120000) && strstr(log_line("dark: look "), "halation") && strstr(log_line("dark: look "), "grain")
+        && strstr(log_line("dark: look "), ", mist") && !strstr(log_line("dark: look "), "mist -"),
+        "the run builds the look first, the roll's Mist with it ('%s')", log_line("dark: look "));
+    {
+        struct wf_look lk;                       /* the prints' note: the look the run takes (wf_dark.c dk_frame step 4) */
+        char tx[200];
+        wf_look_now(&lk);
+        const char *t = wf_exif_text(&lk, lk.grain, lk.halo, lk.bloom, lk.mist, WF_EV_NONE, tx, sizeof tx);
+        chk(lk.mist == 2 && strstr(t, " | Halation Wide | Bloom Normal") && strstr(t, " | Mist 1/4"),
+            "the run's print note: '%s'", t);
+    }
     chk(WAIT(!wf_dark_busy(), 30000) && LOGW("dark: roll 001 end", 3000), "the run ends (host: no SRM, '%s')",
         log_line("dark: roll 001 end"));
-    chk(WAIT(!wf_fx_hk && !wf_fx_gk && h_arena_live == 0, 20000), "after the run, the roll still in: the effects given back (%d)",
+    chk(WAIT(!wf_fx_hk && !wf_fx_gk && !wf_fx_mk && h_arena_live == 0, 20000), "after the run, the roll still in: the effects given back (%d)",
         h_arena_live);
     ui_hold = 0;
     chk(WAIT(h_task_slots == 1, 2000), "the UI task gave its slot back");
@@ -4122,13 +5710,19 @@ int main(int argc, char **argv)
     pick_films();
     if (!strcmp(mode, "SHOT")) t_shot(cs);
     else if (!strcmp(mode, "FX")) { if (!strcmp(cs, "bloom")) t_fx_bloom(); else t_fx(); }
-    else if (!strcmp(mode, "MIST")) t_mist();
+    else if (!strcmp(mode, "FXAB")) t_fxab();
+    else if (!strcmp(mode, "MIST")) { if (!strcmp(cs, "levels")) t_mist_levels(); else t_mist(); }
+    else if (!strcmp(mode, "LOOK")) t_look_sweep();
     else if (!strcmp(mode, "EXIF")) t_exif();
     else if (!strcmp(mode, "EXPSIM")) t_expsim();
     else if (!strcmp(mode, "CFG")) t_cfg();
     else if (!strcmp(mode, "PACK")) t_pack(cs, argc > 3 ? argv[3] : 0);
     else if (!strcmp(mode, "LIGHT")) t_light();
+    /* test.sh passes "PRINT:chain" as MODE PRINT, CASE chain (until 11-15 that ran t_print a second time) */
+    else if (!strcmp(mode, "PRINT") && !strcmp(cs, "chain")) t_print_chain();
     else if (!strcmp(mode, "PRINT")) t_print();
+    else if (!strcmp(mode, "PRINT:chain")) t_print_chain();
+    else if (!strcmp(mode, "STAGE")) t_stage(cs);
     else if (!strcmp(mode, "LOG")) t_log(cs);
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();
