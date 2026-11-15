@@ -203,6 +203,7 @@ ML/modules/windyflm.mo    module
 ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper)
 ML/data/WFCANS.DAT        hình lon phim
 ML/data/WFFONTS.DAT       font chữ của giao diện (Ubuntu Sans, UBUNTU_FONT_LICENCE.txt)
+ML/data/WFPRINT.DAT       font chữ in dưới ảnh của Darkroom (viền + thông tin, Ubuntu Sans)
 ML/data/*.CUB             cube Film LUT (README_FILMLUT.txt)
 ML/SETTINGS/WINDYFLM.CFG  cấu hình (module tự ghi)
 ML/LOGS/WINDYFLM.LOG      nhật ký, ghi nối tiếp qua các lần bật máy; mỗi lần

@@ -39,7 +39,7 @@ During Phase 2, agents write only inside their own paths and never commit. The l
 | `src/ui/*` | ui | browser (B2 small text), can pack loader, own font renderer, icons |
 | `films/catalog.py`, `films/tables/*.T17` | data | catalogue rows, regenerated tables (scan / cine / paper variants) |
 | `tools/mk_wtab.py`, `tools/mk_wfpack.py`, `tools/mk_wfcans.py`, `cans/*`, `luts/*` | data | cube -> table converter, film pack, can pack, film cube model |
-| `tools/mk_wffont.py` | ui | Ubuntu Sans -> WFFONTS.DAT |
+| `tools/mk_wffont.py` | ui | Ubuntu Sans -> WFFONTS.DAT (UI), WFPRINT.DAT (Darkroom print caption, EOS M) |
 | `tools/mk_catalog_c.py`, `tools/mk_*tab.py` (log tables), `tools/provenance_gate.py`, `build.sh`, `test.sh`, `tests/host/*` | core | C catalogue, generated tables, build, host tests, gate |
 | `tests/ui/*` | ui | UI host test (PPM dumps) |
 | `README.md`, `ATTRIBUTIONS.md`, `LICENSE`, `QWEN.md`, `AGENTS.md`, `docs/*` | lead | docs, Qwen hand-off |
@@ -634,6 +634,64 @@ Stocks keep their Windy names, and there are no brand logos.
   `| Halation Film | Bloom Normal`; the Darkroom's `dark: look ready ..: halation + bloom normal`. A roll's prints use
   the Halation and Bloom settings of the run, as before.
 
+### 3.9 Print finishes: frame and date stamp (owner 2026-11-15, EOS M Darkroom only)
+
+Two optional finishes on a Darkroom print (`src/wf_print.c`, pure code; `wf_dark.c` does the I/O). Both Off (the
+defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compares the files).
+- **Settings.**
+  - `wf_pr_frame` 0..4 = Off / White / Black / White wide / Black wide.
+  - `wf_pr_info` 0..2 = Off / On / On + roll; it needs a frame, so it is greyed while Frame is Off.
+  - `wf_pr_date` 0..3 = Off / 'YY MM DD / DD MM 'YY / MM DD 'YY.
+  - Config `frame=off|white|black|whitewide|blackwide`, `info=off|on|roll` (default on), `date=off|ymd|dmy|mdy`.
+  - ML menu "Print frame", "Print info", "Date stamp" under "Darkroom".
+  - Darkroom screen: a PRINT block of three rows. UP / DOWN pick a row; LEFT / RIGHT / the wheel change it; this works
+    while idle, stopped or failed, not during a run. The easel shows a sketch of the finished print while no print is
+    on it. A run takes a snapshot of the three settings at start (`dark: roll .. print frame f info i date d`).
+- **Frame.**
+  - The canvas is laid out as the viewer shows it, then mapped back into the stored image for Orientation 3 / 6 / 8,
+    so the caption sits under the picture and turns with it.
+  - Border at a 3456 px short side (scaled with it): 112 px (about 3 %), wide 256 px. With Info on, the caption adds
+    464 px to the bottom border.
+  - Every offset and size is a multiple of 16 in the stored image, so the picture's 16 x 8 MCUs are the same blocks.
+    The host check shows the picture's luma inside a framed print equals the plain print's, value for value.
+  - The canvas is made band by band while the encoder streams: the frame colour, the picture's own rows and the
+    caption band (rendered once). There is no downscale and no second frame buffer.
+  - The APP1 Exif PixelX / YDimension are rewritten to the canvas size (`wf_dk_dims`). The orientation is kept.
+  - White frame Y 255 with captions Y 30 / 118; black frame Y 12 with captions Y 236 / 150. Text only: no logos, no
+    maker trade dress.
+- **Caption** (`wf_pf_caption`, from `wf_dk_shot`: the Exif of the print's APP1, gaps filled from the CR2's own tags).
+  - Line 1: camera / lens (84 px, medium).
+  - Line 2: focal length, f-number, shutter, ISO (62 px).
+  - Line 3: the film, then Print / Grain / Halation / Bloom / Mist from the look's text (62 px).
+  - On + roll adds `ROLL 021 · 07/24` at the right of line 1.
+  - Items that do not fit the picture width are dropped from the end: line 1's lens, then line 3's effects; the film
+    name is cut last.
+- **Font pack** `ML/DATA/WFPRINT.DAT` (`tools/mk_wffont.py --print-only`, own format "WFPF" v1, 167,228 B, in the
+  tool's header). Ubuntu Sans at 84 px wght 500 and 62 px wght 400, 4-bit anti-aliased, ASCII plus the middle dot,
+  with kerning, FNV-1a checked. Pack missing or bad: frames are printed without the details, and the log says so once
+  per run.
+- **Date stamp** (`wf_pf_stamp`).
+  - Orange seven-segment digits like a film camera's date back, drawn from their geometry. The segments are hexagons
+    with 45-degree tips, slanted 8 degrees, with a soft core and a glow, screened over the picture. The colour turns
+    red-orange at the rim.
+  - The digit height is 3.6 % of the short side. The stamp sits at the bottom right of the picture as shown (all four
+    orientations), inside the picture, frame or no frame.
+  - The date comes from the APP1's DateTimeOriginal, else the CR2's. With no date the stamp is skipped and logged.
+- **Memory.** Nothing new is allocated: the pack (<= 512 KB), the caption band (<= about 3.7 MB) and the row buffer
+  (about 197 KB) use `M.raw`, which is free scratch in the DRY phase. The stamp's map (about 148 KB) uses `M.raw` too.
+  Fonts / text are static (about 1 KB BSS).
+- **Text.** `dark: F07 frame white o1 5408x4144 (Exif size set), band .. KB, ..ms`,
+  `dark: F07 caption <line 1> | <line 2> | <line 3>`, `dark: F07 date stamp 06 03 '24 o1 ..ms`.
+- **Checks.**
+  - `tests/host/wf_dark_test.c`: layouts for every frame / info / orientation, Exif parsing in both byte orders,
+    caption and date text, the pack, band text, stamp place and colour, frame-Off identity. A `finish` mode prints
+    one CR2 with given settings.
+  - `tools/dr_dark_check.sh` (FIN=1): Off = plain print byte for byte on three frames, then samples checked by
+    `tools/dr_fin_check.py`: canvas size, picture luma = plain, stamp at the bottom right as shown, frame corners,
+    Exif size and orientation.
+  - `tests/ui/dr_ui_test.c` 3b: the PRINT rows and the easel sketch.
+  - The 5D2 has no Darkroom: `wf_print.o` and WFPRINT.DAT are EOS M only.
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`
@@ -694,6 +752,14 @@ Own format, decided by the UI side. Glyphs from Ubuntu Sans (Ubuntu Font Licence
 
 Drawn by our own renderer, which needs none of ML's 7 dynamic font slots. Title and film name use ML's `argnor23` /
 `argnor28` through `rbf_draw_string` / `font_large` etc.
+
+### 4.6 `ML/DATA/WFPRINT.DAT` (core reads, EOS M only)
+
+The Darkroom's print caption font (section 3.9): `tools/mk_wffont.py WFPRINT.DAT --print-only`, run by `build.sh`.
+"WFPF" v1, two fonts (84 px wght 500, 62 px wght 400), ASCII 32..126 plus 127 = U+00B7, 4-bit coverage, kern pairs,
+FNV-1a over everything after the header. The byte layout is in the tool's docstring. `wf_pf_fonts` checks the magic,
+version, sizes and hash, and `mk_wffont.py` checks its own renderer against PIL. The Darkroom reads the pack per
+framed print into `M.raw` scratch (at most `WF_PF_MAXB` 512 KB).
 
 ## 5. Browser UI (B2 small text)
 
@@ -773,8 +839,8 @@ The layout, 720x480 (the ML bitmap):
 
 ## 6. Build and tests
 
-- `build.sh CAM=EOSM|5D2` -> `build/<cam>/windyflm.mo` plus the card files (WFFILMS.DAT, WFCANS.DAT, WFFONTS.DAT, cubes
-  are separate).
+- `build.sh CAM=EOSM|5D2` -> `build/<cam>/windyflm.mo` plus the card files (WFFILMS.DAT, WFCANS.DAT, WFFONTS.DAT; EOS M also
+  WFPRINT.DAT; cubes are separate).
   - Flags as the port's: `-Os -march=armv5t -marm -mlong-calls -mfloat-abi=soft -ffast-math
     -fsingle-precision-constant`; kernels `-O2`; asm `-mcpu=arm946e-s -marm`.
   - ML headers: EOS M `/root/ml/expsim/mls` (the card core: autoexec 782dbf15, EOSM_202.sym md5 09ccc47d); 5D2 the
@@ -805,7 +871,7 @@ Separate folders, so the current Film Roll cards stay usable: `F:\MagicLatern\EO
 
 ```
 ML/modules/windyflm.mo
-ML/DATA/WFFILMS.DAT, WFCANS.DAT, WFFONTS.DAT
+ML/DATA/WFFILMS.DAT, WFCANS.DAT, WFFONTS.DAT (EOS M also WFPRINT.DAT, the Darkroom print caption)
 ML/LUTS/... (Film LUT cubes: ours from luts/, the owner's own cubes copied by the owner)
 README_WINDYFILM.txt, README_FILMLUT.txt, SPEKTRAFILM_LICENSE.txt, ATTRIBUTIONS.txt
 ```

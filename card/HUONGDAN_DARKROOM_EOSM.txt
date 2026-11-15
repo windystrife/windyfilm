@@ -127,6 +127,23 @@ không có CR2 thì không được đếm.
 - Trong bản in, EXIF của Canon được giữ; UserComment ghi
   "WindyFilm Darkroom: <phim / look> | ROLL 001 F01".
 
+VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như cũ)
+- Trên màn hình Darkroom (lúc chưa tráng / đã dừng) có khối PRINT 3 dòng. Lên / xuống
+  để chọn dòng, trái / phải hoặc bánh xe để đổi giá trị. Cũng có trong menu ML:
+  "Print frame", "Print info", "Date stamp" ngay dưới "Darkroom". Máy nhớ trong cấu hình.
+  - Frame: Off / White / Black / White wide / Black wide (viền trắng / đen, mỏng / dày).
+  - Info: Off / On / On + roll. Dưới ảnh in 3 dòng chữ: máy / ống kính; tiêu cự, khẩu,
+    tốc, ISO; tên phim + Print / Grain / Halation / Bloom / Mist. "On + roll" thêm
+    "ROLL 021 · 07/24" bên phải. Info chỉ có khi Frame khác Off (Frame Off thì Info mờ).
+  - Date: Off / 'YY MM DD / DD MM 'YY / MM DD 'YY. Số 7 đoạn màu cam phát sáng như mặt
+    sau máy phim, góc dưới phải trong ảnh, có viền hay không đều được. Ngày lấy theo
+    ngày chụp trong EXIF; tấm nào không có ngày thì bỏ qua và ghi vào log.
+- Ảnh dọc (xoay) được in đúng chiều: chữ nằm dưới ảnh, ngày ở góc dưới phải như khi xem.
+- Có viền thì bản in to hơn ảnh (ví dụ 5408x4144 với White + Info). Phần ảnh bên
+  trong giữ nguyên từng điểm như bản in không viền.
+- Chỉ có chữ, không logo. Thiếu file ML/DATA/WFPRINT.DAT thì vẫn in viền nhưng không
+  có chữ (log ghi "WFPRINT.DAT missing").
+
 
 5. NHỮNG GÌ CẦN THỬ
 -------------------
@@ -167,6 +184,13 @@ o. (15/11) Tắt máy bật lại khi đang có cuộn: cuộn (ROLL 00n, bộ �
    LiveView lên, không phải chờ. Mở màn hình chọn cuộn ngay sau khi bật: không bị đóng
    ("no beat" trong log là lỗi cần báo).
 p. (15/11) Sau "New roll" / nạp cuộn mới: chụp ngay được, không "busy".
+q. (15/11) Viền + ngày: trong Darkroom đặt Frame White, Info On + roll, Date 'YY MM DD
+   rồi tráng một cuộn ngắn (3 kiểu, có 1 tấm dọc). Bản in phải có viền trắng, 3 dòng
+   chữ dưới ảnh, "ROLL ... · 0n/03" bên phải, ngày cam ở góc dưới phải. Log có
+   "dark: F01 frame white ..." và "dark: F01 date stamp ...". Ghi lại thời gian mỗi kiểu
+   (so với lúc không viền).
+r. (15/11) Đặt lại Frame Off, Date Off: bản in phải như cũ (không viền, không ngày).
+   Tắt máy bật lại: 3 dòng PRINT giữ giá trị đã đặt.
 
 
 6. GỬI LẠI
