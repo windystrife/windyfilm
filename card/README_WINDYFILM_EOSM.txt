@@ -129,8 +129,8 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 1. ML/LOGS/WINDYFLM.LOG sau khi bật máy phải có:
      hook NN ff169414 rom e92d41fc err 0
      hooks: installed (0)
-     pack ok: 706 tables, index NNms, catalog 97 films
-     stage ok: 657 of 657 pairs match the pack (44 negatives, 15 prints), index NNms
+     pack ok: 692 tables, index NNms, catalog 97 films
+     stage ok: 643 of 643 pairs match the pack (44 negatives, 15 prints), index NNms
    (dòng "stage ok" là của Film stage, xem mục 7).
 2. Chụp một ảnh mỗi chế độ: phim (Print Scan / Cine / Paper), Log, Log + LUT,
    một lon Film LUT. Mỗi ảnh có dòng "yuv NN ..." trong log.
