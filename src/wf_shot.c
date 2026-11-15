@@ -1011,7 +1011,9 @@ static void wf_apt(char *o, int n, int *l, int ms)          /* tenths of a secon
 }
 
 /* "shot #3 Portra 400 WS: 16.4 s = look 4.6 + mist 9.2 + halation+bloom normal 1.8 + grain 0.6 (TOP 8.1, BOT 8.3) EV12";
- * the halation stage is named by what ran in it: "halation", "bloom low", "halation+bloom strong" */
+ * the halation stage is named by what ran in it: "halation", "bloom low", "halation+bloom strong". A log line keeps
+ * WF_SHOT_LINE - 1 characters: a longer one (every effect on, the halves, a long title: the 5D2's lost its EV, RAWB11
+ * note) goes on two lines, cut before an effect, the halves or the EV, the second "shot #3 ... + grain 0.6 (TOP ..) EV12" */
 static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const struct wf_look *lk, int st, int ev)
 {
     if (!WF_ST_TOUCHED(st)) {
@@ -1023,8 +1025,8 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
     int hb = lk->bloom <= WF_BLOOM_MAX ? lk->bloom : 0;
     snprintf(hn, sizeof hn, " + %s%s%s ", lk->halo || !hb ? "halation" : "", lk->halo && hb ? "+" : "", bn[hb]);
     const char *const en[3] = { " + mist ", hn, " + grain " };
-    char line[WF_SHOT_LINE], title[48];
-    int l = 0;
+    char line[2 * WF_SHOT_LINE], title[48];
+    int l = 0, cut[5], nc = 0;
     char nb[16];
     snprintf(nb, sizeof nb, "shot #%d ", ++wf_shot_n);
     line[0] = 0;
@@ -1043,6 +1045,7 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
         int ms = e == 0 ? a->m + (b ? b->m : 0) : e == 1 ? a->h + (b ? b->h : 0) : a->g + (b ? b->g : 0);
         if (!sa && !sb)
             continue;
+        cut[nc++] = l;
         wf_ap(line, sizeof line, &l, en[e]);
         if (sa == 1 && (!b || sb == 1))
             wf_apt(line, sizeof line, &l, ms);
@@ -1050,6 +1053,7 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
             wf_ap(line, sizeof line, &l, "-");
     }
     if (b) {
+        cut[nc++] = l;
         wf_ap(line, sizeof line, &l, " (TOP ");
         wf_apt(line, sizeof line, &l, a->ms);
         wf_ap(line, sizeof line, &l, ", BOT ");
@@ -1057,10 +1061,28 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
         wf_ap(line, sizeof line, &l, ")");
     }
     if (ev != WF_EV_NONE) {
+        cut[nc++] = l;
         snprintf(nb, sizeof nb, " EV%d", ev);
         wf_ap(line, sizeof line, &l, nb);
     }
-    wf_log("%s", line);
+    if (l < WF_SHOT_LINE) {
+        wf_log("%s", line);
+    } else {
+        int c = WF_SHOT_LINE - 1, n2 = 0;        /* no cut point that fits: a hard cut */
+        for (int i = nc - 1; i >= 0; i--)
+            if (cut[i] > 0 && cut[i] < WF_SHOT_LINE) {
+                c = cut[i];
+                break;
+            }
+        char l2[WF_SHOT_LINE];
+        snprintf(nb, sizeof nb, "shot #%d ...", wf_shot_n);
+        l2[0] = 0;
+        wf_ap(l2, sizeof l2, &n2, nb);
+        wf_ap(l2, sizeof l2, &n2, line + c);
+        line[c] = 0;
+        wf_log("%s", line);
+        wf_log("%s", l2);
+    }
     int hr = a->hst == 1 && (!b || b->hst == 1), gr = a->gst == 1 && (!b || b->gst == 1), mr = a->mst == 1 && (!b || b->mst == 1);
     wf_exif_shot(lk, gr ? lk->grain : 0, hr ? lk->halo : 0, hr ? lk->bloom : 0, mr ? lk->mist : 0, ev);
 }
