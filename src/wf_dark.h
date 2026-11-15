@@ -73,6 +73,17 @@ int  wf_dark_eta_s(const struct wf_dark_view *v);   /* seconds left for the roll
 int  wf_dark_src(int output, int flut);          /* EOS M: the WF_DEV_* tables a run builds for look output (WF_OUT_*) +
                                                     Film LUT, as B (Leica Vivid WF_DEV_DISP, cubes WF_DEV_CUBE); 0 = none */
 
+/* print finishes (docs/DESIGN.md 3.9, src/wf_print.h): a frame with the shot's details under the picture, a date stamp.
+   Settings of the menu / config / the Darkroom's rows (WF_PFR_*, WF_PIN_*, WF_PDT_* of wf_print.h; defaults Off, Info
+   On, Off): a run takes them at its start, so the prints of one run match. Frame Off and Date Off = today's print. */
+extern volatile int wf_pr_frame, wf_pr_info, wf_pr_date;
+enum { WF_PO_FRAME = 0, WF_PO_INFO, WF_PO_DATE, WF_PO_N };   /* the Darkroom's print rows (wf_menu.c) */
+const char *wf_popt_name(int k);                 /* "Frame", "Info", "Date" */
+const char *wf_popt_text(int k, char *b, int n); /* the value as shown: "White wide", "On + roll", "'26 11 15" (today) */
+int  wf_popt_avail(int k);                       /* 0 = greyed: Info with the frame Off */
+void wf_popt_step(int k, int d);                 /* LEFT / RIGHT / wheel (wraps); the config is saved later */
+int  wf_clock_ymd(void);                         /* the camera clock's date as y * 10000 + m * 100 + d, -1 = unknown */
+
 /* ------------------------------------------------------------------ UI */
 #define WF_UI_SCR_ROLL 1                         /* = WFUI_SCR_ROLL / WFUI_SCR_DARK of src/ui/wf_ui_int.h */
 #define WF_UI_SCR_DARK 2

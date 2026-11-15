@@ -124,7 +124,7 @@ static int gsel[WF_NGROUPS], gfirst[WF_NGROUPS];
 static int last_id;                     /* selection kept between opens */
 static int dirty;
 static uint32_t drawn_gen;
-/* the rows: WF_NROWS (10, Bloom since RAWB11) do not fit above the tabs, so ROWS_VIS of them show at 19 px and the list scrolls with the
+/* the rows: WF_NROWS (18: Bloom and Gauge, then the seven film-stage knobs, since 11-15) do not fit above the tabs, so ROWS_VIS of them show at 19 px and the list scrolls with the
    focus (the font keeps its size); rtop = the first row shown */
 #define ROWS_VIS 7
 static int rtop;
@@ -141,7 +141,7 @@ static const char *msg;
 static int msg_until;
 static int t_probe, t_force, t_heal;
 
-static const char *const gname[WF_NGROUPS] = { "Colour", "Cine", "B&W", "Film LUT" };
+static const char *const gname[WF_NGROUPS] = { "Colour", "Cine", "B&W", "Film LUT", "Film stage" };
 
 static inline const struct wf_film *film_at(int i) { return i >= 0 && i < nlist ? &wf_films[list[i]] : 0; }
 static inline int gcount(int g) { return gstart[g + 1] - gstart[g]; }
@@ -436,10 +436,12 @@ static void draw_info_column(const struct wf_film *f, int g)
         wfg_bits16(wf_icons[r], 270, y + 1, !av ? (foc ? C_TXT3 : C_BAROFF) : foc ? A : C_TXT3);
         const char *nm = wf_row_name(r);
         ui_text(F_15, 294, y, nm ? nm : "", !av ? C_TXT3 : foc ? C_TXT : C_TXT2);
-        const char *val = wf_row_text(r);
-        if (!val) val = "";
         int live = foc && av;
         int vx = live ? 684 : 700;
+        /* the long text (a print stock's full name) where it fits between the name and the value's arrows */
+        const char *val = wf_row_text_long(r);
+        if (!val || ui_textw(F_15, val) > vx - 18 - (294 + ui_textw(F_15, nm ? nm : "") + 16)) val = wf_row_text(r);
+        if (!val) val = "";
         int xl = vx - text_r(F_15, vx, y, val, !av ? C_TXT3 : foc ? C_TXT : C_TXT2);   /* left edge of the value */
         if (r == WF_ROW_STRENGTH)
         {
@@ -591,15 +593,48 @@ static void draw_info(const struct wf_film *f, int g)
     y += 8;
 
     int lut = f->flags & WF_F_LUTCAN, av = wf_avail(f->id);
-    static const char *const pn[WF_NPRINTS] = { "Scan", "Cine", "Paper" };
-    char pr[32];
+    static const char *const pn[WF_NPRINTS] = { "Scan", "Cine", "Paper",
+        "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72", "5382", "5384/82", "5384/92", "5385/93",
+        "5385/62", "5386", "5383", "3513D", "3523XD" };
+    char pr[160], pl[3][72];
+    int npl = 0;
     pr[0] = 0;
     for (int v = 0; v < WF_NPRINTS; v++)
-        if (f->prints & (1 << v))
+        if (f->prints & (1u << v))
         {
             int n = strlen(pr);
             snprintf(pr + n, sizeof(pr) - n, "%s%s", n ? ", " : "", pn[v]);
         }
+    /* the Prints value in up to 3 lines, each broken after the last comma that fits (a chain film has up to 16 print
+     * stocks: until 11-15 the list was cut after the seventh); the third line is clipped as before */
+    {
+        const char *s = lut ? "-" : pr;
+        int pw = x1 - 20 - (x + 112);
+        while (*s && npl < 3)
+        {
+            int n = strlen(s), cut = n;
+            if (npl < 2 && ui_textw(F_15, s) > pw)
+            {
+                cut = 0;
+                for (int i = 0; s[i] && i + 1 < (int)sizeof pl[0]; i++)
+                    if (s[i] == ',' && s[i + 1] == ' ')
+                    {
+                        memcpy(pl[npl], s, i + 1);
+                        pl[npl][i + 1] = 0;
+                        if (ui_textw(F_15, pl[npl]) > pw) break;
+                        cut = i + 1;
+                    }
+                if (!cut) cut = n;
+            }
+            int k = cut < (int)sizeof pl[0] - 1 ? cut : (int)sizeof pl[0] - 1;
+            memcpy(pl[npl], s, k);
+            pl[npl][k] = 0;
+            npl++;
+            s += cut;
+            while (*s == ' ') s++;
+        }
+        if (!npl) pl[npl++][0] = 0;
+    }
     char kel[16], outp[40];
     snprintf(kel, sizeof(kel), "%d K", f->kelvin);
     /* a can's chip 3 names the curve its Load sets ("V-Log", "C-Log2" for the CinePrint looks), "Standard" a display look */
@@ -609,7 +644,7 @@ static void draw_info(const struct wf_film *f, int g)
     const char *kv[] = {
         "Table", f->code ? f->code : "",
         "Daylight", kel,
-        "Prints", lut ? "-" : pr,
+        "Prints", pl[0],
         "Output", lut ? outp : "Film look",
         "On the card", av ? (lut ? "LUT cube found" : "Film table found") : lut ? "LUT cube missing"
                        : wf_films_state() == 0 ? "Starting (tables not read yet)"
@@ -620,6 +655,11 @@ static void draw_info(const struct wf_film *f, int g)
     {
         ui_text(F_15, x, y, kv[i], C_TXT3);
         ui_text_clip(F_15, x + 112, y, kv[i + 1], i == 8 && !av ? C_WARN : C_TXT, x1 - 20);
+        for (int j = 1; i == 4 && j < npl; j++)  /* the rest of the print stocks */
+        {
+            y += 19;
+            ui_text_clip(F_15, x + 112, y, pl[j], C_TXT, x1 - 20);
+        }
     }
     y += 4;
     wfg_rect(x, y, x1 - 20, y, C_LINE);

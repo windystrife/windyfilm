@@ -36,7 +36,7 @@ the set index, so two films on one row with different scales rebuild the effect 
 import os, sys, struct, math
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-ID0, ID_LIMIT = 26, 127
+ID0, ID_LIMIT = 26, 255
 MODE_MAX = 16                     # fr_modes.h FR_MODE_MAX: 13..16 Canon Log (owner 2026-11-13); films stay at 1..4, 11, 12
 # text limits (WindyFilm browser, docs/DESIGN.md 5): name <= 24 chars (wf_film.name), strip label `short` <= 11 chars and
 # <= 66 px at Ubuntu Sans 13 px wght 500 wdth 82, description lines <= 44 chars and <= 440 px at 15 px wght 500 wdth 100.
@@ -45,9 +45,13 @@ NAME_CH, SHORT_CH, SHORT_PX, LINE_CH, LINE_PX = 24, 11, 66, 44, 440
 FONT_UBUNTU = os.environ.get("WF_FONT", "/usr/share/fonts/truetype/ubuntu/UbuntuSans[wdth,wght].ttf")
 KINDS = ("COLOUR NEG", "SLIDE", "B&W NEG", "CINE NEG", "FILM LUT")
 FMTS = ("35mm", "120", "V-Log", "C-Log2", "Standard")
-GROUPS = ("colour", "cine", "bw", "lut")
-PRINTS = ("scan", "cine", "paper")
+GROUPS = ("colour", "cine", "bw", "lut", "stage")      # stage: the film-stage chain films (derived, DESIGN 1a)
+PRINTS = ("scan", "cine", "paper") + tuple("p%02d" % i for i in range(16))
+# p00..p15: the chain films' sixteen print stocks, in the order of the dumped stock manifest. They sit AFTER the three
+# catalogue variants (src/wf_api.h WF_PRINT_STOCK0 3, WF_NPRINTS 19) so a shipped film keeps bits 0..2 unchanged.
 PSUFFIX = {"scan": "", "cine": "_C", "paper": "_P"}
+for _i in range(16):
+    PSUFFIX["p%02d" % _i] = "P%02d" % _i              # films/tables/G<neg>P<print>.T17, the name the bake writes
 MAKER = "WindyStrife"
 PSTYLE_NEUTRAL = 0x84
 FLUT_N = 24                       # src/wf_loglut.h WF_FLUT_N: Technical + 4 film cubes + the owner's 6 (V11) + EKTA P (V13) + 11 Windy (V14T, named Windy 11-14) + Leica Vivid (11-14); a LUT can's `lut` is 1..FLUT_N - 1
@@ -87,7 +91,7 @@ TYPES = {"neg": 0, "slide": 1, "bw": 2}
 GRAIN_ROWS = {"Neg 400": 0, "Neg 800T": 1, "Slide 50": 2, "B&W 400": 3, "Neg 160": 4, "Neg 250": 5}
 HALO_PROFILES = {"neg": 0, "C800T": 1, "slide": 2, "BW": 3,           # YH_NEG, YH_C800T, YH_SLIDE, YH_BW
                  "spk_s": 4, "spk_w": 5, "spk_c": 6, "spk_n": 7, "spk_bw": 8, "spk_bww": 9}   # YH_SPK_S .. YH_SPK_BWW
-# spektrafilm halation (Halation menu "Spektra" / "Spektra + bloom"; yh_halo.h YH_SPK_*, fit_levels.py): the profile of
+# spektrafilm halation (Halation "Tight"; yh_halo.h YH_SPK_*, fit_levels.py): the profile of
 # the film's anti-halation class as spektrafilm's params_builder assigns it (Portra / Ektar / slide strong, Gold /
 # UltraMax / C200 / Xtra weak, Vision3 cine strong, rem-jet removed none); B&W GUESS (spektrafilm has none). Default by
 # family; a row's `spk` (profile, strength Q8) overrides it. Strength stays 256 unless the row's README pushes the
@@ -111,7 +115,9 @@ FAMILY = {
 LUT_GRAIN, LUT_HALO, LUT_SPK = ("Neg 400", 256), ("neg", 256), ("spk_s", 256)
 
 # strip labels (the text under a can on the browser strip), by id
-SHORT = {26: 'Chrome', 27: 'Classic Neg', 28: 'Pro Neg Std', 29: 'Eterna', 30: 'Chungking', 31: 'Cine 250D', 32: 'Portra 160', 33: 'Portra 400', 34: 'Gold 200', 35: 'Cine 800T', 37: 'Tri-X 400', 38: 'Superia 400', 39: 'Ektar 100', 40: 'UltraMax', 41: 'HP5 Plus', 43: 'Portra 800', 44: 'Pro 400H', 45: 'T-Max 100', 46: 'P3200', 47: 'XP2 Super', 48: 'ColorPlus', 50: 'Cine 50D', 53: 'Delta 100', 54: 'Pan F 50', 55: 'Acros 100', 56: 'Foma 100', 57: 'Lomo 800', 59: 'Azure', 60: 'Pan 200', 61: 'FP4 Plus', 62: 'V3 250D', 63: 'V3 500T', 64: 'Portra LUT', 65: '400H LUT', 66: 'EKTA P', 67: '3513 LUT', 68: '2383 v3', 69: '2383 v5', 70: 'Ektar LUT', 71: 'Neutral', 72: 'Luca Bono', 73: '250D P', 74: '250D M', 75: '500T P', 76: '500T M', 77: 'EKTA M', 78: 'EKTAa P', 79: 'EKTAa M', 80: 'EXR P', 81: 'EXR M', 82: 'EXRa P', 83: 'EXRa M', 84: 'Leica Vivid'}
+SHORT = {26: 'Chrome', 27: 'Classic Neg', 28: 'Pro Neg Std', 29: 'Eterna', 30: 'Chungking', 31: 'Cine 250D', 32: 'Portra 160', 33: 'Portra 400', 34: 'Gold 200', 35: 'Cine 800T', 37: 'Tri-X 400', 38: 'Superia 400', 39: 'Ektar 100', 40: 'UltraMax', 41: 'HP5 Plus', 43: 'Portra 800', 44: 'Pro 400H', 45: 'T-Max 100', 46: 'P3200', 47: 'XP2 Super', 48: 'ColorPlus', 50: 'Cine 50D', 53: 'Delta 100', 54: 'Pan F 50', 55: 'Acros 100', 56: 'Foma 100', 57: 'Lomo 800', 59: 'Azure', 60: 'Pan 200', 61: 'FP4 Plus', 62: 'V3 250D', 63: 'V3 500T', 64: 'Portra LUT', 65: '400H LUT', 66: 'EKTA P', 67: '3513 LUT', 68: '2383 v3', 69: '2383 v5', 70: 'Ektar LUT', 71: 'Neutral', 72: 'Luca Bono', 73: '250D P', 74: '250D M', 75: '500T P', 76: '500T M', 77: 'EKTA M', 78: 'EKTAa P', 79: 'EKTAa M', 80: 'EXR P', 81: 'EXR M', 82: 'EXRa P', 83: 'EXRa M', 84: 'Leica Vivid', 85: '500T 2393', 86: '250D 2383', 87: 'Portra C', 88: 'Ektar C'}
+# the 45 chain negatives (ids 89..133): "Neg 00" .. "Neg 45", minus negative 33 (no usable print)
+SHORT.update({89 + n: "Neg %02d" % n for n in range(46) if n != 33})
 # table variants made per table code (luts/film/src/mk_wfprints.py: Cine = negative -> 2383 print, Paper = negative -> the
 # colour paper of its spektrafilm profile). Films without an entry have the scan look only (no spektrafilm negative:
 # slide, B&W, Fuji / Kodak looks without a profile, effect looks). Film LUT cans have none.
@@ -131,26 +137,38 @@ def gen_of(table):
 def cube_of(table):
     return CUBE.get(table, table + ".CUB")
 
+def group_of(f):
+    """the strip tab of a row: a derived (film-stage chain) film has its own, the rest follow lut / type / family"""
+    return ("lut" if f["lut"] else "stage" if f.get("derived") else "bw" if f["type"] == "bw"
+            else "cine" if f["family"] == "cine" else "colour")
+
 def derive(f):
     """the browser fields that follow from the row: group, kind, fmt, short, prints"""
-    f["group"] = "lut" if f["lut"] else "bw" if f["type"] == "bw" else "cine" if f["family"] == "cine" else "colour"
+    f["group"] = group_of(f)
     f["kind"] = ("FILM LUT" if f["lut"] else "SLIDE" if f["type"] == "slide" else "B&W NEG" if f["type"] == "bw"
-                 else "CINE NEG" if f["group"] == "cine" else "COLOUR NEG")
+                 else "CINE NEG" if f["family"] == "cine" else "COLOUR NEG")
     f["fmt"] = CURVE_FMT[FLUT_CURVE[f["lut"]]] if f["lut"] else "35mm"
     f["short"] = SHORT.get(f["id"], "")
+    own = f.get("prints")
     f["prints"] = () if f["lut"] or not f["ready"] else VARIANTS.get(f["table"], ("scan",))
+    if own is not None:                                # a row that brings its own variant list (the chain films)
+        f["prints"] = () if f["lut"] or not f["ready"] else tuple(own)
+    if f["family"] == "B&W":
+        f["order"] += 130                              # the B&W films stay last on the strip; the 45 chain negatives
+                                                       # take 59..103 and the three catalogue variants keep 0..2
     if f["ready"] and not f["lut"]:
         f["cube"] = cube_of(f["table"])
-        f["prov"] = ("WindyStrife parametric look luts/looks/%s (published data sheets / own judgement, named in the generator) "
-                     "-> %s -> tools/mk_wtab.py -> films/tables/%s.T17" % (gen_of(f["table"]), f["cube"], f["table"]))
+        if not f.get("prov"):                          # a row may bring its own provenance (the chain films)
+            f["prov"] = ("WindyStrife parametric look luts/looks/%s (published data sheets / own judgement, named in the generator) "
+                         "-> %s -> tools/mk_wtab.py -> films/tables/%s.T17" % (gen_of(f["table"]), f["cube"], f["table"]))
     return f
 
 def F(id, code, name, type, iso, isocode, kelvin, ev8, family, order, grain, halo, line1="", line2="", table=None,
-      ready=False, mode=None, v21=None, t17=None, prov="", fx="", spk=None, lut=0):
+      ready=False, mode=None, v21=None, t17=None, prov="", fx="", spk=None, lut=0, derived=False, prints=None):
     return derive(dict(id=id, code=code, name=name, type=type, iso=iso, isocode=isocode, kelvin=kelvin, ev8=ev8,
                        family=family, order=order, grain=grain, halo=halo, line1=line1, line2=line2, table=table or code,
                        ready=ready, mode=mode, v21=(id >= 32) if v21 is None else v21, t17=t17, prov=prov, fx=fx, spk=spk,
-                       lut=lut))
+                       lut=lut, derived=derived, prints=prints))
 
 def LUTCAN(id, code, name, iso, isocode, kelvin, order, lut, line1, line2, prov):
     """a Film LUT can (see the top): colour negative, the + LUT modes' effect parameters"""
@@ -330,7 +348,133 @@ FILMS = [
     # exposure, and its load sets Picture Style Standard. Name only: no logo, mark or house colour of the camera maker.
     dict(LUTCAN(84, "LLEICV", "Leica Vivid", 100, 72, 5200, 23, 23, "A look on the camera's Standard picture,", "not a log or film look.",
            "owner's Lumix L Leica 2 display cube (sRGB in, sRGB out, 33^3) as LEICAVSR.CUB, not in the repo"), fmt="Standard"),
+    # ---- 14/11/2026, branch film-stage: four film pairs baked out of the Genesis 1.6.6 chain under the declared
+    # exception (docs/DESIGN.md 1a). The tables are card data made on a PC by tools/mk_genesis_cube.c (samples the chain,
+    # pins its print base fog to 0 and its print white to 1, so 18 % grey lands where sRGB puts it) and converted by
+    # tools/mk_wtab.py; no code of the chain is in the module and nothing of it is linked at run time. The camera shows a
+    # stock, not a tool, so the names are the stocks; where the numbers come from is in `prov` and in the DESIGN note.
+    F(85, "GX500T", "Vision3 500T 2393", "neg", 500, 91, 3200, 0, "cine", 55, ("Neg 800T", 256), ("C800T", 256),
+      "Tungsten cine negative on a cinema", "print stock (2393).", ready=False, spk=("spk_c", 256), derived=True,
+      prov="Genesis 1.6.6 film chain, negative 00 (Vision3 500T) + print 02 (2393), push 0 bleach 0 (declared exception, "
+           "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> films/tables/GX500T.T17"),
+    F(86, "GX250D", "Vision3 250D 2383", "neg", 250, 83, 5500, 0, "cine", 56, ("Neg 250", 256), ("neg", 256),
+      "Daylight cine negative on a cinema", "print stock (2383).", ready=False, spk=("spk_c", 256), derived=True,
+      prov="Genesis 1.6.6 film chain, negative 01 (Vision3 250D) + print 01 (2383), push 0 bleach 0 (declared exception, "
+           "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> films/tables/GX250D.T17"),
+    F(87, "GXP400", "Portra 400 2383", "neg", 400, 88, 5200, 0, "portrait neg", 57, ("Neg 400", 256), ("neg", 256),
+      "Portrait negative on a cinema print", "stock (2383).", ready=False, spk=("spk_s", 256), derived=True,
+      prov="Genesis 1.6.6 film chain, negative 02 (Portra 400) + print 01 (2383), push 0 bleach 0 (declared exception, "
+           "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> films/tables/GXP400.T17"),
+    F(88, "GXE100", "Ektar 100 3513", "neg", 100, 72, 5200, 0, "saturated / creative", 58, ("Neg 160", 256), ("neg", 256),
+      "Vivid negative on a Fuji cinema print", "stock (3513).", ready=False, spk=("spk_s", 256), derived=True,
+      prov="Genesis 1.6.6 film chain, negative 13 (Ektar 100) + print 14 (3513), push 0 bleach 0 (declared exception, "
+           "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> films/tables/GXE100.T17"),
 ]
+
+# ---- the whole chain matrix, 46 negatives x 16 prints (14/11/2026, tools/mk_genesis_films.py matrix). One row per
+# NEGATIVE (ids 89..133); the sixteen print stocks are that row's variants (p00..p15 -> films/tables/G<nn>P<pp>.T17).
+# That is the two-choice UI: the strip picks the negative, the Print row picks the print stock, the way the plugin's own
+# panel reads. Four pairs come out black (their print white sits on the base fog) and negative 33 has no usable print at
+# all, so those variant bits are left out. Names: the plugin's stock-name table has not been recovered yet, so the rows
+# carry their index.
+GX_NEG_N, GX_PRINT_N = 46, 16
+GX_SKIP = {(17, 3), (17, 8), (17, 13), (17, 15)} | {(33, p) for p in range(GX_PRINT_N)}
+# index 45 repeats index 0 in the plugin (its switch aliases it), so it gets no row of its own.
+GX_ALIAS = {45: 0}
+# the plugin's own stock names, recovered 15/11/2026 from Genesis.ofx offset 0x3504e50 (char[24] entries, plugin order,
+# owner confirmed the order): (display name <= 24 chars, strip label <= 11 chars, official name <= 44 chars)
+GX_NAMES = [
+    ("Vision2 5201 50D", "5201 50D", "Kodak Vision2 5201 50D"),
+    ("Vision3 5203 50D", "5203 50D", "Kodak Vision3 5203 50D"),
+    ("Vision2 5205 250D", "5205 250D", "Kodak Vision2 5205 250D"),
+    ("Vision3 5207 250D", "5207 250D", "Kodak Vision3 5207 250D"),
+    ("Vision2 5212 100T", "5212 100T", "Kodak Vision2 5212 100T"),
+    ("Vision3 5213 200T", "5213 200T", "Kodak Vision3 5213 200T"),
+    ("Vision2 5217 200T", "5217 200T", "Kodak Vision2 5217 200T"),
+    ("Vision2 5218 500T", "5218 500T", "Kodak Vision2 5218 500T"),
+    ("Vision3 5219 500T", "5219 500T", "Kodak Vision3 5219 500T"),
+    ("Double-X 5222", "5222 B&W", "Eastman Double-X 5222"),
+    ("Vision2 Expr 5229", "5229 500T", "Kodak Vision2 Expression 5229 500T"),
+    ("EXR 5245 50D", "5245 50D", "Eastman EXR 5245 50D"),
+    ("Vision 5246 250D", "5246 250D", "Kodak Vision 5246 250D"),
+    ("ECN-I 5247 16D", "5247 16D", "Eastman ECN-I 5247 16D"),
+    ("ECN-II 5247 100T", "5247 100T", "Eastman ECN-II 5247 100T (1974)"),
+    ("ECN-II 5247 125T", "5247 125T", "Eastman ECN-II 5247 125T (1983)"),
+    ("ECN-I 5254 100T", "5254 100T", "Eastman ECN-I 5254 100T"),
+    ("ECN-I 5248 25T", "5248 25T", "Eastman ECN-I 5248 25T (1952)"),
+    ("EXR 5248 100T", "5248 100T", "Eastman EXR 5248 100T"),
+    ("ECN-I 5250 50D", "5250 50D", "Eastman ECN-I 5250 50D"),
+    ("ECN-I 5251 50T", "5251 50T", "Eastman ECN-I 5251 50T"),
+    ("Vision2 5260 500T", "5260 500T", "Kodak Vision2 5260 500T"),
+    ("Vision 5263 500T", "5263 500T", "Kodak Vision 5263 500T"),
+    ("Vision 5274 200T", "5274 200T", "Kodak Vision 5274 200T"),
+    ("Vision 5277 320T", "5277 320T", "Kodak Vision 5277 320T"),
+    ("Vision 5279 500T", "5279 500T", "Kodak Vision 5279 500T"),
+    ("Vision 5284 500T", "5284 500T", "Kodak Vision 5284 500T"),
+    ("EXR 5287 200T", "5287 200T", "Eastman EXR 5287 200T"),
+    ("Vision 5289 800T", "5289 800T", "Kodak Vision 5289 800T"),
+    ("ECN-II 5293 250T", "5293 82", "Eastman ECN-II 5293 250T (1982)"),
+    ("EXR 5293 250T", "5293 92", "Eastman EXR 5293 250T (1992)"),
+    ("ECN-II 5294 400T", "5294 400T", "Eastman ECN-II 5294 400T"),
+    ("EXR 5296 500T", "5296 500T", "Eastman EXR 5296 500T"),
+    ("ECN-II 5297 250D", "5297 250D", "Eastman ECN-II 5297 250D"),
+    ("EXR 5298 500T", "5298 500T", "Eastman EXR 5298 500T"),
+    ("Primetime 5620 640T", "5620 640T", "Kodak 5620 Primetime 640T"),
+    ("Eterna Vivid 8543", "8543 160T", "Fuji Eterna Vivid 8543 160T"),
+    ("Eterna Vivid 8547", "8547 500T", "Fuji Eterna Vivid 8547 500T"),
+    ("Eterna 8553 250T", "8553 250T", "Fuji Eterna 8553 250T"),
+    ("Eterna 8563 250D", "8563 250D", "Fuji Eterna 8563 250D"),
+    ("Eterna 8583 400T", "8583 400T", "Fuji Eterna 8583 400T"),
+    ("Reala 8592 500D", "8592 500D", "Fuji Reala 8592 500D"),
+    ("SuperF 8572 500T", "8572 500T", "Fuji Super F-Series 8572 500T"),
+    ("SuperF 8532 125T", "8532 125T", "Fuji Super F-Series 8532 F-125T"),
+    ("Color A 8518 250T", "8518 250T", "Fuji Color A 8518 250T"),
+]
+assert len(GX_NAMES) == 45, len(GX_NAMES)
+for _n in range(GX_NEG_N):                             # the strip labels first: derive() reads SHORT when the row is made
+    if _n not in GX_ALIAS:
+        SHORT[89 + _n] = GX_NAMES[_n if _n < 45 else 44][1]
+def gx_speed(official):
+    """(box speed, Light "Day" kelvin) of a chain stock from its official name: the last "<speed>D" / "<speed>T" in it
+    (a stock's published rating; "F-125T" counts). Tungsten-balanced stocks get 3200 K, so Light Day sets the camera to
+    the stock's own balance (daylight turns blue, as unfiltered tungsten film; Light Auto keeps the user's white balance
+    for an 85-filter look). The one name without a rating is Double-X 5222: EI 250 daylight (200 tungsten)."""
+    import re
+    m = re.findall(r"(\d+)([DT])\b", official)
+    if not m:
+        assert "Double-X" in official, official
+        return 250, 5200
+    return int(m[-1][0]), 3200 if m[-1][1] == "T" else 5200
+
+
+def iso_code(iso):
+    """Canon's ISO code (100 = 72, 8 per stop), held inside the camera's 100..3200 like the other rows."""
+    return max(72, min(112, int(round(72 + 8 * math.log2(iso / 100.0)))))
+
+
+for _n in range(GX_NEG_N):
+    if _n in GX_ALIAS:
+        continue
+    _disp, _short, _official = GX_NAMES[_n if _n < 45 else 44]
+    _iso, _kel = gx_speed(_official)
+    _pr = tuple("p%02d" % _p for _p in range(GX_PRINT_N) if (_n, _p) not in GX_SKIP)
+    if not _pr:
+        continue
+    FILMS.append(F(89 + _n, "G%02d" % _n, _disp, "neg", _iso, iso_code(_iso), _kel, 0, "cine", 59 + _n,
+                   ("Neg 400", 256), ("neg", 256), _official,
+                   "Print stock row picks the print.", ready=True, table="G%02d" % _n, spk=("spk_c", 256),
+                   derived=True, prints=_pr,
+                   prov="Genesis 1.6.6 film chain, negative %02d (%s) x the sixteen print stocks (declared exception, "
+                        "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> "
+                        "films/tables/G%02dP*.T17" % (_n, _official, _n)))
+    SHORT[89 + _n] = _short
+# 59..104 minus the 6 values the catalogue already uses (66 = DLY200's preset order); the chain rows only have to stay
+# between the slide films (50..58) and the B&W films (200..) on the strip
+_used = {f["order"] for f in FILMS if f["order"] < 130 and not (f["code"].startswith("G") and f["id"] >= 89)}
+_free = [o for o in range(59, 140) if o not in _used]
+for _k, _f in enumerate(f for f in FILMS if f["code"].startswith("G") and f["id"] >= 89):
+    _f["order"] = _free[_k]
+
 # the author's codes (no own code may equal one; generic notations only, PLAN 5.1)
 AUTHOR_CODE_RULE = "no code equal to one of the author's (P160 .. XP2): checked against tools/brandscan.py's list"
 
@@ -459,7 +603,7 @@ def header(out, synth=0, gaps=False):
     L.append("static const struct { uint8_t row; uint16_t scale_q8, rho_q8; } fr_cat_gsets[FR_CAT_NGSET] = { %s };" %
              ", ".join("{ %d, %d, %d }" % g for g in gs))
     L.append("/* halation sets: yh profile (YH_NEG 0, YH_C800T 1, YH_SLIDE 2, YH_BW 3), strength Q8 (yh_params.hal_q8); the")
-    L.append(" * spektrafilm profile (YH_SPK_S 4 .. YH_SPK_BWW 9) and its strength Q8 (Halation \"Spektra\") */")
+    L.append(" * spektrafilm profile (YH_SPK_S 4 .. YH_SPK_BWW 9) and its strength Q8 (Halation \"Tight\") */")
     L.append("static const struct { uint8_t prof, sprof; uint16_t hal_q8, shal_q8; } fr_cat_hsets[FR_CAT_NHSET] = { %s };" %
              ", ".join("{ %d, %d, %d, %d }" % (h[0], h[2], h[1], h[3]) for h in hs))
     L.append("#endif")
@@ -549,18 +693,27 @@ def check():
             if f["kind"] not in KINDS: bad.append("%s: kind %r" % (c, f["kind"]))
             if f["fmt"] not in FMTS: bad.append("%s: fmt %r" % (c, f["fmt"]))
             if f["group"] not in GROUPS: bad.append("%s: group %r" % (c, f["group"]))
-            if f["group"] != ("lut" if f["lut"] else "bw" if f["type"] == "bw" else "cine" if f["family"] == "cine" else "colour"):
-                bad.append("%s: group %r does not follow type / family" % (c, f["group"]))
+            if f["group"] != group_of(f):
+                bad.append("%s: group %r does not follow lut / derived / type / family" % (c, f["group"]))
             if f["lut"]:
                 if f["prints"] != (): bad.append("%s: a Film LUT can has no print variants" % c)
             else:
                 pr = f["prints"]
-                if not isinstance(pr, tuple) or not pr or pr[0] != "scan" or any(v not in PRINTS for v in pr) or len(set(pr)) != len(pr):
-                    bad.append("%s: prints %r must be a tuple starting with 'scan' of %s" % (c, pr, PRINTS))
+                if not isinstance(pr, tuple) or not pr or any(v not in PRINTS for v in pr) or len(set(pr)) != len(pr):
+                    bad.append("%s: prints %r must be a non-empty tuple of %s" % (c, pr, PRINTS))
+                elif "scan" not in pr and not f.get("derived"):
+                    bad.append("%s: prints %r has no scan variant" % (c, pr))
                 else:
                     for v in pr:
-                        if not os.path.exists(t17_path(f, v)): bad.append("%s: %s missing" % (c, t17_path(f, v)))
-                        elif os.path.getsize(t17_path(f, v)) != 19652: bad.append("%s: %s is not 4913 words" % (c, t17_path(f, v)))
+                        p = t17_path(f, v)
+                        if not os.path.exists(p):
+                            # a derived table (DESIGN 1a) is made by build.sh, not committed: not a problem, but it
+                            # only exists in a tree that could make it
+                            if f.get("derived"):
+                                print("catalog: %s: %s not made yet (derived, build.sh makes it)" % (c, os.path.basename(p)))
+                                continue
+                            bad.append("%s: %s missing" % (c, p))
+                        elif os.path.getsize(p) != 19652: bad.append("%s: %s is not 4913 words" % (c, p))
         if f["family"] not in FAMILY: bad.append("%s: family %r" % (c, f["family"]))
         if f["mode"] is not None and (i > 31 or not (1 <= f["mode"] <= 4 or f["mode"] in (11, 12))): bad.append("%s: film output modes are frozen (D4)" % c)
         if f["ready"]:
@@ -640,7 +793,7 @@ def docs(out):
             f["id"], f["name"], f["code"], f["type"], f["iso"], f["kelvin"], f["family"], g, h,
             "as + LUT" if f["lut"] else "%s x%.2f" % (s[0], s[1] / 256.0),
             "cube" if f["lut"] else "yes" if f["ready"] else "placeholder", f["prov"] or "-"))
-    L += ["", "## spektrafilm halation (Halation: Spektra / Spektra + bloom)", "",
+    L += ["", "## spektrafilm halation (Halation: Tight)", "",
           "The halation model of spektrafilm (github andreavolpato/spektrafilm, GPLv3; its published model numbers, no code):",
           "light reflected back from the film base re-exposes the emulsion in 3 bounces, Gaussians of sigma, 1.41 sigma and",
           "1.73 sigma with weights 4/7, 2/7, 1/7, the same sigma in every layer (65 um still, 50 um cine; 9.4 / 7.2 px at",

@@ -5,9 +5,14 @@
 #   CR2 -> decode -> levels -> as-shot WB + scene scale + ISO trim -> sRGB base develop -> q95 print with Canon's APP1,
 # the print decoded by djpeg and PIL, compared with Canon's own JPEG (mean Y offset in EV, PSNR), the fit against Canon's
 # frame for the trim table ("trim ISO n: .. EV"), quarter-size PNGs dev_<n>.png / canon_<n>.png.
+# Then the print finishes (DESIGN 3.9, wf_print.o, tools/mk_wffont.py --print-only WFPRINT.DAT): all Off = the plain
+# print byte for byte; frames (white / black, thin / wide, details, roll) and date stamps on landscape and portrait
+# (Orientation 6 / 8) pairs, each print checked (tools/dr_fin_check.py: canvas size, the picture's luma unchanged, the
+# border, the Exif size and orientation) and kept as out/fin_<pair>_<tag>.JPG + a quarter-size PNG as shown.
 #
 #   bash tools/dr_dark_check.sh [DIR] [N]     the first N pairs of DIR (default Day09 EOS M, all)
-# Env: W (default /root/ml/wf_dr_dark), KEEP=1 keeps the prints. The photos and every output stay in W: never commit them.
+# Env: W (default /root/ml/wf_dr_dark), KEEP=1 keeps the prints, FIN=0 skips the finishes. The photos and every output
+# stay in W: never commit them.
 set -e
 R=$(cd "$(dirname "$0")/.." && pwd)
 S=$R/src
@@ -29,6 +34,7 @@ MODFLAGS="-Os -march=armv5t -marm -mlong-calls -mfloat-abi=soft -ffast-math -fsi
 $CC $MODFLAGS -O2 -c -o $O/wf_cr2.o $S/wf_cr2.c
 $CC $MODFLAGS -O2 -c -o $O/wf_jpe.o $S/wf_jpe.c
 $CC $MODFLAGS -Werror -c -o $O/wf_darkp.o $S/wf_darkp.c
+$CC $MODFLAGS -O2 -Werror -c -o $O/wf_print.o $S/wf_print.c
 $CC $MODFLAGS -O2 -Werror -c -o $O/wf_dev_c.o $S/wf_dev.c
 $CC -mcpu=arm946e-s -marm -c -o $O/wf_dev_arm.o $S/wf_dev_arm.S
 arm-none-eabi-ld -r -o $O/wf_dev.o $O/wf_dev_c.o $O/wf_dev_arm.o
@@ -39,7 +45,7 @@ $CC $MODFLAGS -c -o $O/wf_logout_tab.o $S/wf_logout_tab.c
 $CC -mcpu=arm946e-s -marm -c -o $O/wf_logout_arm.o $S/wf_logout_arm.S
 arm-none-eabi-ld -r -o $O/wf_logout.o $O/wf_logout_tab.o $O/wf_logout_arm.o
 bad=
-for o in wf_cr2 wf_jpe wf_darkp; do
+for o in wf_cr2 wf_jpe wf_darkp wf_print; do
   arm-none-eabi-readelf -A $O/$o.o | grep -q "Tag_CPU_arch: v5T$" || bad="$bad $o(not v5T)"
   n=$(arm-none-eabi-objdump -d $O/$o.o | grep -ciE "[[:space:]](ldr|str)d[a-z]{0,2}[[:space:]]" || true)
   [ "$n" = 0 ] || bad="$bad $o(LDRD/STRD $n)"
@@ -49,11 +55,13 @@ done
 [ -z "$bad" ] || { echo "object checks failed:$bad"; exit 1; }
 arm-none-eabi-objdump -h $O/wf_darkp.o | grep -q rodata.str && $PY $R/tools/fmt_check.py $O/wf_darkp.o
 
+# the print font pack the units and the finish runs read (DESIGN 3.9)
+$PY $R/tools/mk_wffont.py $W/WFPRINT.DAT --print-only > /dev/null
 HCC="arm-linux-gnueabi-gcc -O1 -marm -march=armv5te -Wall -Wno-comment -I$S -I$R/tests/host -I$G"
 $HCC -c -o $O/wf_dark_test.o $R/tests/host/wf_dark_test.c
 $HCC -c -o $O/wf_dev_shim.o $R/tests/host/wf_dev_shim.c
 arm-linux-gnueabi-gcc -static -o $W/wf_dark_test $O/wf_dark_test.o $O/wf_dev_shim.o $O/wf_cr2.o $O/wf_jpe.o \
-  $O/wf_darkp.o $O/wf_dev.o $O/wf_loglut.o $O/wf_llk.o $O/wf_llk_arm.o $O/wf_logout.o -lm \
+  $O/wf_darkp.o $O/wf_print.o $O/wf_dev.o $O/wf_loglut.o $O/wf_llk.o $O/wf_llk_arm.o $O/wf_logout.o -lm \
   -Wl,--no-enum-size-warning -Wl,--no-wchar-size-warning -Wl,--no-warn-execstack
 
 TP=0; TF=0
@@ -113,6 +121,47 @@ for c in "$D"/*.CR2; do
   k=$((k + 1))
   [ $k -ge $N ] && break
 done
+# the print finishes: TAG FRAME INFO DATE on pairs of the set (WF_PFR_* / WF_PIN_* / WF_PDT_*)
+if [ "${FIN:-1}" = 1 ]; then
+  LOOK="WindyFilm: Portra 400 | Print Cine | Strength 100% | Grain Normal | Halation Film | Bloom Low | Mist 1/8"
+  fin() {   # fin PAIR TAG FRAME INFO DATE [ROLL]
+    local b=$1 tag=$2 c="$D/$1.CR2" j="$D/$1.JPG"
+    [ -f "$c" ] && [ -f "$j" ] || { echo "fin $b: not in $D"; return; }
+    ( cd $W && qemu-arm-static $W/wf_dark_test finish "$c" "$j" $W/out $tag $3 $4 $5 $W/WFPRINT.DAT "$LOOK" "${6:--}" ) \
+      > $W/out/fin_${b}_$tag.log 2>&1 || true
+    grep -E "^(finish|FAIL)" $W/out/fin_${b}_$tag.log | sed "s#$D/##; s#$W/out/##; s/^/fin $b $tag: /"
+    tally $W/out/fin_${b}_$tag.log
+    [ -f $W/out/${b}_$tag.JPG ] || { TF=$((TF + 1)); return; }
+    rm -f $W/out/${b}_$tag.dev.uyvy $W/out/${b}_$tag.print.l8 $W/out/${b}_$tag.wire.l8
+    mv $W/out/${b}_$tag.JPG $W/out/fin_${b}_$tag.JPG
+    djpeg -outfile /dev/null $W/out/fin_${b}_$tag.JPG || { echo "djpeg fin_${b}_$tag: FAIL"; TF=$((TF + 1)); }
+    if $PY $R/tools/dr_fin_check.py $W/out/fin_${b}_$tag.JPG $W/out/fin_${b}_off.JPG "$j" $(awk '/^canvas/ {print $2, $3, $4, $5, $6}' \
+         $W/out/fin_${b}_$tag.log) $3 $5 $W/out/fin_${b}_$tag.png; then TP=$((TP + 1)); else TF=$((TF + 1)); fi
+  }
+  for b in IMG_0208 IMG_0206 IMG_0212; do                   # landscape, Orientation 6, Orientation 8
+    [ -f "$D/$b.CR2" ] || continue
+    ( cd $W && qemu-arm-static $W/wf_dark_test frame "$D/$b.CR2" "$D/$b.JPG" $W/out ) > $W/out/fin_${b}_plain.log 2>&1 || true
+    ( cd $W && qemu-arm-static $W/wf_dark_test finish "$D/$b.CR2" "$D/$b.JPG" $W/out off 0 1 0 $W/WFPRINT.DAT "$LOOK" - ) \
+      > $W/out/fin_${b}_off.log 2>&1 || true
+    if [ -f $W/out/$b.JPG ] && cmp -s $W/out/$b.JPG $W/out/${b}_off.JPG; then
+      echo "fin $b: frame Off + date Off = the plain print, byte for byte ($(stat -c %s $W/out/$b.JPG) B): ok"; TP=$((TP + 1))
+    else
+      echo "fin $b: frame Off + date Off differs from the plain print: FAIL"; TF=$((TF + 1))
+    fi
+    mv -f $W/out/${b}_off.JPG $W/out/fin_${b}_off.JPG
+    rm -f $W/out/$b.JPG $W/out/$b.dev.uyvy $W/out/$b.print.l8 $W/out/$b.wire.l8 $W/out/${b}_off.*.l8 $W/out/${b}_off.dev.uyvy
+  done
+  fin IMG_0208 white_info 1 2 0 "ROLL 021 $(printf '\x7f') 07/24"
+  fin IMG_0208 black 2 0 0
+  fin IMG_0208 whitew_info_date 3 1 1
+  fin IMG_0208 date 0 1 2
+  fin IMG_0206 blackw_info_date 4 1 3 "ROLL 021 $(printf '\x7f') 01/24"
+  fin IMG_0206 white_info 1 1 0
+  fin IMG_0212 date 0 1 1
+  fin IMG_0212 white_info_date 1 2 1 "ROLL 021 $(printf '\x7f') 07/24"
+  rm -f $W/out/*.dev.uyvy $W/out/*_*.print.l8 $W/out/*_*.wire.l8
+fi
+
 echo "trim summary (fit vs scene scale per ISO, EV):"
 grep -h "^trim ISO" $W/out/*.log | awk '{iso=$3; sub(":","",iso); print iso, $8}' | sort -n | awk '
   {v[$1]=v[$1] " " $2; n[$1]++} END {for (i in v) print "  ISO " i ": n " n[i] ":" v[i]}' | sort -t' ' -k3 -n

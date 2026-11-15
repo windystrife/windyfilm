@@ -19,6 +19,7 @@ const char *wfui_host_msg(void);
 void wfui_host_beat(int ph, int ago_ms);
 const char *wfdr_host_msg(void);
 int wfdr_host_confirm(void);
+int wfdr_host_pfoc(void);
 
 static const char *outdir;
 static int fails, closed;
@@ -221,8 +222,40 @@ int main(int argc, char **argv)
     fake_view()->battery = 76;
     open_scr(WFUI_SCR_DARK);
     shot("dark_ready");
+    /* 3b. the print finishes (owner 11-15, DESIGN 3.9): Frame / Info / Date rows; UP / DOWN pick, LEFT / RIGHT / wheel */
+    CHECK(wfdr_host_pfoc() == 0 && wf_pr_frame == 0 && wf_pr_info == 1 && wf_pr_date == 0, "finishes not at their "
+          "defaults: focus %d frame %d info %d date %d", wfdr_host_pfoc(), wf_pr_frame, wf_pr_info, wf_pr_date);
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wf_pr_frame == 1, "RIGHT on Frame: %d (want White)", wf_pr_frame);
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfdr_host_pfoc() == 1 && wf_pr_info == 2, "Info: focus %d value %d (want On + roll)", wfdr_host_pfoc(), wf_pr_info);
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wfdr_host_pfoc() == 2 && wf_pr_date == 1, "Date: focus %d value %d (want '26 11 15)", wfdr_host_pfoc(), wf_pr_date);
+    CHECK(fake_nstart() == 0 && !closed, "the finish rows started or closed something");
+    shot("dark_print_white_info_date");
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfdr_host_pfoc() == 0, "DOWN from Date: focus %d (want Frame, wraps)", wfdr_host_pfoc());
+    key(MODULE_KEY_PRESS_LEFT);
+    key(MODULE_KEY_PRESS_LEFT);
+    CHECK(wf_pr_frame == 4, "LEFT LEFT from White: %d (want Black wide, wraps)", wf_pr_frame);
+    key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wfdr_host_pfoc() == 2 && wf_pr_date == 0, "UP to Date, wheel left: focus %d date %d", wfdr_host_pfoc(), wf_pr_date);
+    shot("dark_print_black_wide");
+    key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wf_pr_frame == 0, "Frame back to Off: %d", wf_pr_frame);
+    key(MODULE_KEY_PRESS_DOWN);
+    shot("dark_print_info_greyed");                          /* frame Off: Info greyed */
+    key(MODULE_KEY_PRESS_LEFT);                              /* On + roll -> On: the defaults again */
+    CHECK(wf_pr_frame == 0 && wf_pr_info == 1 && wf_pr_date == 0, "finishes back to defaults: %d %d %d", wf_pr_frame,
+          wf_pr_info, wf_pr_date);
     key(MODULE_KEY_PRESS_SET);
     CHECK(fake_nstart() == 1, "SET did not start the darkroom");
+    CHECK(wf_pr_frame == 0 && wf_pr_date == 0, "SET changed the finishes");
 
     /* 4. frame 1 loading: blank paper */
     struct wf_dark_view *v = fake_view();

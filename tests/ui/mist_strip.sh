@@ -1,6 +1,6 @@
 #!/bin/bash
 # mist_strip.sh OUTDIR [IMG.JPG@EV8@X,Y;X,Y ...] - the Mist strips (owner 11-15): every Mist level (Off, 1/8 .. 1, Black
-# 1/8 .. 1) with Halation and Bloom Off, then Mist 1/4 + Halation Film + Bloom Normal, through the module's own code (host
+# 1/8 .. 1) with Halation and Bloom Off, then Mist 1/4 + Halation Wide + Bloom Normal, through the module's own code (host
 # case MIST:levels with WF_FX_DUMP=1). Per image: OUTDIR/mist_<name>_frames.png (whole frames), _crop<k>.png (1:1 crops
 # round X,Y in frame pixels, at most 4), _combo.png. EV8 = the photo's EV100 x 8 (its exposure: the mist's hot ramp
 # follows the shot's EV). An EOS M JPEG L (5184 x 3456). Also the test scene (disc, orange lamp, leaves with sky gaps,

@@ -28,6 +28,120 @@ The phase 1 audit (OWN / GLUE / DEP / DER for every file of the port) is in the 
 - Never commit: `*.mo`, `*.DAT`, `*.sym`, ROMs or firmware, the owner's cubes (CinePrint, Leica, V-Log grades, EKTA P
   export), `.FRT` caches.
 
+### 1a. Declared exception on branch `film-stage` (owner, 14 Nov 2026)
+
+**This branch is NOT clean-room. Do not publish it, do not hand it over as if it were, and never merge it into `main`
+without this paragraph staying at the top of the merge.**
+
+Branch `film-stage` carries film tables whose numbers are derived from **Genesis Pro 1.6.6** (Cullen Kelly Color, a
+commercial OFX film-emulation plugin, unrelated to the filmroll.mo author): the negative-stock DLogE (121 points),
+`StMtoPD` 3x4, the interlayer polynomial `IIE` 3x10, `Print_DLogE` 101, the `DyeAmountLUT` (16 print stocks, 65^3
+each, subsampled to 33^3) and the `Lin_to_LogFN` convention. The owner accepted the legal risk for his private use on
+14 Nov 2026, the same way he accepted it for the Film Roll port.
+
+What this means in practice:
+
+- The **module code stays ours**: the Genesis chain runs only in a host-side generator (`tools/mk_genesis_films.py`),
+  which samples it into the 17^3 table a WindyFilm film already is. Nothing of the plugin's is linked, patched or
+  called at runtime, and the module's size does not change.
+- The **generated tables are card data** (`ML/DATA`), never committed; they are Genesis-derived all the same, so a
+  card made from this branch carries no clean-room claim either.
+- `tools/provenance_gate.py` keeps its deny list for `main` and `raw-develop`. On `film-stage` only, the
+  Genesis file names are allowed and the gate prints `gate: this tree is NOT clean-room (Genesis-derived tables)` on
+  every build, so a green gate can never be mistaken for a clean tree again.
+- **`print-frame` carries the same exception** from its merge of `film-stage` (15 Nov 2026, the owner asked for the
+  merge). The gate treats it like `film-stage`. Its print finishes (DESIGN 3.9) were written clean-room up to 47f9597,
+  the commit before the merge: take that commit, not the merge, where a clean tree is needed.
+- **`darkroom` carries the same exception** from its merge of `print-frame` (with `film-stage` 4f92b21; 15 Nov 2026,
+  the owner: "merge fillm stage đi bạn"). The gate treats it like `film-stage`. Its own work was clean-room up to
+  fe4190e, the commit before the merge. Its look sweep of the chain films (`tools/look_sweep.sh stage`) shows
+  Genesis-derived tables on the owner's photos: private, never on a public page.
+
+What this branch adds on top (14 Nov 2026, same day):
+
+- **Four films** in the catalogue, ids 85..88: `GX500T` Vision3 500T 2393, `GX250D` Vision3 250D 2383, `GXP400` Portra
+  400 2383, `GXE100` Ektar 100 3513 (a negative stock and a print stock of the chain per film). They are plain
+  WindyFilm films: one 17^3 table each, grain and halation from their rows, no code of the chain in the module.
+- **Placement**: the chain ends on the print's dye density, so its own black is the print's base fog (~0.03) and its
+  white whatever that print reaches (0.43..0.60 for these four). Stretching the *input* to fill the display crushed
+  everything below code 0.35 into the toe (measured), so the two ends are pinned on the **output** instead - base fog
+  to 0, print white to 1, i.e. printer points - and the exposure offset is fitted so 18 % grey lands on 0.18. What is
+  left in between is the film's own curve.
+- **One module.** The films are part of `windyflm.mo` like every other film: no second build, no second module, no
+  separate settings file (owner 14 Nov 2026: "code tiếp từ windyfilm, rồi dùng đường RAW của windyfilm"). The tables
+  ride on the WindyFilm the camera already has.
+- The four tables are **not committed** (bullet above): `build.sh` calls `tools/mk_genesis_films.py stage
+  films/tables` when they are missing, and `mk_wfpack.py` leaves a film off the card when its table is not there. A
+  tree that never had the port tree builds the other 53 films and says so.
+
+**What branch `grain-halation` adds on top (15 Nov 2026, cut from `film-stage`) — the plugin's numbers in the CODE.**
+The owner asked for the plugin's grain and halation in the module as two named stages, **WindyGrain** and
+**WindyHalation** (the browser rows that used to read `Grain` and `Halation`; since 11-15 they read `Grain` and
+`Halation` again, next to a `Bloom` and a `Gauge` row, and the stage names live on in this section and the code
+comments). This is a bigger step than the four
+tables: the *module* now carries constants of the plugin, not only sampled card data.
+
+- **WindyGrain** (`src/yg_grain.c`, `yg_gen_*`): the plugin's three 64-point amplitude tables (`grainTable_r/g/b`,
+  `CreateFilmGrain` at `kernel_source.cl:2745`, dumped in `genesis_re/halation_performance_grain_head.cl.txt`),
+  converted once to Q8 display levels and kept as `int16_t[64]`; its `prng(x, y, seed, channel)`, its straight line
+  into the tail for the lowest 1/64 of the rank, its `saturation` mix, its `amplitude`, and the bilinear upsample of a
+  grain buffer smaller than the frame (`ApplyFilmGrain`:2804) as the gauge / size mapping. The code that reads them is
+  ours (integer, no divide, no float per pixel); the amplitude does not depend on the level, as in the plugin.
+- **WindyHalation** (`src/yh_halo.c`, `yh_gen_*`): the light wrap of `LightWrapHalationStepOne` /
+  `LightWrapStepTwo` (`halation_step1_step2.cl.txt`, `kernel_source.cl:1723 / :2340`): the arctan highlight mask with
+  its 0.94 threshold, the difference of blur, the per-channel arctan gate `1 - clamp(0.491 - 0.507*atan(...))`, the
+  radius `max(1, maxDim * light_wrap_radius / (2048 * gauge))`, and `halation_strength` as the final scale. The blur
+  is two box passes on the 1/8 grid the module's own halation already uses (a Gaussian, as the plugin's Performance
+  kernel). Two domain differences are declared where the code is: our frame is display-referred, so the arctan's own
+  `0.58..0.95` window is laid onto codes 240..255, and the delta is added in code units rather than in LogC3.
+- **What is NOT taken**: no shader text, no plugin binary, no `.ofx`; nothing is linked, patched or called. The
+  `light_wrap_color` default is the one constant we could not read exactly (0.40 / 0.50 / 0.45, the third a GUESS
+  from the hand-off note).
+- **The plugin's stages are options, not replacements.** `Fine / Normal / Strong` (grain) and `Wide / Tight`
+  (halation; the bloom has its own `Bloom` row since 11-15, it was `Wide + Glow` / `Tight + Glow`) are unchanged in
+  what they do; `Even Fine / Even Normal / Even Strong` (grain) and `Wrap` (halation) are appended to the two rows; the
+  labels say what they do and name no plugin or other project since 11-15, this section and the code comments keep
+  the source. The `Gauge` row (16 / 35 / 65 mm, 11-15) scales the Yedlin grain's pitch, the plugin grain's own gauge
+  and the reach of both halos; at `35 mm` (the default) every other film, table, stage and setting behaves exactly as
+  before (the `FXAB` host test measures both).
+- `tools/provenance_gate.py` allows this branch the same exception as `film-stage` (`NOT_CLEAN` lists both) and still
+  prints `gate: this tree is NOT clean-room` on every build. **Do not publish this branch, do not merge it into
+  `main` without this section, and never describe a card made from it as clean-room.**
+
+**The chain's own knobs on the camera (15 Nov 2026, `film-stage`) — two-stage tables.** The owner asked for the
+chain's settings as rows: `Film exp` (+-2 stops in thirds), `Push / pull` (+-1 stop in thirds), `Exp comp`,
+`Printer R / G / B` (+-12 printer points, 0.025 logE each) and `Interlayer` (0..200 % in 25 % steps). A single 17^3
+table per pair cannot move with them, so the generator also writes the chain **in two halves** as card data
+(`ML/DATA/WFSTAGE.DAT`, `tools/mk_wfstage.py` + `tools/mk_wfstage.c`, layout in `src/wf_stagek.h`):
+
+- **negative half** per negative stock: display code -> exposure axis (`X`), axis -> density per channel (`A1`), and a
+  33^3 grid density -> printing density at interlayer 0 plus its interlayer part (`A2`); **print half** per print
+  stock: printing density -> print density per channel (`B1`) and a 33^3 grid print density -> the print's raw output
+  (`B2`); **per pair** the fitted exposure and the two pinned ends of the shipped table, and the FNV-1a of that very
+  `.T17` (the module takes an entry only when `WFFILMS.DAT` holds the same table, so the knobs never compose against
+  another chain build).
+- The halves are **measurements of the chain**, not its formulas: `tools/mk_wfstage.c` links the chain in the port
+  tree on the PC (as `mk_genesis_cube.c` does) and drives it as a black box (exposure sweeps, bisection, printer
+  offsets), reading the values its own trace prints through a host-only `fprintf` hook (`tools/mk_wfstage_hook.h`,
+  `-DGL_FILM_TRACE`; the chain source is not edited). Nothing of the plugin is linked, patched or called on the camera.
+- **Module**: `src/wf_stagek.c` composes a 17^3 table from the two halves with generic 1D / tetrahedral interpolation
+  (integer, armv5t, no division) in two passes, so one half is in memory at a time (435 KB, then 217 KB, plus 29 KB;
+  `WF_MEM_TMP`, freed at once). It runs in `wf_task` when a knob or the film changes, never per pixel: the per-pixel
+  kernel, its 17^3 table and its cost stay as they are. At default knobs the shipped table is used, not a composed one.
+  The module grows by the compose code and the index reader (image 502 KB of the 512 KB target, EOS M).
+- **Accuracy** (against the chain run directly at the 4913 nodes, 7 pairs x 12 knob sets): mean 0.25..0.6 codes, max
+  Y 1..8, V up to 13 on saturated nodes at the gamut edge. Default composition against the shipped tables, all 699
+  pairs: mean of means 0.29, worst mean 0.63, worst max 14.
+- `Push / pull` in this chain is only a shift of the exposure axis (the same scale as `Film exp`), and `Exp comp`
+  cancels both (the chain's `exposure = -push`), keeping the fitted placement; the help lines say so.
+- **The shipped matrix tables were stale** (found 15 Nov while checking the composition): 503 of 704 `G<nn>P<pp>.T17`
+  differed from the current chain by more than 1 code on average (worst 56), baked before the chain's 14 Nov change
+  (clamp after `StMtoPD`). All 736 matrix tables and the four stage films were regenerated from the current chain; the
+  looks of those pairs move to the current chain.
+- `WFSTAGE.DAT` (22.6 MB, 44 negative and 16 print halves) is card data like the tables: Genesis-derived, never
+  committed; without it the seven rows stay greyed and every film behaves as before.
+
+
 ## 2. Repo layout and who owns what
 
 During Phase 2, agents write only inside their own paths and never commit. The lead session commits explicit paths.
@@ -39,7 +153,7 @@ During Phase 2, agents write only inside their own paths and never commit. The l
 | `src/ui/*` | ui | browser (B2 small text), can pack loader, own font renderer, icons |
 | `films/catalog.py`, `films/tables/*.T17` | data | catalogue rows, regenerated tables (scan / cine / paper variants) |
 | `tools/mk_wtab.py`, `tools/mk_wfpack.py`, `tools/mk_wfcans.py`, `cans/*`, `luts/*` | data | cube -> table converter, film pack, can pack, film cube model |
-| `tools/mk_wffont.py` | ui | Ubuntu Sans -> WFFONTS.DAT |
+| `tools/mk_wffont.py` | ui | Ubuntu Sans -> WFFONTS.DAT (UI), WFPRINT.DAT (Darkroom print caption, EOS M) |
 | `tools/mk_catalog_c.py`, `tools/mk_*tab.py` (log tables), `tools/provenance_gate.py`, `build.sh`, `test.sh`, `tests/host/*` | core | C catalogue, generated tables, build, host tests, gate |
 | `tests/ui/*` | ui | UI host test (PPM dumps) |
 | `README.md`, `ATTRIBUTIONS.md`, `LICENSE`, `QWEN.md`, `AGENTS.md`, `docs/*` | lead | docs, Qwen hand-off |
@@ -639,6 +753,11 @@ Stocks keep their Windy names, and there are no brand logos.
   line names the stage by what ran (`+ halation`, `+ bloom low`, `+ halation+bloom strong`); EXIF / print comment
   `| Halation Film | Bloom Normal`; the Darkroom's `dark: look ready ..: halation + bloom normal`. A roll's prints use
   the Halation and Bloom settings of the run, as before.
+- **Names since the film-stage merge** (15 Nov 2026, print-frame, DESIGN 1a): Halation Off / Wide / Tight / Wrap
+  (`wf_halo` 0..3; Wide = Film above, Tight = Spektra, Wrap = the light wrap, config `gen`), a Gauge row 16 / 35 / 65 mm
+  that scales grain and the halation stage (key bits `WF_FXK_HGAUGE` / `WF_FXK_GGAUGE`), and Grain Off / Fine / Normal
+  / Strong / Even Fine / Even Normal / Even Strong. The text reads `| Halation Wide | Bloom Normal`, `| Gauge 16 mm`
+  when not 35 mm.
 
 ### 3.8 Mist, checked (owner 2026-11-15)
 
@@ -666,13 +785,75 @@ changed and found:
   cores give up their own light (1 - k): -2 at 1/8, -16..-20 at 1. Left as tuned (k was raised x2..2.7 after the
   owner's camera test of 11-12).
 
+### 3.9 Print finishes: frame and date stamp (owner 2026-11-15, EOS M Darkroom only)
+
+Two optional finishes on a Darkroom print (`src/wf_print.c`, pure code; `wf_dark.c` does the I/O). Both Off (the
+defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compares the files).
+- **Settings.**
+  - `wf_pr_frame` 0..4 = Off / White / Black / White wide / Black wide.
+  - `wf_pr_info` 0..2 = Off / On / On + roll; it needs a frame, so it is greyed while Frame is Off.
+  - `wf_pr_date` 0..3 = Off / 'YY MM DD / DD MM 'YY / MM DD 'YY.
+  - Config `frame=off|white|black|whitewide|blackwide`, `info=off|on|roll` (default on), `date=off|ymd|dmy|mdy`.
+  - ML menu "Print frame", "Print info", "Date stamp" under "Darkroom".
+  - Darkroom screen: a PRINT block of three rows. UP / DOWN pick a row; LEFT / RIGHT / the wheel change it; this works
+    while idle, stopped or failed, not during a run. The easel shows a sketch of the finished print while no print is
+    on it. A run takes a snapshot of the three settings at start (`dark: roll .. print frame f info i date d`).
+- **Frame.**
+  - The canvas is laid out as the viewer shows it, then mapped back into the stored image for Orientation 3 / 6 / 8,
+    so the caption sits under the picture and turns with it.
+  - Border at a 3456 px short side (scaled with it): 112 px (about 3 %), wide 256 px. With Info on, the caption adds
+    464 px to the bottom border.
+  - Every offset and size is a multiple of 16 in the stored image, so the picture's 16 x 8 MCUs are the same blocks.
+    The host check shows the picture's luma inside a framed print equals the plain print's, value for value.
+  - The canvas is made band by band while the encoder streams: the frame colour, the picture's own rows and the
+    caption band (rendered once). There is no downscale and no second frame buffer.
+  - The APP1 Exif PixelX / YDimension are rewritten to the canvas size (`wf_dk_dims`). The orientation is kept.
+  - White frame Y 255 with captions Y 30 / 118; black frame Y 12 with captions Y 236 / 150. Text only: no logos, no
+    maker trade dress.
+- **Caption** (`wf_pf_caption`, from `wf_dk_shot`: the Exif of the print's APP1, gaps filled from the CR2's own tags).
+  - Line 1: camera / lens (84 px, medium).
+  - Line 2: focal length, f-number, shutter, ISO (62 px).
+  - Line 3: the film, then Print / Grain / Halation / Bloom / Mist from the look's text (62 px).
+  - On + roll adds `ROLL 021 · 07/24` at the right of line 1.
+  - Items that do not fit the picture width are dropped from the end: line 1's lens, then line 3's effects; the film
+    name is cut last.
+- **Font pack** `ML/DATA/WFPRINT.DAT` (`tools/mk_wffont.py --print-only`, own format "WFPF" v1, 167,228 B, in the
+  tool's header). Ubuntu Sans at 84 px wght 500 and 62 px wght 400, 4-bit anti-aliased, ASCII plus the middle dot,
+  with kerning, FNV-1a checked. Pack missing or bad: frames are printed without the details, and the log says so once
+  per run.
+- **Date stamp** (`wf_pf_stamp`).
+  - Orange seven-segment digits like a film camera's date back, drawn from their geometry. The segments are hexagons
+    with 45-degree tips, slanted 8 degrees, with a soft core and a glow, screened over the picture. The colour turns
+    red-orange at the rim.
+  - The digit height is 3.6 % of the short side. The stamp sits at the bottom right of the picture as shown (all four
+    orientations), inside the picture, frame or no frame.
+  - The date comes from the APP1's DateTimeOriginal, else the CR2's. With no date the stamp is skipped and logged.
+- **Memory.** Nothing new is allocated: the pack (<= 512 KB), the caption band (<= about 3.7 MB) and the row buffer
+  (about 197 KB) use `M.raw`, which is free scratch in the DRY phase. The stamp's map (about 148 KB) uses `M.raw` too.
+  Fonts / text are static (about 1 KB BSS).
+- **Text.** `dark: F07 frame white o1 5408x4144 (Exif size set), band .. KB, ..ms`,
+  `dark: F07 caption <line 1> | <line 2> | <line 3>`, `dark: F07 date stamp 06 03 '24 o1 ..ms`.
+- **Checks.**
+  - `tests/host/wf_dark_test.c`: layouts for every frame / info / orientation, Exif parsing in both byte orders,
+    caption and date text, the pack, band text, stamp place and colour, frame-Off identity. A `finish` mode prints
+    one CR2 with given settings.
+  - `tools/dr_dark_check.sh` (FIN=1): Off = plain print byte for byte on three frames, then samples checked by
+    `tools/dr_fin_check.py`: canvas size, picture luma = plain, stamp at the bottom right as shown, frame corners,
+    Exif size and orientation.
+  - `tests/ui/dr_ui_test.c` 3b: the PRINT rows and the easel sketch.
+  - The 5D2 has no Darkroom: `wf_print.o` and WFPRINT.DAT are EOS M only.
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`
 
 Frozen: cameras, the catalogue struct, rows, load, status, UI entry points, log and card read. The core implements
 everything except `wf_ui_*`. The UI calls only these functions plus ML's drawing API. Rows (2026-11-14): Light, Print,
-Grain, Halation, Bloom, Mist, Strength, Highlights, Shadows, Film LUT (`WF_NROWS` 10; Bloom since RAWB11).
+Grain, Halation, Bloom, Mist, Strength, Highlights, Shadows, Film LUT (`WF_NROWS` 10; Bloom since RAWB11). Since
+2026-11-15 (`film-stage`, merged into `print-frame`): Light, Print stock, Grain, Halation, Bloom, Gauge, Mist, Strength,
+Highlights, Shadows, Film LUT, then the film-stage knobs Film exp, Push / pull, Exp comp, Printer R, Printer G, Printer
+B, Interlayer (`WF_NROWS` 18; the knob rows are available only on a film-stage pair that `ML/DATA/WFSTAGE.DAT` carries,
+section 1a).
 
 ### 4.2 Catalogue
 
@@ -727,6 +908,14 @@ Own format, decided by the UI side. Glyphs from Ubuntu Sans (Ubuntu Font Licence
 Drawn by our own renderer, which needs none of ML's 7 dynamic font slots. Title and film name use ML's `argnor23` /
 `argnor28` through `rbf_draw_string` / `font_large` etc.
 
+### 4.6 `ML/DATA/WFPRINT.DAT` (core reads, EOS M only)
+
+The Darkroom's print caption font (section 3.9): `tools/mk_wffont.py WFPRINT.DAT --print-only`, run by `build.sh`.
+"WFPF" v1, two fonts (84 px wght 500, 62 px wght 400), ASCII 32..126 plus 127 = U+00B7, 4-bit coverage, kern pairs,
+FNV-1a over everything after the header. The byte layout is in the tool's docstring. `wf_pf_fonts` checks the magic,
+version, sizes and hash, and `mk_wffont.py` checks its own renderer against PIL. The Darkroom reads the pack per
+framed print into `M.raw` scratch (at most `WF_PF_MAXB` 512 KB).
+
 ## 5. Browser UI (B2 small text)
 
 Mockups: notes folder `newmodule-mockups/mock_B2s_strip_x2.png` and `mock_B2s_strip_lut_x2.png`; drawing code in
@@ -739,7 +928,7 @@ The layout, 720x480 (the ML bitmap):
 | header (0-33) | mark, "WindyFilm" argnor23, "by WindyStrife" 13 px, loaded chip 15 px |
 | big can | 160x226 at (45, 40), glow in the film's colour (16 palette rings, recoloured per film), floor shadow |
 | right column x 262 | name argnor28 at y 38; chips (kind / ISO / format) 13 px at y 72; SET Load button; description 15 px, 2 lines at y 96 / 113 |
-| rows | 10 rows, 7 shown from y 136 at 19 px pitch; the list scrolls with the focus (2 px scroll bar at x 712); focus bar in the accent colour, chevrons on the focused value; Strength as 5 bars |
+| rows | 18 rows since the film-stage merge (10 before), 7 shown from y 136 at 19 px pitch; the list scrolls with the focus (2 px scroll bar at x 712); focus bar in the accent colour, chevrons on the focused value; Strength as 5 bars |
 | tabs | Colour / Cine / B&W / Film LUT with counts at y 276, underline on the active one; counter "n / N" |
 | strip | 35 mm band y 300-436 with sprocket holes; cans 52x73 with short names (13 px condensed) under them; selected can 58x82 framed in the accent colour; edge fades and arrows |
 | scrollbar | y 441-446 |
@@ -805,8 +994,8 @@ The layout, 720x480 (the ML bitmap):
 
 ## 6. Build and tests
 
-- `build.sh CAM=EOSM|5D2` -> `build/<cam>/windyflm.mo` plus the card files (WFFILMS.DAT, WFCANS.DAT, WFFONTS.DAT, cubes
-  are separate).
+- `build.sh CAM=EOSM|5D2` -> `build/<cam>/windyflm.mo` plus the card files (WFFILMS.DAT, WFCANS.DAT, WFFONTS.DAT; EOS M also
+  WFPRINT.DAT; cubes are separate).
   - Flags as the port's: `-Os -march=armv5t -marm -mlong-calls -mfloat-abi=soft -ffast-math
     -fsingle-precision-constant`; kernels `-O2`; asm `-mcpu=arm946e-s -marm`.
   - ML headers: EOS M `/root/ml/expsim/mls` (the card core: autoexec 782dbf15, EOSM_202.sym md5 09ccc47d); 5D2 the
@@ -837,7 +1026,7 @@ Separate folders, so the current Film Roll cards stay usable: `F:\MagicLatern\EO
 
 ```
 ML/modules/windyflm.mo
-ML/DATA/WFFILMS.DAT, WFCANS.DAT, WFFONTS.DAT
+ML/DATA/WFFILMS.DAT, WFCANS.DAT, WFFONTS.DAT (EOS M also WFPRINT.DAT, the Darkroom print caption)
 ML/LUTS/... (Film LUT cubes: ours from luts/, the owner's own cubes copied by the owner)
 README_WINDYFILM.txt, README_FILMLUT.txt, SPEKTRAFILM_LICENSE.txt, ATTRIBUTIONS.txt
 ```
