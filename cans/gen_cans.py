@@ -516,17 +516,98 @@ for _c, _nm, _words, _iso, _acc, _bg in (
       [band(0, 30, V((64, 66, 74), (44, 44, 50)), _acc),
        ribbon((58, 58, 64), (40, 40, 46), hi=_acc)],
       lay=dict(maker=(6, 25), name=(34, 82), iso=(82, 124), maxw=100), foot_text="35mm")
-# the chain matrix: one can per negative stock (catalog.py 89.., codes G00..G44), our own colours - Kodak-family stocks
-# warm (amber), Fuji-family cool (teal), the last digit group in the accent word. No packaging of either maker is copied.
-_CHAIN_CANS = [(n, "Kodak") for n in range(36)] + [(n, "Fuji") for n in range(36, 46)]
-for _n, _fam in _CHAIN_CANS:
-    if _n in (33, 45):                                # 33 has no usable print, 45 aliases 0: no row, no can
-        continue
-    _acc = (226, 170, 96) if _fam == "Kodak" else (110, 206, 196)
-    _bg = V((62, 46, 26), (26, 18, 10)) if _fam == "Kodak" else V((22, 56, 54), (8, 24, 22))
-    S("G%02d" % _n, "Negative %02d" % _n, ("WindyStrife", SV), [(_fam, WH), ("%02d" % _n, _acc)], ("", WH), SV, _acc,
-      _bg, [band(0, 30, V((58, 60, 68), (40, 40, 46)), _acc), ribbon((52, 52, 58), (36, 36, 42), hi=_acc)],
-      lay=dict(maker=(6, 25), name=(34, 82), iso=(0, 1), maxw=100), foot_text="35mm")
+# the chain matrix: one can per negative stock (catalog.py 89.., codes G00..G44). 11-15 (owner: "make them look like
+# Kodak and Fuji, adding Kodak and Fuji is fine"): each stock in the colours of its maker's family, as the colour and
+# B&W cans above - the maker's name, the family word and the speed in our font (Ubuntu Sans), the stock number on the
+# foot; no logo glyph, no script lettering, no artwork of either maker. Families: Kodak Vision3 (black, gold band, red
+# rule), Vision2 (black, silver band, gold rule), Vision (black, amber band), EXR (Kodak yellow, black band), the old
+# Eastman Color Negative (cream, red band), Double-X (B&W panel), Primetime (red); Fuji Eterna (deep green), Eterna
+# Vivid (bright green, stripes), Reala (teal), Super F (white panel on green), Color A (cream, green band).
+# Speed accent: daylight warm, tungsten cool.
+CHAIN_STOCKS = {                                      # code: (family, words, stock number, speed), from catalog.py names
+    "G00": ("V2", ("Vision2",), "5201", "50D"), "G01": ("V3", ("Vision3",), "5203", "50D"),
+    "G02": ("V2", ("Vision2",), "5205", "250D"), "G03": ("V3", ("Vision3",), "5207", "250D"),
+    "G04": ("V2", ("Vision2",), "5212", "100T"), "G05": ("V3", ("Vision3",), "5213", "200T"),
+    "G06": ("V2", ("Vision2",), "5217", "200T"), "G07": ("V2", ("Vision2",), "5218", "500T"),
+    "G08": ("V3", ("Vision3",), "5219", "500T"), "G09": ("DX", ("Double-X",), "5222", "B&W"),
+    "G10": ("V2", ("Vision2", "Expression"), "5229", "500T"), "G11": ("EXR", ("EXR",), "5245", "50D"),
+    "G12": ("V1", ("Vision",), "5246", "250D"), "G13": ("ECN", ("ECN-I",), "5247", "16D"),
+    "G14": ("ECN", ("ECN-II",), "5247", "100T"), "G15": ("ECN", ("ECN-II",), "5247", "125T"),
+    "G16": ("ECN", ("ECN-I",), "5254", "100T"), "G17": ("ECN", ("ECN-I",), "5248", "25T"),
+    "G18": ("EXR", ("EXR",), "5248", "100T"), "G19": ("ECN", ("ECN-I",), "5250", "50D"),
+    "G20": ("ECN", ("ECN-I",), "5251", "50T"), "G21": ("V2", ("Vision2",), "5260", "500T"),
+    "G22": ("V1", ("Vision",), "5263", "500T"), "G23": ("V1", ("Vision",), "5274", "200T"),
+    "G24": ("V1", ("Vision",), "5277", "320T"), "G25": ("V1", ("Vision",), "5279", "500T"),
+    "G26": ("V1", ("Vision",), "5284", "500T"), "G27": ("EXR", ("EXR",), "5287", "200T"),
+    "G28": ("V1", ("Vision",), "5289", "800T"), "G29": ("ECN", ("ECN-II",), "5293", "250T"),
+    "G30": ("EXR", ("EXR",), "5293", "250T"), "G31": ("ECN", ("ECN-II",), "5294", "400T"),
+    "G32": ("EXR", ("EXR",), "5296", "500T"), "G34": ("EXR", ("EXR",), "5298", "500T"),
+    "G35": ("PT", ("Primetime",), "5620", "640T"), "G36": ("EV", ("Eterna", "Vivid"), "8543", "160T"),
+    "G37": ("EV", ("Eterna", "Vivid"), "8547", "500T"), "G38": ("ET", ("Eterna",), "8553", "250T"),
+    "G39": ("ET", ("Eterna",), "8563", "250D"), "G40": ("ET", ("Eterna",), "8583", "400T"),
+    "G41": ("RE", ("Reala",), "8592", "500D"), "G42": ("SF", ("Super F",), "8572", "500T"),
+    "G43": ("SF", ("Super F",), "8532", "125T"), "G44": ("CA", ("Color A",), "8518", "250T"),
+}
+GOLD = V((252, 208, 60), (244, 176, 20))
+SILVER = V((222, 224, 230), (164, 168, 178))
+FUJI_G = V((20, 138, 96), (10, 92, 64))
+
+def chain_style(code, name):
+    fam, words, num, speed = CHAIN_STOCKS[code]
+    day = speed.endswith("D")
+    foot = "%s  35mm" % num
+    lines = [(w, None, 1.0 if i == 0 else 0.7) for i, w in enumerate(words)]
+    def L(*cols):                                     # the family word(s) in their colours
+        return [(w, cols[min(i, len(cols) - 1)], k) for i, (w, _, k) in enumerate(lines)]
+    if fam in ("V3", "V2", "V1"):                     # Kodak motion picture: black body, a coloured top band
+        acc = Y3 if day else (150, 196, 255)
+        top = {"V3": GOLD, "V2": SILVER, "V1": V((246, 166, 44), (212, 112, 18))}[fam]
+        rule = {"V3": RD, "V2": Y3, "V1": CR}[fam]
+        word = {"V3": WH, "V2": (222, 224, 230), "V1": Y1}[fam]
+        S(code, name, ("Kodak", BK), L(word, acc), (speed, acc), WH, acc, V((30, 30, 34), (8, 8, 10)),
+          [Rc(0, 7, DW, 36, top), Rc(0, 39, DW, 41.5, rule), Rc(0, 124, DW, 125.6, acc)],
+          lay=dict(maker=(8, 35), name=(46, 80), iso=(80, 122)), foot_text=foot)
+    elif fam == "EXR":                                # Kodak yellow, black band, red rule, black ribbon
+        S(code, name, ("Kodak", Y2), L(BK), (speed, RD2), Y2, Y3, V((254, 220, 90), (244, 182, 22)),
+          [band(0, 33, V(KB0, KB1), RD), ribbon(BK, BK2, hi=(90, 90, 96))], lay=TOP, foot_text=foot)
+    elif fam == "ECN":                                # the old Eastman Color Negative: cream, red band and ribbon
+        S(code, name, ("Eastman", CR), L(RD2), (speed, BRN), CR, (230, 120, 90), V((250, 240, 218), (232, 212, 176)),
+          [band(0, 33, V((204, 42, 34), (150, 20, 20)), BRN), ribbon((200, 40, 34), (150, 20, 20), hi=(240, 150, 120))],
+          lay=TOP, foot_text=foot)
+    elif fam == "DX":                                 # Double-X: black body, Kodak yellow band, white panel
+        S(code, name, ("Kodak", BK), L(BK), ("5222", RD), WH, Y2, V(KG0, KG1),
+          [Rc(0, 7, DW, 36, V((252, 214, 80), (246, 190, 30))), Rc(7, 42, DW, 106, V((250, 250, 248), (224, 224, 222))),
+           Rc(7, 106, DW, 108.4, Y3)],
+          lay=dict(maker=(8, 35), name=(46, 76), iso=(76, 104)), extra=[("black & white", WH, 110, 122, 84)],
+          foot_text="35mm", side="black & white")
+    elif fam == "PT":                                 # Primetime: red body, black band
+        S(code, name, ("Kodak", WH), L(WH), (speed, Y2), WH, Y2, V((226, 30, 30), (140, 10, 14)),
+          [band(0, 33, V(KB0, KB1), Y2), ribbon(RD3, (86, 12, 30), hi=(235, 90, 70))], lay=TOP,
+          isosh=(110, 18, 38), foot_text=foot)
+    elif fam == "ET":                                 # Fuji Eterna: deep green-black, green band, teal rule
+        acc = (150, 224, 196) if day else (150, 196, 255)
+        S(code, name, ("Fujifilm", WH), L(WH), (speed, acc), WH, acc, V((24, 70, 64), (6, 24, 22)),
+          [Rc(0, 7, DW, 33, FUJI_G), Rc(0, 36, DW, 38.4, TL), Rc(0, 124, DW, 125.6, acc)],
+          lay=dict(maker=(8, 30), name=(44, 80), iso=(80, 122)), foot_text=foot)
+    elif fam == "EV":                                 # Eterna Vivid: bright green, white and red stripes
+        S(code, name, ("Fujifilm", WH), L(WH, Y2), (speed, WH), WH, Y2, V((12, 168, 76), (14, 100, 60)),
+          [Pg([(0, 124), (DW, 112), (DW, 116.5), (0, 128.5)], WH), Pg([(0, 130), (DW, 118), (DW, 121), (0, 133)], RD)],
+          lay=dict(maker=(7, 26), name=(30, 76), iso=(76, 112)), nsh=(8, 70, 40), isow=84, foot_text=foot)
+    elif fam == "RE":                                 # Reala: teal, dark band
+        S(code, name, ("Fujifilm", WH), L(WH), (speed, Y2), WH, Y2, V((16, 128, 140), (8, 70, 92)),
+          [band(0, 30, V((8, 64, 72), (4, 40, 48)), Y2), ribbon((8, 64, 72), (4, 40, 48), hi=(120, 220, 230))],
+          lay=dict(maker=(6, 27), name=(36, 80), iso=(80, 120)), foot_text=foot)
+    elif fam == "SF":                                 # Super F: white panel on Fuji green, red rule
+        S(code, name, ("Fujifilm", WH), L(GR2), (speed, TL), WH, (160, 226, 190), FUJI_G,
+          [band(0, 30, V((10, 80, 56), (6, 56, 40))), Rc(7, 36, DW, 108, V((250, 250, 248), (226, 232, 228))),
+           Rc(7, 108, DW, 110.4, RD)],
+          lay=dict(maker=(6, 28), name=(40, 72), iso=(72, 106), maxw=100), isow=96, foot_text=foot)
+    else:                                             # Color A: cream, Fuji green band and ribbon
+        S(code, name, ("Fujifilm", CR), L(GR2), (speed, RD2), GR2, (120, 210, 160), V((250, 240, 218), (232, 212, 176)),
+          [band(0, 33, FUJI_G, GR2), ribbon((20, 120, 84), (10, 84, 58), hi=(150, 220, 180))], lay=TOP, foot_text=foot)
+
+for _c, (_f, _w, _num, _sp) in CHAIN_STOCKS.items():   # the style's name only labels it (rows keep catalog.py's name)
+    chain_style(_c, "%s %s %s" % (" ".join(_w), _num, _sp))
 # ---- shipped films
 S("CHROME", "Classic Chrome", ("WindyStrife", (214, 208, 204)), [("Classic", WH), ("Chrome", SV)], ("200", WH), SV,
   (226, 120, 110), V((92, 95, 108), (62, 64, 74)),
