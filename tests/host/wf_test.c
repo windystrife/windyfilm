@@ -50,6 +50,7 @@
  *                      512 KB becomes WINDYFLM.OLD at boot
  * Output: PASS / FAIL lines, then "RESULT MODE CASE: P pass, F fail"; exit status 1 on any failure. */
 #define _GNU_SOURCE
+#include <dirent.h>
 #include <errno.h>
 #include <malloc.h>
 #include <math.h>
@@ -2029,8 +2030,13 @@ static void t_mist_levels(void)
  *   <frame.uyvy> <ev8> <film id> <print 0..2> <strength 0..2> <grain 0..3> <halation 0..2> <bloom 0..3> <mist 0..8> <out.ppm> <c|d>
  *   [X,Y]  (also <out>_c.ppm: 960 x 640 at 1:1 round X, Y)
  * c = the camera's hook (the in-camera path), d = the Darkroom's look stage (wf_shot_run with devd, as wf_dark.c). The
- * frames are the Darkroom's sRGB develop of the owner's CR2s (wf_dark_test devset), outside the repository; the output a
- * third-size PPM (3 x 3 box). Prints "look <out> | <log line>" per job. Not in test.sh's list: it needs the env. */
+ * frames are the Darkroom's develop of the owner's CR2s (wf_dark_test devset: sRGB for the films, each Film LUT can's
+ * own cube for that can), outside the repository; the output a third-size PPM (3 x 3 box). Film id 0 = the frame as it
+ * is (the neutral develop, through the same third-size and 1:1 dumps). WF_LOOK_CUBES = a card's ML/DATA: its cubes are
+ * linked into this card so a can loads (wf_load wants its cube on the card; the stage itself uses the develop). An
+ * <out> ending in .uyvy is the full frame as it is (5184 x 3456 UYVY8: the print finishes' input). Prints
+ * "look <out> | <log line> | exif <the look text the print's comment gets>" per job. Not in test.sh's list: it needs
+ * the env. */
 static void dump_third(const char *path, const uint32_t *p)
 {
     FILE *f = fopen(path, "wb");
@@ -2092,6 +2098,24 @@ static void t_look_sweep(void)
     put_file("ML/DATA/WFFILMS.DAT", b, n);
     free(b);
     put_cfg("film=26\noutput=film\nprint=scan\nstrength=normal\ngrain=off\nhalation=off\nbloom=off\nmist=off\n");
+    const char *cubes = getenv("WF_LOOK_CUBES");
+    if (cubes) {
+        DIR *dd = opendir(cubes);
+        struct dirent *de;
+        int nc = 0;
+        while (dd && (de = readdir(dd))) {
+            size_t l = strlen(de->d_name);
+            if (l < 5 || (strcmp(de->d_name + l - 4, ".CUB") && strcmp(de->d_name + l - 4, ".cub")))
+                continue;
+            char sp[800], dp[300];
+            snprintf(sp, sizeof sp, "%s/%s", cubes, de->d_name);
+            snprintf(dp, sizeof dp, "ML/DATA/%s", de->d_name);
+            nc += link(sp, dp) == 0 || symlink(sp, dp) == 0;
+        }
+        if (dd)
+            closedir(dd);
+        chk(nc > 0, "WF_LOOK_CUBES %s: %d cubes linked", cubes, nc);
+    }
     wf_fx_retry_ms = 500;
     mod_init(1);
 #ifndef WF_BUILD_5D2
@@ -2121,6 +2145,11 @@ static void t_look_sweep(void)
             }
             snprintf(cur, sizeof cur, "%s", fp);
         }
+        if (id == 0) {                           /* the neutral develop as it is: no look, no stage */
+            memcpy(out, in, NW * 4);
+            printf("look %s | neutral develop\n", op);
+            goto dump;
+        }
         ms_ev(ev8);
         int lr = wf_loaded() == id ? WF_LOAD_OK : wf_load(id);
         wf_print = pr;
@@ -2144,12 +2173,23 @@ static void t_look_sweep(void)
             continue;
         }
         log_mark();
+        char et[200];
+        wf_exif_text(&lk, lk.grain, lk.halo, lk.bloom, lk.mist, WF_EV_NONE, et, sizeof et);
         if (pth[0] == 'd') {                     /* the Darkroom's stage on the developed frame, the frame's EV */
-            printf("look %s | %s\n", op, dk_stage(in, out, ev8));
+            printf("look %s | %s | exif %s\n", op, dk_stage(in, out, ev8), et);
         } else {
             shot(in, out, FW, FH);
             LOGW("shot #", 5000);
-            printf("look %s | %s\n", op, log_line("shot #"));
+            printf("look %s | %s | exif %s\n", op, log_line("shot #"), et);
+        }
+    dump:
+        if (strlen(op) > 5 && !strcmp(op + strlen(op) - 5, ".uyvy")) {
+            FILE *uf = fopen(op, "wb");          /* the full frame (the print finishes' input) */
+            chk(uf && fwrite(out, 4, NW, uf) == (size_t)NW, "write %s", op);
+            if (uf)
+                fclose(uf);
+            nj++;
+            continue;
         }
         dump_third(op, out);
         if (nf == 13) {                          /* "X,Y": also <out>_c.ppm, 960 x 640 at 1:1 (grain, halation edges) */

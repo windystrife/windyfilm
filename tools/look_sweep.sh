@@ -1,14 +1,14 @@
 #!/bin/bash
-# look_sweep.sh - every film and Film LUT can on real EOS M RAW frames (WindyStrife): the Darkroom's own develop of each CR2
-# (tests/host/wf_dark_test.c devset: the sRGB base for the films, each can's cube for the cans), the module's look stage on
-# the sRGB base (test.sh LOOK:sweep with the real pack: film tables, prints, strength, grain, halation, bloom, mist; the
-# camera's hook and the Darkroom's stage), then the gallery (tools/look_sweep.py). WSL, after build.sh for the EOS M.
+# look_sweep.sh - every film and Film LUT can on real EOS M RAW frames (WindyStrife), all from the CR2: the Darkroom's own
+# develop (tests/host/wf_dark_test.c devset, full size: the sRGB base for the films, each can's own cube for that can),
+# the Darkroom's look stage with the film's default finish (test.sh LOOK:sweep with the real pack: grain, halation, bloom
+# as the camera prints them; the Bloom and Mist sets), then the gallery (tools/look_sweep.py). The camera's JPEGs are
+# never a look or a "before" (Exif captions only). WSL, after build.sh for the EOS M.
 #
 #   bash tools/look_sweep.sh WORK OUT CARD FX_FILM FRAME...
 #     WORK  work dir (frames, PPMs, logs); OUT the gallery; CARD a card's ML/DATA (the cans' cubes, only read);
 #     FX_FILM the film id of the effect strips; FRAME = NAME=CR2@EV8@TAGS@X,Y (tools/look_sweep.py lists)
-# Env: CAMJPG = the camera's JPEGs of the frames (shown in the gallery), STEP = dev | look | gallery (one step only),
-#      KEEP=1 keeps the full-size frames and the PPMs.
+# Env: STEP = dev | look | gallery (one step only), KEEP=1 keeps the full-size develops (dev/*.uyvy, ~36 MB each).
 # The photos and everything written stay in WORK and OUT, outside the repository: never commit them.
 set -e
 R=$(cd "$(dirname "$0")/.." && pwd)
@@ -54,14 +54,14 @@ fi
 
 if [ -z "$STEP" ] || [ "$STEP" = look ]; then
   t0=$(date +%s)
-  ( cd $R && CAM=EOSM WF_LOOK_PACK=$R/build/eosm/WFFILMS.DAT WF_LOOK_JOBS=$W/jobs.txt bash test.sh LOOK:sweep ) > $W/look.log 2>&1 || true
+  ( cd $R && CAM=EOSM WF_LOOK_PACK=$R/build/eosm/WFFILMS.DAT WF_LOOK_JOBS=$W/jobs.txt WF_LOOK_CUBES=$CARD bash test.sh LOOK:sweep ) > $W/look.log 2>&1 || true
   cp $R/build/eosm/test/LOOK_sweep.log $W/look_detail.log 2>/dev/null || true
   echo "look: $(grep -c '^look ' $W/look_detail.log) shots in $(( $(date +%s) - t0 )) s, $(grep -E 'checks passed|FAIL' $W/look.log | head -3 | tr '\n' ' ')"
 fi
 
 if [ -z "$STEP" ] || [ "$STEP" = gallery ]; then
-  $PY $R/tools/look_sweep.py gallery $W $OUT ${CAMJPG:+"$CAMJPG"}
+  $PY $R/tools/look_sweep.py gallery $W $OUT
   if [ "$KEEP" != 1 ]; then
-    rm -f $W/dev/*_base.uyvy
+    rm -f $W/dev/*.uyvy
   fi
 fi
