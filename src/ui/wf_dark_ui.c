@@ -23,6 +23,30 @@ static void say(const char *s, int now) { msg = s; msg_until = now + MSG_MS; }
 
 static inline int is5d2(void) { return wf_cam() == WF_CAM_5D2; }
 
+const char *wfdr_dev_why(void)
+{
+    const struct wf_roll *r = wf_roll_now();
+    if (!wf_roll_open(r)) return "Load a roll first";
+    return wf_roll_left(r) > 0 ? 0 : "No frames to develop";
+}
+int wfdr_dev_hint_w(void) { return ui_textw(F_13, "PLAY") + 15 + ui_textw(F_13, "Darkroom"); }
+int wfdr_dev_hint(int x, int y)
+{
+    int ok = !wfdr_dev_why(), kw = ui_textw(F_13, "PLAY") + 10;
+    wfg_rrect(x, y - 1, x + kw, y + 16, 4, -1, ok ? C_AMBER : C_LINE, 1);
+    ui_text(F_13, x + 5, y, "PLAY", ok ? C_AMBER : C_BAROFF);
+    return x + kw + 5 + ui_text(F_13, x + kw + 5, y, "Darkroom", ok ? C_TXT : C_BAROFF);
+}
+
+/* why a film cannot load: a table not read yet (the worker starting, RAWB8) is not "not on the card" */
+static const char *not_avail(const struct wf_film *f)
+{
+    if (f->flags & WF_F_LUTCAN) return "LUT cube not on the card";
+    int fs = wf_films_state();
+    return fs == 0 ? "Starting: film tables not read yet" : fs == -1 ? "Worker not running: film tables cannot load"
+                   : "Film table not on the card";
+}
+
 static int text_r(int font, int xr, int y, const char *s, int c)
 {
     int w = ui_textw(font, s);
@@ -89,11 +113,14 @@ static void mark(int x, int y, int bg)                     /* own mark: a frame 
 enum { RT_COLOUR = 0, RT_SLIDE, RT_BW, RT_CINE, RT_LUT, RT_N };
 static const char *const rt_name[RT_N] = { "COLOUR", "SLIDE", "B&W", "CINE", "LUT" };
 static const char *const rt_process[RT_N] = { "C-41", "E-6", "B&W", "ECN-2", "LOG" };
-static const int exps[3] = { 12, 24, 36 };
+#define NEXP 5
+static const int exps[NEXP] = { 3, 6, 12, 24, 36 };        /* 3 and 6: owner 11-15, a short roll */
 
 static uint8_t rl[RT_N][64];                               /* wf_films index per tab, by catalogue order */
 static int rn[RT_N];
-static int rtab, rsel[RT_N], rexp = 1, rbuilt, rglow = -1;
+static int rtab, rsel[RT_N], rexp = 3, rbuilt, rglow = -1;   /* 24 */
+static const struct wf_film *cf_film;            /* owner 11-15: "close the finished roll and load this?" (0 = not asked) */
+static int cf_exp;
 
 static int tab_of(const struct wf_film *f)
 {
@@ -134,13 +161,14 @@ static void roll_select_id(int id)
 
 static void roll_enter(void)
 {
+    cf_film = 0;
     if (!rbuilt) roll_build();
     const struct wf_roll *r = wf_roll_now();
     int id = wf_roll_open(r) ? r->film : wf_loaded();
     if (id) roll_select_id(id);
     if (!rn[rtab])
         for (int t = 0; t < RT_N; t++) if (rn[t]) { rtab = t; break; }
-    if (wf_roll_open(r)) for (int k = 0; k < 3; k++) if (exps[k] == r->exp) rexp = k;
+    if (wf_roll_open(r)) for (int k = 0; k < NEXP; k++) if (exps[k] == r->exp) rexp = k;
     wfg_glow_centre(360, 168, 360, 290);
     rglow = -1;                                            /* the glow ramp again (the palette may be the darkroom's) */
     msg = 0;
@@ -162,6 +190,29 @@ const struct wf_film *wfdr_loaded(int *nexp) { if (nexp) *nexp = rl_exp; return 
 static int roll_key(int key, int now)
 {
     const struct wf_film *f = rfilm(rtab, rsel[rtab]);
+    if (cf_film)                                /* the close-and-load question: SET yes, MENU no, nothing else */
+    {
+        if (key == MODULE_KEY_PRESS_SET || key == MODULE_KEY_JOY_CENTER)
+        {
+            const struct wf_film *nf = cf_film;
+            int ne = cf_exp, rc = wf_roll_req_swap(nf->id, ne);
+            cf_film = 0;
+            if (rc >= 0)                        /* as a roll load: the animation, then LiveView */
+            {
+                rl_film = nf;
+                rl_exp = ne;
+                wf_log("ui: roll closed for a new one, load %d x%d", nf->id, ne);
+                return WFDR_LOADED;
+            }
+            say(rc == -3 ? "Busy, press SET again" : "Cannot load this roll", now);
+        }
+        else if (key == MODULE_KEY_MENU)
+        {
+            cf_film = 0;
+            wf_log("ui: close-and-load dropped (MENU)");   /* gate W22: the old binary has that other word */
+        }
+        return WFDR_STAY;
+    }
     switch (key)
     {
     case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_UP:
@@ -174,10 +225,10 @@ static int roll_key(int key, int now)
         roll_next_tab(1);
         break;
     case MODULE_KEY_PRESS_UP: case MODULE_KEY_INFO:
-        rexp = (rexp + 1) % 3;
+        rexp = (rexp + 1) % NEXP;
         break;
     case MODULE_KEY_PRESS_DOWN:
-        rexp = (rexp + 2) % 3;
+        rexp = (rexp + NEXP - 1) % NEXP;
         break;
     case MODULE_KEY_PRESS_SET: case MODULE_KEY_JOY_CENTER:
     {
@@ -190,8 +241,16 @@ static int roll_key(int key, int now)
             wf_log("ui: roll %d picked again (%d/%d)", r->num, r->nshot, r->exp);
             return WFDR_LOADED;
         }
-        if (wf_roll_open(r) && r->nshot > 0) { say("This roll has frames: develop it first (Darkroom)", now); break; }
-        if (!wf_avail(f->id)) { say(f->flags & WF_F_LUTCAN ? "LUT cube not on the card" : "Film table not on the card", now); break; }
+        if (wf_roll_open(r) && r->nshot > 0)
+        {
+            if (r->state == WF_RS_LOADED) { say("This roll has frames: PLAY develops it (Darkroom)", now); break; }
+            if (!wf_avail(f->id)) { say(not_avail(f), now); break; }
+            cf_film = f;                            /* finished (full / rewound): ask before closing it */
+            cf_exp = exps[rexp];
+            wf_log("ui: roll %d finished, close it for %d x%d?", r->num, f->id, cf_exp);
+            break;
+        }
+        if (!wf_avail(f->id)) { say(not_avail(f), now); break; }
         int rc = wf_roll_req_load(f->id, exps[rexp]);
         if (rc >= 0)                                /* as a film load: the animation, then close and LiveView */
         {
@@ -204,7 +263,16 @@ static int roll_key(int key, int now)
             : rc == -4 ? "Rolls come to this camera later (EOS M first)" : "Cannot load this roll", now);
         break;
     }
-    case MODULE_KEY_MENU: case MODULE_KEY_TRASH: case MODULE_KEY_PLAY: case MODULE_KEY_LV:
+    case MODULE_KEY_PLAY:                           /* owner 11-15: the Darkroom on top, while there are frames */
+    {
+        if (is5d2()) return 1;
+        const char *why = wfdr_dev_why();
+        if (why) { say(why, now); break; }
+        wf_log("ui: roll picker -> Darkroom");
+        wf_ui_open_scr(WFUI_SCR_DARK);
+        break;
+    }
+    case MODULE_KEY_MENU: case MODULE_KEY_TRASH: case MODULE_KEY_LV:
         return 1;
     }
     return 0;
@@ -313,7 +381,7 @@ static void roll_info(void)
     wfg_tri(x + ew - 17, cy + 9, x + ew - 13, cy + 5, x + ew - 9, cy + 9, A);   /* up / down: the count changes */
     wfg_tri(x + ew - 17, cy + 13, x + ew - 13, cy + 17, x + ew - 9, cy + 13, A);
     if (!wf_avail(f->id))
-        text_c(F_13, 360, 416, f->flags & WF_F_LUTCAN ? "LUT cube not on the card" : "Film table not on the card", C_WARN);
+        text_c(F_13, 360, 416, not_avail(f), C_WARN);
     else
     {
         const struct wf_roll *r = wf_roll_now();
@@ -331,8 +399,29 @@ static void roll_footer(void)
     const struct wf_roll *r = wf_roll_now();
     static const char *const k_open[] = { "L/R", "Film", "TAP", "Shelf", "MENU", "Back", 0 };
     const char *const *k = wf_roll_open(r) && r->nshot ? k_open : is5d2() ? k_5d2 : k_eosm;
+    int dw = is5d2() ? 0 : wfdr_dev_hint_w() + 12;          /* EOS M: "[PLAY] Darkroom", dim without frames */
     int w = hints(k, 2000, 455, C_TXT2, C_TXT3) - 2000 - 12;   /* measure off screen */
-    hints(k, (WFUI_W - w) / 2, 455, C_TXT2, C_TXT3);
+    int x = hints(k, (WFUI_W - w - dw) / 2, 455, C_TXT2, C_TXT3);
+    if (dw) wfdr_dev_hint(x, 455);
+}
+
+/* the close-and-load question (owner 11-15) over the dimmed picker */
+static void roll_confirm(void)
+{
+    const struct wf_roll *r = wf_roll_now();
+    int x0 = 100, x1 = 620, y0 = 128, y1 = 352, cx = 360, left = wf_roll_left(r);
+    char a[64], b[64];
+    wfg_scrim(x0, y0, x1, y1);
+    wfg_rrect(x0, y0, x1, y1, 12, C_BGLAST, C_WARN, 2);
+    snprintf(a, sizeof a, "Roll %03d has %d undeveloped frame%s.", r->num, left, left == 1 ? "" : "s");
+    text_c(F_ML23, cx, y0 + 22, a, C_TXT);
+    text_c(F_15, cx, y0 + 66, "Close it and load the new roll?", C_TXT);
+    snprintf(b, sizeof b, "%s  x%d", cf_film->name, cf_exp);
+    text_c(F_15, cx, y0 + 92, b, C_AMBER);
+    text_c(F_13, cx, y0 + 128, "(the RAW/JPG files stay on the card)", C_TXT2);
+    static const char *const k[] = { "SET", "Close and load", "MENU", "Cancel", 0 };
+    int w = hints(k, 2000, y1 - 40, C_TXT, C_TXT2) - 2000 - 12;
+    hints(k, cx - w / 2, y1 - 40, C_TXT, C_TXT2);
 }
 
 static void roll_render(int now)
@@ -352,6 +441,7 @@ static void roll_render(int now)
     roll_info();
     wfg_rect(12, 440, WFUI_W - 13, 440, C_SEP);
     roll_footer();
+    if (cf_film) roll_confirm();
 }
 
 /* =================================================================== darkroom */
@@ -812,6 +902,93 @@ void wfdr_hud(uint8_t *vram, int pitch, int blink, int mode)
     wfg_pitch = cp;
 }
 
+/* owner 11-15: the end-of-roll notice, a box in the middle of LiveView (clear of the HUD's chip, counter and ladder).
+ * wf_dark.c says when (5 s when the roll ends, 2.5 s each time LiveView comes back, a key drops it). Text pieces are
+ * joined by small square dots (the font is ASCII only). */
+#define NT_X0 96
+#define NT_X1 624
+#define NT_Y0 118
+#define NT_Y1 336
+static int dots_w(int font, const char *const *s, int n, int gap)
+{
+    int w = 0;
+    for (int i = 0; i < n; i++) w += ui_textw(font, s[i]) + (i ? gap : 0);
+    return w;
+}
+static int nt_key_w(const char *k, const char *t) { return ui_textw(F_13, k) + 20 + ui_textw(F_13, t); }
+static int nt_key(int x, int y, const char *k, const char *t, int W, int K)   /* "[KEY] text"; returns the end */
+{
+    int kw = ui_textw(F_13, k) + 12;
+    wfg_rrect(x, y, x + kw, y + 18, 4, W, -1, 0);
+    wfg_rrect(x + 1, y + 1, x + kw - 1, y + 17, 3, K, -1, 0);
+    ui_text(F_13, x + 6, y + 2, k, W);
+    return x + kw + 8 + ui_text(F_13, x + kw + 8, y + 2, t, W);
+}
+static void dots_c(int font, int cx, int y, const char *const *s, int n, int gap, int c, int dc)
+{
+    int x = cx - dots_w(font, s, n, gap) / 2;
+    for (int i = 0; i < n; i++)
+    {
+        if (i) { wfg_rect(x + gap / 2 - 2, y + 8, x + gap / 2 + 1, y + 11, dc); x += gap; }
+        x += ui_text(font, x, y, s[i], c);
+    }
+}
+
+void wfdr_notice(uint8_t *vram, int pitch, int mode)
+{
+    const struct wf_roll *r = wf_roll_now();
+    if (!vram) return;
+    uint8_t *cv = wfg_cv;
+    int cp = wfg_pitch;
+    wfg_cv = vram;
+    wfg_pitch = pitch;
+    if (mode == WF_HUD_CLEAR || (r->state != WF_RS_FULL && r->state != WF_RS_REWOUND))
+    {
+        hud_punch(NT_X0, NT_Y0, NT_X1, NT_Y1, 1);
+        wfg_cv = cv;
+        wfg_pitch = cp;
+        return;
+    }
+    int fade = mode == WF_HUD_FADE, cx = (NT_X0 + NT_X1) / 2;
+    int K = MLC(COLOR_BLACK), R = fade ? MLC(COLOR_GRAY(55)) : MLC(COLOR_RED);
+    int W = fade ? MLC(COLOR_GRAY(55)) : MLC(COLOR_WHITE), Y = fade ? MLC(COLOR_GRAY(55)) : MLC(COLOR_YELLOW);
+    int G = MLC(COLOR_GRAY(60)), D = MLC(COLOR_GRAY(30));
+    const struct wf_film *f = wf_film_by_id(r->film);
+    char a[16], c[16];
+    const char *s[3];
+    /* (an ML index is a negative colour here, which wfg_rrect reads as "no outline": the frames are two fills) */
+    wfg_rrect(NT_X0, NT_Y0, NT_X1, NT_Y1, 12, R, -1, 0);
+    wfg_rrect(NT_X0 + 3, NT_Y0 + 3, NT_X1 - 3, NT_Y1 - 3, 9, K, -1, 0);
+    spaced_c(F_ML28, cx, NT_Y0 + 16, r->state == WF_RS_FULL ? "END OF ROLL" : "ROLL REWOUND", R, 4);
+    wfg_rect(NT_X0 + 40, NT_Y0 + 58, NT_X1 - 40, NT_Y0 + 58, D);
+    /* 12/12 . Portra 400 . ROLL 021 (rewound: 7 frames . ..., the frames still to develop after a stopped run) */
+    int left = wf_roll_left(r);
+    if (r->state == WF_RS_FULL) snprintf(a, sizeof a, "%d/%d", r->nshot, r->exp);
+    else snprintf(a, sizeof a, "%d frame%s", left, left == 1 ? "" : "s");
+    snprintf(c, sizeof c, "ROLL %03d", r->num);
+    s[0] = a;
+    s[1] = f ? f->name : "?";
+    s[2] = c;
+    if (f && f->shortname && dots_w(F_15, s, 3, 22) > NT_X1 - NT_X0 - 40) s[1] = f->shortname;
+    dots_c(F_15, cx, NT_Y0 + 72, s, 3, 22, W, R);
+    /* owner 11-15: the shutter is held on a finished roll (wf_dark.c); the two ways out */
+    text_c(F_15, cx, NT_Y0 + 98, "Roll finished: develop it in the Darkroom, or load a new roll", W);
+    const char *dv = "Develop:", *path = "open WindyFilm > Darkroom";
+    int dw = ui_textw(F_15, dv) + 10, pw = ui_textw(F_15, path), x = cx - (dw + pw) / 2;
+    ui_text(F_15, x, NT_Y0 + 122, dv, G);
+    ui_text(F_15, x + dw, NT_Y0 + 122, path, Y);
+    /* [SET] the Darkroom now, [INFO] the roll picker (wf_main.c: while the notice is up) */
+    x = cx - (nt_key_w("SET", "Darkroom") + 28 + nt_key_w("INFO", "New roll")) / 2;
+    x = nt_key(x, NT_Y0 + 150, "SET", "Darkroom", W, K) + 28;
+    nt_key(x, NT_Y0 + 150, "INFO", "New roll", W, K);
+    wfg_rect(NT_X0 + 40, NT_Y0 + 181, NT_X1 - 40, NT_Y0 + 181, D);
+    text_c(F_13, cx, NT_Y0 + 191, wf_roll_shutter_locked() ? "The shutter stays locked until then"
+                                                           : "Shots from now on are not counted, WindyFilm keeps working", G);
+    if (fade) hud_punch(NT_X0, NT_Y0, NT_X1, NT_Y1, 0);
+    wfg_cv = cv;
+    wfg_pitch = cp;
+}
+
 /* =================================================================== dispatch (wf_ui.c) */
 void wfdr_enter(int scr)
 {
@@ -855,4 +1032,6 @@ int wfdr_tick(int scr, int now)
 int wfdr_host_tab(void) { return rtab; }
 int wfdr_host_exp(void) { return exps[rexp]; }
 int wfdr_host_sel_id(void) { const struct wf_film *f = rfilm(rtab, rsel[rtab]); return f ? f->id : 0; }
+const char *wfdr_host_msg(void) { return msg ? msg : ""; }
+int wfdr_host_confirm(void) { return cf_film != 0; }
 #endif

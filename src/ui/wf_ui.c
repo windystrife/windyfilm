@@ -251,8 +251,10 @@ static void load_sel(void)
         anim_start(f, 0);
         return;
     }
-    say(r == WF_LOAD_NOTABLE ? "Film table not on the card" : r == WF_LOAD_NOCUBE ? "LUT cube not on the card"
-        : r == WF_LOAD_BUSY ? "Busy, press SET again" : "Unknown film");
+    int fs = wf_films_state();                              /* a table not read is not "not on the card" (RAWB8) */
+    say(r == WF_LOAD_NOTABLE ? (fs == 0 ? "Starting: film tables not read yet, SET again soon"
+                                : fs == -1 ? "Worker not running: film tables cannot load" : "Film table not on the card")
+        : r == WF_LOAD_NOCUBE ? "LUT cube not on the card" : r == WF_LOAD_BUSY ? "Busy, press SET again" : "Unknown film");
     wf_log("ui: load %d -> %d", f->id, r);
 }
 
@@ -260,6 +262,16 @@ static void step_row(int d)
 {
     if (!wf_row_avail(focus)) return;
     if (wf_row_step(focus, d)) dirty = 1;
+}
+
+/* PLAY with a roll on the camera: the Darkroom (owner 11-15, EOS M) while it has frames to develop, else why not */
+static void dev_key(void)
+{
+    if (is5d2()) return;
+    const char *why = wfdr_dev_why();
+    if (why) { say(why); return; }
+    wf_log("ui: browser -> Darkroom");
+    scr_req = WFUI_SCR_DARK;
 }
 
 static void act(int k)
@@ -297,9 +309,12 @@ static void act(int k)
     case MODULE_KEY_PICSTYLE:
     case MODULE_KEY_TOUCH_1_FINGER: edit = 0; next_group(); break;
     case MODULE_KEY_INFO:         info = !info; dirty = 1; break;
+    case MODULE_KEY_PLAY:                                   /* a roll on the camera: the Darkroom entry; no roll: */
+        if (!is5d2() && wf_roll_open(wf_roll_now())) { dev_key(); break; }   /* closes, as before */
+        close_req = 1;
+        break;
     case MODULE_KEY_MENU:
     case MODULE_KEY_TRASH:
-    case MODULE_KEY_PLAY:
     case MODULE_KEY_LV:           close_req = 1; break;
     }
 }
@@ -377,7 +392,8 @@ static int draw_load_button(const struct wf_film *f, int g)
     }
     if (!wf_avail(f->id))
     {
-        const char *s = "Not on card";
+        int fs = (f->flags & WF_F_LUTCAN) ? 1 : wf_films_state();   /* the tables need the worker + pack first */
+        const char *s = fs == 0 ? "Starting..." : fs == -1 ? "Worker not running" : "Not on card";
         int bw = ui_textw(F_15, s) + 20;
         wfg_rrect(706 - bw, 70, 706, 90, 10, -1, C_TXT3, 1);
         ui_text(F_15, 706 - bw + 10, 72, s, C_TXT3);
@@ -536,6 +552,8 @@ static void draw_footer(void)
         x += kw + 5;
         x += ui_text(F_13, x, 455, k[1], C_TXT3) + 12;
     }
+    if (!is5d2() && wf_roll_open(wf_roll_now()))           /* owner 11-15: "[PLAY] Darkroom" while a roll is on the */
+        wfdr_dev_hint(706 - wfdr_dev_hint_w(), 455);         /* camera, dim without frames (no roll: as before) */
 }
 
 /* INFO: the film's details and the key map of this camera, over a dimmed browser */
@@ -543,7 +561,8 @@ static void draw_info(const struct wf_film *f, int g)
 {
     static const char *const h_eosm[] = { "Left / Right", "previous / next film", "Up / Down", "choose a row",
         "Rear ring", "change the row", "SET", "load the film", "1-finger tap", "next group",
-        "INFO", "this page", "MENU, 2-finger tap", "close", "Half-shutter", "close, shoot", 0 };
+        "INFO", "this page", "PLAY", "Darkroom (a roll on)", "MENU, 2-finger tap", "close", "Half-shutter",
+        "close, shoot", 0 };
     static const char *const h_5d2[] = { "Joystick left / right", "previous / next film", "Joystick up / down",
         "choose a row", "Main or rear dial", "change the row", "Joystick press", "edit row: L / R",
         "SET", "load the film", "Pict.Style", "next group", "INFO", "this page", "MENU, TRASH", "close",
@@ -588,7 +607,9 @@ static void draw_info(const struct wf_film *f, int g)
         "Daylight", kel,
         "Prints", lut ? "-" : pr,
         "Output", lut ? outp : "Film look",
-        "On the card", av ? (lut ? "LUT cube found" : "Film table found") : (lut ? "LUT cube missing" : "Film table missing"),
+        "On the card", av ? (lut ? "LUT cube found" : "Film table found") : lut ? "LUT cube missing"
+                       : wf_films_state() == 0 ? "Starting (tables not read yet)"
+                       : wf_films_state() == -1 ? "Worker not running" : "Film table missing",
         "State", wf_loaded() == f->id ? "Loaded" : "Not loaded",
         0 };
     for (int i = 0; kv[i]; i += 2, y += 19)
@@ -966,6 +987,8 @@ int wfui_host_focus(void) { return focus; }
 int wfui_host_rtop(void) { return rtop; }
 int wfui_host_info(void) { return info; }
 int wfui_host_anim(void) { return anim_on; }
+int wfui_host_scr(void) { return scr; }
+const char *wfui_host_msg(void) { return msg && get_ms_clock() - msg_until < 0 ? msg : ""; }
 int wfui_host_edit(void) { return edit; }
 int wfui_host_phase(void) { return phase; }
 #endif
@@ -1181,7 +1204,8 @@ int wf_ui_open_key(unsigned int key)
  * LV on mode 0, ask for 93 ourselves: 150 ms after it opened, then every 300 ms, MG_TRIES times (past ML's own 2 s
  * ask). Our asks may land after the menu has closed (ML closes it when it sees mode 0 after its redraw flood): Canon's
  * dialog would then stay up with no menu on it, so a 93 seen within 1 s of the close is asked back to 0.
- * Called every ~50 ms from the core's guard task (wf_main.c), never while the browser is open (the core's module UI
+ * Called every ~10 ms from wf_task's waits (wf_main.c; RAWB8 had a task of its own, dropped: DryOS's task table), never
+ * while the browser is open (the core's module UI
  * holds the dialog then). 5D2: nothing (its menu dialog is 38, no report of this there). State: mg (wf_api.h part). */
 #define MG_MODE      93                     /* GUIMODE_ML_MENU in stills LV (RECORDING_H264 -> 99: never asked) */
 #define MG_FIRST_MS  150

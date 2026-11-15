@@ -69,15 +69,19 @@ const char *wf_exif_text(const struct wf_look *lk, int g, int h, int m, int ev, 
 /* ================================================================== the roll (wf_task) */
 static struct wf_roll roll;
 static volatile uint32_t roll_gen_n = 1;
-static int roll_read_done, roll_have_file, roll_dirty, roll_save_fail_t;
+static int roll_read_done, roll_have_file, roll_dirty, roll_save_fail_t, roll_save_fails;
+static struct wf_fe roll_save_fe;
 static char roll_txt[WF_ROLL_FILE] __attribute__((aligned(32)));
 volatile int wf_blind = 1;
-static volatile int req_kind, req_film, req_exp;  /* 1 load, 2 rewind, 3 close */
+static volatile int req_kind, req_film, req_exp;  /* 1 load, 2 rewind, 3 close, 4 close + load (swap) */
 static int poll_F = -1, poll_D = -1, poll_stable, wind_t = -100000;
 static int pq_old = -1, rv_old = -1, prop_t;
 static int hud_on, hud_fonts_on, hud_t, hud_mode = -1, info_t = -100000, hud_sig, hud_job;
 static int hud_font_again, hud_font_t, hud_font_n;  /* the font pack read again while Canon held the card */
 static volatile int dk_running;                   /* the darkroom task owns the roll */
+static int nt_state = -1, nt_req, nt_t, nt_len, nt_mode = -1, nt_pt;   /* the end-of-roll notice (roll_notice) */
+static volatile int nt_up, nt_drop, nt_poke;
+static volatile int sh_k;                         /* the shutter held now (roll_shutter): 0 no, 1 full, 2 rewound */
 
 const struct wf_roll *wf_roll_now(void) { return &roll; }
 uint32_t wf_roll_gen(void) { return roll_gen_n; }
@@ -85,6 +89,30 @@ static void roll_changed(void) { roll_gen_n++; wf_gen_bump(); }
 int wf_roll_shooting(void) { return roll.state == WF_RS_LOADED; }
 int wf_roll_blocks_play(void) { return wf_blind && wf_roll_open(&roll) && !dk_running; }
 int wf_dark_busy(void) { return dk_running; }
+
+/* GUI task (wf_main.c wf_keypress): a key while the end-of-roll notice is up drops it (wf_task clears it on its next
+ * poll); what 1 (SET / Q) opens the Darkroom on top, 2 (INFO) the roll picker for a new roll. Never in the ML menu (the
+ * notice is not drawn there either). */
+int wf_roll_notice_key(int what)
+{
+    if (!nt_up || gui_menu_shown())
+        return 0;
+    nt_drop = 1;
+    if (what)
+        wf_ui_open_scr(what == 1 ? WF_UI_SCR_DARK : WF_UI_SCR_ROLL);
+    return 1;
+}
+
+/* GUI task: a half / full shutter press on the LiveView screen while the shutter is held (roll_shutter): kept from Canon
+ * (ML's UI lock holds the shutter itself; this also keeps the half-press AF from starting), the notice shows at once */
+int wf_roll_shutter_key(void)
+{
+    if (!sh_k || !lv || gui_menu_shown() || is_play_mode() || wf_ui_is_open())
+        return 0;
+    nt_poke = 1;
+    return 1;
+}
+int wf_roll_shutter_locked(void) { return sh_k; }
 
 int wf_roll_req_load(int film, int exp)
 {
@@ -120,6 +148,22 @@ int wf_roll_req_close(void)
     req_kind = 3;
     return 0;
 }
+int wf_roll_req_swap(int film, int exp)
+{
+    if (!WF_DARK_CAN)
+        return -4;
+    if (req_kind || dk_running)
+        return -3;
+    if (!(roll.state == WF_RS_FULL || (roll.state == WF_RS_REWOUND && wf_roll_left(&roll) > 0)))
+        return -1;
+    if (!wf_roll_ok_exp(exp) || !wf_film_by_id(film))
+        return -2;
+    req_film = film;
+    req_exp = exp;
+    WF_BARRIER();
+    req_kind = 4;
+    return 0;
+}
 
 int wf_roll_hud(char *line, int n)
 {
@@ -138,6 +182,10 @@ static void roll_read(void)
     roll_have_file = FIO_GetFileSize(WF_ROLL_PATH, &size) == 0;
     if (!roll_have_file)
         return;
+    if (size == 0) {                             /* RAWB8's card: created, then the write never came */
+        wf_log("roll: %s is empty (a save that did not finish): no roll", WF_ROLL_PATH);
+        return;                                  /* (roll_have_file: the next save writes it in place) */
+    }
     uint32_t n = size < WF_ROLL_FILE ? size : WF_ROLL_FILE;
     if (wf_card_read(WF_ROLL_PATH, 0, roll_txt, n, 0) != 0 || wf_roll_parse(&roll, roll_txt, (int)n) != 0) {
         wf_log("roll: %s unreadable (%d bytes): no roll", WF_ROLL_PATH, (int)size);
@@ -149,22 +197,34 @@ static void roll_read(void)
     wf_log("roll: %03d %s film %d %d/%d", roll.num, wf_roll_state_name(roll.state), roll.film, roll.nshot, roll.exp);
 }
 
+/* a failed save: logged once per failing step (not at every 3 s try), "saved after n tries" once it went */
+static int roll_save_err(int step, int rc)
+{
+    if (!roll_save_fails++ || step != roll_save_fe.step)
+        wf_log("roll: %s not saved (%s rc %d), retry", WF_ROLL_PATH, wf_fe_name(step), rc);
+    roll_save_fe.step = step;
+    roll_save_fe.rc = rc;
+    return -1;
+}
 static int roll_save(void)
 {
     if (wf_roll_text(&roll, roll_txt, sizeof roll_txt) != WF_ROLL_FILE)
-        return -1;
+        return roll_save_err(WF_FE_WRITE, -1);
     struct wf_fe e = { 0, 0 };
     void *f = wf_fopen_w(WF_ROLL_PATH, roll_have_file ? WF_FO_AT : WF_FO_NEW, 0, &e);
     if (!f) {
         if (e.step == WF_FE_OPEN && roll_have_file)
             roll_have_file = 0;                  /* gone (card swapped): created again next time */
-        return -1;
+        return roll_save_err(e.step, e.rc);
     }
+    roll_have_file = 1;                          /* on the card now: a later try opens it in place (no create) */
     int w = FIO_WriteFile(f, roll_txt, WF_ROLL_FILE);
     FIO_CloseFile(f);
     if (w != WF_ROLL_FILE)
-        return -1;
-    roll_have_file = 1;
+        return roll_save_err(WF_FE_WRITE, w);
+    if (roll_save_fails)
+        wf_log("roll: %s saved after %d tries", WF_ROLL_PATH, roll_save_fails + 1);
+    roll_save_fails = 0;
     roll_dirty = 0;
     return 0;
 }
@@ -222,6 +282,68 @@ static void roll_props(int idle)
     }
 }
 
+/* the end-of-roll notice (owner 11-15, wfdr_notice): NT_FIRST_MS when the roll ends on this boot (its last frame counts,
+ * End roll now), NT_AGAIN_MS each time LiveView comes back (or the menu / UI / PLAY goes) and after each shot while it
+ * stays FULL / REWOUND, then the HUD's fade. A key drops it at once (wf_roll_notice_key); the darkroom run, the ML menu,
+ * the UI, PLAY and movie mode never get it. Called by roll_hud with the HUD's own want, before the HUD's pixels. */
+#define NT_FIRST_MS 5000
+#define NT_AGAIN_MS 2500
+#define NT_FADE_MS  400                          /* = HUD_FADE_MS (below) */
+static void roll_notice(int want, int now)
+{
+    int endk = roll.state == WF_RS_FULL ? 1 : roll.state == WF_RS_REWOUND && wf_roll_left(&roll) > 0 ? 2 : 0;
+    if (nt_state == WF_RS_LOADED && endk)
+        nt_req = NT_FIRST_MS;                    /* the roll ended now (waits for LiveView if it is not there) */
+    nt_state = roll.state;
+    want = want && endk && !is_movie_mode();
+    if (nt_poke) {                               /* a shutter press on the held roll (wf_roll_shutter_key): now */
+        nt_poke = 0;
+        if (endk) {
+            nt_req = nt_req > NT_AGAIN_MS ? nt_req : NT_AGAIN_MS;
+            nt_drop = 0;
+        }
+    }
+    if (!endk)
+        nt_req = 0;
+    else if (info_t == now)                      /* roll_hud: LiveView back, a shot done, a new state (the HUD info rule) */
+        nt_req = nt_req > NT_AGAIN_MS ? nt_req : NT_AGAIN_MS;
+    if (!want) {                                 /* gone with LiveView / under the menu or UI: roll_hud's redraw covers it */
+        nt_len = nt_drop = nt_up = 0;
+        return;
+    }
+    if (nt_req && !nt_drop) {                    /* a new notice, or more time for the one on screen */
+        int rest = nt_len ? nt_len - (now - nt_t) : 0;
+        if (!nt_len) {
+            wf_log("roll: end notice %s", endk == 1 ? "full" : "rewound");
+            nt_mode = -1;
+        }
+        if (nt_req > rest) {
+            nt_len = nt_req;
+            nt_t = now;
+        }
+        nt_req = 0;
+    }
+    if (!nt_len)
+        return;
+    int t = now - nt_t;
+    int mode = nt_drop ? WF_HUD_CLEAR : t < nt_len ? WF_HUD_FULL : t < nt_len + NT_FADE_MS ? WF_HUD_FADE : WF_HUD_CLEAR;
+    if (gui_menu_shown() || wf_ui_is_open())     /* (again right before the pixels) */
+        return;
+    if (mode == WF_HUD_CLEAR) {
+        wfdr_notice(bmp_vram(), WF_BMPPITCH, WF_HUD_CLEAR);
+        redraw();                                /* Canon's own LiveView marks under the box come back */
+        hud_mode = -1;                           /* (the HUD paints again after it) */
+        nt_len = nt_drop = nt_up = 0;
+        return;
+    }
+    if (mode != nt_mode || now - nt_pt >= 500) {
+        wfdr_notice(bmp_vram(), WF_BMPPITCH, mode);
+        nt_mode = mode;
+        nt_pt = now;
+    }
+    nt_up = 1;
+}
+
 /* the HUD over LiveView (DESIGN 3.6, owner 11-14): the roll + film chip, the big counter and the ladder show for
  * HUD_INFO_MS, fade for HUD_FADE_MS, then only a small dim counter stays. They show again when LiveView comes back
  * (or the menu / UI / PLAY goes), after a shot, after a frame counts, and when the roll, its film or its state changes. */
@@ -260,6 +382,7 @@ static void roll_hud(void)
     }
     if (want && !hud_on)
         info_t = now;                            /* LiveView is back */
+    roll_notice(want, now);
     if (want) {
         int blink = now - wind_t < 1000, t = now - info_t;
         int mode = t < HUD_INFO_MS ? WF_HUD_FULL : t < HUD_INFO_MS + HUD_FADE_MS ? WF_HUD_FADE : WF_HUD_SMALL;
@@ -278,12 +401,44 @@ static void roll_hud(void)
     hud_on = want;
 }
 
+/* owner 11-15: no shot on a finished roll. While the roll is FULL, or REWOUND with frames to develop, ML's UI lock holds
+ * Canon's shutter (gui_uilock UILOCK_SHUTTER, what ML's own exmem.c does against ERR70; wf_task only: it waits for the
+ * property). Never saved anywhere: worked out from the roll at every poll, so it lets go once the roll is closed or a
+ * new one loaded, while the darkroom develops, in movie mode, while recording, and at unload (wf_dark_end). With no
+ * roll nothing here ever runs gui_uilock. */
+#define WF_UILOCK_SHUTTER 0x0001                 /* ML property.h UILOCK_SHUTTER */
+extern int icu_uilock, __recording, __recording_custom;
+extern void gui_uilock(int what);
+static void roll_shutter(int let_go)
+{
+    int k = roll.state == WF_RS_FULL ? 1 : roll.state == WF_RS_REWOUND && wf_roll_left(&roll) > 0 ? 2 : 0;
+    if (!WF_DARK_CAN || let_go || dk_running || is_movie_mode() || __recording || __recording_custom)
+        k = 0;
+    if (!k == !sh_k) {
+        sh_k = k;                                /* (full <-> rewound: the lock stays) */
+        return;
+    }
+    gui_uilock(k ? (icu_uilock | WF_UILOCK_SHUTTER) : (icu_uilock & ~WF_UILOCK_SHUTTER));
+    sh_k = k;
+    if (k)
+        wf_log("roll: shutter blocked (%s), UI lock %x", k == 1 ? "full" : "rewound", (unsigned)icu_uilock);
+    else
+        wf_log("roll: shutter free, UI lock %x", (unsigned)icu_uilock);
+    roll_changed();
+}
+
 static void roll_req(void)
 {
     int k = req_kind, F = 0, D = 0;
     if (!k)
         return;
     const struct wf_film *f = wf_film_by_id(req_film);
+    if (k == 4) {                                /* the roll picker's close-and-load: the finished roll first */
+        int left = wf_roll_left(&roll);
+        if (wf_roll_close(&roll) == 0)
+            wf_log("roll: %03d closed for a new roll, %d frame(s) kept undeveloped", roll.num, left);
+        k = 1;
+    }
     if (k == 1) {
         if (wf_card_nums(&D, &F) != 0) {
             wf_log("roll: no file number, load refused");
@@ -322,6 +477,9 @@ void wf_roll_poll(void)
     }
     if (dk_running) {
         hud_on = 0;
+        nt_state = -1;                           /* a run rewinds the roll: no end notice for that */
+        nt_req = nt_len = nt_up = 0;
+        roll_shutter(0);                         /* developing: the shutter free */
         return;
     }
     int idle = wf_job_state() == 0 && !wf_shot_pending();
@@ -349,10 +507,9 @@ void wf_roll_poll(void)
         }
     }
     roll_props(idle);
-    if (roll_dirty && idle && get_ms_clock() - roll_save_fail_t > 3000 && roll_save() != 0) {
-        roll_save_fail_t = get_ms_clock();
-        wf_log("roll: %s not saved, retry", WF_ROLL_PATH);
-    }
+    roll_shutter(0);
+    if (roll_dirty && idle && get_ms_clock() - roll_save_fail_t > 3000 && roll_save() != 0)
+        roll_save_fail_t = get_ms_clock();       /* (roll_save logged it) */
     roll_hud();
 }
 
@@ -608,7 +765,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     uint32_t fsize = 0;
     if (FIO_GetFileSize(cr2, &fsize) != 0 || fsize < 4096) { dk_why = "no CR2"; return DK_ERR; }
     void *f = FIO_OpenFile(cr2, 0);
-    if (!f || !DRY_OK(f)) { dk_why = "open CR2"; return DK_ERR; }
+    if (!WF_FH_OK(f)) { dk_why = "open CR2"; return DK_ERR; }
     uint32_t nh = fsize < WF_CR2_HEAD ? fsize : WF_CR2_HEAD;
     rc = dk_read_at(f, 0, M.in, nh) ? WF_CR2_E_READ : wf_cr2_parse(M.in, nh, fsize, &dk_inf);
     if (rc == 0) {
@@ -635,7 +792,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     if (FIO_GetFileSize(jpg, &jn) == 0 && jn > 1024) {   /* Canon's APP1 from the shot's own JPEG */
         void *g = FIO_OpenFile(jpg, 0);
         uint32_t n = jn < DK_APP1 ? jn : DK_APP1;
-        if (g && DRY_OK(g)) {
+        if (WF_FH_OK(g)) {
             if (dk_read_at(g, 0, M.app1, n) != 0 || wf_dk_app1(M.app1, n, &ao, &al) != 0)
                 al = 0;
             FIO_CloseFile(g);
@@ -965,10 +1122,11 @@ int wf_dark_start(void)
     WF_BARRIER();
     dk_running = 1;                              /* wf_task leaves the roll alone from here */
     int tid = task_create("wf_dark", DK_PRIO, 0x2000, (void *)dk_task, 0);
-    if (!DRY_OK(tid)) {
+    if (!DRY_OK(tid)) {                          /* DryOS's task table full: nothing taken yet, the roll as it was */
         dk_running = 0;
         dv.state = WF_DR_FAIL;
-        dv.msg = "no task";
+        dv.msg = "No free task: try again";
+        wf_log("dark: no task (%x)", (unsigned)tid);
         dv_bump();
         return -3;
     }
@@ -1010,6 +1168,7 @@ void wf_dark_end(void)
         prop_request_change(WF_PROP_REVIEW, &rv_old, 4);
     if (roll_dirty)
         roll_save();
+    roll_shutter(1);                             /* the shutter never stays held without the module */
     if (hud_fonts_on)
         wfdr_hud_fonts(0);
 }

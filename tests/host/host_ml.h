@@ -9,6 +9,7 @@ extern char __camera_model_short[16], firmware_version[16];
 extern int pic_quality, shooting_mode, lv;
 extern uint8_t lens_info[];                      /* ML struct lens_info bytes (layout from wf_expoff.c) */
 extern volatile int h_play, h_movie, h_menu_shown, h_gdraw, h_expsim, h_expsim_stuck;
+extern volatile int h_task_fail, h_tasks_live, h_nsem;   /* task_create("film_yuv") refusals; live tasks; semaphores */
 
 /* ROM words (wf_cam_*: wf_host_rom_read); h_rom_bad = address whose word reads wrong (0 none) */
 extern volatile uint32_t h_rom_bad;
@@ -51,6 +52,13 @@ extern volatile int h_clock_add_ms;
    creates / removes / renames while lens_info.job_state != 0; main() fails every run on either. */
 extern char h_fio_busy[128], h_fio_wpath[128];
 extern volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy;
+/* file handles are small numbers like DryOS's (odd as often as even); h_fio_rm_open: removes of a file still open
+   (refused); h_fio_open_now: handles open now, their names into names */
+extern int icu_uilock, __recording, __recording_custom;
+extern volatile int h_uilock_n;                                     /* gui_uilock calls (ML's UI lock, icu_uilock) */
+extern volatile int h_fio_rm_open, h_fio_odd_fd, h_fio_cpath_n;   /* h_fio_odd_fd: only odd handles (3, 5, 7 ..) */
+extern char h_fio_cpath[128];                                       /* h_fio_cpath_n counts the creates of this path */
+int h_fio_open_now(char *names, int n);
 
 /* the menu entries menu_add got */
 extern void *h_menu;

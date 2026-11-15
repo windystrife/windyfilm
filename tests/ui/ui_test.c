@@ -340,6 +340,24 @@ int main(int argc, char **argv)
     shot("b2s_status");
     close_ui(MODULE_KEY_MENU, 0);
 
+    /* 4b. the film tables not read because the worker is not up yet (owner RAWB8: "worker 5"): no "Not on card" */
+    fake_reset();
+    fake_set_card(card);
+    fake_set_missing(id_of("PRT160"));
+    fake_set_films_state(0);
+    open_ui();
+    go_to("PRT160");
+    shot("b2s_starting");
+    fake_log_clear();
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wf_loaded() == 0 && fake_log_has("ui: load"), "a film whose table is not read yet was loaded");
+    shot("b2s_starting_set");
+    tick(150);
+    fake_set_films_state(-1);
+    fake_set_status("Worker failed");
+    shot("b2s_noworker");
+    close_ui(MODULE_KEY_MENU, 0);
+
     /* 5. no can pack: plain cans in the group colour */
     fake_reset();
     fake_set_card(nocans);

@@ -8,8 +8,9 @@
  *   module init (ML's module loader): ROM checks (wf_cam_init), config, menu, the task. No hook, no file write.
  *   wf_task (prio 0x1E, own): starts the worker + hooks (wf_cam_start), then every ~50 ms: shot log, pack reader, Log + LUT
  *     tables, effects, preview tables, config save, EXIF writer, Light, the browser request, log flush.
- *   wf_mguard (EOS M, prio 0x1B, own): every 50 ms the ML menu's Canon dialog (wf_ui_menu_guard, src/ui/wf_ui.c); its
- *     own task because wf_task can be busy for tens of seconds (a LUT read, RAW develop tables). Logs, no files.
+ *     It also runs the EOS M ML-menu guard (wf_ui_menu_guard, src/ui/wf_ui.c) in its 10 ms waits. RAWB8 had that
+ *     guard in a task of its own (wf_mguard): one task more filled DryOS's task table at boot and the worker was
+ *     refused on 3 of 3 boots, so it lives here now (while wf_task is busy reading a LUT, ML's own 2 s ask stays).
  *   worker film_yuv (prio 0x1C, wf_shot.c) and the Canon hook tasks never log and never touch files. */
 #include <module.h>
 #include "wf_core.h"
@@ -39,14 +40,13 @@ extern void NotifyBox(int timeout, const char *fmt, ...);
 extern void gui_stop_menu(void);
 extern void wf_film_shot_set_mem(void *mem);
 #define WF_TASK_PRIO 0x1E
-#define WF_MG_PRIO   0x1B                        /* above the shot worker (0x1C): a develop must not starve it */
 
 volatile int wf_cam_ok;
 volatile int wf_unloading;
 static volatile uint32_t wf_gen_n = 1;
 static const char *volatile wf_status_s = "";
 static volatile int wf_ui_req;
-static volatile int wf_task_up, wf_mg_up;
+static volatile int wf_task_up;
 
 /* ------------------------------------------------------------------ wf_api.h services */
 int wf_cam(void)
@@ -61,6 +61,37 @@ int wf_cam(void)
 }
 const char *wf_status(void) { return wf_status_s; }
 void wf_status_set(const char *s) { wf_status_s = s ? s : ""; wf_gen_bump(); }
+
+/* the worker + hooks start (wf_task): a refused worker task (DryOS's task table full at boot) is tried again every
+ * WF_START_MS, WF_START_TRIES times (~15 s); "Worker failed" only after the last */
+#define WF_START_MS    500
+#define WF_START_TRIES 30
+static volatile int wf_cam_rc = WF_CAM_NOWORKER, wf_cam_tries;
+static int wf_cam_t;
+static void wf_cam_try(void)
+{
+    wf_cam_t = get_ms_clock();
+    int rc = wf_cam_start();
+    wf_cam_tries++;
+    if (rc == WF_CAM_NOWORKER && wf_cam_tries < WF_START_TRIES)
+        return;                                  /* (wf_worker_start logged the try) */
+    if (rc == WF_CAM_NOWORKER)
+        wf_status_set("Worker failed");
+    wf_cam_rc = rc;
+    wf_log("hooks: %s (%d), try %d", rc ? "not installed" : "installed", rc, wf_cam_tries);
+    wf_gen_bump();
+}
+int wf_films_state(void)
+{
+    int ws = wf_ws_state();
+    if (!wf_cam_ok)
+        return -1;
+    if (ws == 1 || ws < 0)
+        return ws == 1 ? 1 : -2;
+    if (wf_cam_rc == WF_CAM_NOWORKER)
+        return wf_cam_tries < WF_START_TRIES ? 0 : -1;
+    return wf_cam_rc ? -1 : 0;
+}
 uint32_t wf_gen(void) { return wf_gen_n; }
 void wf_gen_bump(void) { wf_gen_n++; }
 
@@ -91,7 +122,7 @@ void *wf_fcreate(const char *path, struct wf_fe *e)
     if (wf_fremove(path, e))
         return 0;
     void *f = FIO_CreateFile(path);              /* ML: _FIO_RemoveFile (nothing there now) + _FIO_CreateFile */
-    if (!f || !DRY_OK(f)) {
+    if (!WF_FH_OK(f)) {
         wf_fset(e, WF_FE_CREATE, (int)(uintptr_t)f);
         return 0;
     }
@@ -123,7 +154,7 @@ void *wf_fopen_w(const char *path, int how, uint32_t pos, struct wf_fe *e)
     if (how == WF_FO_NEW || (how == WF_FO_END_OR_NEW && !wf_fexists(path)))
         return wf_fcreate(path, e);
     void *f = FIO_OpenFile(path, WF_O_RDWR_SYNC);  /* an open never changes the directory: fine while Canon is busy */
-    if (!f || !DRY_OK(f)) {
+    if (!WF_FH_OK(f)) {
         wf_fset(e, WF_FE_OPEN, (int)(uintptr_t)f);
         return 0;
     }
@@ -274,7 +305,7 @@ int wf_card_read(const char *path, uint32_t pos, void *p, uint32_t n, uint32_t *
         return WF_RD_NOMEM;
     void *f = FIO_OpenFile(path, 0);
     int rc = 0;
-    if (!f || ((uint32_t)f & 1)) {
+    if (!WF_FH_OK(f)) {
         rc = WF_RD_OPEN;
         f = 0;
     } else if (FIO_SeekSkipFile(f, pos, 0) != (int64_t)pos) {
@@ -331,6 +362,25 @@ static unsigned int wf_keypress(unsigned int key)
         return 1;
     if (wf_ui_is_open())
         return wf_ui_key(key);
+    if ((key == MODULE_KEY_PRESS_HALFSHUTTER || key == MODULE_KEY_PRESS_FULLSHUTTER) && wf_roll_shutter_key())
+        return 0;                                /* a finished roll: no shot, the notice says why (wf_dark.c) */
+    switch (key) {                               /* the end-of-roll notice (wf_dark.c): a key press drops it */
+    case MODULE_KEY_PRESS_SET: case MODULE_KEY_JOY_CENTER: case MODULE_KEY_Q:   /* (EOS M LiveView: SET comes as Q) */
+        if (wf_roll_notice_key(1))
+            return 0;                            /* SET: the Darkroom opens instead */
+        break;
+    case MODULE_KEY_INFO:
+        if (wf_roll_notice_key(2))
+            return 0;                            /* INFO: the roll picker, for a new roll */
+        break;
+    case MODULE_KEY_PRESS_HALFSHUTTER: case MODULE_KEY_PRESS_FULLSHUTTER: case MODULE_KEY_REC:
+    case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:
+    case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_UP: case MODULE_KEY_WHEEL_DOWN:
+    case MODULE_KEY_MENU: case MODULE_KEY_TRASH: case MODULE_KEY_PLAY: case MODULE_KEY_LV:
+    case MODULE_KEY_PICSTYLE: case MODULE_KEY_TOUCH_1_FINGER:
+        wf_roll_notice_key(0);                   /* and the key goes on as before */
+        break;
+    }
     if (key == WF_KEY_PLAY && !gui_menu_shown() && wf_roll_blocks_play()) {   /* blind roll (docs/DESIGN.md 3.6) */
         NotifyBox(2000, "Roll in camera: develop it in the Darkroom");
         return 0;
@@ -354,10 +404,12 @@ static void wf_task(void *arg)
         wf_film_shot_set_mem(m);                 /* the shot set of the film kernel (wf_film.c), kept */
         if (!m)
             wf_log("film: no memory for the shot set, film looks stay off");
-        int rc = wf_cam_start();
-        wf_log("hooks: %s (%d)", rc ? "not installed" : "installed", rc);
+        wf_cam_try();
     }
     while (!wf_unloading) {
+        if (wf_cam_ok && wf_cam_rc == WF_CAM_NOWORKER && wf_cam_tries < WF_START_TRIES
+            && get_ms_clock() - wf_cam_t >= WF_START_MS)
+            wf_cam_try();
         if (wf_cam_ok) {
             wf_cam_poll();
             wf_shot_poll();                      /* shot log, EXIF entries, pack reader, Log + LUT, effects */
@@ -372,8 +424,10 @@ static void wf_task(void *arg)
         wf_log_flush();
         for (int i = 0; i < 5 && !wf_unloading; i++) {
             msleep(10);
-            if (wf_cam_ok)
+            if (wf_cam_ok) {
                 wf_ws_poll();                    /* a parked shot may wait for its film table */
+                wf_ui_menu_guard();              /* EOS M: the ML menu's Canon dialog (no task of its own) */
+            }
         }
     }
     if (wf_cam_ok) {
@@ -384,19 +438,6 @@ static void wf_task(void *arg)
     wf_log_flush();
     wf_task_up = 0;
 }
-
-#ifndef WF_BUILD_5D2
-/* EOS M: the ML menu's Canon dialog (src/ui/wf_ui.c wf_ui_menu_guard) */
-static void wf_mg_task(void *arg)
-{
-    (void)arg;
-    while (!wf_unloading) {
-        wf_ui_menu_guard();
-        msleep(50);
-    }
-    wf_mg_up = 0;
-}
-#endif
 
 /* ------------------------------------------------------------------ module init / deinit */
 static unsigned int wf_init(void)
@@ -411,16 +452,9 @@ static unsigned int wf_init(void)
     wf_ui_init();
     wf_dark_init();
     wf_menu_init();                              /* config, ML menu */
-    task_create("wf_task", WF_TASK_PRIO, 0x2000, (void *)wf_task, 0);
-#ifndef WF_BUILD_5D2
-    if (wf_cam_ok) {
-        wf_mg_up = 1;
-        if (task_create("wf_mguard", WF_MG_PRIO, 0x1000, (void *)wf_mg_task, 0) & 1) {   /* handles even, errors odd */
-            wf_mg_up = 0;
-            wf_log("menu: no guard task");
-        }
-    }
-#endif
+    uint32_t tt = task_create("wf_task", WF_TASK_PRIO, 0x2000, (void *)wf_task, 0);
+    if (!DRY_OK(tt))                             /* DryOS's task table full: nothing of WindyFilm runs */
+        wf_log("no wf_task (%x): WindyFilm stays off", (unsigned)tt);
     return 0;
 }
 
@@ -433,7 +467,7 @@ static unsigned int wf_deinit(void)
     wf_pv_deinit();
     wf_exp_deinit();
     wf_shot_deinit();
-    for (int i = 0; i < 50 && (wf_task_up || wf_mg_up); i++)
+    for (int i = 0; i < 50 && wf_task_up; i++)
         msleep(20);
     return 0;
 }

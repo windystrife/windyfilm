@@ -59,6 +59,8 @@ enum { WF_LOAD_OK = 0, WF_LOAD_NOTABLE, WF_LOAD_NOCUBE, WF_LOAD_BUSY, WF_LOAD_UN
 int  wf_load(int id);                     /* make film id the active look: output Film, or V-Log + LUT for a can */
 int  wf_loaded(void);                     /* the active film id, 0 = none (output is plain log, Log + LUT or Off) */
 int  wf_avail(int id);                    /* 1 = loadable now (its table is in the pack / its cube is on the card) */
+int  wf_films_state(void);                /* the film tables: 1 read, 0 starting (worker / pack not up yet), -1 the
+                                             worker or the hooks failed, -2 the pack is missing or bad */
 const char *wf_status(void);              /* one line, "" when all is well: "Unsupported firmware", "Disable filmroll.mo", ... */
 uint32_t wf_gen(void);                    /* bumped on every state change: the UI redraws when it differs */
 
@@ -70,7 +72,7 @@ int  wf_ui_is_open(void);
 unsigned int wf_ui_key(unsigned int key); /* from the core's CBR_KEYPRESS while open: 0 = consumed, 1 = pass on */
 int  wf_ui_open_key(unsigned int key);    /* 1 = this key opens the browser (EOS M: long DOWN; 5D2: TRASH) */
 void wf_ui_open_refused(unsigned int key, int play);   /* the open key did not open it: log why */
-int  wf_ui_menu_guard(void);              /* EOS M, every ~50 ms (core guard task): the ML menu's Canon dialog; 1 = asked */
+int  wf_ui_menu_guard(void);              /* EOS M, every ~10 ms (wf_task's waits): the ML menu's Canon dialog; 1 = asked */
 
 /* ------------------------------------------------------------------ core services */
 void wf_log(const char *fmt, ...);        /* ML/LOGS/WINDYFLM.LOG (buffered, written by the core task) */

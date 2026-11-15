@@ -107,6 +107,21 @@ int main(void)
     f[4] = '3';
     CHECK(wf_roll_parse(&q, buf, WF_ROLL_FILE) == -1, "exp 32 refused");
     f[4] = '2';
+    CHECK(wf_roll_ok_exp(3) && wf_roll_ok_exp(6) && !wf_roll_ok_exp(4) && !wf_roll_ok_exp(5) && !wf_roll_ok_exp(0)
+          && !wf_roll_ok_exp(48), "3 and 6 exposures allowed (owner 11-15), 4 / 5 / 0 / 48 not");
+    {                                            /* a roll of 3: full at the 3rd frame, its file reads back */
+        struct wf_roll s3;
+        wf_roll_reset(&s3);
+        CHECK(wf_roll_load(&s3, 57, 3, 100, 300) == 0 && s3.exp == 3, "a roll of 3 loads");
+        for (int i = 1; i <= 4; i++)
+            wf_roll_seen(&s3, 100, 300 + i, has_cr2, 0);
+        CHECK(s3.state == WF_RS_FULL && s3.nshot == 3, "a roll of 3: full at 3 (%d, state %d)", s3.nshot, s3.state);
+        char b3[WF_ROLL_FILE];
+        struct wf_roll q3;
+        CHECK(wf_roll_text(&s3, b3, sizeof b3) == WF_ROLL_FILE && wf_roll_parse(&q3, b3, WF_ROLL_FILE) == 0
+              && q3.exp == 3 && q3.nshot == 3 && q3.state == WF_RS_FULL, "a roll of 3 reads back");
+        CHECK(wf_roll_load(&s3, 57, 6, 100, 310) == -1, "a full roll of 3 takes no new load");
+    }
     f = strstr(buf, "f=100,206,S");
     f[10] = 'Z';
     CHECK(wf_roll_parse(&q, buf, WF_ROLL_FILE) == -1 && q.num == 0, "bad frame state -> reset");

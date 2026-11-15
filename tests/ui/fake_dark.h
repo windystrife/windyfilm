@@ -12,4 +12,6 @@ int  fake_req_film(void);
 int  fake_req_exp(void);
 int  fake_nstart(void);
 int  fake_nstop(void);
+void fake_set_locked(int k);                /* wf_roll_shutter_locked() */
+int  fake_nswap(void);                      /* wf_roll_req_swap calls that closed + loaded */
 #endif

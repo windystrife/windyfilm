@@ -34,9 +34,13 @@ volatile int h_shoot_fail, h_heap_free = 8 << 20, h_arena_live;
 volatile int h_clock_add_ms;
 char h_fio_busy[128], h_fio_wpath[128];
 static void *h_wf;                                  /* the open file of h_fio_wpath */
-volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy;
+volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy, h_fio_rm_open, h_fio_odd_fd, h_fio_cpath_n;
+char h_fio_cpath[128];
 void *h_menu;
 volatile int h_menu_count;
+int icu_uilock, __recording, __recording_custom;    /* ML's UI lock word (gui_uilock sets its low 16 bits), recording */
+volatile int h_uilock_n;                            /* gui_uilock calls */
+void gui_uilock(int what) { h_uilock_n++; icu_uilock = what & 0xFFFF; }
 
 /* ------------------------------------------------------------------ ROM */
 static const uint32_t h_rom[][2] = {
@@ -131,10 +135,19 @@ static void *h_task_main(void *p)
     t.entry(t.arg);
     return 0;
 }
+/* DryOS's task table: get_task_info_by_id answers 0 for h_tasks_live ids of task_max; h_task_fail = how many
+ * task_create("film_yuv") calls are refused with 5 (a full table, owner RAWB8 boots) */
+unsigned int task_max = 72;
+volatile int h_task_fail, h_tasks_live = 70, h_nsem;
+int get_task_info_by_id(int a, int id, void *p) { (void)a; (void)p; return id >= 1 && id <= h_tasks_live ? 0 : 1; }
 int task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg)
 {
     static int n;
-    (void)name; (void)prio; (void)stack;
+    (void)prio; (void)stack;
+    if (h_task_fail > 0 && name && !strcmp(name, "film_yuv")) {
+        h_task_fail--;
+        return 5;
+    }
     struct h_task *t = malloc(sizeof *t);
     t->entry = (void (*)(void *))entry;
     t->arg = arg;
@@ -152,6 +165,8 @@ struct h_sem { sem_t s; } __attribute__((aligned(8)));
 void *create_named_semaphore(const char *name, int initial)
 {
     (void)name;
+    if (name && (!strcmp(name, "wf_lock") || !strcmp(name, "wf_go") || !strcmp(name, "wf_done")))
+        h_nsem++;                                /* the worker's three */
     struct h_sem *s = malloc(sizeof *s);
     sem_init(&s->s, 0, initial);
     return s;
@@ -258,12 +273,61 @@ static int h_busy(const char *path)              /* h_fio_busy: that path, or "*
 {
     return h_fio_busy[0] && (!strcmp(h_fio_busy, "*") || !strcmp(h_path(path), h_fio_busy));
 }
+/* DryOS file handles are small numbers, the lowest free one from 3 (RAWB8's log: 3, 5, 7), odd as often as even: the
+   module must take any handle but 0 (WF_FH_OK, never DRY_OK) and close each one. A handle left open at the end of a run,
+   or a remove of a file that is open (the camera refuses it: RAWB8's WFROLL.TXT stayed 0 bytes), fails the run. */
+#define H_NFD 32
+static FILE *h_fd[H_NFD];
+static char h_fd_name[H_NFD][128];
+static pthread_mutex_t h_fd_mx = PTHREAD_MUTEX_INITIALIZER;
+static void *h_fd_put(FILE *f, const char *path)
+{
+    if (!f)
+        return 0;
+    pthread_mutex_lock(&h_fd_mx);
+    for (int i = 3; i < H_NFD; i += h_fio_odd_fd ? 2 : 1)   /* h_fio_odd_fd: 3, 5, 7 .. only */
+        if (!h_fd[i]) {
+            h_fd[i] = f;
+            snprintf(h_fd_name[i], sizeof h_fd_name[i], "%s", h_path(path));
+            pthread_mutex_unlock(&h_fd_mx);
+            return (void *)(uintptr_t)i;
+        }
+    pthread_mutex_unlock(&h_fd_mx);
+    fclose(f);
+    return 0;                                     /* no free handle */
+}
+static FILE *h_fd_get(void *h) { uintptr_t i = (uintptr_t)h; return i >= 3 && i < H_NFD ? h_fd[i] : 0; }
+static int h_fd_open_on(const char *path)
+{
+    int n = 0;
+    pthread_mutex_lock(&h_fd_mx);
+    for (int i = 3; i < H_NFD; i++)
+        n += h_fd[i] && !strcmp(h_fd_name[i], h_path(path));
+    pthread_mutex_unlock(&h_fd_mx);
+    return n;
+}
+int h_fio_open_now(char *names, int n)            /* handles still open; their file names into names */
+{
+    int k = 0;
+    if (n > 0)
+        names[0] = 0;
+    pthread_mutex_lock(&h_fd_mx);
+    for (int i = 3; i < H_NFD; i++)
+        if (h_fd[i]) {
+            k++;
+            int l = (int)strlen(names);
+            if (l < n - 1)
+                snprintf(names + l, n - l, "%s%s", l ? " " : "", h_fd_name[i]);
+        }
+    pthread_mutex_unlock(&h_fd_mx);
+    return k;
+}
 void *FIO_OpenFile(const char *path, unsigned mode)
 {
     h_fio_opens++;
     if (h_busy(path))
         return 0;
-    void *f = fopen(h_path(path), (mode & 3) == 2 ? "r+b" : "rb");
+    void *f = h_fd_put(fopen(h_path(path), (mode & 3) == 2 ? "r+b" : "rb"), path);
     if (f && h_fio_wpath[0] && !strcmp(h_path(path), h_fio_wpath))
         h_wf = f;
     return f;
@@ -279,17 +343,19 @@ static void h_dir_change(void) { if (h_li_get("job")) h_fio_dir_busy++; }
 void *FIO_CreateFile(const char *path)
 {
     h_fio_creates++;
+    if (h_fio_cpath[0] && !strcmp(h_path(path), h_fio_cpath))
+        h_fio_cpath_n++;
     h_dir_change();
     if (h_exists(path))
         h_fio_dup++;
     if (h_busy(path))
         return 0;
-    void *f = fopen(h_path(path), "w+b");
+    void *f = h_fd_put(fopen(h_path(path), "w+b"), path);
     if (f && h_fio_wpath[0] && !strcmp(h_path(path), h_fio_wpath))
         h_wf = f;
     return f;
 }
-int FIO_ReadFile(void *f, void *p, size_t n) { return (int)fread(p, 1, n, f); }
+int FIO_ReadFile(void *f, void *p, size_t n) { FILE *F = h_fd_get(f); return F ? (int)fread(p, 1, n, F) : -1; }
 /* h_fio_wmax > 0: the next write to a file opened by the path h_fio_wpath stops after that many bytes (a short write),
    then writes are whole again */
 int FIO_WriteFile(void *f, const void *p, size_t n)
@@ -299,11 +365,28 @@ int FIO_WriteFile(void *f, const void *p, size_t n)
         h_fio_wmax = 0;
         n = (size_t)m;
     }
-    int k = (int)fwrite(p, 1, n, f);
-    fflush(f);
+    FILE *F = h_fd_get(f);
+    if (!F)
+        return -1;
+    int k = (int)fwrite(p, 1, n, F);
+    fflush(F);
     return k;
 }
-void FIO_CloseFile(void *f) { if (f == h_wf) h_wf = 0; if (f) fclose(f); }
+void FIO_CloseFile(void *f)
+{
+    if (f == h_wf)
+        h_wf = 0;
+    uintptr_t i = (uintptr_t)f;
+    FILE *F = 0;
+    pthread_mutex_lock(&h_fd_mx);
+    if (i >= 3 && i < H_NFD) {
+        F = h_fd[i];
+        h_fd[i] = 0;
+    }
+    pthread_mutex_unlock(&h_fd_mx);
+    if (F)
+        fclose(F);
+}
 int FIO_GetFileSize(const char *path, uint32_t *size)
 {
     struct stat st;
@@ -314,13 +397,18 @@ int FIO_GetFileSize(const char *path, uint32_t *size)
 }
 int64_t FIO_SeekSkipFile(void *f, int64_t pos, int whence)
 {
-    if (fseeko(f, (off_t)pos, whence) != 0)
+    FILE *F = h_fd_get(f);
+    if (!F || fseeko(F, (off_t)pos, whence) != 0)
         return -1;
-    return (int64_t)ftello(f);
+    return (int64_t)ftello(F);
 }
-int FIO_RemoveFile(const char *path)             /* a busy path: the card refuses, the file stays */
+int FIO_RemoveFile(const char *path)             /* a busy path or an open file: the card refuses, the file stays */
 {
     h_dir_change();
+    if (h_fd_open_on(path)) {
+        h_fio_rm_open++;
+        return -1;
+    }
     return !h_busy(path) && unlink(h_path(path)) == 0 ? 0 : -1;
 }
 int FIO_RenameFile(const char *src, const char *dst)

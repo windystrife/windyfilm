@@ -589,6 +589,32 @@ static void t_shot(const char *cs)
         chk(h_kelvin_n == 0 && h_nchanges == 0 && h_gm_last == 0 && h_ba_last == 0, "white balance never touched");
         return;
     }
+    if (!strcmp(cs, "late") || !strcmp(cs, "noworker")) {   /* DryOS's task table full at boot (owner RAWB8 "worker 5") */
+        int late = !strcmp(cs, "late");
+        h_task_fail = late ? 3 : 1000;
+        std_pack();
+        int s0 = h_nsem;
+        mod_init(0);
+        chk(LOGW("worker 5 prio 1c", 3000) && LOGW("try 1, tasks 70 of 72", 3000) && !wf_cam_shot_ok(),
+            "a refused worker: logged with the task count, no hooks yet");
+        chk(wf_films_state() == 0 && !*wf_status() && !wf_avail(wf_films[fA].id),
+            "while it tries again: tables 'starting' (%d), no status yet ('%s')", wf_films_state(), wf_status());
+        if (late) {
+            chk(WAIT(wf_cam_shot_ok(), 5000) && LOGW("hooks: installed (0), try 4", 3000), "the 4th try starts it: %s",
+                log_line("hooks:"));
+            chk(WAIT(wf_ws_state() == 1, 5000) && LOGW("pack ok", 3000) && wf_films_state() == 1 && wf_avail(wf_films[fA].id)
+                && !*wf_status(), "the pack is read after the late start (state %d)", wf_films_state());
+        } else {
+            chk(WAIT(log_has("hooks: not installed (-100), try 30"), 25000) && !strcmp(wf_status(), "Worker failed")
+                && wf_films_state() == -1 && !wf_cam_shot_ok(), "30 tries then 'Worker failed' (%d, '%s')",
+                wf_films_state(), wf_status());
+            usleep(1200000);
+            chk(!log_has("try 31"), "no 31st try");
+        }
+        chk(h_nsem - s0 == 3, "the worker's 3 semaphores made once over all the tries: %d", h_nsem - s0);
+        mod_deinit();
+        return;
+    }
     if (!strcmp(cs, "busy")) {                   /* the old module holds the hook site */
         h_patch_err = 2;
         std_pack();
@@ -2029,6 +2055,23 @@ static void t_log(const char *cs)
         mod_deinit();
         return;
     }
+    if (!strcmp(cs, "odd")) {                    /* every file handle odd: DryOS gives 3, 5, 7 as often as even ones (RAWB8) */
+        unlink(LOG_PATH);
+        h_fio_odd_fd = 1;
+        mod_init(0);
+        for (int i = 0; i < 20; i++) {
+            wf_log("odd handle line %d", i);
+            usleep(30000);
+        }
+        chk(LOGW("odd handle line 19\n", 3000), "odd handles: the log made and appended");
+        b = get_file(LOG_PATH, &n);
+        chk(b && count_str(b, "odd handle line ") == 20 && !strstr(b, "card refused"), "all 20 lines, no refusal (%d)",
+            b ? count_str(b, "odd handle line ") : -1);
+        free(b);
+        mod_deinit();
+        h_fio_odd_fd = 0;
+        return;
+    }
     if (!strcmp(cs, "new")) {                    /* no log on the card, Canon busy at boot: the log is made once idle */
         unlink(LOG_PATH);
         h_li_set("job", 1);
@@ -2956,8 +2999,163 @@ static int menu_set(const char *nm)                 /* SET on the entry: its sel
     sel(*(void **)(e + wf_t_me_priv), 1);
     return 0;
 }
-static void t_roll(void)
+#define H_KEY_HALFSHUTTER 1                       /* ML module.h MODULE_KEY_PRESS_HALFSHUTTER / _SET (as WF_KEY_PLAY) */
+#define H_KEY_FULLSHUTTER 3
+#define H_KEY_SET 9
+#define H_KEY_INFO 23
+#define H_ROLLF "ML/SETTINGS/WFROLL.TXT"
+static int roll_cr2_yes(void *ctx, int folder, int file) { (void)ctx; (void)folder; (void)file; return 1; }
+static char *roll_file_wait(const char *want, long *n, int ms)   /* wf_task writes it after the state changed in memory */
 {
+    char *b = 0;
+    for (int t = 0; t <= ms; t += 100) {
+        free(b);
+        b = get_file(H_ROLLF, n);
+        if (b && *n == 1536 && strstr(b, want))
+            break;
+        usleep(100000);
+    }
+    return b;
+}
+/* ROLL:save / short / back - the roll file on RAWB8's card (owner 11-15): "not saved, retry" every 3 s, 0 bytes after a
+ * reboot. Every file handle odd here (DryOS hands out 3, 5, 7 as often as even ones; RAWB8 took them for errors and left
+ * them open). save: the empty WFROLL.TXT that card was left with; short: no file, the first write cut short; back: a
+ * roll file read at boot. One boot per case (the module loads once per boot) */
+static void t_roll_save(const char *cs)
+{
+#ifdef WF_BUILD_5D2
+    (void)cs;
+    chk(1, "5D2: no roll");
+#else
+    long n = 0;
+    char *b;
+    std_pack();
+    h_set_folder_number(100);
+    h_set_file_number(300);
+    h_fio_odd_fd = 1;
+    snprintf(h_fio_cpath, sizeof h_fio_cpath, "%s", H_ROLLF);
+    const int film = wf_films[fA].id;
+    if (!strcmp(cs, "save")) {
+        put_file(H_ROLLF, "", 0);
+        log_mark();
+        mod_init(1);
+        chk(LOGW("roll: " H_ROLLF " is empty", 3000) && wf_roll_now()->state == WF_RS_EMPTY,
+            "RAWB8's empty roll file at boot: no roll (%s)", log_line("roll: "));
+        int rc = wf_roll_req_load(film, 12);
+        chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000), "a roll loads (%d)", rc);
+        b = roll_file_wait("state=loaded", &n, 3000);
+        chk(b && n == 1536 && h_fio_cpath_n == 0 && !log_has("not saved"),
+            "odd handles, the empty file: saved in place at once (%ld bytes, %d creates)", n, h_fio_cpath_n);
+        free(b);
+    } else if (!strcmp(cs, "short")) {
+        unlink(H_ROLLF);
+        snprintf(h_fio_wpath, sizeof h_fio_wpath, "%s", H_ROLLF);
+        h_fio_wmax = 100;
+        log_mark();
+        mod_init(1);
+        int rc = wf_roll_req_load(film, 12);
+        chk(rc == 0 && LOGW("roll: " H_ROLLF " not saved (write rc 100), retry", 3000),
+            "a short first write: logged with its step ('%s')", log_line("not saved"));
+        b = roll_file_wait("state=loaded", &n, 6000);
+        long nl = 0;
+        char *lg = get_file(LOG_PATH, &nl);
+        int said = lg ? count_str(lg + (nl > log_at ? log_at : nl), "not saved") : -1;
+        free(lg);
+        chk(b && n == 1536 && LOGW("roll: " H_ROLLF " saved after 2 tries", 2000) && said == 1 && h_fio_cpath_n == 1,
+            "saved by the next try, in place (%ld bytes, %d 'not saved' lines, %d creates)", n, said, h_fio_cpath_n);
+        free(b);
+        h_fio_wpath[0] = 0;
+    } else {                                     /* back: a roll file from an earlier boot, read through an odd handle */
+        struct wf_roll r;
+        char t[1536];
+        wf_roll_reset(&r);
+        wf_roll_load(&r, film, 12, 100, 290);
+        wf_roll_seen(&r, 100, 292, roll_cr2_yes, 0);
+        chk(wf_roll_text(&r, t, sizeof t) == 1536, "a roll file of 2 frames made");
+        put_file(H_ROLLF, t, sizeof t);
+        log_mark();
+        mod_init(1);
+        chk(LOGW("roll: 001 loaded film", 3000) && wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->nshot == 2,
+            "the roll read back at boot (%s)", log_line("roll: "));
+    }
+    chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "the roll closes");
+    b = roll_file_wait("state=done", &n, 3000);
+    chk(b && h_fio_cpath_n == (!strcmp(cs, "short") ? 1 : 0), "state=done on the card, rewritten in place (%d creates)",
+        h_fio_cpath_n);
+    free(b);
+    mod_deinit();
+    h_fio_cpath[0] = 0;
+    h_fio_odd_fd = 0;
+#endif
+}
+/* ROLL:lock - the shutter held on a finished roll (owner 11-15): a roll of 3, the close-and-load request, the new roll
+ * free, a roll of 6 full again, unload lets go */
+static int roll_shoot(int from, int n)
+{
+    int ok = 1;
+    for (int i = 0; i < n && ok; i++) {
+        char p[64];
+        int n0 = wf_roll_now()->nshot;
+        snprintf(p, sizeof p, "DCIM/100CANON/IMG_%04d.CR2", from + i);
+        put_file(p, "II*", 3);
+        h_set_file_number(from + i);
+        ok = WAIT(wf_roll_now()->nshot == n0 + 1, 5000);
+    }
+    return ok;
+}
+static void t_roll_lock(void)
+{
+#ifdef WF_BUILD_5D2
+    std_pack();
+    mod_init(1);
+    chk(wf_roll_req_swap(wf_films[fA].id, 3) == -4, "5D2: no roll to close and load");
+    usleep(300000);
+    chk(h_uilock_n == 0 && cbr_key(H_KEY_HALFSHUTTER) == 1, "5D2: no UI lock, the shutter keys pass");
+    mod_deinit();
+#else
+    std_pack();
+    h_set_folder_number(100);
+    h_set_file_number(400);
+    mod_init(1);
+    const int film = wf_films[fA].id, film2 = wf_films[fC].id;
+    int rc = wf_roll_req_load(film, 3);
+    chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->exp == 3, 5000), "a roll of 3 loads (%d)", rc);
+    chk(wf_roll_req_swap(film2, 6) == -1, "close-and-load refused while the roll still shoots");
+    chk(roll_shoot(401, 3) && wf_roll_now()->state == WF_RS_FULL && LOGW("roll: shutter blocked (full)", 3000)
+        && (icu_uilock & 1), "3 frames: full, the shutter held (%d/3, lock %x)", wf_roll_now()->nshot, icu_uilock);
+    usleep(300000);
+    cbr_key(H_KEY_SET);                          /* the first notice (5 s) away: SET drops it (the Darkroom is asked for) */
+    usleep(400000);
+    log_mark();
+    chk(cbr_key(H_KEY_HALFSHUTTER) == 0 && LOGW("roll: end notice full", 3000), "half-shutter: kept, the notice at once");
+    lv = 0;
+    chk(cbr_key(H_KEY_HALFSHUTTER) == 1, "no LiveView (Canon's own screens): the key passes, ML's lock holds the shutter");
+    lv = 1;
+    chk(wf_roll_req_swap(film2, 7) == -2 && wf_roll_req_swap(9999, 6) == -2, "close-and-load: a bad count / film refused");
+    rc = wf_roll_req_swap(film2, 6);
+    chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->film == film2 && wf_roll_now()->exp == 6
+        && wf_roll_now()->num == 2, 5000) && LOGW("roll: 001 closed for a new roll, 3 frame(s) kept undeveloped", 3000)
+        && LOGW("roll: 002 loaded", 3000), "close-and-load: roll 001 closed (3 kept), roll 002 x6 loaded (%d, %s)", rc,
+        log_line("roll: 00"));
+    chk(LOGW("roll: shutter free", 3000) && !(icu_uilock & 1) && cbr_key(H_KEY_HALFSHUTTER) == 1,
+        "the new roll: the shutter free, the half-shutter passes");
+    chk(roll_shoot(404, 6) && wf_roll_now()->state == WF_RS_FULL && WAIT(icu_uilock & 1, 3000),
+        "6 frames: full, held again (%d/6)", wf_roll_now()->nshot);
+    log_mark();
+    mod_deinit();
+    chk(log_has("roll: shutter free") && !(icu_uilock & 1), "unload: the shutter free (lock %x)", icu_uilock);
+#endif
+}
+static void t_roll(const char *cs)
+{
+    if (!strcmp(cs, "save") || !strcmp(cs, "short") || !strcmp(cs, "back")) {
+        t_roll_save(cs);
+        return;
+    }
+    if (!strcmp(cs, "lock")) {
+        t_roll_lock();
+        return;
+    }
     std_pack();
     h_set_folder_number(100);
     h_set_file_number(206);
@@ -2965,6 +3163,10 @@ static void t_roll(void)
     chk(menu_named("Film roll") && menu_named("Blind roll") && menu_named("Darkroom") && menu_named("End roll now")
         && menu_named("Close roll"), "menu: Film roll, Blind roll, Darkroom, End roll now, Close roll");
     chk(wf_roll_now()->state == WF_RS_EMPTY && cbr_key(WF_KEY_PLAY) == 1, "no roll: PLAY passes");
+    usleep(300000);
+    chk(h_uilock_n == 0 && !log_has("roll: shutter") && !log_has("roll: image quality") && cbr_key(H_KEY_HALFSHUTTER) == 1
+        && cbr_key(H_KEY_FULLSHUTTER) == 1, "no roll: as before (no UI lock (%d calls), no RAW+L, the shutter keys pass)",
+        h_uilock_n);
 #ifdef WF_BUILD_5D2
     chk(wf_roll_req_load(wf_films[fA].id, 12) == -4, "5D2: a roll load is refused (the darkroom comes to the EOS M first)");
     chk(menu_named("RAW develop") != 0, "5D2: the RAW develop entry is there (B on the 5D2, raw-develop 6b51b75)");
@@ -2995,15 +3197,79 @@ static void t_roll(void)
     chk(wf_roll_req_rewind() == 0 && WAIT(wf_roll_now()->state == WF_RS_REWOUND, 5000) && wf_roll_now()->nshot == 1
         && !wf_roll_shooting() && wf_rawb == 1, "End roll now: rewound with its frame, RAW develop stays on (state %d)",
         wf_roll_now()->state);
+    chk(LOGW("roll: end notice rewound", 3000), "End roll now: the end notice shows (rewound)");
+    chk(LOGW("roll: shutter blocked (rewound)", 3000) && (icu_uilock & 1), "rewound with a frame to develop: the shutter held "
+        "(UI lock %x)", icu_uilock);
     chk(cbr_key(WF_KEY_PLAY) == 0, "rewound roll: PLAY still blocked until it is developed or closed");
     chk(wf_roll_req_load(film, 24) == -1, "a roll with frames in the camera: a new load is refused");
     chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000) && wf_rawb == 1
         && cbr_key(WF_KEY_PLAY) == 1, "Close roll: done, RAW develop stays on, PLAY passes");
+    chk(LOGW("roll: shutter free", 3000) && !(icu_uilock & 1) && cbr_key(H_KEY_HALFSHUTTER) == 1
+        && LOGW("roll: image quality back to", 3000), "closed: as with no roll (shutter free, lock %x, image quality back)",
+        icu_uilock);
     wf_rawb = 0;
     rc = wf_roll_req_load(film, 12);
     chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && wf_rawb == 0,
         "RAW develop off: a roll loads, RAW develop stays off (%d, %d)", rc, wf_rawb);
     chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "the empty roll closes");
+    /* the end-of-roll notice (owner 11-15): the 12th frame shows it, SET opens the Darkroom while it is up (no UI in
+     * this build: the stub logs it), a key drops it, LiveView back shows it again */
+    rc = wf_roll_req_load(film, 12);
+    chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000), "a roll of 12 loads (%d)", rc);
+    usleep(600000);
+    log_mark();
+    int ok = 1;
+    for (int i = 0; i < 12 && ok; i++) {
+        char p[64];
+        snprintf(p, sizeof p, "DCIM/100CANON/IMG_%04d.CR2", 209 + i);
+        put_file(p, "II*", 3);
+        h_set_file_number(209 + i);
+        ok = WAIT(wf_roll_now()->nshot == i + 1, 5000);
+    }
+    chk(ok && wf_roll_now()->state == WF_RS_FULL && LOGW("roll: end notice full", 3000) && log_has(", end of roll"),
+        "12 frames: FULL, the end notice shows (%d/12, state %d)", wf_roll_now()->nshot, wf_roll_now()->state);
+    chk(LOGW("roll: shutter blocked (full)", 3000) && (icu_uilock & 1) && wf_roll_shutter_locked() == 1,
+        "a full roll: the shutter held (ML UI lock %x)", icu_uilock);
+    usleep(300000);
+    chk(cbr_key(H_KEY_SET) == 0 && LOGW("browser: not in this build (screen 2)", 2000),
+        "SET while the notice is up: taken, the Darkroom is asked for");
+    usleep(600000);
+    chk(cbr_key(H_KEY_SET) == 1, "SET after the notice went: passes to Canon");
+    log_mark();
+    lv = 0;
+    usleep(600000);
+    chk(!log_has("roll: end notice"), "no LiveView: no notice");
+    lv = 1;
+    chk(LOGW("roll: end notice full", 3000), "LiveView back on a full roll: the notice again");
+    log_mark();
+    chk(cbr_key(H_KEY_INFO) == 0 && LOGW("browser: not in this build (screen 1)", 2000),
+        "INFO while the notice is up: taken, the roll picker is asked for (a new roll)");
+    usleep(300000);
+    log_mark();
+    chk(cbr_key(H_KEY_HALFSHUTTER) == 0 && cbr_key(H_KEY_FULLSHUTTER) == 0 && LOGW("roll: end notice full", 3000),
+        "half / full shutter on the full roll: kept from Canon, the notice at once");
+    h_play = 1;
+    chk(cbr_key(H_KEY_HALFSHUTTER) == 1, "in PLAY the half-shutter passes (Canon's way back; ML's lock still holds)");
+    h_play = 0;
+    log_mark();
+    h_movie = 1;
+    lv = 0;
+    usleep(600000);
+    lv = 1;
+    usleep(900000);
+    chk(!log_has("roll: end notice"), "movie mode: no notice");
+    chk(log_has("roll: shutter free") && !(icu_uilock & 1) && cbr_key(H_KEY_HALFSHUTTER) == 1,
+        "movie mode: the shutter free (lock %x)", icu_uilock);
+    h_movie = 0;
+    chk(LOGW("roll: shutter blocked (full)", 3000) && (icu_uilock & 1), "photo mode again: held again");
+    log_mark();
+    __recording = 1;
+    chk(LOGW("roll: shutter free", 3000) && WAIT(!(icu_uilock & 1), 1000), "recording: free");
+    __recording = 0;
+    chk(WAIT(icu_uilock & 1, 3000), "not recording: held again");
+    log_mark();
+    chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "the full roll closes");
+    chk(LOGW("roll: shutter free", 3000) && !(icu_uilock & 1) && wf_roll_shutter_locked() == 0, "closed: the shutter free");
     long n = 0;
     char *b = 0;
     for (int i = 0; i < 50; i++) {                  /* wf_task writes the file after the state changed in memory */
@@ -3591,7 +3857,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LOG")) t_log(cs);
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();
-    else if (!strcmp(mode, "ROLL")) t_roll();
+    else if (!strcmp(mode, "ROLL")) t_roll(cs);
     else if (!strcmp(mode, "LEICA")) t_leica();
     else if (!strcmp(mode, "CLOG2")) t_clog2();
     else if (!strcmp(mode, "CUBE65")) t_cube65();
@@ -3606,6 +3872,10 @@ int main(int argc, char **argv)
         h_fio_dup);
     chk(h_fio_dir_busy == 0, "no card file created / removed / renamed while Canon saved a shot (%d times)",
         h_fio_dir_busy);
+    char open_names[256];
+    int open_n = h_fio_open_now(open_names, sizeof open_names);
+    chk(open_n == 0 && h_fio_rm_open == 0, "every card file closed (%d open: %s), no remove of an open file (%d)", open_n,
+        open_names, h_fio_rm_open);
     if (nfail)
         log_tail(25);
     printf("RESULT %s %s %s: %d pass, %d fail\n", CAM_NAME, mode, cs, npass, nfail);

@@ -34,9 +34,10 @@ static int nvals(int r)
     return n;
 }
 
+static int films_state = 1;                 /* wf_films_state(): 1 read, 0 starting, -1 worker failed */
 void fake_reset(void)
 {
-    cam = WF_CAM_EOSM; loaded = 0; gen++; grey_mask = 0; nmissing = 0; status = "";
+    cam = WF_CAM_EOSM; loaded = 0; gen++; grey_mask = 0; nmissing = 0; status = ""; films_state = 1;
     busy_n = 0;
     for (int r = 0; r < WF_NROWS; r++) val[r] = 0;
     val[WF_ROW_GRAIN] = 2;                  /* Normal */
@@ -108,6 +109,8 @@ int wf_load(int id)
 
 int wf_loaded(void) { return loaded; }
 const char *wf_status(void) { return status; }
+int wf_films_state(void) { return films_state; }
+void fake_set_films_state(int s) { films_state = s; gen++; }
 uint32_t wf_gen(void) { return gen; }
 
 void wf_log(const char *fmt, ...)

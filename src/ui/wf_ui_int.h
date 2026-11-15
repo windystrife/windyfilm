@@ -119,5 +119,11 @@ int  wfdr_key(int scr, int key);        /* WFDR_*: LOADED = a roll was loaded (w
 const struct wf_film *wfdr_loaded(int *nexp);   /* that roll's film and exposures */
 int  wfdr_tick(int scr, int now);       /* 1 = something moved (redraw now) */
 void wfdr_leave(int scr);
+/* the Darkroom entry of the browser and the roll picker (owner 11-15, EOS M): PLAY opens the Darkroom while the roll has
+   frames to develop. wfdr_dev_why: 0 = it can, else why not ("Load a roll first" / "No frames to develop");
+   wfdr_dev_hint draws "[PLAY] Darkroom" at x (bright / dim by that), returns its end; wfdr_dev_hint_w its width */
+const char *wfdr_dev_why(void);
+int  wfdr_dev_hint(int x, int y);
+int  wfdr_dev_hint_w(void);
 
 #endif

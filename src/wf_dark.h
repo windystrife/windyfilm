@@ -22,6 +22,12 @@ uint32_t wf_roll_gen(void);                      /* bumped when the roll changes
 int  wf_roll_req_load(int film, int exp);
 int  wf_roll_req_rewind(void);
 int  wf_roll_req_close(void);
+/* close the finished roll (FULL, or REWOUND with frames: they stay on the card, kept undeveloped) and load a new one in
+   one request (the roll picker's close-and-load question, owner 11-15); codes as wf_roll_req_load, -1 = no finished roll */
+int  wf_roll_req_swap(int film, int exp);
+/* owner 11-15: no shot on a finished roll. 1 (FULL) / 2 (REWOUND with frames to develop) while wf_task holds Canon's
+   shutter through ML's UI lock, 0 free (no roll, still shooting, closed, developing, movie mode, recording) */
+int  wf_roll_shutter_locked(void);
 int  wf_roll_hud(char *line, int n);             /* the HUD text ("ROLL 021  Windy 400  5/12"), 0 = no roll */
 
 /* ------------------------------------------------------------------ darkroom (task "wf_dark") */
@@ -75,6 +81,9 @@ void wf_ui_open_scr(int scr);                    /* open the UI on a screen (WF_
 enum { WF_HUD_FULL = 0, WF_HUD_FADE, WF_HUD_SMALL, WF_HUD_CLEAR };
 int  wfdr_hud_fonts(int on);
 void wfdr_hud(uint8_t *vram, int pitch, int blink, int mode);
+/* the end-of-roll notice (owner 11-15): a box in the middle while a roll is FULL or REWOUND; mode FULL / FADE (dimmed,
+   dithered) / CLEAR (its box back to 0). wf_dark.c times it: 5 s when the roll ends, 2.5 s when LiveView comes back */
+void wfdr_notice(uint8_t *vram, int pitch, int mode);
 int  wf_clock_hm(void);                          /* the camera clock as h * 100 + m, -1 = unknown (wf_dark.c) */
 
 #endif

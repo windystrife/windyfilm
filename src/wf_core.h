@@ -28,7 +28,11 @@ extern void *__mem_malloc(size_t len, unsigned flags, const char *file, unsigned
 extern void  __mem_free(void *p);
 extern int  is_play_mode(void);
 #endif
-#define DRY_OK(h)   (((uint32_t)(h) & 1) == 0)   /* DryOS handles are even, errors odd and never 0 */
+#define DRY_OK(h)   (((uint32_t)(h) & 1) == 0)   /* DryOS task / semaphore handles are even, errors odd and never 0 */
+/* a file handle (ML's FIO_OpenFile / FIO_CreateFile): anything but 0, ML's error (it maps Canon's -1 to 0). DryOS file
+ * handles are small numbers, odd as often as even (RAWB8 logged 3, 5, 7 as "refused"): never DRY_OK on a file, or a good
+ * handle is taken for an error and left open (RAWB8's WFROLL.TXT: created empty, then never removable) */
+#define WF_FH_OK(f) ((uint32_t)(uintptr_t)(f) != 0 && (uint32_t)(uintptr_t)(f) != 0xFFFFFFFFu)
 #define DRY_SEM(h)  ((uint32_t)(h) != 0 && DRY_OK(h))
 #define DRY_TIMEOUT 9
 #define WF_MEM_DMA 1                              /* __mem_malloc flags (ML mem.h MEM_DMA / MEM_TEMPORARY) */
@@ -101,6 +105,11 @@ void wf_dark_end(void);                           /* wf_task at unload: stop a r
 int  wf_roll_shooting(void);                      /* a roll is loaded (takes frames; RAW develop B may run on them too) */
 int  wf_dark_busy(void);                          /* a darkroom run lives (RAW develop B gives its shoot memory back) */
 int  wf_roll_blocks_play(void);                   /* blind roll: PLAY is eaten */
+int  wf_roll_notice_key(int what);                /* GUI task, a key: drops the end-of-roll notice if it is up (wf_task
+                                                     clears it); what 1 (SET / Q) also opens the Darkroom, 2 (INFO) the
+                                                     roll picker for a new roll. 1 = it was up */
+int  wf_roll_shutter_key(void);                   /* GUI task, a half / full shutter press: 1 = eaten (the shutter is held
+                                                     on a finished roll; the end notice shows at once) */
 #define WF_KEY_PLAY 24                            /* ML module.h MODULE_KEY_PLAY */                           /* wf_menu.c: ML lens_info.job_state (Canon busy with a shot when != 0) */
 int wf_iso_now(void);                             /* wf_menu.c: the ISO now (lens_info.iso, or iso_auto under Auto ISO) */
 void wf_ui_request(void);                         /* menu: open the browser from wf_task after the ML menu closed */
@@ -108,6 +117,7 @@ void wf_ui_request(void);                         /* menu: open the browser from
 /* ------------------------------------------------------------------ camera layer (wf_cam_eosm.c / wf_cam_5d2.c) */
 int  wf_cam_init(void);                           /* module init: ROM word checks only (no hook); 1 = this body is supported */
 int  wf_cam_start(void);                          /* wf_task: worker + hooks; 0 = installed */
+#define WF_CAM_NOWORKER (-100)                    /* wf_cam_start: no worker task (yet): wf_task tries again */
 void wf_cam_poll(void);                           /* wf_task: the camera layer's own log lines (rejects) */
 int  wf_cam_shot_ok(void);                        /* the in-camera path is up (worker + main hook) */
 int  wf_cam_gate_pv(void);                        /* preview: a shot now would get a look at all (JPEG L, no multishot) */
