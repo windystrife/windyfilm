@@ -8,9 +8,10 @@ WindyFilm's own converter, so the module and mk_wtab.py stay as they are and the
   mk_genesis_films.py tab  OUTDIR PAIR [PAIR..]     .cube -> .T17 through tools/mk_wtab.py
   mk_genesis_films.py stage TABLES_DIR              the four catalogue tables (catalog.py 85..88) as <NAME>.T17;
                                                     build.sh calls this, existing files are kept unless FORCE=1
-  mk_genesis_films.py matrix DIR [NEGS] [PRINTS]     every pair of the whole chain (46 x 16): one <GnnPnn>.T17 plus
-                                                    fit.csv; NEGS/PRINTS are comma lists or "-" for all, existing
-                                                    tables are skipped unless FORCE=1
+  mk_genesis_films.py matrix DIR [NEGS] [PRINTS]     every pair of the whole chain (46 x the 15 print slots with a
+                                                    table): one <GnnPpp>.T17 plus fit.csv; PRINTS are label slots
+                                                    (PRINT_NAMES, mapped through PRINT_CHAIN); NEGS/PRINTS are comma
+                                                    lists or "-" for all, existing tables are skipped unless FORCE=1
   mk_genesis_films.py list                          the pairs this file knows
 
 A PAIR is NAME:NEG:PRINT[:PUSHPULL[:BLEACH[:PBLEACH[:NEUTRAL]]]], e.g. `vision3-250d-2383:0:1`.
@@ -30,7 +31,10 @@ CC = os.environ.get("CC", "gcc")
 TOOL = os.path.join("/tmp", "mk_genesis_cube")
 
 # The pairs worth shipping first: the owner's Genesis session used Vision3 5260 500T on print 2393, so the first
-# entries follow that, then a spread of negative speeds and print stocks (see docs/GENESIS-PAIRS.md).
+# entries follow that, then a spread of negative speeds and print stocks (see docs/GENESIS-PAIRS.md). These specs give
+# the CHAIN's own indices (no PRINT_CHAIN), and their names are guesses from before the stock names were recovered:
+# negative 0 is Vision2 5201 50D and chain print 14 is 2302 (B&W), so "ektar-3513" is negative 13 on the B&W print.
+# Their catalogue rows (85..88) are not shown (ready=False).
 PAIRS = [
     "500T-2393:0:2",        # negative 0, print 02_2393
     "250D-2383:1:1",        # negative 1, print 01_2383
@@ -113,32 +117,50 @@ def stage(outdir):
         print("tab   %-8s %8d B  %s" % (STAGE[name], os.path.getsize(out), out))
 
 
-# the 46 negative stocks and 16 print stocks of the chain, in its own index order (the dumped stock manifest)
+# the 46 negative stocks of the chain in its own index order, and its 16 print stocks in the PLUGIN'S UI ORDER (the
+# owner's list, 15/11/2026). These label slots p00..p15 are what films/catalog.py PRINTS, src/wf_menu.c wf_print_name /
+# wf_print_full, src/ui/wf_ui.c and tests/ui/fake_core.c name, and what G<nn>P<pp>.T17 carries in <pp>.
 NEG_N, PRINT_N = 46, 16
 PRINT_NAMES = ("2302", "2383", "2393", "2395", "5380", "5381_50", "5381_72", "5382", "5384_82", "5384_92",
                "5385_93", "5385_62", "5386", "5383", "3513D", "3523XD")
+# Label slot -> the chain's print index (gl_print_stock: which of the dumped DyeAmountLUTs print_00..15 holds that
+# stock); None = no table. The dump follows the UI order except at two slots (measured 15/11/2026 on the chain's own
+# fr_glook_print.bin, pinned by tools/check_print_slots.py): its print_00 is a byte copy of print_01 / print_02, and its
+# print_14 is the only B&W table (mean chroma 0.01 against 0.37..0.45), so it is 2302's, the one B&W print of the list.
+# Every other table the dump shares is one of the plugin's own five pairs (2383 = 2393, 2395 = 5384/82,
+# 5380 = 5381/72, 5384/92 = 5385/93, 5385/62 = 5386), so those slots are in order. 3513D's own table is not in the
+# dump: its slot has no table and no film offers it until the table is recovered. Until 11-15 G<nn>P<pp> took chain
+# print <pp> directly, which put 2302's label on a colour table and 3513D's on the B&W one.
+PRINT_CHAIN = (14, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, None, 15)
+assert len(PRINT_CHAIN) == PRINT_N and sorted(c for c in PRINT_CHAIN if c is not None) == list(range(1, PRINT_N))
 
 
 def matrix(outdir, negs=None, prns=None):
-    """every pair: 46 negatives x 16 prints -> one <GnnPnn>.T17 each, and fit.csv with the placement numbers.
-    The .cube is deleted after each conversion: 736 of them would be 700 MB."""
+    """every pair: 46 negatives x the print slots that have a table (PRINT_CHAIN) -> one <GnnPpp>.T17 each (<pp> the
+    label slot, the chain print PRINT_CHAIN[pp]), and fit.csv with the placement numbers (its print column is the label
+    slot). A remade code replaces its fit.csv row. The .cube is deleted after each conversion: 720 of them would be
+    700 MB."""
     negs = range(NEG_N) if negs is None else negs
     prns = range(PRINT_N) if prns is None else prns
     force = os.environ.get("FORCE", "") == "1"
     os.makedirs(outdir, exist_ok=True)
     work = os.path.join(outdir, ".genesis")
     os.makedirs(work, exist_ok=True)
-    todo = [(n, p) for n in negs for p in prns]
+    todo = [(n, p) for n in negs for p in prns if PRINT_CHAIN[p] is not None]
     csv = os.path.join(outdir, "fit.csv")
-    rows = [] if force else [l for l in open(csv).read().splitlines() if l] if os.path.exists(csv) else []
-    done = {l.split(",")[0] for l in rows[1:]} if rows else set()
-    print("matrix: %d pairs, %d already made" % (len(todo), len(done)))
+    rows = {}
+    if os.path.exists(csv):
+        for l in open(csv).read().splitlines()[1:]:
+            if l:
+                rows[l.split(",")[0]] = l
+    done = set(rows)
+    print("matrix: %d pairs, %d already made" % (len(todo), len(done & {"G%02dP%02d" % t for t in todo})))
     for k, (neg, prn) in enumerate(todo, 1):
         code = "G%02dP%02d" % (neg, prn)
         out = os.path.join(outdir, code + ".T17")
         if code in done and os.path.exists(out) and not force:
             continue
-        cub, fit = cube(work, "%s:%d:%d" % (code, neg, prn), quiet=True)
+        cub, fit = cube(work, "%s:%d:%d" % (code, neg, PRINT_CHAIN[prn]), quiet=True)
         r = subprocess.run([sys.executable, os.path.join(HERE, "mk_wtab.py"), "cube", cub, out],
                            capture_output=True, text=True)
         os.remove(cub)
@@ -146,11 +168,19 @@ def matrix(outdir, negs=None, prns=None):
             sys.exit("mk_wtab failed for %s:\n%s" % (code, r.stderr[-1500:]))
         exp = [l for l in fit.splitlines() if l.startswith("fit: exposure")]
         dens = [l for l in fit.splitlines() if "print density" in l]
-        rows.append("%s,%d,%d,%d,%s" % (code, neg, prn, os.path.getsize(out), (exp[0] if exp else "").replace(",", ";")))
-        print("%4d/%d %s neg %2d print %2d %7d B  %s" % (k, len(todo), code, neg, prn, os.path.getsize(out),
-                                                         (dens[0] if dens else "")[:80]))
+        rows[code] = "%s,%d,%d,%d,%s" % (code, neg, prn, os.path.getsize(out), (exp[0] if exp else "").replace(",", ";"))
+        print("%4d/%d %s neg %2d print %2d (chain %2d) %7d B  %s" % (k, len(todo), code, neg, prn, PRINT_CHAIN[prn],
+                                                                   os.path.getsize(out), (dens[0] if dens else "")[:80]))
+    for p in range(PRINT_N):                            # a slot without a table keeps no row (and no stale file)
+        if PRINT_CHAIN[p] is None:
+            for n in range(NEG_N):
+                code = "G%02dP%02d" % (n, p)
+                rows.pop(code, None)
+                if os.path.exists(os.path.join(outdir, code + ".T17")):
+                    os.remove(os.path.join(outdir, code + ".T17"))
+                    print("removed %s.T17 (print slot %d %s has no table)" % (code, p, PRINT_NAMES[p]))
     with open(csv, "w") as f:
-        f.write("code,neg,print,bytes,fit\n" + "\n".join(rows) + "\n")
+        f.write("code,neg,print,bytes,fit\n" + "\n".join(rows[c] for c in sorted(rows)) + "\n")
     print("matrix: %d tables in %s, fit in %s" % (len(todo), outdir, csv))
 
 

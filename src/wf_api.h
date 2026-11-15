@@ -20,11 +20,15 @@ enum { WF_GRP_COLOUR = 0, WF_GRP_CINE, WF_GRP_BW, WF_GRP_LUT, WF_GRP_STAGE, WF_N
 #define WF_PRINT_SCAN   0                 /* print variants = table variants in WFFILMS.DAT */
 #define WF_PRINT_CINE   1
 #define WF_PRINT_PAPER  2
-/* 3..18: the chain films' sixteen print stocks, in the order of the dumped stock manifest (the catalogue's
- * "p00".."p15"). Kept AFTER the three catalogue variants so a shipped film keeps bits 0..2 and its pack entries do not
- * change. A chain film sets 3..18 and wf_print_eff falls back to its first available variant. */
+/* 3..18: the chain films' sixteen print stocks in the plugin's UI order (the catalogue's "p00".."p15", 2302 first).
+ * Kept AFTER the three catalogue variants so a shipped film keeps bits 0..2 and its pack entries do not change. A chain
+ * film sets 3..18 (3513D, 17, never: no table) and wf_print_eff falls back to WF_PRINT_CHAIN_DEF when the film has it,
+ * else to its first available variant. */
 #define WF_PRINT_STOCK0 3
 #define WF_NPRINTS      19
+/* a chain film's default print (Print = Scan, or a print it lacks): 2383, the plain cinema print. The owner's own
+ * session used 2393, whose table is the same; 2302 (the first slot) is the B&W print. */
+#define WF_PRINT_CHAIN_DEF (WF_PRINT_STOCK0 + 1)
 
 struct wf_film {
     uint8_t  id;                          /* stable id (the old catalogue numbering 26..127 is kept; the config stores it) */

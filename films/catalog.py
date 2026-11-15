@@ -47,8 +47,9 @@ KINDS = ("COLOUR NEG", "SLIDE", "B&W NEG", "CINE NEG", "FILM LUT")
 FMTS = ("35mm", "120", "V-Log", "C-Log2", "Standard")
 GROUPS = ("colour", "cine", "bw", "lut", "stage")      # stage: the film-stage chain films (derived, DESIGN 1a)
 PRINTS = ("scan", "cine", "paper") + tuple("p%02d" % i for i in range(16))
-# p00..p15: the chain films' sixteen print stocks, in the order of the dumped stock manifest. They sit AFTER the three
-# catalogue variants (src/wf_api.h WF_PRINT_STOCK0 3, WF_NPRINTS 19) so a shipped film keeps bits 0..2 unchanged.
+# p00..p15: the chain films' sixteen print stocks in the plugin's UI order (2302 first; tools/mk_genesis_films.py
+# PRINT_NAMES, and PRINT_CHAIN for which chain table each one is). They sit AFTER the three catalogue variants
+# (src/wf_api.h WF_PRINT_STOCK0 3, WF_NPRINTS 19) so a shipped film keeps bits 0..2 unchanged.
 PSUFFIX = {"scan": "", "cine": "_C", "paper": "_P"}
 for _i in range(16):
     PSUFFIX["p%02d" % _i] = "P%02d" % _i              # films/tables/G<neg>P<print>.T17, the name the bake writes
@@ -374,11 +375,15 @@ FILMS = [
 # ---- the whole chain matrix, 46 negatives x 16 prints (14/11/2026, tools/mk_genesis_films.py matrix). One row per
 # NEGATIVE (ids 89..133); the sixteen print stocks are that row's variants (p00..p15 -> films/tables/G<nn>P<pp>.T17).
 # That is the two-choice UI: the strip picks the negative, the Print row picks the print stock, the way the plugin's own
-# panel reads. Four pairs come out black (their print white sits on the base fog) and negative 33 has no usable print at
-# all, so those variant bits are left out. Names: the plugin's stock-name table has not been recovered yet, so the rows
-# carry their index.
+# panel reads. Variant bits left out: 3513D on every row (GX_NOTAB: the dumped tables hold no 3513D, see
+# tools/mk_genesis_films.py PRINT_CHAIN), negative 17 on 2302 / 5383 / 3523XD (chain prints 14 / 13 / 15: print
+# density 0.027..0.036 in fit.csv, its white sits on the base fog) and negative 33, which has no usable print at all.
+# Until 11-15 the skip list named 17 on slots 3 / 8 / 13 / 15, but 3 and 8 render normally (density 0.027..0.454) and
+# 17 on chain print 14 does not; tools/check_print_slots.py checks the list against fit.csv.
 GX_NEG_N, GX_PRINT_N = 46, 16
-GX_SKIP = {(17, 3), (17, 8), (17, 13), (17, 15)} | {(33, p) for p in range(GX_PRINT_N)}
+GX_NOTAB = {14}
+GX_SKIP = {(17, 0), (17, 13), (17, 15)} | {(33, p) for p in range(GX_PRINT_N)} | \
+          {(n, p) for n in range(GX_NEG_N) for p in GX_NOTAB}
 # index 45 repeats index 0 in the plugin (its switch aliases it), so it gets no row of its own.
 GX_ALIAS = {45: 0}
 # the plugin's own stock names, recovered 15/11/2026 from Genesis.ofx offset 0x3504e50 (char[24] entries, plugin order,
@@ -464,7 +469,7 @@ for _n in range(GX_NEG_N):
                    ("Neg 400", 256), ("neg", 256), _official,
                    "Print stock row picks the print.", ready=True, table="G%02d" % _n, spk=("spk_c", 256),
                    derived=True, prints=_pr,
-                   prov="Genesis 1.6.6 film chain, negative %02d (%s) x the sixteen print stocks (declared exception, "
+                   prov="Genesis 1.6.6 film chain, negative %02d (%s) x the print stocks (declared exception, "
                         "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> "
                         "films/tables/G%02dP*.T17" % (_n, _official, _n)))
     SHORT[89 + _n] = _short

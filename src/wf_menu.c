@@ -212,9 +212,10 @@ static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Tungst
 static const char *const wf_light_key[WF_NLIGHT] = { "auto", "day", "cloudy", "tungsten" };
 static const char *wf_strength_name[WF_NSTRENGTH] = { "30%", "100%", "125%" };
 static const char *const wf_strength_key[WF_NSTRENGTH] = { "subtle", "normal", "strong" };
-/* the chain's 16 print stocks by full name, p00..p15 = the chain's own index order (its stock manifest print_00..15).
- * Five pairs make the same table (one dye-amount table each: 2383 = 2393, 5380 = 5381/72, 2395 = 5384/82,
- * 5384/92 = 5385/93, 5385/62 = 5386); both names stay, as in the plugin's own list. */
+/* the chain's 16 print stocks by full name, p00..p15 = the plugin's UI order (tools/mk_genesis_films.py PRINT_NAMES;
+ * PRINT_CHAIN maps each to its chain table: 2302 is the dump's print_14, the B&W table). Five pairs make the same table
+ * (one dye-amount table each: 2383 = 2393, 5380 = 5381/72, 2395 = 5384/82, 5384/92 = 5385/93, 5385/62 = 5386); both
+ * names stay, as in the plugin's own list. 3513D has no table yet: no film offers it. */
 static const char *const wf_print_full[16] = {
     "Kodak B&W Print Film 2302", "Kodak Vision Color 2383", "Kodak Vision Premier Color 2393",
     "Kodak Vision Color Teleprint 2395 500T", "Eastman Color Print LC 5380", "Eastman Color Print 5381 (1950)",
@@ -411,12 +412,15 @@ static const char *const wf_rname[WF_NROWS] = { "Light", "Print stock", "Grain",
 
 const char *wf_row_name(int row) { return row >= 0 && row < WF_NROWS ? wf_rname[row] : ""; }
 
-/* the print a film shoots for wf_print: its own variant when it has it, else its FIRST available one (the chain films
- * have no Scan/Cine/Paper at all: their variants start at WF_PRINT_STOCK0) */
+/* the print a film shoots for wf_print: its own variant when it has it, else its FIRST available one; a chain film
+ * (no Scan/Cine/Paper at all, its variants start at WF_PRINT_STOCK0) takes WF_PRINT_CHAIN_DEF (2383) when it has it,
+ * not its first stock 2302, the B&W print */
 static int wf_print_first(int k)
 {
     if (k < 0)
         return WF_PRINT_SCAN;
+    if (!(wf_films[k].prints & (1u << WF_PRINT_SCAN)) && (wf_films[k].prints & (1u << WF_PRINT_CHAIN_DEF)))
+        return WF_PRINT_CHAIN_DEF;
     for (int v = 0; v < WF_NPRINTS; v++)
         if (wf_films[k].prints & (1u << v))
             return v;

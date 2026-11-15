@@ -103,19 +103,24 @@ static uint32_t wf_dt(uint32_t a, uint32_t b) { return b - a; }
 
 /* ------------------------------------------------------------------ the look of a shot */
 int wf_cat_index(int id);
-/* the variant a shot really uses: the wanted one if the film HAS it, else the film's first variant; and if the pack
- * does not CARRY that variant at all, the first variant it does carry (the chain films have no Scan - their variants
- * are the sixteen print stocks - so the first-variant fallback is what makes them usable). A variant the pack carries
- * but whose table fails its checksum is kept, not swapped: the shot then ends with ": notab" as it always did. */
+/* the variant a shot really uses: the wanted one if the film HAS it, else the film's first variant (a chain film:
+ * WF_PRINT_CHAIN_DEF when it has it, as wf_menu.c wf_print_first, so the shot uses the print the row shows); and if
+ * the pack does not CARRY that variant at all, the first variant it does carry (the chain films have no Scan - their
+ * variants are the print stocks - so the fallback is what makes them usable). A variant the pack carries but whose
+ * table fails its checksum is kept, not swapped: the shot then ends with ": notab" as it always did. */
 static int wf_variant_eff(int k, int v)
 {
     const struct wf_film *f = &wf_films[k];
     int w;
     if (v < 0 || v >= WF_NPRINTS || !(f->prints & (1u << v))) {
-        for (v = 0; v < WF_NPRINTS && !(f->prints & (1u << v)); v++)
-            ;
-        if (v >= WF_NPRINTS)
-            v = WF_PRINT_SCAN;
+        if (!(f->prints & (1u << WF_PRINT_SCAN)) && (f->prints & (1u << WF_PRINT_CHAIN_DEF)))
+            v = WF_PRINT_CHAIN_DEF;
+        else {
+            for (v = 0; v < WF_NPRINTS && !(f->prints & (1u << v)); v++)
+                ;
+            if (v >= WF_NPRINTS)
+                v = WF_PRINT_SCAN;
+        }
     }
     if (wf_ws_state() == 1 && !wf_ws_listed(k, v)) {
         for (w = 0; w < WF_NPRINTS; w++)
