@@ -76,8 +76,9 @@ shot: Canon YUV conversion site ─ hook (patch_hook_function) ─ gate ─ sema
   - Off.
   - Loading a Film LUT can sets Log + LUT with the can's cube on that cube's own curve (`WF_FLUT_CURVE`): V-Log, the
     twelve CinePrint looks Canon Log 2 since 11-14 (3.5).
-- **Effects:** grain (`yg_*`), halation and bloom (`yh_*`: one stage, two rows and settings since RAWB11), Mist (`wf_mist`, EOS M; on the 5D2 halves only once its
-  map hand-over is wired, as before), Strength 30 / 100 / 125, Highlights / Shadows -5..+5 (section 3.3).
+- **Effects:** grain (`yg_*`), halation and bloom (`yh_*`: one stage, two rows and settings since RAWB11), Mist (`wf_mist`;
+  on the 5D2 in halves, the TOP's map kept for its BOT; checked 11-15, section 3.8), Strength 30 / 100 / 125,
+  Highlights / Shadows -5..+5 (section 3.3).
 - **Light** (new row): Auto = the camera's WB, untouched. Day = the stock's `kelvin`. Cloudy = kelvin x 1.25, rounded to
   100 K. Tungsten = 3200 K.
   - Set through `lens_set_kelvin`, at load and when the row changes.
@@ -633,6 +634,32 @@ Stocks keep their Windy names, and there are no brand logos.
   line names the stage by what ran (`+ halation`, `+ bloom low`, `+ halation+bloom strong`); EXIF / print comment
   `| Halation Film | Bloom Normal`; the Darkroom's `dark: look ready ..: halation + bloom normal`. A roll's prints use
   the Halation and Bloom settings of the run, as before.
+
+### 3.8 Mist, checked (owner 2026-11-15)
+
+"kiểm tra luôn cái mist đi bạn". The model (`wf_mist.h`) is unchanged: k 0.08 / 0.15 / 0.28 / 0.45 for 1/8 .. 1 (white
+and black alike; v2 of 11-12), three Gaussians (sigma 31 / 124 / 467 px), white weights 0.25 / 0.35 / 0.40, black
+0.55 / 0.35 / 0.10 with its source knee, the hot ramp from code 250 (x8 at EV <= 7, x1 from EV 13). What the check
+changed and found:
+- **Chroma rounding.** U and V were shifted down by up to one code on every pixel (a plain `>> 24` of a signed product):
+  the dark of a frame -0.5 with white mist, -1.0 with black, a faint green cast. Rounded now (SMLAL onto 2^23).
+- **The halves' mirror** (Diana halves on the EOS M, every 5D2 shot: the seam at frame row 1872). The TOP guesses the
+  rows below the seam from its own: until 11-15 a mirror eroded over +-2 cells. A light ON the seam lost 2 cells a side,
+  and the BOT's pull drew two dark lobes under it (-32 / -64 codes at white / black 1 against the whole frame); a light
+  24 px above the seam still left +33 / +41 below it. Now a light is mirrored only where it reaches the seam (per
+  column, from the seam row outwards, a cell over code 250's light is taken only while no brighter than the one taken
+  before it): +-1.5 codes in both cases. Sky and walls mirror as before, so a horizon on the seam still lays a skirt
+  of glow over the ground below it (+41 / +43 at white / black 1, as before; the TOP cannot see below the seam).
+- **The shot line** split in two when it would pass 110 characters (mist + halation + bloom + grain + halves): the
+  second line `shot #n ... (TOP .., BOT ..) EV12` keeps the EV.
+- **Order.** The 8-bit path: mist on Canon's words, before the colour kernel (film table or cube). RAW develop B and
+  the Darkroom with Log + LUT: the cube is in the develop, so mist runs on the graded codes, after the cube (with
+  Film output it runs before the film table, as on 8-bit).
+- **Strength on photos** (`tests/ui/mist_strip.sh`). The veil is additive in linear light, so how much the dark lifts
+  depends on the scene: a backlit tree (47 % sky, IMG_0218) lifts deep blacks from Y 10 to 33 at white 1/8 and to 76 at
+  white 1 (black 1/8 +17); a dusk street (19 % sky, IMG_0220) +7 at white 1/8, +25 at white 1, +2 at black 1/8. Light
+  cores give up their own light (1 - k): -2 at 1/8, -16..-20 at 1. Left as tuned (k was raised x2..2.7 after the
+  owner's camera test of 11-12).
 
 ## 4. Interfaces
 

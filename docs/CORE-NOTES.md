@@ -133,7 +133,8 @@ Deny input: the old module's binary (path assembled inside the script, read only
   Formats: only `%d %x %X %s` (+ `-` / `0`, width); `tools/fmt_check.py` fails the build otherwise (trap W23).
   Useful lines: `hook NN ff169414 rom e92d41fc err 0`, `pack ok: N tables`,
   `pack <code> v<variant> loaded`, `yuv NN <buf>/<raw>: film <code> v0 s100 <ms> h<ms> g<ms> m<ms> q<ms> a<aspect>`,
-  `shot #n <title>: <s> = look .. + mist .. (TOP .., BOT ..) EV..`, `lut <cube> 33^3 ok|cache ..`, `exif IMG_nnnn.JPG ok`,
+  `shot #n <title>: <s> = look .. + mist .. (TOP .., BOT ..) EV..` (from 110 characters on, two lines: the second
+  `shot #n ... (TOP .., BOT ..) EV..`, so the EV stays), `lut <cube> 33^3 ok|cache ..`, `exif IMG_nnnn.JPG ok`,
   Highlights / Shadows when not 0: ` hl+3 sh-2` in the yuv, shot and lut lines, `lut: highlights +4 shadows -2` (bent again),
   `fx halation|grain|mist .. ready`, `light Day: 5500K`, `expsim: ..`.
 - EXIF: UserComment (0x9286, 264 zero bytes on Canon) overwritten in place with `ASCII\0\0\0WindyFilm: <title> | Print ..
