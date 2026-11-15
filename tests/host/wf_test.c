@@ -1015,7 +1015,7 @@ static void t_fxab(void)
     shot(in, out2, FW, FH);
     chk(ndiff(ref, out2, NW) == 0, "both effects off: the frame is the film look alone");
 
-    /* ---- the stages as they were: Yedlin grain Normal, halation Film + bloom */
+    /* ---- the stages as they were: Yedlin grain Normal, halation Wide + Glow (cfg bloom) */
     wf_grain = 2;
     wf_halo = 2;
     post = wf_fx_mode();
@@ -1510,6 +1510,20 @@ static void t_cfg(void)
     wf_cfg_load();
     chk(wf_grain == WF_GRAIN_DEF && wf_halo == WF_HALO_DEF, "unknown grain / halation words: the defaults (%d %d)",
         wf_grain, wf_halo);
+    /* the labels say what the halo looks like and name no product: per-film profiles Wide, 3-bounce Tight, light wrap Wrap */
+    wf_grain = 5;
+    wf_halo = 1;
+    int lw = !strcmp(wf_row_text(WF_ROW_HALO), "Wide");
+    wf_halo = 2;
+    lw = lw && !strcmp(wf_row_text(WF_ROW_HALO), "Wide + Glow");
+    wf_halo = 3;
+    int lt = !strcmp(wf_row_text(WF_ROW_HALO), "Tight");
+    wf_halo = 4;
+    lt = lt && !strcmp(wf_row_text(WF_ROW_HALO), "Tight + Glow");
+    wf_halo = 5;
+    chk(lw && lt && !strcmp(wf_row_text(WF_ROW_HALO), "Wrap") && !strcmp(wf_row_text(WF_ROW_GRAIN), "Even Normal"),
+        "WindyHalation labels Wide / Wide + Glow / Tight / Tight + Glow / Wrap, WindyGrain Even Normal (%s, %s)",
+        wf_row_text(WF_ROW_HALO), wf_row_text(WF_ROW_GRAIN));
     wf_grain = gr0;
     wf_halo = ha0;
     char big[700];

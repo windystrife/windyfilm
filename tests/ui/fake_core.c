@@ -28,7 +28,7 @@ static const char *const v_print_full[16] = {
     "Eastman Color Print 5384 (1992)", "Eastman Color Print LC 5385 (1993)", "Eastman Color Print 5385 (1962)",
     "Eastman EXR Color Print 5386", "Eastman Color Print 5383", "Fuji Eterna-CP Type 3513D", "Fuji Eterna-CP 3523XD" };
 static const char *const v_grain[] = { "Off", "Fine", "Normal", "Strong", "Even Fine", "Even Normal", "Even Strong", 0 };
-static const char *const v_halo[] = { "Off", "Film", "Film + bloom", "Spektra", "Spektra + bloom", "Light wrap", 0 };
+static const char *const v_halo[] = { "Off", "Wide", "Wide + Glow", "Tight", "Tight + Glow", "Wrap", 0 };
 static const char *const v_mist[] = { "Off", "1/8", "1/4", "1/2", "1", "Black 1/8", "Black 1/4", "Black 1/2", "Black 1", 0 };
 static const char *const v_flut[] = { "Off", "Vision3 250D", "Vision3 500T", "Portra 400", "Leica Vivid", "Windy 250D P", 0 };
 static const char *const v_hs[] = { "-5", "-4", "-3", "-2", "-1", "0", "+1", "+2", "+3", "+4", "+5", 0 };

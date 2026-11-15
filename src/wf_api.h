@@ -53,7 +53,7 @@ enum { WF_ROW_LIGHT = 0, WF_ROW_PRINT, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_MIST, W
 const char *wf_row_name(int row);         /* "Light", "Print", "WindyGrain", "WindyHalation", "Mist", "Strength",
                                              "Highlights", "Shadows", "Film LUT"; the last choice of the two effect rows is
                                              the Genesis Pro 1.6.6 model (docs/DESIGN.md 1a) */
-const char *wf_row_text(int row);         /* the current value as text: "Day", "Scan", "Normal", "Light wrap", "Off", "100%", "+2",
+const char *wf_row_text(int row);         /* the current value as text: "Day", "Scan", "Normal", "Wrap", "Off", "100%", "+2",
                                              ... (Highlights / Shadows: "-5" .. "0" .. "+5", no wrap at the ends) */
 const char *wf_row_text_long(int row);    /* the same, with a print stock by its full name ("Kodak Vision Color 2383"); the
                                              ML menu's value field is too narrow for it, the WindyFilm UI row is not */

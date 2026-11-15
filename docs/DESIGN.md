@@ -88,10 +88,10 @@ tables: the *module* now carries constants of the plugin, not only sampled card 
 - **What is NOT taken**: no shader text, no plugin binary, no `.ofx`; nothing is linked, patched or called. The
   `light_wrap_color` default is the one constant we could not read exactly (0.40 / 0.50 / 0.45, the third a GUESS
   from the hand-off note).
-- **The plugin's stages are options, not replacements.** `Fine / Normal / Strong` (grain) and `Film / Film + bloom /
-  Spektra …` (halation) are unchanged; `Even Fine / Even Normal / Even Strong` (grain) and `Light wrap` (halation) are
-  appended to the two rows; the labels say what they do and carry no plugin name since 11-15, this section and the
-  code comments keep the source. Every other film, table, stage and setting behaves exactly as before (the `FXAB`
+- **The plugin's stages are options, not replacements.** `Fine / Normal / Strong` (grain) and `Wide / Wide + Glow /
+  Tight / Tight + Glow` (halation) are unchanged in what they do; `Even Fine / Even Normal / Even Strong` (grain) and
+  `Wrap` (halation) are appended to the two rows; the labels say what they do and name no plugin or other project since
+  11-15, this section and the code comments keep the source. Every other film, table, stage and setting behaves exactly as before (the `FXAB`
   host test measures both).
 - `tools/provenance_gate.py` allows this branch the same exception as `film-stage` (`NOT_CLEAN` lists both) and still
   prints `gate: this tree is NOT clean-room` on every build. **Do not publish this branch, do not merge it into

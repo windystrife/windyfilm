@@ -186,7 +186,9 @@ static const char *const wf_grain_key[WF_GRAIN_MAX + 1] = { "off", "fine", "norm
                                                             "evenstrong" };
 static const char *const wf_grain_old[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "genfine", "gennormal",
                                                             "genstrong" };
-static const char *wf_halo_name[WF_HALO_MAX + 1] = { "Off", "Film", "Film + bloom", "Spektra", "Spektra + bloom", "Light wrap" };
+/* WindyHalation by the look of the halo: the per-film fitted profiles (prof, cfg halation / bloom) reach 40..134 px
+ * (90 % of the halo energy at 5184 px), the 3-bounce ones (sprof, cfg spk / spkbloom) 31..35 px; + Glow is the bloom */
+static const char *wf_halo_name[WF_HALO_MAX + 1] = { "Off", "Wide", "Wide + Glow", "Tight", "Tight + Glow", "Wrap" };
 static const char *const wf_halo_key[WF_HALO_MAX + 1] = { "off", "halation", "bloom", "spk", "spkbloom", "wrap" };
 static const char *const wf_halo_old[WF_HALO_MAX + 1] = { "off", "halation", "bloom", "spk", "spkbloom", "gen" };
 static const char *wf_mist_name[WF_MIST_MAX + 1] = { "Off", "1/8", "1/4", "1/2", "1", "Black 1/8", "Black 1/4", "Black 1/2",
@@ -844,7 +846,7 @@ static void wf_ex_push(const char *t)
 
 void wf_exif_none(void) { wf_ex_push(""); }
 
-/* "WindyFilm: Portra 400 | Print Cine | Light Day | Strength 100% | Grain Normal | Halation Film + bloom | Mist 1/8 | EV12"
+/* "WindyFilm: Portra 400 | Print Cine | Light Day | Strength 100% | Grain Normal | Halation Tight + Glow | Mist 1/8 | EV12"
  * g / h / m: the grain / halation / mist setting when it ran on this shot, 0 = it did not */
 void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev)
 {
@@ -1403,8 +1405,8 @@ static struct menu_entry wf_menu[] = {
               .help = "How Log + LUT reads the JPEG: sRGB, or a Canon style undone (Film 1, Neutral)." },
             WF_ROWE("Light", WF_ROW_LIGHT, wf_light_select, "White balance: Auto (yours), the stock's Day, Cloudy, Tungsten."),
             WF_ROWE("Print", WF_ROW_PRINT, wf_print_select, "Scan, cine print or paper print of the loaded film."),
-            WF_ROWE("WindyGrain", WF_ROW_GRAIN, wf_grain_select, "Film grain at the shot: Fine / Normal / Strong are ours (Yedlin), Even ... is the same in every tone."),
-            WF_ROWE("WindyHalation", WF_ROW_HALO, wf_halo_select, "Red glow around highlights (3:2); Light wrap: bright areas spill over their edges."),
+            WF_ROWE("WindyGrain", WF_ROW_GRAIN, wf_grain_select, "Grain: Fine / Normal / Strong follow the tone, Even ... does not."),
+            WF_ROWE("WindyHalation", WF_ROW_HALO, wf_halo_select, "Highlight halo: Wide / Tight, + Glow adds bloom; Wrap: edge spill."),
             WF_ROWE("Mist", WF_ROW_MIST, wf_mist_select, "Diffusion filter: glow on lights, veil on shadows."),
             { .name = "Strength", .priv = (void *)&wf_strength, .max = WF_NSTRENGTH - 1, .choices = wf_strength_name,
               .select = wf_strength_select, .help = "How strongly the film look is applied." },

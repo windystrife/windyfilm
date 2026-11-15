@@ -227,7 +227,7 @@ int main(int argc, char **argv)
     end_checks();
 
     /* 2e. film-stage (11-15): a chain can (G08 = 5219 500T, the Film stage tab) loaded, Print stock 2302 (its full name
-     * on the row), WindyGrain Even Normal, WindyHalation Light wrap; the focus walks down to WindyHalation; INFO */
+     * on the row), WindyGrain Even Normal, WindyHalation Wrap; the focus walks down to WindyHalation; INFO */
     fake_reset();
     fake_set_card(card);
     fake_set_loaded(id_of("G08"));
