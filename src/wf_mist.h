@@ -36,7 +36,8 @@
  * Whole frame:  mist_begin_frame; mist_gather_chunk for the rows (chunks of 288 words, x0 % 16 == 0);
  *               mist_build(g, MIST_WHOLE); then mist_apply_chunk per chunk (any row range, y = row of the FULL frame).
  * Halves (Diana, 5D2 Path A later): TOP: begin, gather rows 0 .. H/2 - 1, build(MIST_TOP) (the rows below the seam are
- *               mirrored, eroded, so a small source above the seam leaves no phantom glow), apply those rows.
+ *               mirrored, a light only where it reaches the seam: one above it leaves no phantom glow, one on it
+ *               comes out whole), apply those rows.
  *               BOT: gather rows H/2 .. H - 1 (the top half's low-res rows are kept), build(MIST_BOTTOM) (the glow is made
  *               on the whole frame, then pulled onto the top half's seam row over MIST_SEAMD cell rows so there is no
  *               step), apply those rows.

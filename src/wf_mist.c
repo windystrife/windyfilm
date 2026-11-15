@@ -336,27 +336,31 @@ static void up_add(mist_ctx *g, int32_t *dst, const int32_t *src, int sw, int sh
     }
 }
 
-/* TOP half: the rows below the seam = the rows above it, mirrored, and eroded (min of light over +-2 cells and the
- * rows next to it, all three channels from the same cell), so a small source above the seam leaves no phantom glow */
+/* TOP half: the rows below the seam = the rows above it, mirrored, a LIGHT only where it reaches the seam. Going away
+ * from the seam row in each column, a cell brighter than a cell all at code MIST_R0 (a light: clipped, or a lamp's hot
+ * gain) is taken only while it is no brighter than the cell taken before it, else that cell again (all three channels
+ * of one cell). A round light ON the seam comes out whole (its own lower half); a light above it, not touching it, leaves
+ * nothing below, so no phantom glow; the rest (sky, walls) mirrors as it is. Until 11-15 the mirror was eroded instead
+ * (min over +-2 cells and the rows next to it): a light on the seam lost 2 cells a side and the bottom half's pull
+ * (mist_build) drew two dark lobes under it, -32 / -64 codes at white / black 1 against the whole frame, while a light
+ * 24 px above the seam still left +33 / +41 under it (owner 11-15 mist strips; the 5D2's seam crosses every frame). */
 static void mirror_rows(mist_ctx *g, int s)
 {
     int gw = g->gw, gh = g->gh;
+    int32_t tb = (int32_t)(g->sl[MIST_R0] >> 4), *pr = g->rowL;   /* Q20 a sample -> the cells' Q16 mean (flush); rowL:
+                                                                    * per column the row last taken (free until the apply) */
+    for (int x = 0; x < gw; x++)
+        pr[x] = s - 1;
     for (int j = 0; s + j < gh; j++) {
         int sr = s - 1 - j < 0 ? 0 : s - 1 - j;
+        const int32_t *src = g->L0 + 3 * gw * sr;
         int32_t *d = g->L0 + 3 * gw * (s + j);
         for (int x = 0; x < gw; x++) {
-            int bx = x, by = sr, bl = g->L0[3 * (gw * sr + x)];
-            for (int dx = -2; dx <= 2; dx++) {
-                int xx = x + dx < 0 ? 0 : x + dx >= gw ? gw - 1 : x + dx;
-                int l = g->L0[3 * (gw * sr + xx)];
-                if (l < bl) { bl = l; bx = xx; by = sr; }
-            }
-            for (int dy = -1; dy <= 1; dy += 2) {
-                int yy = sr + dy < 0 ? 0 : sr + dy > s - 1 ? s - 1 : sr + dy;
-                int l = g->L0[3 * (gw * yy + x)];
-                if (l < bl) { bl = l; bx = x; by = yy; }
-            }
-            const int32_t *c = g->L0 + 3 * (gw * by + bx);
+            const int32_t *c = src + 3 * x, *p = g->L0 + 3 * (gw * pr[x] + x);
+            if (c[0] > tb && c[0] > p[0])
+                c = p;
+            else
+                pr[x] = sr;
             d[3 * x] = c[0]; d[3 * x + 1] = c[1]; d[3 * x + 2] = c[2];
         }
     }
