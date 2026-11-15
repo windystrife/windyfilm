@@ -953,6 +953,8 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     j.white = lw ? lw : wf_dk_white(WF_DK_EOSM, dk_inf.iso);
     int as = wf_dk_scales(WF_DK_EOSM, dk_inf.wb, j.black, j.white, dk_inf.iso, j.wb_q8);
     j.roll = src != WF_DEV_LOG;
+    j.hue = dk_lgk ? wf_rb_hue : WF_DEV_HUE_A;   /* chain films (B's switch, wf_rawb.h); cans + sRGB base develop: A */
+    j.ms = get_ms_clock;
     struct wf_dev_stat st;
     memset(&st, 0, sizeof st);
     if (wf_dev_prepare(M.scr, M.tabs, &j, &st) != 0) { dk_why = "prepare"; return DK_ERR; }
@@ -1060,9 +1062,9 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     *bytes = (int)wr.n;
     dv.print_ready = 2;
     wf_log("dark: F%02d IMG_%04d iso %d: load %d expose %d fix %d dry %d ms, %d KB, wb %s, trim %d, black %d white %d%s, "
-           "look %s", i + 1, roll.file[i], dk_inf.iso, dk_t[0], dk_t[1], dk_t[2], dk_t[3], (int)(wr.n >> 10),
-           as ? "as-shot" : "daylight", wf_dk_trim10(WF_DK_EOSM, dk_inf.iso), j.black, j.white, lw ? "" : " (table)",
-           wf_status_name(status));
+           "shoulder %s %dms, look %s", i + 1, roll.file[i], dk_inf.iso, dk_t[0], dk_t[1], dk_t[2], dk_t[3],
+           (int)(wr.n >> 10), as ? "as-shot" : "daylight", wf_dk_trim10(WF_DK_EOSM, dk_inf.iso), j.black, j.white,
+           lw ? "" : " (table)", st.roll ? wf_dev_hue_name(st.hue) : "-", st.ro_ms, wf_status_name(status));
     return DK_OK;
 }
 

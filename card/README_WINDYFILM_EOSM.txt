@@ -197,6 +197,13 @@ Bật:
   215 KB từ thẻ. Log:
     rawb: tables log pack G08 v4 c1 NNms (offset ..., 643 entries, ...)
   Ghi lại NN: đó là thời gian đọc thẻ + dựng bảng (chưa đo trên máy thật).
+- Vai sáng của lon Film stage trên RAW (15/11, chủ máy chọn i): đèn và chỗ sáng giữ
+  màu tới trắng của phim rồi mới chuyển dần sang kem / trắng. Muốn ảnh y như thẻ
+  RAWB14 / RAWB15 (từng kênh tự cháy sáng, vai sáng a) thì sửa trên máy tính file
+  ML/SETTINGS/WINDYFLM.CFG thành dòng shoulder=a (shoulder=d: giữ nguyên tông màu
+  tới hết, để so), shoulder=i là mặc định. Lon Log + LUT và phim thường không đổi. Log mỗi tấm:
+    rawb: black ..., roll 1 c.. y.., shoulder i NNms
+  (NN = thời gian dựng bảng vai sáng của tấm đó).
 - Tạm thời (chờ quyết định): bảng log chưa chứa các hàng knob, Strength hay
   Highlights / Shadows. Một trong các hàng đó khác mặc định (knob khác 0 / Off /
   100 %, Strength khác 100 %, Highlights / Shadows khác 0) thì lon Film stage đi

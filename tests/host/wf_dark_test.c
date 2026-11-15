@@ -675,10 +675,12 @@ static void frame(const char *cr2, const char *jpg, const char *od, const char *
 /* devset LIST OUTDIR: the Darkroom's develop (dk_frame's steps 1-2: decode, levels, as-shot WB + scene scale + ISO trim,
  * the develop tables of a look) of several CR2s through several tables, for the look sweep (tools/look_sweep.sh). LIST:
  *   F <name> <cr2>                                          a frame, decoded once and kept
- *   D <tag> <srgb|cube|disp> <curve> <flut> <cube|-> <1|3>  a develop, as wf_dark.c builds it for a look (cube: LUT EI 0,
- *                                                           auto exposure when flut; disp: Highlights / Shadows 0), then
+ *   D <tag> <srgb|cube|disp> <curve> <flut> <cube|-> <1|3> [a|i|d]  a develop, as wf_dark.c builds it for a look (cube:
+ *                                                           LUT EI 0, auto exposure when flut; disp: Highlights / Shadows
+ *                                                           0), then
  *        every frame through it: 1 = OUTDIR/<name>_<tag>.uyvy (5184 x 3456), 3 = OUTDIR/<name>_<tag>.ppm (a third, 3 x 3
- *        box, the JFIF matrix) */
+ *        box, the JFIF matrix). a / i / d: the film shoulder's colour (j.hue, WF_DEV_HUE_*; default a); a chain film's
+ *        RAW develop is "cube 1 0 <its log table> 1 i" (S-Log3, no auto exposure, shoulder I as wf_dark.c / wf_rawb.c) */
 struct dsf { char name[64]; struct wf_cr2_info inf; uint8_t *raw; struct wf_dev_job j; };
 
 static uint8_t *decode_cr2(const char *cr2, struct wf_cr2_info *inf)
@@ -755,7 +757,7 @@ static void devset(const char *list, const char *od)
     CHECK(l != 0, "open %s", list);
     char ln[1024];
     while (l && fgets(ln, sizeof ln, l)) {
-        char a[64], b[512], c[64], cube[512];
+        char a[64], b[512], c[64], cube[512], hk[8] = "a";
         int curve = 0, flut = 0, down = 3;
         if (sscanf(ln, "F %63s %511[^\n]", a, b) == 2 && nf < NF) {
             struct dsf *s = &fr[nf];
@@ -777,7 +779,8 @@ static void devset(const char *list, const char *od)
                    wf_dk_ev8(s->inf.iso, s->inf.et_n, s->inf.et_d, s->inf.fn_n, s->inf.fn_d), j->black, j->white,
                    as ? "as-shot" : "daylight", wf_dk_trim10(WF_DK_EOSM, s->inf.iso));
             nf++;
-        } else if (sscanf(ln, "D %63s %63s %d %d %511s %d", a, c, &curve, &flut, cube, &down) == 6) {
+        } else if (sscanf(ln, "D %63s %63s %d %d %511s %d %7s", a, c, &curve, &flut, cube, &down, hk) >= 6) {
+            int hue = hk[0] == 'i' ? WF_DEV_HUE_I : hk[0] == 'd' ? WF_DEV_HUE_D : WF_DEV_HUE_A;
             int src = !strcmp(c, "srgb") ? WF_DEV_SRGB : !strcmp(c, "cube") ? WF_DEV_CUBE : !strcmp(c, "disp") ? WF_DEV_DISP : 0;
             const char *cf = strcmp(cube, "-") ? cube : 0;
             struct wf_ll_info li;
@@ -790,10 +793,13 @@ static void devset(const char *list, const char *od)
             for (int i = 0; i < nf; i++) {
                 struct wf_dev_job j = fr[i].j;
                 j.roll = src != WF_DEV_LOG;
+                j.hue = hue;
                 struct wf_dev_stat st;
                 memset(&st, 0, sizeof st);
                 rc = wf_dev_prepare(scr, &T, &j, &st);
                 CHECK(rc == 0, "%s %s: prepare %d", fr[i].name, a, rc);
+                CHECK(rc || st.hue == (st.roll && src == WF_DEV_CUBE && curve >= 1 && curve <= 5 ? hue : WF_DEV_HUE_A),
+                      "%s %s: shoulder %d, asked %d (roll %d)", fr[i].name, a, st.hue, hue, st.roll);
                 if (rc)
                     continue;
                 for (int y = 0; y < H; y += 64)
@@ -810,7 +816,8 @@ static void devset(const char *list, const char *od)
                 } else {
                     put_third(p, frm, W, H);
                 }
-                printf("develop %s %s: %s\n", fr[i].name, a, p);
+                printf("develop %s %s: %s (roll %d k %d c %d, shoulder %s)\n", fr[i].name, a, p, st.roll, st.ro_k, st.ro_c,
+                       wf_dev_hue_name(st.hue));
             }
         }
     }

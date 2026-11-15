@@ -119,7 +119,8 @@ Deny input: the old module's binary (path assembled inside the script, read only
   `lutei=-3..6`, `print=scan|cine|paper`, `light=auto|day|cloudy|tungsten`, `strength=subtle|normal|strong`,
   `grain=off|fine|normal|strong`, `halation=off|halation|spk`, `bloom=off|low|normal|strong` (RAWB11; an old `halation=bloom|spkbloom` reads as
   `halation|spk` + `bloom=normal`), `mist=off|w8|w4|w2|w1|b8|b4|b2|b1`,
-  `preview=off|on|fast`, `exposure=camera|smooth`, `exptrim=-16..16`, `exif=on|off`, `userwb=mode,kelvin,gm,ba`
+  `preview=off|on|fast`, `exposure=camera|smooth`, `exptrim=-16..16`, `exif=on|off`,
+  `shoulder=i|a|d` (chain-log: the chain films' shoulder colour on RAW, 10.9; no line = i), `userwb=mode,kelvin,gm,ba`
   (only while Light holds the WB). Written by `wf_task` 1.5 s after a change, at most 600 B.
 - `ML/LOGS/WINDYFLM.LOG`: appended across boots. A boot starts with `WindyFilm <date>: camera ..` (logged in
   `wf_init`); at the first write of a boot a log over 512 KB becomes `WINDYFLM.OLD`. Lines wait in a 16 KB byte ring
@@ -405,6 +406,9 @@ buffer was refetched. Hence the fused kernel with a stack slot.
 Real colour spreads the tetrahedral lookups over more of the 356 KB node table; the D-cache is 8 KB. So 29-36 s per
 shot. A sky as large as IMG_0206's (4.8 M highlight pixels) would add more.
 
+Chain films on RAW with the shoulder I (10.9, the default since 2026-11-15): +2.2..3.9 s of rows per shot on the
+real raws (memsim), the per-shot table 5 ms.
+
 The next step for speed is to cut the node-table misses. Candidates:
 - a smaller node table: 17^3 nodes, or 16-bit lanes;
 - going through the rows in tiles.
@@ -687,3 +691,52 @@ on the EOS M, after every boot, look change and playback -> shoot, and a 65^3 Ci
 - whether raw0 really holds this shot at both hooks: the P0 probe run answers it;
 - the RearDevelop task's patience while the TOP holds FrontDevelop about 20 s;
 - white levels per ISO.
+
+### 10.9 Shoulder colour on chain films (chain-log, 2026-11-15, the owner picked i)
+
+The film shoulder (`j.roll`, 10.7) maps each enc index on its own: per channel (A), so a bright coloured light walks
+off toward white channel by channel. The owner compared A, D (one shift from the pixel's luma for all three channels:
+the hue kept to the top) and I (D up to the look's white, then a smooth step over 1.5 stops toward each channel's own
+shift: lights keep their colour up to the print's white, then roll into cream / white) and picked **I** for the chain
+films on RAW. `struct wf_dev_job.hue` (`WF_DEV_HUE_A / I / D`) asks for it; `wf_dev_prepare` takes it only with the
+shoulder on, `WF_DEV_CUBE` and a log curve (1..5), else A. Callers: B (`wf_rawb_stage`) and the Darkroom
+(`dk_frame`) pass `wf_rb_hue` for a chain film on the log pack (`RB_K_LG` / `dk_lgk`), A for everything else (Log +
+LUT cans, Leica, plain log, the sRGB base develop of films and of the 8-bit chain). `wf_rb_hue` = WINDYFLM.CFG
+`shoulder=i|a|d`, i when the line is missing; a gives the RAWB14 / RAWB15 frame bit for bit (wf_test RAWB:chain).
+
+**Per shot** (`wf_dv_roll`): instead of A's three enc copies, one table T of `WF_DEV_NENC + 256` words in `enc2`:
+`T[i] = (uint16)(s(i) + 2) | w(i) << 16`, s = A's map as a shift in quarter enc steps (signed: the shoulder holds the
+look back, then lifts it near the sensor's white), w Q14 = 0 up to the look's white, smooth step over 384 steps, 1
+beyond (D: 0); the top 256 words repeat the last. Logged as `shoulder <a|i|d> <ms>` on B's `rawb: black ...` line and
+the Darkroom's `dark: F.. IMG_....` line (`st.ro_ms` through `j.ms`).
+
+**Per pixel** (C reference `wf_dv_hue_idx`, asm `wf_dv_span_hs`): luma of the three non-negative accumulators with the
+gamut's Rec.709-Y row (`wf_dv_hue_lw`, x 32768, SMULW), im = enc index of the luma + 256; d = T[im] low, w = T[im]
+high; per channel i += (d (16384 - w) + h w) >> 16 with h = T[i] low, clamped to 0 .. NENC - 1, then the plain enc
+table. Pre-test: R and G accumulators both under `hk` (every gamut's B weight is negative, so the luma is under the
+knee) take the plain lookups. A neutral pixel has im = i: knee, target and grey stay A's. `wf_dv_span_hs` is the span
+kernel macro with the shoulder block (`KERNEL name, hue` in wf_dev_arm.S); `wf_dv_span_s` assembles byte-identical to
+before. Tests: dev mode `hue` (luma rows against inv(wf_ll_mat), asm = C over 4 phases x 9 scales, I and D on a
+neutral ramp within 2 codes of A and equal below the knee), wf_test RAWB:chain (I default, a / d through the switch,
+each bit-exact against the direct develop), CFG (`shoulder=`), RAWB (Log + LUT logs `shoulder a`).
+
+**Cost** (memsim, `HUE=a|i|d [CAM=5D2] [CURVE=1 CUBE=.. SCENE=..] bash tools/dev_bench.sh`):
+
+Per-shot table ("shoulder tables", its own memsim phase through `j.ms`): A 9.1-10.9 ms (three per-channel enc copies),
+I 4.1-4.9 ms, D 4.0-4.7 ms. Rows, the frame 5184 x 3456 (instructions per pixel in brackets):
+
+| Shot | A (RAWB14 / 15) | **I** | D |
+|---|---|---|---|
+| synthetic scene, V-Log `FILM33.CUB`, knee 1905, 11 % highlight px | 25.60 s (161.7) | **28.52 s** (177.1) | 28.52 s (177.1) |
+| IMG_6849, G03P01 log table on S-Log3, knee 1296, bright facade, no clip | 22.70 s (120.9) | **26.57 s** (150.0) | 26.23 s (149.0) |
+| IMG_6856, G03P01, night street, 339 k highlight px | 23.15 s (128.0) | **25.33 s** (144.5) | 25.11 s (143.7) |
+
+- I costs the real chain-film shots +2.2 s (6856) to +3.9 s (6849) of rows, +9 to +17 %: the luma (3 SMULW), T[im] and
+  the per-channel shift with its MAC run on every pixel the pre-test does not send to the plain lookups. D saves only
+  0.2-0.3 s of that (the w > 0 MAC). A's per-pixel path and checksum are unchanged (no shoulder: bbbeb78c, 25.86 s).
+- Shot (prepare + rows; prepare 4.64-4.68 s here includes `wf_dev_levels`, logged apart as `lev` on the camera):
+  IMG_6849 27.35 -> 31.21 s, IMG_6856 27.83 -> 30.00 s.
+- 5D2 develop (`CAM=5D2`: its matrix and object, the same EOS M frames): the same within 0.1 s (A 22.64 / 23.12, I 26.52
+  / 25.30, D 26.17 / 25.07 s). Its frame is 5600 x 3744 = 1.17 x: about 26.5 -> 31.0 s (6849) and 27.0 -> 29.6 s (6856)
+  of rows. The 5D2 has no WFLOG.DAT, so its B never takes I today; the Darkroom is EOS M only.
+- On the camera: `shoulder i NNms` (the table) and `rows NN ms` on B's lines; the Darkroom's `expose` time.

@@ -733,10 +733,22 @@ struct wf_dv_span {                              /* src/wf_dev_arm.S reads it by
     int             sh;                          /* 56: C reference only */
     const uint32_t *enc;                         /* 60: C reference only: enc[0] */
     int             p;                           /* 64: the row's phase: 1 = x even is green */
+    /* film shoulder I / D (j.hue): wf_dv_span_hs only, read once per call (wf_dv_hue_idx is the C reference) */
+    const uint32_t *tb;                          /* 68: the shift table + off entries (off = (23 - sh) x 256: the asm's
+                                                    CLZ index is enc index - off, as for encb) */
+    int32_t         noff;                        /* 72: -off, the CLZ index of enc index 0 */
+    uint32_t        lc0;                         /* 76: luma weights c0 | c1 << 16 (Q16, half scale: SMULW) */
+    int32_t         lc2;                         /* 80: c2 */
+    uint32_t        hk;                          /* 84: accumulators R and G both below hk: the luma index is below the
+                                                    knee, the shift 0 (the plain lookups; 0 = always the full path) */
+    int32_t         vmax;                        /* 88: the CLZ index of enc index WF_DEV_NENC - 1 */
+    const uint32_t *ht;                          /* 92: the shift table (0 = shoulder A / none) */
 };
 typedef char wf_dv_span_chk[__builtin_offsetof(struct wf_dv_span, w) == 36 && __builtin_offsetof(struct wf_dv_span, p) == 64
-                            && sizeof(void *) == 4 ? 1 : -1];
+                            && __builtin_offsetof(struct wf_dv_span, tb) == 68
+                            && __builtin_offsetof(struct wf_dv_span, ht) == 92 && sizeof(void *) == 4 ? 1 : -1];
 void wf_dv_span_s(const struct wf_dv_span *sp, int x, int n, uint32_t *out);   /* n pairs from x into out[0 .. n) */
+void wf_dv_span_hs(const struct wf_dv_span *sp, int x, int n, uint32_t *out);  /* the same with the shoulder I / D */
 struct wf_dv_map { uint16_t kr, kb, ikr, ikb; }; /* block colour: R/G, B/G, G/R, G/B in raw units, Q12 */
 struct wf_dv_sum { uint32_t r, g, b, n; };       /* block sums of the ratio samples (g = G1 + G2) */
 
@@ -763,8 +775,10 @@ struct wf_dv_ctx {
     struct wf_dv_sum *sum;                       /* bw x bh; after the fill each entry holds its struct wf_dv_map */
     uint8_t  *need;                              /* bw x bh: highlight path (a clipped quad in this or a neighbour block) */
     uint32_t hl_px;
-    const uint32_t *enc;                         /* the shot's enc[3][WF_DEV_NENC]: t->enc, or enc2 with the film shoulder */
-    uint32_t *enc2;                              /* scratch: enc with the shoulder (wf_dv_roll) */
+    const uint32_t *enc;                         /* the shot's enc[3][WF_DEV_NENC]: t->enc, or enc2 with the film shoulder A */
+    uint32_t *enc2;                              /* scratch: enc with the shoulder A, or the shift table of I / D
+                                                    (wf_dv_roll) */
+    int      hue;                                /* WF_DEV_HUE_I / _D: sp.ht holds the shift table; A: 0 */
     uint16_t *ytab;                              /* scratch: the look's neutral luma per enc index (wf_dv_roll only) */
 };
 
@@ -1146,6 +1160,86 @@ int wf_dev_roll_lift = WF_DV_ROLL_LIFT;          /* -1 = the look's white (host 
 
 static uint32_t wf_dv_g7(int ch, uint32_t e) { return ((e >> 9) / (uint32_t)wf_dv_wst[ch]) << 7 | (e & 127); }
 
+/* ---- shoulder I / D (j.hue, wf_dev.h WF_DEV_HUE_*). The map above as a shift of the enc index, s(i) = i' - i in quarter
+ * steps (below 0 where the shoulder holds the look back, above 0 near the sensor's white where it lifts the look toward
+ * its target), per shot in a table T of WF_DEV_NENC + 256 words (enc2): T[i] = (uint16)(s(i) + 2) | w(i) << 16, the +2
+ * the final rounding, w Q14 the weight toward each channel's own shift: 0 up to the look's white iw, then the smooth
+ * step t^2 (3 - 2 t) over WF_DV_HUE_SPAN steps, 1 beyond (I; D keeps w 0). Per pixel: the luma of the three
+ * non-negative accumulators (half scale, the gamut's Y row, SMULW: each product floored), im = its enc index + 256 (the
+ * octave of the half scale), d = T[im] low, w = T[im] high; per channel with enc index i: i += (d (16384 - w)
+ * + h w) >> 16, h = T[i] low (whole steps: at most 2 codes from the per-channel A's interpolated entry at w = 1),
+ * kept within 0 .. WF_DEV_NENC - 1 (a channel far above its luma may take a lift past the table), then the plain enc
+ * table. A neutral has im = i: the knee and the target stay A's. */
+#define WF_DV_HUE_SPAN 384                       /* I: 1.5 stops from the look's white to the per-channel shift */
+#define WF_DV_HUE_NT   (WF_DEV_NENC + 256)       /* the table's words: im reaches idx(1.1 x 2^23) + 256 < 4608 */
+/* luma of each log gamut: the Y row of its RGB -> XYZ (tools/mk_loglut_tab.py GAMUTS, D65), x 32768 (SMULW: half scale),
+   rows sum to 32768; c0, c1 > 0 >= c2 in all five (wf_dv_hue_hk relies on it) */
+static const int16_t wf_dv_hue_lw[WF_LL_NCURVE][3] = {
+    { 7048, 29002, -3282 },                      /* S-Gamut3.Cine (S-Log3: the chain films' log pack) */
+    { 8542, 25392, -1166 },                      /* V-Gamut */
+    { 9567, 26995, -3794 },                      /* ARRI Wide Gamut 3 */
+    { 8561, 28496, -4289 },                      /* Cinema Gamut (Canon Log 2) */
+    { 8561, 28496, -4289 },                      /* Cinema Gamut (Canon Log 3) */
+};
+const char *wf_dev_hue_name(int hue)
+{
+    static const char *const n[WF_DEV_HUE_N] = { "a", "i", "d" };
+    return hue >= 0 && hue < WF_DEV_HUE_N ? n[hue] : "?";
+}
+const int16_t *wf_dev_hue_luma(int curve)        /* host tests: the weights against wf_ll_mat */
+{
+    return curve >= 1 && curve <= WF_LL_NCURVE ? wf_dv_hue_lw[curve - 1] : 0;
+}
+
+static uint32_t wf_dv_hue_w(int hue, int i, int iw)
+{
+    if (hue != WF_DEV_HUE_I || i <= iw)
+        return 0;
+    if (i >= iw + WF_DV_HUE_SPAN)
+        return 16384;
+    uint32_t s = ((uint32_t)(i - iw) << 14) / WF_DV_HUE_SPAN;       /* Q14 */
+    return ((s * s) >> 14) * (49152 - 2 * s) >> 14;
+}
+
+/* the asm's pre-test: R and G accumulators both below hk -> the luma index is below the knee ik (T = 2: no shift, w 0).
+   la <= (a0 c0 + a1 c1) / 2^16 (c2 <= 0, a2 >= 0) < hk (c0 + c1) / 2^16 <= xk << sh, xk the least x with
+   idx(x) >= ik - 256: so idx(la >> sh) + 256 < ik. Only a shortcut: the full path gives the same words. */
+static uint32_t wf_dv_hue_hk(int ik, int sh, const int16_t *lw)
+{
+    int n = ik - 256;
+    if (n <= 0 || lw[0] <= 0 || lw[1] <= 0 || lw[2] > 0)
+        return 0;
+    uint32_t xk;
+    if (n < 512)
+        xk = (uint32_t)n;                        /* idx(x) = x below 512 */
+    else {
+        int s = (n >> 8) - 1;                    /* idx = (s << 8) + (x >> s), x >> s in 256 .. 511 */
+        xk = (uint32_t)(n - (s << 8)) << s;
+    }
+    uint64_t q = wf_dv_udiv64((uint64_t)xk << (sh + 16), (uint32_t)(lw[0] + lw[1]));
+    return q > 0x7fffffffu ? 0x7fffffffu : (uint32_t)q;
+}
+
+static inline int32_t wf_dv_smulw(int32_t a, int32_t c) { return (int32_t)(((int64_t)a * c) >> 16); }
+
+/* the C reference of the shoulder I / D lookups: the enc indices of one pixel from its non-negative accumulators a[k]
+   (x = a >> sh, capped at WF_DEV_XMAX as the paths do), sp->ht / lc0 / lc2 */
+static inline void wf_dv_hue_idx(const struct wf_dv_span *sp, int sh, const int32_t *a, int *ix)
+{
+    const uint32_t *T = sp->ht;
+    int32_t la = wf_dv_smulw(a[0], (int16_t)(sp->lc0 & 0xffff)) + wf_dv_smulw(a[1], (int16_t)(sp->lc0 >> 16))
+               + wf_dv_smulw(a[2], sp->lc2);
+    uint32_t xl = (uint32_t)(la < 0 ? 0 : la) >> sh;
+    uint32_t tm = T[wf_dv_idx(xl > WF_DEV_XMAX ? WF_DEV_XMAX : xl) + 256];
+    int32_t w = (int32_t)(tm >> 16), dq = (int32_t)(int16_t)(tm & 0xffff) * (16384 - w);
+    for (int k = 0; k < 3; k++) {
+        uint32_t x = (uint32_t)a[k] >> sh;
+        int i = wf_dv_idx(x > WF_DEV_XMAX ? WF_DEV_XMAX : x);
+        i += (dq + (int32_t)(int16_t)(T[i] & 0xffff) * w) >> 16;
+        ix[k] = i < 0 ? 0 : i > WF_DEV_NENC - 1 ? WF_DEV_NENC - 1 : i;
+    }
+}
+
 static void wf_dv_roll(struct wf_dv_ctx *c, const int32_t m[3], struct wf_dev_stat *st)
 {
     const struct wf_dev_tabs *t = c->t;
@@ -1186,8 +1280,16 @@ static void wf_dv_roll(struct wf_dv_ctx *c, const int32_t m[3], struct wf_dev_st
     int64_t m0 = ((Y[ik + 16] - Y[ik - 16]) * span) >> 5;   /* the look's slope at the knee, over the span (< 2^29) */
     if (m0 < 0) m0 = 0;
     if (m0 > 3 * (int64_t)dy) m0 = 3 * (int64_t)dy;                 /* the Hermite stays monotone */
-    for (int ch = 0; ch < 3; ch++)
-        wf_copyw(c->enc2 + ch * WF_DEV_NENC, E + ch * WF_DEV_NENC, ik);
+    int hue = c->j.hue == WF_DEV_HUE_I || c->j.hue == WF_DEV_HUE_D ? c->j.hue : WF_DEV_HUE_A;
+    if (t->src != WF_DEV_CUBE || t->curve < 1 || t->curve > WF_LL_NCURVE)
+        hue = WF_DEV_HUE_A;                      /* I / D need the log gamut's luma */
+    uint32_t *T = c->enc2;
+    if (hue)
+        for (int i = 0; i < ik; i++)
+            T[i] = 2;                            /* no shift (+ the rounding), w 0 */
+    else
+        for (int ch = 0; ch < 3; ch++)
+            wf_copyw(c->enc2 + ch * WF_DEV_NENC, E + ch * WF_DEV_NENC, ik);
     int j = i0;
     for (int i = ik; i < WF_DEV_NENC; i++) {
         int yt;
@@ -1203,13 +1305,25 @@ static void wf_dv_roll(struct wf_dv_ctx *c, const int32_t m[3], struct wf_dev_st
         if (Y[j1] > Y[j] && yt > Y[j])
             f = ((yt - Y[j]) << 7) / (Y[j1] - Y[j]);
         if (f > 128) f = 128;
+        if (hue) {                               /* Q7 shift -> quarter steps */
+            int32_t s = (((j << 7) + f - (i << 7)) + 16) >> 5;
+            T[i] = (uint32_t)(uint16_t)(s + 2) | wf_dv_hue_w(hue, i, iw) << 16;
+            continue;
+        }
         for (int ch = 0; ch < 3; ch++) {
             const uint32_t *e = E + ch * WF_DEV_NENC;
             int32_t g0 = (int32_t)wf_dv_g7(ch, e[j]), g1 = (int32_t)wf_dv_g7(ch, e[j1]);
             c->enc2[ch * WF_DEV_NENC + i] = wf_dv_entry(ch, g0 + (((g1 - g0) * f + 64) >> 7));
         }
     }
-    c->enc = c->enc2;
+    if (hue) {
+        for (int i = WF_DEV_NENC; i < WF_DV_HUE_NT; i++)
+            T[i] = T[WF_DEV_NENC - 1];
+        c->hue = hue;
+        c->sp.ht = T;                            /* the enc tables stay t->enc */
+    } else {
+        c->enc = c->enc2;
+    }
     st->roll = 1;
     st->ro_k = ik;
     st->ro_c = ic;
@@ -1375,13 +1489,29 @@ int wf_dev_prepare(void *scratch, const struct wf_dev_tabs *t, const struct wf_d
         c->wcol[v][3] = q[6] | q[7] << 16;
         c->wcol[v][4] = q[8];
     }
-    if (jin->roll && t->src != WF_DEV_LOG)
+    c->hue = 0;
+    c->sp.ht = 0;
+    if (jin->roll && t->src != WF_DEV_LOG) {
+        int t0 = jin->ms ? jin->ms() : 0;
         wf_dv_roll(c, m, st);
+        if (jin->ms)
+            st->ro_ms = jin->ms() - t0;
+    }
     c->sp.node = t->node;
     c->sp.enc = c->enc;
     c->sp.encb = (const uint32_t *)((uintptr_t)c->enc + (uintptr_t)(intptr_t)((23 - sh) * 256 * 4));
     c->sp.k = 256u << sh;
     c->sp.sh = sh;
+    if (c->hue) {                                /* the shoulder I / D: the shift table and the luma for the kernels */
+        const int16_t *lw = wf_dv_hue_lw[t->curve - 1];
+        c->sp.tb = c->sp.ht + (23 - sh) * 256;
+        c->sp.noff = -(23 - sh) * 256;
+        c->sp.vmax = WF_DEV_NENC - 1 - (23 - sh) * 256;
+        c->sp.lc0 = (uint32_t)(uint16_t)lw[0] | (uint32_t)(uint16_t)lw[1] << 16;
+        c->sp.lc2 = lw[2];
+        c->sp.hk = wf_dv_hue_hk(st->ro_k, sh, lw);
+    }
+    st->hue = c->hue;
     st->sh = sh;
     st->fast = c->fast;
     return 0;
@@ -1415,9 +1545,19 @@ static int16_t *wf_dv_row(struct wf_dv_ctx *c, int y, uint32_t **mk)
 
 /* x (raw -> Q14) of one pixel, the enc lookups and the tetrahedral: lane sums */
 #define WF_DV_LOOK(R, G, B, A0, A1) do {                                                          \
-        int32_t x0_ = (M0 * (R) + M1 * (G) + M2 * (B)) >> sh;                                      \
-        int32_t x1_ = (M3 * (R) + M4 * (G) + M5 * (B)) >> sh;                                      \
-        int32_t x2_ = (M6 * (R) + M7 * (G) + M8 * (B)) >> sh;                                      \
+        int32_t x0_ = (M0 * (R) + M1 * (G) + M2 * (B));                                            \
+        int32_t x1_ = (M3 * (R) + M4 * (G) + M5 * (B));                                            \
+        int32_t x2_ = (M6 * (R) + M7 * (G) + M8 * (B));                                            \
+        if (c->hue) {                                                                              \
+            int32_t a_[3] = { x0_ < 0 ? 0 : x0_, x1_ < 0 ? 0 : x1_, x2_ < 0 ? 0 : x2_ };            \
+            int i_[3];                                                                             \
+            wf_dv_hue_idx(&c->sp, sh, a_, i_);                                                     \
+            wf_dv_tet(node, e0[i_[0]], e1[i_[1]], e2[i_[2]], &(A0), &(A1));                        \
+            break;                                                                                 \
+        }                                                                                          \
+        x0_ >>= sh;                                                                                \
+        x1_ >>= sh;                                                                                \
+        x2_ >>= sh;                                                                                \
         x0_ = x0_ < 0 ? 0 : x0_ > WF_DEV_XMAX ? WF_DEV_XMAX : x0_;                                 \
         x1_ = x1_ < 0 ? 0 : x1_ > WF_DEV_XMAX ? WF_DEV_XMAX : x1_;                                 \
         x2_ = x2_ < 0 ? 0 : x2_ > WF_DEV_XMAX ? WF_DEV_XMAX : x2_;                                 \
@@ -1552,7 +1692,9 @@ static void wf_dv_mhc_c(const struct wf_dv_span *sp, int x, int n, int p)
 static inline int32_t wf_dv_lo16(uint32_t w) { return (int16_t)(w & 0xffff); }
 static inline int32_t wf_dv_hi16(uint32_t w) { return (int16_t)(w >> 16); }
 
-/* C reference of wf_dv_lut_s */
+/* C reference of wf_dv_lut_s; with the shoulder I / D (sp->ht) of wf_dv_span_hs, counting its paths (host tests: the
+   pre-test's plain lookups, w 0, w > 0; the C reference never runs on the camera) */
+uint32_t wf_dev_hue_paths[3];
 static void wf_dv_lut_c(const struct wf_dv_span *sp, int n, uint32_t *out)
 {
     const uint32_t *w = sp->w, *e0 = sp->enc, *e1 = e0 + WF_DEV_NENC, *e2 = e1 + WF_DEV_NENC;
@@ -1565,6 +1707,21 @@ static void wf_dv_lut_c(const struct wf_dv_span *sp, int n, uint32_t *out)
             int32_t x0 = r * wf_dv_lo16(w[0]) + g * wf_dv_hi16(w[0]) + b * wf_dv_lo16(w[1]);
             int32_t x1 = r * wf_dv_hi16(w[1]) + g * wf_dv_lo16(w[2]) + b * wf_dv_hi16(w[2]);
             int32_t x2 = r * wf_dv_lo16(w[3]) + g * wf_dv_hi16(w[3]) + b * wf_dv_lo16(w[4]);
+            if (sp->ht) {                        /* the shoulder I / D (wf_dv_span_hs) */
+                int32_t ac[3] = { x0 < 0 ? 0 : x0, x1 < 0 ? 0 : x1, x2 < 0 ? 0 : x2 };
+                int ix[3];
+                wf_dv_hue_idx(sp, sp->sh, ac, ix);
+                if ((uint32_t)ac[0] < sp->hk && (uint32_t)ac[1] < sp->hk)
+                    wf_dev_hue_paths[0]++;       /* the asm's paths, for the test: the pre-test's plain lookups */
+                else {
+                    int32_t la = wf_dv_smulw(ac[0], (int16_t)(sp->lc0 & 0xffff))
+                               + wf_dv_smulw(ac[1], (int16_t)(sp->lc0 >> 16)) + wf_dv_smulw(ac[2], sp->lc2);
+                    uint32_t xl = (uint32_t)(la < 0 ? 0 : la) >> sp->sh;
+                    wf_dev_hue_paths[sp->ht[wf_dv_idx(xl > WF_DEV_XMAX ? WF_DEV_XMAX : xl) + 256] >> 16 ? 2 : 1]++;
+                }
+                wf_dv_tet(sp->node, e0[ix[0]], e1[ix[1]], e2[ix[2]], &a[e][0], &a[e][1]);
+                continue;
+            }
             x0 = (x0 < 0 ? 0 : x0) >> sp->sh;
             x1 = (x1 < 0 ? 0 : x1) >> sp->sh;
             x2 = (x2 < 0 ? 0 : x2) >> sp->sh;
@@ -1579,6 +1736,7 @@ static void wf_dv_lut_c(const struct wf_dv_span *sp, int n, uint32_t *out)
 static int wf_dv_ref = 1;
 void wf_dev_kernel(int ref) { (void)ref; }
 #define wf_dv_span_s(sp, x, n, o) ((void)(sp), (void)(x), (void)(n), (void)(o))
+#define wf_dv_span_hs(sp, x, n, o) ((void)(sp), (void)(x), (void)(n), (void)(o))
 #else
 static int wf_dv_ref;
 void wf_dev_kernel(int ref) { wf_dv_ref = ref; }
@@ -1588,7 +1746,10 @@ void wf_dev_kernel(int ref) { wf_dv_ref = ref; }
 static void wf_dv_fastspan(struct wf_dv_ctx *c, int xa, int xb, int p)
 {
     if (!wf_dv_ref) {
-        wf_dv_span_s(&c->sp, xa, (xb - xa) >> 1, c->out + (xa >> 1));
+        if (c->hue)
+            wf_dv_span_hs(&c->sp, xa, (xb - xa) >> 1, c->out + (xa >> 1));
+        else
+            wf_dv_span_s(&c->sp, xa, (xb - xa) >> 1, c->out + (xa >> 1));
         return;
     }
     for (int x = xa; x < xb; x += 2 * WF_DV_SPAN) {
@@ -1624,9 +1785,19 @@ wf_dv_hlpair(struct wf_dv_ctx *c, int x, int y, int p, int nc, const int16_t *co
         while ((mx >> k) > WF_DV_RAWMAX && k < sh) k++;
         const int shk = sh - k;
         const int32_t R = P[0] >> k, G = P[1] >> k, Bq = P[2] >> k;
-        int32_t x0 = (M[0] * R + M[1] * G + M[2] * Bq) >> shk;
-        int32_t x1 = (M[3] * R + M[4] * G + M[5] * Bq) >> shk;
-        int32_t x2 = (M[6] * R + M[7] * G + M[8] * Bq) >> shk;
+        int32_t x0 = (M[0] * R + M[1] * G + M[2] * Bq);
+        int32_t x1 = (M[3] * R + M[4] * G + M[5] * Bq);
+        int32_t x2 = (M[6] * R + M[7] * G + M[8] * Bq);
+        if (c->hue) {                            /* the shoulder I / D */
+            int32_t ac[3] = { x0 < 0 ? 0 : x0, x1 < 0 ? 0 : x1, x2 < 0 ? 0 : x2 };
+            int ix[3];
+            wf_dv_hue_idx(&c->sp, shk, ac, ix);
+            wf_dv_tet(node, e0[ix[0]], e1[ix[1]], e2[ix[2]], &a[e][0], &a[e][1]);
+            continue;
+        }
+        x0 >>= shk;
+        x1 >>= shk;
+        x2 >>= shk;
         x0 = x0 < 0 ? 0 : x0 > WF_DEV_XMAX ? WF_DEV_XMAX : x0;
         x1 = x1 < 0 ? 0 : x1 > WF_DEV_XMAX ? WF_DEV_XMAX : x1;
         x2 = x2 < 0 ? 0 : x2 > WF_DEV_XMAX ? WF_DEV_XMAX : x2;

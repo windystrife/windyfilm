@@ -6,10 +6,12 @@
 #include "wf_rawb.h"
 
 volatile int wf_rawb;                            /* menu, off at every boot, never saved (wf_menu.c) */
+volatile int wf_rb_hue = 1;                      /* WF_DEV_HUE_I (asserted below); WINDYFLM.CFG shoulder= (wf_menu.c) */
 int wf_rawb_can(void) { return WF_RAWB_CAN; }
 
 #if WF_RAWB_CAN
 #include "wf_dev.h"
+_Static_assert(WF_DEV_HUE_I == 1, "wf_rb_hue default");
 #include "wf_rsrc.h"
 
 /* ML core (EOSM_202.sym) */
@@ -69,13 +71,14 @@ struct rb_ev {
     uint8_t why, skip, out, cand_n;               /* WF_RBW_*, WF_RBS_* (camera gate), look output, candidates */
     int8_t  pick, rs_why;                         /* candidate, WF_RS_* */
     uint8_t ab, wb_src, roll, tier, cont;          /* cont: a 5D2 BOT half that continued its TOP's develop */
+    uint8_t hue;                                  /* WF_DEV_HUE_* the shoulder took */
     int16_t score[WF_RB_NCAND];
     int     arg, n_rs;
     uint32_t addr;
     int     black, white, lv_black, lv_white;     /* used; measured on the raw (0 = none) */
     int     t_pick, t_lev, t_prep, t_rows, rows;
     int     fit_n, clip, hl_fill;
-    int     ro_c, ro_ytop;
+    int     ro_c, ro_ytop, ro_ms;                 /* ro_ms: the shoulder tables (the I / D shift table) */
     uint32_t h0, h1;                              /* raw sample hash before / after the develop */
 };
 #define RB_EV_N 8
@@ -293,6 +296,8 @@ int wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk)
     j.canon_h = yz - ya;
     j.dec = dec;
     j.roll = lk->output != WF_OUT_LOG;
+    j.hue = (key & 15) == RB_K_LG ? wf_rb_hue : WF_DEV_HUE_A;   /* chain films only; cans + sRGB base develop: A */
+    j.ms = get_ms_clock;
     struct wf_dev_stat st;
     memset(&st, 0, sizeof st);
     e->h0 = rb_hash(raw, f->rpitch, f->ray1);
@@ -310,6 +315,8 @@ int wf_rawb_stage(struct wf_frame *f, const struct wf_look *lk)
     e->roll = (uint8_t)st.roll;
     e->ro_c = st.ro_c;
     e->ro_ytop = st.ro_ytop;
+    e->hue = (uint8_t)st.hue;
+    e->ro_ms = st.ro_ms;
 
     /* 4. rows, a band at a time; Canon's rows below the last band stay when it stops */
 rows:;
@@ -470,9 +477,10 @@ static void rb_report(void)
             else
                 wf_log("rawb: buf %d %x of %d, scores %s, blocks %d", e->pick, (unsigned)e->addr, e->cand_n, sc, e->n_rs);
             if (!e->cont)
-                wf_log("rawb: black %d%s white %d%s, wb %d t%d n%d, clip %d fill %d, roll %d c%d y%d", e->black,
-                       e->lv_black ? "" : "(cam)", e->white, e->lv_white ? "" : "(iso)", e->wb_src, e->tier, e->fit_n,
-                       e->clip, e->hl_fill, e->roll, e->ro_c, e->ro_ytop);
+                wf_log("rawb: black %d%s white %d%s, wb %d t%d n%d, clip %d fill %d, roll %d c%d y%d, shoulder %s %dms",
+                       e->black, e->lv_black ? "" : "(cam)", e->white, e->lv_white ? "" : "(iso)", e->wb_src, e->tier,
+                       e->fit_n, e->clip, e->hl_fill, e->roll, e->ro_c, e->ro_ytop, wf_dev_hue_name(e->hue),
+                       e->ro_ms);
             wf_log("rawb: %s rows %d, pick %d lev %d prep %d rows %d ms%s%s%s",
                    e->ab ? "STOPPED" : "done", e->rows, e->t_pick, e->t_lev, e->t_prep, e->t_rows,
                    e->ab ? " (" : "", e->ab ? rb_abname[e->ab] : "", e->ab ? ")" : "");

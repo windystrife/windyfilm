@@ -2462,7 +2462,7 @@ static void t_cfg(void)
     const char *code1 = wf_flut_code[1];
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
-            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1);
+            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\nshoulder=D\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
@@ -2475,6 +2475,7 @@ static void t_cfg(void)
     chk(wf_exp_mode == (WF_EXP_CAN ? WF_EXP_SMOOTH : WF_EXP_CANON) && wf_exp_trim == -5 && wf_exif_off == 1,
         "exposure %d exptrim %d exif off %d", wf_exp_mode, wf_exp_trim, wf_exif_off);
     chk(wf_blind == 0, "blind=OFF read: Blind roll off (%d)", wf_blind);
+    chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
     chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2, "print finishes read: frame %d info %d date %d (want 4 2 2)",
         wf_pr_frame, wf_pr_info, wf_pr_date);
     chk(WAIT(h_kelvin_last == 3200, 5000), "Light Tungsten applied at start (%dK)", h_kelvin_last);
@@ -2486,7 +2487,7 @@ static void t_cfg(void)
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\nexposure=%s\n"
-             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\nstage=0,0,0,0,0,0,4\n"
+             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\nshoulder=d\nstage=0,0,0,0,0,0,4\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
     free(b);
@@ -3944,6 +3945,7 @@ static int rb_ref_hl, rb_ref_sh;                 /* WF_DEV_DISP: Highlights / Sh
 static int rb_ref_curve;                         /* WF_DEV_CUBE: the curve and cube of the reference, auto exposure on */
 static const char *rb_ref_cube;
 static int rb_ref_auto = 1;                      /* WF_DEV_CUBE: 0 = no auto exposure (a chain film's log table) */
+static int rb_ref_hue;                           /* WF_DEV_HUE_* of the reference (A: each channel on its own) */
 static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
 {
     static struct wf_dev_tabs T;
@@ -3965,11 +3967,12 @@ static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
     memcpy(dst, canon, NW * 4);
     j.canon = dst; j.canon_y0 = 0; j.canon_h = FH;
     j.roll = roll;
+    j.hue = rb_ref_hue;
     struct wf_dev_stat st;
     int rp = wf_dev_prepare(scr, &T, &j, &st);
     wf_dev_rows(scr, 0, FH, dst, FW * 2);
-    printf("reference develop: build %d, levels %d / %d, prepare %d, wb %d, clip %d, roll %d\n", rc, lb, lw, rp, st.wb_src,
-           st.clip_quads, st.roll);
+    printf("reference develop: build %d, levels %d / %d, prepare %d, wb %d, clip %d, roll %d, shoulder %d\n", rc, lb, lw,
+           rp, st.wb_src, st.clip_quads, st.roll, st.hue);
     free(scr);
 }
 /* B table cache (.RBT) helpers: switch the Film LUT and wait for B's tables line holding `expect` (ms = its time) */
@@ -4168,7 +4171,8 @@ static void t_rawb(void)
     wf_out = WF_OUT_LLUT;
     chk(LOGW("rawb: tables cube c2 VLOG.CUB", 60000), "Log + LUT: '%s'", log_line("rawb: tables"));
     rb_stopped("Log + LUT", "buf 0 52000000 of 3,");
-    chk(strstr(log_line("rawb: black"), "roll 1") != 0, "Log + LUT: shoulder on ('%s')", log_line("rawb: black"));
+    chk(strstr(log_line("rawb: black"), "roll 1") != 0 && strstr(log_line("rawb: black"), "shoulder a "),
+        "Log + LUT: shoulder on, each channel on its own (a can: not the chain films' I, '%s')", log_line("rawb: black"));
     /* Leica Vivid (WF_FLUT_DISP): raw -> the sRGB develop -> the owner's display cube on the sRGB codes, no log step */
     {
         char nb[WF_LL_NAME];
@@ -4513,15 +4517,39 @@ static void t_rawb_chain(void)
     rb_ref_curve = WF_LL_SLOG3;
     rb_ref_cube = "ML/DATA/LGREF.CUB";
     rb_ref_auto = 0;
+    rb_ref_hue = WF_DEV_HUE_I;
     rb_ref(ref, in, WF_DEV_CUBE, 1);
-    rb_ref_auto = 1;
-    rb_ref_cube = 0;
+    chk(wf_rb_hue == WF_DEV_HUE_I, "no shoulder= in WINDYFLM.CFG: the chain films' shoulder I (%d)", wf_rb_hue);
     chk(sb == 0 && ndiff(out, ref, NW) == 0, "log pack shot: bit-exact vs the direct develop with its table as a .cube "
-        "(S-Log3, LUT EI 0, no auto exposure, shoulder on), no film table after it (%d words differ)", ndiff(out, ref, NW));
-    chk(LOGW("rawb: done rows 3456,", 5000) && strstr(log_line("rawb: black"), "roll 1"), "developed, shoulder on: '%s'",
-        log_line("rawb: black"));
+        "(S-Log3, LUT EI 0, no auto exposure, shoulder I), no film table after it (%d words differ)", ndiff(out, ref, NW));
+    chk(LOGW("rawb: done rows 3456,", 5000) && strstr(log_line("rawb: black"), "roll 1")
+        && strstr(log_line("rawb: black"), "shoulder i "), "developed, shoulder I: '%s'", log_line("rawb: black"));
     chk(LOGW(": film ", 3000) && strstr(log_line(": film "), " raw"), "shot line marks the develop: '%s'", log_line(": film "));
     memcpy(out2, out, NW * 4);
+    /* shoulder=a: the frame as before the owner's pick (RAWB14), bit for bit; shoulder=d: the hue-locked one. Per shot, no
+       table rebuild. */
+    static const char hk[3] = { 'a', 'i', 'd' };
+    for (int hv = WF_DEV_HUE_A; hv <= WF_DEV_HUE_D; hv += WF_DEV_HUE_D - WF_DEV_HUE_A) {
+        log_mark();
+        wf_rb_hue = hv;
+        sb = shot(in, out, FW, FH);
+        rb_ref_hue = hv;
+        rb_ref(ref, in, WF_DEV_CUBE, 1);
+        int dv = ndiff(out, out2, NW);
+        char sw[16];
+        snprintf(sw, sizeof sw, "shoulder %c ", hk[hv]);
+        /* A must change the frame; D may equal I here: this frame's light stays under the look's white, where I is D
+           (dev mode hue covers I's weights above it) */
+        chk(sb == 0 && ndiff(out, ref, NW) == 0 && (hv == WF_DEV_HUE_D || dv > 0), "shoulder=%c: bit-exact vs the direct "
+            "develop with hue %d (%d words differ), %d words of %d differ from I", hk[hv], hv, ndiff(out, ref, NW), dv, NW);
+        chk(LOGW("rawb: done rows 3456,", 5000) && strstr(log_line("rawb: black"), sw), "shoulder=%c logged: '%s'", hk[hv],
+            log_line("rawb: black"));
+        printf("shoulder=%c: %d of %d words differ from I\n", hk[hv], dv, NW);
+    }
+    wf_rb_hue = WF_DEV_HUE_I;
+    rb_ref_hue = WF_DEV_HUE_A;
+    rb_ref_auto = 1;
+    rb_ref_cube = 0;
 
     /* strength 30 %: the log table has no strength, the 8-bit chain does it (base develop + the print's table) */
     log_mark();

@@ -64,7 +64,7 @@ $HCC -c -o $W/o/wf_dev_shim.o $H/wf_dev_shim.c
 arm-linux-gnueabi-gcc -static -o $W/wf_dev_test $W/o/wf_dev_test.o $W/o/wf_dev_scene.o $W/o/wf_dev_shim.o $O/wf_dev.o \
   $O/wf_rsrc.o $O/wf_loglut.o $O/wf_llk.o $O/wf_llk_arm.o $O/wf_logout.o -lm -Wl,--no-enum-size-warning -Wl,--no-wchar-size-warning \
   -Wl,--no-warn-execstack
-MODES="px frame bad span roll rsrc pack"
+MODES="px frame bad span hue roll rsrc pack"
 if [ "${FULL:-0}" = 1 ]; then          # the full EOS M frame, rendered natively (float scene code is slow under qemu)
   gcc -O2 -DWF_DEV_SCENE_MAIN -I$H -o $W/wf_dev_scene $H/wf_dev_scene.c -lm
   mkdir -p $W/full
@@ -86,7 +86,7 @@ for m in $MODES; do
   p=${p:-0}; f=${f:-1}; [ $rc = 0 ] || [ "$f" != 0 ] || f=1
   TP=$((TP + p)); TF=$((TF + f)); [ "$f" = 0 ] || BAD="$BAD $m"
   echo "== $m ($((t1 - t0)) s): ${res:-no RESULT line (rc $rc)}"
-  grep -E "^(px|EOSM|5D2|highlights|span|rsrc|FAIL)" $W/run/$m.log
+  grep -E "^(px|EOSM|5D2|highlights|span|hue|rsrc|FAIL)" $W/run/$m.log
 done
 echo "dev host test: $TP pass, $TF fail${BAD:+ (failed:$BAD)}"
 [ $TF = 0 ]

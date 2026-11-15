@@ -36,7 +36,8 @@
  *     -> R/G and B/G, holes filled from neighbour blocks (8 rounds), then neutral (trap W19).
  *   - film shoulder (j.roll): the look's tone curve to a knee half an octave below the first clip, then a shoulder that
  *     reaches the look's white with zero slope at the sensor's white, folded into a per-shot copy of the enc tables
- *     (no per-pixel cost). Without it a V-Log film cube, made for about 8 stops above grey, leaves the EOS M's clip
+ *     (no per-pixel cost; j.hue I / D: a per-shot shift table on the luma enc index instead, see WF_DEV_HUE_*).
+ *     Without it a V-Log film cube, made for about 8 stops above grey, leaves the EOS M's clip
  *     (3.2 - 4.1 stops) mid-shoulder: clipped sky and sun stop flat at about 195 - 213 instead of rolling into white.
  * Rows (wf_dev_rows): any band of output rows, so the NN full frame and the Diana halves use the same code.
  *
@@ -102,7 +103,22 @@ struct wf_dev_job {
                                                     SRGB; see wf_dev.c wf_dv_roll), 0 = the look's curve as is */
     int      canon_pw;                           /* words per row of canon, 0 = w / 2 (a 5D2 half: the 5616 px row while
                                                     the develop covers 5600 px of it, w must be a multiple of 32) */
+    int      hue;                                /* the shoulder's colour, WF_DEV_HUE_* (only with roll on a log curve's
+                                                    CUBE tables; A elsewhere): the chain films' RAW develop takes I */
+    int    (*ms)(void);                          /* a ms clock for st->ro_ms, 0 = none */
 };
+
+/* how the film shoulder treats colour (j.hue). The shoulder is one map of the enc index i -> i' (wf_dv_roll):
+ *   A  each channel through the map at its own index: a coloured light whitens as soon as its brightest channel rolls
+ *      (blue sky above the knee turns magenta; the Log + LUT cans, the sRGB base develop, RAWB14 / RAWB15 and before)
+ *   D  one shift per pixel, the map's shift at the pixel's luma index: R:G:B in linear stay, the hue holds into the
+ *      highlights (comparisons and the cost bench only)
+ *   I  D below the look's white, then over 1.5 stops (WF_DV_HUE_SPAN) a smooth step toward A: lights keep their colour
+ *      up to the look's white and roll into cream / paper white above it (the owner's pick 2026-11-15, the gallery's
+ *      shoulder-e round). Per shot a shift table on the luma enc index; per pixel a luma, one lookup, and per channel
+ *      one more lookup and multiply-add (src/wf_dev_arm.S wf_dv_span_hs; CORE-NOTES 10.9). */
+enum { WF_DEV_HUE_A = 0, WF_DEV_HUE_I = 1, WF_DEV_HUE_D = 2, WF_DEV_HUE_N };
+const char *wf_dev_hue_name(int hue);           /* "a" / "i" / "d" (logs, WINDYFLM.CFG shoulder=), "?" out of range */
 
 /* per-shot results (log line, tests) */
 struct wf_dev_stat {
@@ -116,6 +132,8 @@ struct wf_dev_stat {
     int      roll;                               /* 1 = the film shoulder is in this shot's enc tables */
     int      ro_k, ro_c, ro_w, ro_grey;          /* enc indices (256 per octave): knee, sensor white, look's white, 18 % grey */
     int      ro_ytop;                            /* the look's white the shoulder ends on, 256 Y' */
+    int      hue;                                /* WF_DEV_HUE_* this shot's shoulder took (A when roll is 0) */
+    int      ro_ms;                              /* the shoulder's per-shot tables, ms (j.ms; 0 without a clock) */
 };
 
 /* ------------------------------------------------------------------ load time (wf_task) */

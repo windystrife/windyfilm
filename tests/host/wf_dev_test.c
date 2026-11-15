@@ -12,6 +12,9 @@
  *   wf_dev_test bad               jobs wf_dev_prepare must refuse
  *   wf_dev_test span              the asm span kernel (src/wf_dev_arm.S) = the C reference bit for bit: random raw
  *                                 below clip, 3 node sources x 4 Bayer phases x 9 WB scales (matrix shifts down to 7)
+ *   wf_dev_test hue               the film shoulder I / D (j.hue): luma weights = each gamut's Y row; the asm span kernel
+ *                                 wf_dv_span_hs = its C reference with every path taken; within 2 codes of A on a
+ *                                 neutral ramp, both cameras
  *   wf_dev_test roll              the film shoulder on a neutral exposure ramp: CUBE (identity, film), SRGB, LOG, both cameras
  *   wf_dev_test rsrc              which buffer holds the shot (src/wf_rsrc.c): pointer right / at the previous shot / 0,
  *                                 no match, both buffers the same frame, no address, a frame with no mid-tones
@@ -515,6 +518,170 @@ static void mode_span(void)
     remove("SPAN.CUB");
     free(a); free(b); free(scr);
     sc_free(&s);
+}
+
+/* hue: the film shoulder I / D (wf_dev.h WF_DEV_HUE_*, the chain films' RAW develop).
+   1. its luma weights are the Y row of each log gamut: Rec.709 Y through wf_ll_mat inverted;
+   2. wf_dv_span_hs = its C reference bit for bit: random raw below the clip through a film cube on S-Log3, the
+      shoulder on, 4 Bayer phases x 9 WB scales, I and D; every one of the kernel's paths taken (the pre-test's plain
+      lookups, w = 0, w > 0); A with roll stays wf_dv_span_s;
+   3. on a neutral exposure ramp through the clip (roll's raw), I and D stay within 2 codes of A everywhere (a neutral's
+      luma index is its own: the same knee and target) and differ from it nowhere below the knee. */
+extern const int16_t *wf_dev_hue_luma(int curve);
+extern uint32_t wf_dev_hue_paths[3];
+static const int roll_gdn[3];                    /* roll's ramp (below) */
+static double roll_ev(int x, int w);
+static double enc_ev(int i, int i0);
+static void inv3(const double *m, double *o)
+{
+    double d = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
+    o[0] = (m[4] * m[8] - m[5] * m[7]) / d; o[1] = (m[2] * m[7] - m[1] * m[8]) / d; o[2] = (m[1] * m[5] - m[2] * m[4]) / d;
+    o[3] = (m[5] * m[6] - m[3] * m[8]) / d; o[4] = (m[0] * m[8] - m[2] * m[6]) / d; o[5] = (m[2] * m[3] - m[0] * m[5]) / d;
+    o[6] = (m[3] * m[7] - m[4] * m[6]) / d; o[7] = (m[1] * m[6] - m[0] * m[7]) / d; o[8] = (m[0] * m[4] - m[1] * m[3]) / d;
+}
+static void mode_hue(void)
+{
+    /* 1. weights */
+    static const double y709[3] = { 0.2126729, 0.7151522, 0.0721750 };
+    double worst = 0;
+    for (int cv = 1; cv <= WF_LL_NCURVE; cv++) {
+        double m[9], im[9];
+        for (int k = 0; k < 9; k++) m[k] = wf_ll_mat[cv - 1][k] / 1048576.0;
+        inv3(m, im);
+        const int16_t *lw = wf_dev_hue_luma(cv);
+        CHECK(lw && lw[0] + lw[1] + lw[2] == 32768 && lw[0] > 0 && lw[1] > 0 && lw[2] <= 0, "curve %d: weights", cv);
+        for (int c = 0; c < 3 && lw; c++) {
+            double y = y709[0] * im[c] + y709[1] * im[3 + c] + y709[2] * im[6 + c];
+            double e = fabs(lw[c] / 32768.0 - y);
+            if (e > worst) worst = e;
+            CHECK(e < 3.0 / 32768, "curve %d channel %d: weight %d / 32768 vs the gamut's Y %.6f", cv, c, lw[c], y);
+        }
+    }
+    printf("hue: luma weights = the Y row of each log gamut (worst %.2f / 32768)\n", worst * 32768);
+
+    /* 2. the kernel */
+    const int w = 512, h = 96;
+    struct sc_shot s;
+    sc_default(&s, w, h, 0);
+    CHECK(sc_render(&s) == 0, "render");
+    int thr = s.black + (s.white - s.black) * 96 / 100;
+    uint16_t *v = malloc((size_t)s.raw_w * 2);
+    for (int y = 0; y < s.raw_h; y++) {
+        for (int x = 0; x < s.raw_w; x++) {
+            uint32_t r = rnd() % 100;
+            v[x] = (uint16_t)(r < 10 ? rnd() % (s.black + 64) : r < 40 ? thr - 1 - rnd() % 1024 : rnd() % thr);
+        }
+        sc_pack14(v, s.raw + (size_t)y * s.pitch, s.raw_w);
+    }
+    free(v);
+    write_cube("HUE.CUB", 33, 0);
+    CHECK(wf_dev_build(D, WF_DEV_CUBE, WF_LL_SLOG3, 0, "HUE.CUB", 0, 0, 0) == 0, "build");
+    void *scr = malloc(wf_dev_scratch_bytes(w, h));
+    uint32_t *a = malloc((size_t)w * h * 2), *b = malloc((size_t)w * h * 2), *c0 = malloc((size_t)w * h * 2);
+    struct wf_dev_job j;
+    struct wf_dev_stat st;
+    job_of(&s, &j);
+    j.canon = 0;
+    j.roll = 1;
+    for (int k = 0; k < 3; k++) j.wb_q8[k] = 0;
+    CHECK(wf_dev_prepare(scr, D, &j, &st) == 0, "prepare");
+    int32_t m0[3] = { st.m_q8[0], st.m_q8[1], st.m_q8[2] };
+    int runs = 0, fast = 0, rolled = 0;
+    long moved = 0;
+    memset(wf_dev_hue_paths, 0, sizeof wf_dev_hue_paths);
+    for (int hue = WF_DEV_HUE_I; hue <= WF_DEV_HUE_D; hue++)
+        for (int cfa = 0; cfa < 4; cfa++)
+            for (int e = 0; e <= 8; e++) {
+                j.cfa = cfa;
+                for (int k = 0; k < 3; k++) j.wb_q8[k] = (int32_t)(((int64_t)m0[k] << e) >> 2);
+                j.hue = WF_DEV_HUE_A;
+                CHECK(wf_dev_prepare(scr, D, &j, &st) == 0 && st.hue == WF_DEV_HUE_A, "prepare A");
+                wf_dev_rows(scr, 0, h, c0, w * 2);
+                j.hue = hue;
+                CHECK(wf_dev_prepare(scr, D, &j, &st) == 0, "prepare hue %d cfa %d scale %d", hue, cfa, e);
+                CHECK(st.hl_px == 0 && st.clip_quads == 0, "clipping in the random frame");
+                CHECK(st.hue == (st.roll ? hue : WF_DEV_HUE_A), "stat hue %d (roll %d, want %d)", st.hue, st.roll, hue);
+                wf_dev_rows(scr, 0, h, a, w * 2);
+                wf_dev_kernel(1);
+                wf_dev_rows(scr, 0, h, b, w * 2);
+                wf_dev_kernel(0);
+                long nd = ndiff(a, b, w * h / 2);
+                CHECK(nd == 0, "span_hs hue %d cfa %d scale 2^%d / 4 (sh %d, fast %d): %ld of %d words differ", hue, cfa, e,
+                      st.sh, st.fast, nd, w * h / 2);
+                runs++;
+                fast += st.fast;
+                rolled += st.roll;
+                moved += ndiff(a, c0, w * h / 2);
+            }
+    CHECK(rolled == runs && fast >= runs / 2, "shoulder in %d of %d runs, span kernel in %d", rolled, runs, fast);
+    CHECK(wf_dev_hue_paths[0] && wf_dev_hue_paths[1] && wf_dev_hue_paths[2], "paths: plain %u, w 0 %u, w > 0 %u",
+          wf_dev_hue_paths[0], wf_dev_hue_paths[1], wf_dev_hue_paths[2]);
+    CHECK(moved > 0, "I / D change no word against A");
+    printf("hue: %d runs (%d on the span kernel), span_hs = C reference; C reference pixels: plain %u, w 0 %u, w > 0 %u; "
+           "%ld words differ from A\n", runs, fast, wf_dev_hue_paths[0], wf_dev_hue_paths[1], wf_dev_hue_paths[2], moved);
+    free(scr); free(a); free(b); free(c0);
+    sc_free(&s);
+
+    /* 3. the neutral ramp (roll_case's raw: -7 .. +5.5 EV over grey, G clips first, R last) */
+    for (int cam = 0; cam < 2; cam++) {
+        const int rw2 = 1024, rh2 = 64, x0 = 84, y0 = 64, rw = ((x0 + rw2 + 24) + 7) & ~7, rh = y0 + rh2 + 20,
+                  pitch = rw / 8 * 14;
+        const int black = cam ? 1024 : 2048, white = cam ? 15600 : 12636;
+        uint16_t *row = malloc((size_t)rw * 2);
+        uint8_t *raw = malloc((size_t)rh * pitch + 16);
+        for (int y = 0; y < rh; y++) {
+            for (int x = 0; x < rw; x++) {
+                int xo = x - x0 < 0 ? 0 : x - x0 > rw2 - 1 ? rw2 - 1 : x - x0;
+                int ch = ((x - x0) & 1) + ((y - y0) & 1);
+                double vv = x < 72 ? 0 : roll_gdn[ch] * pow(2.0, roll_ev(xo, rw2));
+                int r = black + (int)(vv + 0.5);
+                row[x] = (uint16_t)(r > white ? white : r);
+            }
+            sc_pack14(row, raw + (size_t)y * pitch, rw);
+        }
+        struct wf_dev_job jr;
+        memset(&jr, 0, sizeof jr);
+        jr.raw = raw; jr.pitch = pitch;
+        jr.ax0 = 72; jr.ay0 = 52; jr.ax1 = rw; jr.ay1 = rh;
+        jr.x0 = x0; jr.y0 = y0; jr.w = rw2; jr.h = rh2;
+        jr.black = black; jr.white = white; jr.cfa = 0; jr.roll = 1;
+        for (int k = 0; k < 3; k++)
+            jr.wb_q8[k] = (int32_t)(0.18 * 16777216.0 * 256.0 / roll_gdn[k] + 0.5);
+        CHECK(wf_dev_build(D, WF_DEV_CUBE, WF_LL_SLOG3, cam, "HUE.CUB", 0, 0, 0) == 0, "ramp build");
+        void *sr = malloc(wf_dev_scratch_bytes(rw2, rh2));
+        uint32_t *fa = malloc((size_t)rw2 * rh2 * 2), *fh = malloc((size_t)rw2 * rh2 * 2);
+        struct wf_dev_stat sa, sh2;
+        CHECK(wf_dev_prepare(sr, D, &jr, &sa) == 0 && sa.roll, "ramp A");
+        wf_dev_rows(sr, 0, rh2, fa, rw2 * 2);
+        double ek = enc_ev(sa.ro_k, sa.ro_grey);
+        for (int hue = WF_DEV_HUE_I; hue <= WF_DEV_HUE_D; hue++) {
+            jr.hue = hue;
+            CHECK(wf_dev_prepare(sr, D, &jr, &sh2) == 0 && sh2.hue == hue && sh2.ro_k == sa.ro_k && sh2.ro_c == sa.ro_c,
+                  "ramp hue %d: the same shoulder (k %d c %d vs %d %d)", hue, sh2.ro_k, sh2.ro_c, sa.ro_k, sa.ro_c);
+            wf_dev_rows(sr, 0, rh2, fh, rw2 * 2);
+            int dmax = 0, below = 0, shown = 0;
+            for (int y = 2; y < rh2 - 2; y++)
+                for (int x = 8; x < rw2 - 8; x += 2) {
+                    uint32_t p = fa[y * (rw2 / 2) + x / 2], q = fh[y * (rw2 / 2) + x / 2];
+                    int dw = 0;
+                    for (int sb = 0; sb < 32; sb += 8) {
+                        int d = abs((int)((p >> sb) & 255) - (int)((q >> sb) & 255));
+                        if (d > dw) dw = d;
+                    }
+                    if (dw > dmax) dmax = dw;
+                    if (dw > 2 && y == rh2 / 2 && shown++ < 8)
+                        printf("  x %d (%+.2f EV): A Y %d %d U %d V %d | hue %d: Y %d %d U %d V %d\n", x, roll_ev(x, rw2),
+                               wY0(p), wY1(p), wU(p), (int8_t)(p >> 16), hue, wY0(q), wY1(q), wU(q), (int8_t)(q >> 16));
+                    below += p != q && roll_ev(x + 4, rw2) < ek - 0.05;
+                }
+            CHECK(dmax <= 2 && below == 0, "%s ramp hue %d: %d codes from A at most (want <= 2), %d pairs differ below the knee",
+                  cam ? "5D2" : "EOSM", hue, dmax, below);
+            printf("hue: %s neutral ramp, %s: within %d codes of A, none below the knee (%.2f EV)\n", cam ? "5D2" : "EOSM",
+                   hue == WF_DEV_HUE_I ? "I" : "D", dmax, ek);
+        }
+        free(sr); free(fa); free(fh); free(row); free(raw);
+    }
+    remove("HUE.CUB");
 }
 
 /* flat 16 x 16 blocks of the camera JPEG (Y range <= 8, not near 0 or 255): mean Y, Cb, Cr of a minus b */
@@ -1315,6 +1482,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "full")) run_frame(0, 5184, 3456, argc > 2 ? argv[2] : 0);
     else if (!strcmp(mode, "bad")) mode_bad();
     else if (!strcmp(mode, "span")) mode_span();
+    else if (!strcmp(mode, "hue")) mode_hue();
     else if (!strcmp(mode, "roll")) mode_roll();
     else if (!strcmp(mode, "rsrc")) mode_rsrc();
     else if (!strcmp(mode, "pack")) mode_pack();
