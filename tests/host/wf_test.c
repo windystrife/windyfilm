@@ -2824,24 +2824,33 @@ static void t_print_chain(void)
         printf("  (no chain film in this catalogue: chain part skipped)\n");
         return;
     }
-    int nchain = 0;
+    int nchain = 0, nbw = 0, kb = -1;
     for (int k = 0; k < wf_nfilms; k++)
         if (!(wf_films[k].flags & WF_F_LUTCAN) && (wf_films[k].prints >> WF_PRINT_STOCK0)) {
             nchain++;
-            chk(wf_films[k].prints & (1u << WF_PRINT_CHAIN_DEF), "chain film %s offers 2383, the default print",
-                wf_films[k].code);
+            if (wf_films[k].flags & WF_F_BW) {       /* Double-X 5222: the chain renders it grey only on 2302 */
+                nbw++;
+                kb = k;
+                chk((wf_films[k].prints >> WF_PRINT_STOCK0) == 1 && !(wf_films[k].prints & 7),
+                    "B&W chain film %s offers 2302 only, the B&W print", wf_films[k].code);
+            } else
+                chk(wf_films[k].prints & (1u << WF_PRINT_CHAIN_DEF), "chain film %s offers 2383, the default print",
+                    wf_films[k].code);
             chk(!(wf_films[k].prints & (1u << (WF_PRINT_STOCK0 + 14))), "chain film %s offers no 3513D (no table)",
                 wf_films[k].code);
         }
-    printf("  %d chain films\n", nchain);
+    printf("  %d chain films (%d B&W)\n", nchain, nbw);
+    chk(nbw == 1, "one B&W chain film, Double-X 5222 (%d)", nbw);
     chain_prints(kc, &v1, &v2);
     chk(wf_films[kc].flags & WF_F_READY, "chain film %d %s: READY (its print tables were there at build time)",
         wf_films[kc].id, wf_films[kc].code);
     chk(v1 >= 0 && v2 >= 0 && !(wf_films[kc].prints & 7), "chain film: two print stocks, no Scan / Cine / Paper");
     if (v2 < 0)
         return;
-    struct pk ec[] = { { kc, v1, tab_make(12, 0, 0, 0) }, { kc, v2, tab_make(-10, 0, 0, 0) } };
-    pack_write(ec, 2, 0);
+    /* one pack for the whole case: the module keeps the first pack index of this process */
+    struct pk ec[] = { { kc, v1, tab_make(12, 0, 0, 0) }, { kc, v2, tab_make(-10, 0, 0, 0) },
+                       { kb, WF_PRINT_STOCK0, tab_make(8, 0, 0, 1) } };
+    pack_write(ec, kb >= 0 ? 3 : 2, 0);
     put_cfg("film=%d\noutput=film\nprint=scan\ngrain=off\nhalation=off\nmist=off\n", wf_films[kc].id);
     mod_init(1);
     gen_frame(in, FW, FH, 0);
@@ -2857,6 +2866,14 @@ static void t_print_chain(void)
     snprintf(t2, sizeof t2, "%s", wf_row_text(WF_ROW_PRINT));
     chk(strcmp(t1, t2) != 0, "chain film: the next stock (%s -> %s)", t1, t2);
     film_shot("chain film, second print stock", kc, v2, 1, -10, 1.5);
+    if (kb >= 0) {
+        /* the B&W chain film has no 2383: the Print row falls back to its one stock, 2302, and the shot uses that table */
+        chk(WAIT(wf_avail(wf_films[kb].id), 5000) && wf_load(wf_films[kb].id) == WF_LOAD_OK
+            && wf_loaded() == wf_films[kb].id, "B&W chain film %s: on the card and loads", wf_films[kb].code);
+        snprintf(t1, sizeof t1, "%s", wf_row_text(WF_ROW_PRINT));
+        chk(!strcmp(t1, "2302"), "B&W chain film: the Print row is on 2302, its only print (%s)", t1);
+        film_shot("B&W chain film, 2302", kb, WF_PRINT_STOCK0, 1, 8, 1.5);
+    }
     mod_deinit();
 }
 

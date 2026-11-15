@@ -19,6 +19,10 @@ stage films of tools/mk_genesis_films.py (GX500T ...).
   checksums    u32 FNV-1a per negative blob, then per print blob
   blobs        struct wf_sg_neg (434,856 B) each, then struct wf_sg_prn (217,192 B) each
 Entries are sorted by id, then variant. The module takes an entry only when id and code match its catalogue.
+Identical halves are stored once and their entries share the blob number (the module reads a blob by its number, so
+nothing changes there): the chain's own dye tables are byte-identical for five print pairs (2383 = 2393, 2395 =
+5384/82, 5380 = 5381/72, 5384/92 = 5385/93, 5385/62 = 5386; tools/check_print_slots.py), so 15 print halves are 10
+blobs.
 ENV: FR_SRC (default as tools/mk_genesis_films.py), FORCE=1 (re-measure the cached halves in films/tables/.stage/),
 CC (default gcc).
 """
@@ -96,6 +100,16 @@ def entries():
     return out
 
 
+def uniq(blobs):
+    """distinct blobs in first-seen order, and the blob number of each input"""
+    out, m = [], []
+    for b in blobs:
+        if b not in out:
+            out.append(b)
+        m.append(out.index(b))
+    return out, m
+
+
 def half(kind, k, nbytes):
     """a cached half (films/tables/.stage/N<nn>.bin / P<pp>.bin), measured when missing or FORCE=1"""
     path = os.path.join(CACHE, "%s%02d.bin" % ("N" if kind == "neg" else "P", k))
@@ -133,14 +147,20 @@ def main():
     ents = [e for e in ents if e not in flat]
     negs = sorted({e[3] for e in ents})
     prns = sorted({e[4] for e in ents})
-    nb = [half("neg", n, NEG_BYTES) for n in negs]
-    pb = [half("print", p, PRN_BYTES) for p in prns]
+    nb, nmap = uniq([half("neg", n, NEG_BYTES) for n in negs])
+    pb, pmap = uniq([half("print", p, PRN_BYTES) for p in prns])
+    for kind, keys, m in (("negative", negs, nmap), ("print", prns, pmap)):
+        shared = [[keys[j] for j in range(len(keys)) if m[j] == u] for u in sorted(set(m))]
+        shared = [s for s in shared if len(s) > 1]
+        if shared:
+            print("  identical %s halves stored once: %d -> %d (chain %ss %s)" % (kind, len(keys), len(set(m)), kind,
+                                                                                 " ".join("=".join(map(str, s)) for s in shared)))
     idx = b""
     for i, v, code, n, p, t17 in ents:
         fit, bk, wt = pr[(n * 16 + p) * 3:(n * 16 + p) * 3 + 3]
         inv = round(4294967296.0 / (wt - bk))
-        idx += struct.pack("<BBBB8siiII", i, v, negs.index(n), prns.index(p), code.encode().ljust(8, b"\0"), fit, bk,
-                           inv, fnv(open(t17, "rb").read()))
+        idx += struct.pack("<BBBB8siiII", i, v, nmap[negs.index(n)], pmap[prns.index(p)],
+                           code.encode().ljust(8, b"\0"), fit, bk, inv, fnv(open(t17, "rb").read()))
     ntab = b"".join(struct.pack("<I", fnv(b)) for b in nb)
     ptab = b"".join(struct.pack("<I", fnv(b)) for b in pb)
     io = 64
@@ -160,7 +180,8 @@ def main():
     selftest(out, ents)
     # read back the way the module reads it, every entry composed at default knobs against its shipped table
     lst = os.path.join(BUILD, "tables.txt")
-    open(lst, "w").write("".join(e[5] + "\n" for e in ents))
+    bw = {f["id"] for f in catalog.rows()[0] if f and f["type"] == "bw"}   # WF_F_BW: the module composes Y only
+    open(lst, "w").write("".join(e[5] + (" bw" if e[0] in bw else "") + "\n" for e in ents))
     r = run([TOOL, "dat", out, lst], "mk_wfstage dat")
     print(r.stdout.rstrip())
     print("%s: %d B" % (os.path.basename(out), size))

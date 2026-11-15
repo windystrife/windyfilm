@@ -14,7 +14,11 @@ a part whose data this checkout does not hold is skipped with a note:
   3. the tables and the catalogue (films/tables/G<nn>P<pp>.T17, films/catalog.py): every offered p00 table is neutral
      (mean |U| + |V| < 5 codes), every other offered slot coloured (> 30) unless the negative is B&W, every offered
      table is there, no P14 file is left, no row offers 3513D or a pair whose print density span in fit.csv is under
-     0.05 (its white sits on the base fog), every row offers 2383 (src/wf_api.h WF_PRINT_CHAIN_DEF)
+     0.05 (its white sits on the base fog), every colour row offers 2383 (src/wf_api.h WF_PRINT_CHAIN_DEF)
+  4. the B&W negative (Double-X 5222, chain negative 9, films/catalog.py GX_BW, 15/11/2026): the chain has no
+     monochrome negative (FR_SRC/fr_glook_neg.h: negative 9 has three distinct spectral rows, its own interlayer and
+     per-channel curves, like the colour stocks), so its row is a B&W NEG printed on 2302 only, every table of it is
+     exactly grey (U = V = 0, mk_wtab --bw) and the module's WF_F_BW makes the film-stage composition Y only
 Output: "PASS ..." / "FAIL ..." lines, then "RESULT: <n> pass <m> fail"; exit 1 on a failure.
 Run in WSL: python3 -I -B tools/check_print_slots.py
 """
@@ -109,7 +113,12 @@ else:
 rows = [f for f in catalog.rows()[0] if f and f["derived"] and re.fullmatch(r"G\d\d", f.get("table") or "")]
 check(len(rows) == 44, "catalogue: %d chain rows" % len(rows))
 check(all("p14" not in f["prints"] for f in rows), "catalogue: no row offers 3513D (p14, no table)")
-check(all("p01" in f["prints"] for f in rows), "catalogue: every row offers 2383 (p01), the default print")
+check(all("p01" in f["prints"] for f in rows if f["type"] != "bw"),
+      "catalogue: every colour row offers 2383 (p01), the default print")
+bwr = [f for f in rows if f["type"] == "bw"]
+check([int(f["table"][1:]) for f in bwr] == sorted(catalog.GX_BW) == [9] and
+      all(f["kind"] == "B&W NEG" and "Double-X" in f["name"] and f["prints"] == ("p00",) for f in bwr),
+      "catalogue: one B&W chain row, G09 Double-X 5222: B&W NEG, printed on 2302 (p00) only")
 have = sorted(n for n in os.listdir(TABLES) if re.fullmatch(r"G\d\dP\d\d\.T17", n)) if os.path.isdir(TABLES) else []
 if not have:
     print("note: no G<nn>P<pp>.T17 in %s (no chain tables made here): tables not checked" % TABLES)
@@ -155,6 +164,23 @@ else:
           % (len(grey), max(grey)[0] if grey else 0, max(grey)[1] if grey else "-"))
     check(colour and min(colour)[0] > 30, "every other offered slot is colour: %d tables, min |U|+|V| %.1f (%s)"
           % (len(colour), min(colour)[0] if colour else 0, min(colour)[1] if colour else "-"))
+    bwt = sorted(n for n in have if int(n[1:3]) in catalog.GX_BW)
+    check(bwt and all(uv(os.path.join(TABLES, n)) == 0 for n in bwt),
+          "the B&W negative's tables are exactly grey (U = V = 0, mk_wtab --bw): %d tables" % len(bwt))
+
+# ---- 4. the chain's negatives: none is monochrome by itself
+NEGH = os.path.join(G.FR_SRC, "fr_glook_neg.h")
+if not os.path.exists(NEGH):
+    print("note: %s not here (no port tree): the chain's negatives are not checked" % NEGH)
+else:
+    src = open(NEGH).read()
+    body = src[src.index("gl_neg_stm"):]
+    body = body[body.index("{") + 1:body.index("};")]
+    stm = [[float(x.strip().rstrip("f")) for x in r.split(",") if x.strip()] for r in re.findall(r"\{([^{}]*)\}", body)]
+    spread = [max(abs(r[i] - r[4 + i]) + abs(r[i] - r[8 + i]) for i in range(4)) for r in stm]
+    check(len(stm) == 46 and min(spread) > 0.5,
+          "chain negatives: all 46 have three distinct spectral rows (min row spread %.2f), so none renders grey by "
+          "itself; negative 9 (Double-X) %.2f" % (min(spread), spread[9]))
 
 print("RESULT: %d pass %d fail" % (NP, len(fails)))
 sys.exit(1 if fails else 0)
