@@ -40,7 +40,10 @@
  *   ROLL               Roll + Darkroom in the module (DESIGN 3.6): both modes at once with RAW develop (no switch-off
  *                      either way; RAWB checks a B shot that counts and a darkroom run taking B's memory), frames from
  *                      file number + CR2, PLAY blocked while a roll is in the camera, the roll file; 5D2: load refused
- *   LOG [big]         the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
+ *   ROLL dark / boot   RAWB9: a roll frame keeps Canon's JPEG (no look), nothing of the look is built while a roll is in,
+ *                      the Darkroom starts with DryOS's task table full (the UI task on the last slot) and builds the
+ *                      look for its run; boot: the roll file read first, no build
+ *   LOG [big]        the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
  *                      the refusal logged), ring full (lines counted), a short write (no line twice); big: a log over
  *                      512 KB becomes WINDYFLM.OLD at boot
  * Output: PASS / FAIL lines, then "RESULT MODE CASE: P pass, F fail"; exit status 1 on any failure. */
@@ -3146,6 +3149,111 @@ static void t_roll_lock(void)
     chk(log_has("roll: shutter free") && !(icu_uilock & 1), "unload: the shutter free (lock %x)", icu_uilock);
 #endif
 }
+/* ROLL:dark / ROLL:boot - the owner's RAWB9 (11-15): every roll frame took the in-camera look (23..36 s), the Darkroom
+ * never started ("dark: no task (5)": DryOS's table full, the UI task on its last slot), and at boot the roll came only
+ * after the grain build (10.9 / 15.2 s). dark: no roll = the look as before; a roll in the camera = nothing of the look
+ * built, its frames Canon's own JPEG; the Darkroom starts with the table full and builds the look for its run. boot: a
+ * roll file at boot = the roll read first, nothing built; closed = the look for shots again */
+static volatile int ui_hold;
+static void ui_task_stand_in(void *a) { (void)a; while (ui_hold) usleep(20000); }
+static void dump_frame(const char *path, const uint32_t *p, int w, int h)   /* 1/8 size RGB PPM for the report */
+{
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    int ow = w / 8, oh = h / 8;
+    fprintf(f, "P6\n%d %d\n255\n", ow, oh);
+    for (int y = 0; y < oh; y++)
+        for (int x = 0; x < ow; x++) {
+            uint32_t q = p[(size_t)y * 8 * (w / 2) + x * 4];
+            int u = (int8_t)(q & 255), yy = (q >> 8) & 255, v = (int8_t)((q >> 16) & 255);
+            unsigned char c[3] = { (unsigned char)clampi(yy + 1402 * v / 1000, 0, 255),
+                                   (unsigned char)clampi(yy - (344 * u + 714 * v) / 1000, 0, 255),
+                                   (unsigned char)clampi(yy + 1772 * u / 1000, 0, 255) };
+            fwrite(c, 1, 3, f);
+        }
+    fclose(f);
+}
+static void t_roll_dark(const char *cs)
+{
+#ifdef WF_BUILD_5D2
+    (void)cs;
+    chk(1, "5D2: no roll");
+#else
+    std_pack();
+    const int film = wf_films[fC].id;
+    put_cfg("film=%d\noutput=film\ngrain=normal\nhalation=bloom\nmist=off\n", film);
+    wf_fx_retry_ms = 500;
+    h_set_folder_number(100);
+    if (!strcmp(cs, "boot")) {
+        struct wf_roll r;
+        char t[1536];
+        wf_roll_reset(&r);
+        wf_roll_load(&r, film, 3, 100, 600);
+        wf_roll_seen(&r, 100, 601, roll_cr2_yes, 0);
+        chk(wf_roll_text(&r, t, sizeof t) == 1536, "a roll file of 1 frame made");
+        put_file(H_ROLLF, t, sizeof t);
+        h_set_file_number(601);
+        mod_init(1);
+        chk(LOGW("roll: 001 loaded film", 3000) && wf_roll_now()->state == WF_RS_LOADED, "the roll read back at boot (%s)",
+            log_line("roll: "));
+        usleep(1500000);
+        chk(!log_has("fx grain") && !log_has("fx halation") && !wf_fx_hk && !wf_fx_gk,
+            "a roll at boot: nothing of the look built ('%s')", log_line("fx "));
+        log_mark();
+        chk(wf_roll_req_close() == 0 && WAIT(wf_roll_now()->state == WF_RS_DONE, 5000), "the roll closes");
+        chk(WAIT(wf_fx_hk && wf_fx_gk, 120000) && LOGW("fx grain", 3000), "closed: the look built for shots again ('%s')",
+            log_line("fx grain"));
+        mod_deinit();
+        return;
+    }
+    h_set_file_number(500);
+    mod_init(1);
+    chk(WAIT(wf_fx_hk && wf_fx_gk, 120000), "no roll: the look built for shots, as before ('%s')", log_line("fx grain"));
+    h_prop_send(PROP_ASPECT, 0);
+    disc_r = 60;
+    gen_frame(in, FW, FH, 1);
+    chk(WAIT(look_table_ready(), 10000), "table published");
+    log_mark();
+    int sb = shot(in, out, FW, FH);
+    chk(sb == 0 && ndiff(out, in, NW) > 0 && LOGW("shot #1 ", 5000), "no roll: a shot gets the look ('%s')", log_line("shot #"));
+    dump_frame("frame_canon.ppm", in, FW, FH);
+    dump_frame("frame_look_noroll.ppm", out, FW, FH);
+    int rc = wf_roll_req_load(film, 3);
+    chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000), "a roll of 3 loads (%d)", rc);
+    chk(WAIT(!wf_fx_hk && !wf_fx_gk && h_arena_live == 0, 20000), "a roll in the camera: the effects given back (%d blocks)",
+        h_arena_live);
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    chk(sb == 0 && ndiff(out, in, NW) == 0, "a roll frame: Canon's own JPEG, untouched (%d words differ)", ndiff(out, in, NW));
+    dump_frame("frame_roll.ppm", out, FW, FH);
+    chk(LOGW("roll frame", 3000) && !log_has("shot #") && !log_has(": film "), "logged as a roll frame, no look ('%s')",
+        log_line("roll frame"));
+    chk(roll_shoot(501, 3) && wf_roll_now()->state == WF_RS_FULL, "3 frames: the roll is full (%d/3)", wf_roll_now()->nshot);
+    usleep(1000000);
+    chk(!log_has("fx grain") && !log_has("fx halation") && !wf_fx_hk && !wf_fx_gk,
+        "nothing of the look built while the roll is in the camera");
+    ui_hold = 1;                                 /* DryOS's table full, the UI task on its last slot (RAWB9 216.1 s) */
+    h_task_slots = 1;
+    int ut = task_create("wf_ui", 0x1B, 0x2000, (void *)ui_task_stand_in, 0);
+    chk(ut > 0 && !(ut & 1) && h_task_slots == 0, "the UI task takes the table's last slot (%x)", ut);
+    log_mark();
+    int r0 = h_task_refused, ds = wf_dark_start();
+    chk(ds == 0 && !log_has("dark: no task") && h_task_refused == r0,
+        "the Darkroom starts with the task table full (%d, %d task_create refused)", ds, h_task_refused - r0);
+    chk(LOGW("dark: roll 001 start, 3 of 3 to develop", 5000), "the run goes ('%s')", log_line("dark: roll"));
+    chk(LOGW("dark: look ", 120000) && strstr(log_line("dark: look "), "halation") && strstr(log_line("dark: look "), "grain"),
+        "the run builds the look first ('%s')", log_line("dark: look "));
+    chk(WAIT(!wf_dark_busy(), 30000) && LOGW("dark: roll 001 end", 3000), "the run ends (host: no SRM, '%s')",
+        log_line("dark: roll 001 end"));
+    chk(WAIT(!wf_fx_hk && !wf_fx_gk && h_arena_live == 0, 20000), "after the run, the roll still in: the effects given back (%d)",
+        h_arena_live);
+    ui_hold = 0;
+    chk(WAIT(h_task_slots == 1, 2000), "the UI task gave its slot back");
+    h_task_slots = -1;
+    mod_deinit();
+#endif
+}
 static void t_roll(const char *cs)
 {
     if (!strcmp(cs, "save") || !strcmp(cs, "short") || !strcmp(cs, "back")) {
@@ -3154,6 +3262,10 @@ static void t_roll(const char *cs)
     }
     if (!strcmp(cs, "lock")) {
         t_roll_lock();
+        return;
+    }
+    if (!strcmp(cs, "dark") || !strcmp(cs, "boot")) {
+        t_roll_dark(cs);
         return;
     }
     std_pack();

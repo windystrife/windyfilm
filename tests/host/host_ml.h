@@ -10,6 +10,8 @@ extern int pic_quality, shooting_mode, lv;
 extern uint8_t lens_info[];                      /* ML struct lens_info bytes (layout from wf_expoff.c) */
 extern volatile int h_play, h_movie, h_menu_shown, h_gdraw, h_expsim, h_expsim_stuck;
 extern volatile int h_task_fail, h_tasks_live, h_nsem;   /* task_create("film_yuv") refusals; live tasks; semaphores */
+extern volatile int h_task_slots, h_task_refused;        /* free task table slots (-1 no limit); task_create refused */
+int task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg);   /* a task of the test's own */
 
 /* ROM words (wf_cam_*: wf_host_rom_read); h_rom_bad = address whose word reads wrong (0 none) */
 extern volatile uint32_t h_rom_bad;

@@ -16,6 +16,7 @@ int wfdr_host_sel_id(void);
 int wfui_host_anim(void);
 int wfui_host_scr(void);
 const char *wfui_host_msg(void);
+void wfui_host_beat(int ph, int ago_ms);
 const char *wfdr_host_msg(void);
 int wfdr_host_confirm(void);
 
@@ -485,6 +486,46 @@ int main(int argc, char **argv)
     hud_dump("3_full", 0, WF_HUD_FULL, 0);
     wfdr_hud_fonts(0);
     CHECK(host_live_allocs() == 0, "section 14: %ld allocations left", host_live_allocs());
+
+    /* 15. owner RAWB9 (11-15): the Darkroom asked for from the UI with the UI task up (wf_task carries the run out, no
+     * task of its own): SET starts it, the screen says it gets ready while the look's effects are built (frame -1,
+     * WF_DP_MIX), then frame 1 loads. And the UI that opens while Canon holds the card after the roll's last frame (its
+     * cans read: "no beat for 2212 / 7256 ms (state 1, phase 5)") keeps its keys up to 10 s there, 2 s elsewhere. */
+    roll_of(colour, 3, 3, WF_RS_FULL);
+    fake_view()->state = WF_DR_IDLE;
+    fake_view()->battery = 70;
+    fake_view()->nwire = 0;
+    fake_view()->print_ready = 0;
+    int ns0 = fake_nstart();
+    open_scr(WFUI_SCR_DARK);
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(fake_nstart() == ns0 + 1 && !closed, "RAWB10: SET in the Darkroom asks for the run (%d)", fake_nstart() - ns0);
+    v = fake_view();
+    r = fake_roll();
+    v->state = WF_DR_RUN; v->phase = WF_DP_MIX; v->frame = -1; v->done = 0; v->total = 3; v->left = 3;
+    v->prog = 0; v->expose = 0; v->t_frame = 6000; v->print_ready = 0; v->nwire = 0; v->avg_ms = 0; v->gen++;
+    shot("dark_ui_mix");
+    CHECK(!closed, "RAWB10: the UI stays up while the run gets ready");
+    v->phase = WF_DP_LOAD; v->frame = 0; v->prog = 80; v->t_frame = 3000; v->gen++;
+    r->state = WF_RS_FULL;
+    shot("dark_ui_frame1");
+    v->state = WF_DR_IDLE; v->phase = WF_DP_NONE; v->frame = -1; v->gen++;
+    close_ui();
+    closed = 0;
+    wf_ui_open_scr(WFUI_SCR_DARK);                 /* the UI task created, still in its open */
+    wfui_host_beat(5, 7256);                       /* PH_CANS, held up 7.3 s (RAWB9 192.8 s) */
+    CHECK(wf_ui_key(MODULE_KEY_PRESS_SET) == 0, "RAWB10: opening, 7.3 s in the cans read: SET still the UI's");
+    wfui_host_beat(5, 10500);
+    CHECK(wf_ui_key(MODULE_KEY_PRESS_SET) == 1, "RAWB10: opening, 10.5 s in the cans read: the key goes to Canon / ML");
+    wfui_task_begin();                             /* the close asked for: it ends without taking the screen */
+    wfui_task_end();
+    closed = 0;
+    wf_ui_open_scr(WFUI_SCR_DARK);
+    wfui_host_beat(3, 2300);                       /* PH_LIST: not a card read, the old 2 s limit */
+    CHECK(wf_ui_key(MODULE_KEY_PRESS_SET) == 1, "RAWB10: opening, 2.3 s outside a pack read: the key goes on (2 s)");
+    wfui_task_begin();
+    wfui_task_end();
+    CHECK(host_live_allocs() == 0, "section 15: %ld allocations left", host_live_allocs());
 
     printf("peak UI heap %ld bytes\n", host_peak_bytes());
     printf("%s: %d failure(s)\n", fails ? "FAIL" : "PASS", fails);

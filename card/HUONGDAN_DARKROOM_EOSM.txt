@@ -4,6 +4,14 @@ Bản thử thứ hai, 14/11/2026 tối: Darkroom gộp chung thẻ với RAW de
 độ chạy cùng lúc. CHƯA chạy trên máy thật lần nào: lần chụp này để đo bộ nhớ, thời
 gian và xem mọi bước có chạy không.
 
+Thay đổi 15/11 (sau log RAWB9):
+- Đang có cuộn trong máy (RAW develop Off): bấm chụp là xong ngay, JPEG lúc chụp là JPEG
+  gốc của Canon (không màu phim, không chờ xử lý). Màu phim chỉ có trên bản in Darkroom.
+- Darkroom chạy trong task của module (không cần task mới nữa): hết lỗi "No free task".
+  Bấm SET: màn hình "Getting ready / Mixing the chemistry" vài giây (dựng bảng phim,
+  halation, grain) rồi mới tới kiểu 1.
+- Lúc có cuộn, module không dựng bảng LUT / grain / halation nữa: bật máy là cuộn hiện ngay.
+
 Ý tưởng: chụp một cuộn phim (3 / 6 / 12 / 24 / 36 kiểu RAW + L, không xem lại ảnh), rồi
 "tráng" cả cuộn trong máy: Darkroom đọc từng file CR2 trên thẻ, develop bằng RAW
 develop B của WindyFilm với phim của cuộn, ghi ra một JPEG "bản in" riêng. Toàn
@@ -57,6 +65,8 @@ bật được cùng nhau, cái này không tắt cái kia:
 - Có cuộn + RAW develop On: mỗi tấm RAW+L được develop B ngay (khoảng 30 s, như
   thường), VÀ vẫn là một kiểu của cuộn: Darkroom in lại từ CR2 sau, bằng phim của cuộn.
 - Kiểu được đếm sau khi B develop xong (bộ đếm nhảy và "WIND ON" hiện sau khoảng 30 s).
+- RAW develop Off (mặc định): tấm của cuộn không qua xử lý nào, chụp liên tục được như
+  máy thường; bộ đếm nhảy ngay sau khi Canon ghi xong CR2.
 - Lúc Darkroom chạy, RAW develop tạm trả bộ nhớ, tráng xong tự dựng lại bảng.
   Darkroom không bắt đầu khi B còn đang develop một tấm: chờ xong rồi bấm SET.
 - Bảng của lon Log + LUT / Leica: Darkroom và RAW develop dùng chung file
@@ -89,14 +99,21 @@ không có CR2 thì không được đếm.
 - Muốn kết thúc sớm: menu "End roll now" (cuộn tua lại, hiện bảng "ROLL REWOUND" và
   "REWOUND"; nút chụp cũng khoá; Darkroom tráng các kiểu đã chụp).
 - "Close roll": bỏ các kiểu chưa tráng (file RAW / JPG vẫn còn nguyên trên thẻ).
-- Mỗi tấm vẫn có JPEG màu phim ngay lúc chụp (như module thường; nếu RAW develop On
-  thì là bản develop B). Darkroom in thêm bản in riêng từ CR2 sau.
+- Khi có cuộn: JPEG lúc chụp là JPEG gốc của Canon (không màu phim), để chụp được ngay.
+  Màu phim nằm trên bản in Darkroom (in từ CR2). Nếu RAW develop On thì JPEG vẫn là bản
+  develop B như trước. Không có cuộn: mọi thứ như cũ (JPEG màu phim lúc chụp).
+- Ngắm LiveView kiểu Log + LUT: khi có cuộn, LiveView không áp LUT (bảng không được dựng).
 
 
 4. TRÁNG (DARKROOM)
 -------------------
 - Menu "Darkroom" -> phòng tối ánh đỏ. SET: bắt đầu. LiveView tạm dừng trong lúc
   tráng, máy không tự tắt.
+- Ngay sau SET: "Getting ready" / "Mixing the chemistry" (pha thuốc: dựng bảng phim,
+  halation, grain cho phim của cuộn). Log: "dark: look ready N ms: film table, halation,
+  grain". Cube 65^3 lần đầu có thể mất vài chục giây; lần sau đọc file .RBT.
+- Mới bật máy mà vào Darkroom ngay có thể thấy "Starting: try again in a moment": chờ vài
+  giây rồi bấm SET lại.
 - Mỗi kiểu qua 4 bước: Loading the negative -> Exposing the paper -> In the fixer
   -> Washing and drying. Bản in hiện dần trên giá, xong thì treo lên dây phơi.
 - Thời gian ước tính (chưa đo trên máy): khoảng 1 phút mỗi kiểu, 24 kiểu khoảng
@@ -140,6 +157,16 @@ k. Cuộn hết, vào chọn cuộn, chọn phim khác, SET: phải hiện câu 
    the new roll?". MENU: huỷ, cuộn cũ còn nguyên. Lần nữa bấm SET: cuộn mới nạp, nút
    chụp mở lại, log có "closed for a new roll".
 l. Chế độ quay phim khi cuộn đã hết: quay được bình thường (không khoá).
+m. (15/11) Nạp cuộn 6 kiểu, RAW develop Off: chụp 3 tấm liên tiếp nhanh. Mỗi tấm phải chụp
+   xong ngay (không có "xử lý" / phải chờ), bộ đếm 1/6, 2/6, 3/6. JPG trong DCIM là màu
+   Canon. Log có "roll frame: Canon's JPEG, no look". Ghi lại nếu có tấm nào phải chờ.
+n. (15/11) "End roll now", vào Darkroom, SET: phải hiện "Mixing the chemistry" rồi tráng
+   cả 3 kiểu. Log KHÔNG được có "dark: no task"; phải có "dark: roll ... start" và
+   "dark: look ready". Ghi lại thời gian mỗi kiểu (đồng hồ ngoài) và bản in có màu phim.
+o. (15/11) Tắt máy bật lại khi đang có cuộn: cuộn (ROLL 00n, bộ đếm) phải hiện ngay khi
+   LiveView lên, không phải chờ. Mở màn hình chọn cuộn ngay sau khi bật: không bị đóng
+   ("no beat" trong log là lỗi cần báo).
+p. (15/11) Sau "New roll" / nạp cuộn mới: chụp ngay được, không "busy".
 
 
 6. GỬI LẠI

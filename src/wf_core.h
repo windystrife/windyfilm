@@ -101,7 +101,15 @@ int wf_job_state(void);
 /* Roll + Darkroom (wf_dark.c, docs/DESIGN.md 3.6; the UI's part is wf_dark.h) */
 void wf_dark_init(void);                          /* module init: the view, no allocation */
 void wf_roll_poll(void);                          /* wf_task: roll file, requests, frames, RAW+L / review, HUD */
+void wf_dark_poll(void);                          /* wf_task, after wf_roll_poll: a darkroom run asked for, carried out
+                                                     here (minutes; no task of its own, owner RAWB9 "dark: no task (5)") */
+void wf_task_yield(int log);                      /* wf_main.c, the darkroom run inside wf_task: the light part of its
+                                                     loop (ML-menu guard, browser request; log 1 = the log to the card) */
 void wf_dark_end(void);                           /* wf_task at unload: stop a run, Canon's values back */
+enum { WF_LU_SHOTS = 1, WF_LU_NONE, WF_LU_DARK };
+int  wf_look_use(void);                           /* what the look's tables are built for (wf_dark.c, owner RAWB9): shots
+                                                     (no roll, or a roll with RAW develop on), none (a roll in the camera:
+                                                     its frames keep Canon's JPEG), the darkroom run (effects, film table) */
 int  wf_roll_shooting(void);                      /* a roll is loaded (takes frames; RAW develop B may run on them too) */
 int  wf_dark_busy(void);                          /* a darkroom run lives (RAW develop B gives its shoot memory back) */
 int  wf_roll_blocks_play(void);                   /* blind roll: PLAY is eaten */

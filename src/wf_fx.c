@@ -468,13 +468,17 @@ static void fx_m_sync(int want)
  * it lives in Canon's heap; both are set up again when playback is left (halation ~25 ms, grain ~1 s). */
 void wf_fx_poll(void)
 {
-    int hk = 0, gk = 0, m = wf_post_want();
+    /* what for (wf_look_use, owner RAWB9): shots as before; a roll in the camera nothing (all given back); a darkroom run
+     * the look's post code without the shot LUT (its develop holds the cube) and for its 3:2 print whatever the aspect */
+    int use = wf_look_use(), hk = 0, gk = 0;
+    int m = use == WF_LU_SHOTS ? wf_post_want() : use == WF_LU_DARK && wf_yuv_active() ? wf_post_now() : 0;
     if (m)
         wf_fx_keys(m, &hk, &gk);
     int mk = m ? wf_fx_mkey(m) : 0;
     int play = (hk || gk || mk) && is_play_mode();
     fx_inplay = play;
-    if (hk && (!wf_aspect_has_halo(wf_aspect) || play))   /* 3:2 only (wf_shot.c; -1 not reported = 3:2 as v1) */
+    if (hk && ((use != WF_LU_DARK && !wf_aspect_has_halo(wf_aspect)) || play))   /* 3:2 only (wf_shot.c; -1 not
+                                                                                    reported = 3:2 as v1) */
         hk = 0;
     if (play && !(gk == fx_g_tried && fx_gb.p && !fx_gb.suite))
         gk = 0;                                  /* only a grain block in Canon's heap stays */

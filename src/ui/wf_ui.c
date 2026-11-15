@@ -16,7 +16,8 @@
  * without sleeping (the owner's RAWB2 log: a TRASH during that build, "ui: closed" right after "fx grain ... ready",
  * no "ui: open"; DryOS does not time-slice equal priorities, so the old prio-0x1E UI task waited the whole build).
  * Now the UI task runs above both, and it beats (hb, phase) at every step; a key that finds no beat for
- * STALE_MS goes to Canon / ML and asks the task to close when it runs again (the EOS M two-finger tap then opens the ML
+ * STALE_MS (STALE_PACK_MS while it opens inside a pack read: a card busy with a shot) goes to Canon / ML and asks the
+ * task to close when it runs again (the EOS M two-finger tap then opens the ML
  * menu: no module took MENU). The task is never declared dead from outside: it may still run and give the screen back.
  * Phases in the log: 1 created, 2 ML menu away, 3 film list, 4 fonts, 5 cans, 6 Canon dialog, 7 screen, 8 palette,
  * 9 tick, 10 drawing, 11 copy, 12 palette check, 13 load animation, 14 closing, 15 starting LiveView. */
@@ -27,6 +28,9 @@
 #define UI_PRIO         0x1B            /* above the film worker (0x1C), below ML's menu_task (0x1A) and Canon's GUI */
 #define UI_STACK        0x2000
 #define STALE_MS        2000
+#define STALE_PACK_MS   10000           /* opening, inside a pack read: Canon may hold the card for seconds after a shot
+                                           (owner RAWB9: "no beat for 2212 / 7256 ms (state 1, phase 5)", the cans read
+                                           while the end-of-roll frame was saved); nothing of ours is on screen yet */
 #define TICK_MS         20
 #define PAL_PROBE_MS    100
 #define PAL_FORCE_MS    2000
@@ -991,6 +995,7 @@ int wfui_host_scr(void) { return scr; }
 const char *wfui_host_msg(void) { return msg && get_ms_clock() - msg_until < 0 ? msg : ""; }
 int wfui_host_edit(void) { return edit; }
 int wfui_host_phase(void) { return phase; }
+void wfui_host_beat(int ph, int ago_ms) { phase = ph; hb = get_ms_clock() - ago_ms; }   /* a UI task held up for ago_ms */
 #endif
 
 /* ------------------------------------------------------------------ 5D2: Canon's dialog under the browser */
@@ -1141,8 +1146,9 @@ void wf_ui_open_scr(int s)
 unsigned int wf_ui_key(unsigned int key)
 {
     if (st == ST_CLOSED || st == ST_CLOSING) return 1;
-    int idle = get_ms_clock() - hb;
-    if (idle > STALE_MS)                    /* the UI task has not run: Canon / ML get the keys, it closes later */
+    int idle = get_ms_clock() - hb, ph = phase;
+    int stale = st == ST_OPENING && (ph == PH_FONTS || ph == PH_CANS) ? STALE_PACK_MS : STALE_MS;
+    if (idle > stale)                       /* the UI task has not run: Canon / ML get the keys, it closes later */
     {
         close_req = 1;
         if (!stale_said)

@@ -127,18 +127,22 @@ int get_ms_clock(void) { return (int)(h_us() / 1000); }
 uint64_t get_us_clock(void) { return h_us(); }
 void msleep(int ms) { usleep(ms > 0 ? ms * 1000 : 1000); }
 
-struct h_task { void (*entry)(void *); void *arg; };
+struct h_task { void (*entry)(void *); void *arg; int slot; };
+/* DryOS's task table: get_task_info_by_id answers 0 for h_tasks_live ids of task_max; h_task_fail = how many
+ * task_create("film_yuv") calls are refused with 5 (a full table, owner RAWB8 boots); h_task_slots >= 0: the table's
+ * free slots from now on, each new task holds one until it returns, none left = every task_create refused with 5 (owner
+ * RAWB9: "tasks 104 of 104", the UI task on the last one, "dark: no task (5)"); -1 = no limit */
+unsigned int task_max = 72;
+volatile int h_task_fail, h_tasks_live = 70, h_nsem, h_task_slots = -1, h_task_refused;
 static void *h_task_main(void *p)
 {
     struct h_task t = *(struct h_task *)p;
     free(p);
     t.entry(t.arg);
+    if (t.slot)
+        __sync_fetch_and_add(&h_task_slots, 1);
     return 0;
 }
-/* DryOS's task table: get_task_info_by_id answers 0 for h_tasks_live ids of task_max; h_task_fail = how many
- * task_create("film_yuv") calls are refused with 5 (a full table, owner RAWB8 boots) */
-unsigned int task_max = 72;
-volatile int h_task_fail, h_tasks_live = 70, h_nsem;
 int get_task_info_by_id(int a, int id, void *p) { (void)a; (void)p; return id >= 1 && id <= h_tasks_live ? 0 : 1; }
 int task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg)
 {
@@ -148,9 +152,19 @@ int task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, vo
         h_task_fail--;
         return 5;
     }
+    int slot = 0;
+    if (h_task_slots >= 0) {
+        if (__sync_fetch_and_add(&h_task_slots, -1) <= 0) {
+            __sync_fetch_and_add(&h_task_slots, 1);
+            h_task_refused++;
+            return 5;
+        }
+        slot = 1;
+    }
     struct h_task *t = malloc(sizeof *t);
     t->entry = (void (*)(void *))entry;
     t->arg = arg;
+    t->slot = slot;
     pthread_t th;
     pthread_attr_t at;
     pthread_attr_init(&at);
