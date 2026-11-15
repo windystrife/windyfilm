@@ -33,6 +33,7 @@ ALL="$ALL LOG:odd"                                 # file handles odd as often a
 ALL="$ALL ROLL:save ROLL:short ROLL:back ROLL:lock" # the roll file on RAWB8's card (odd handles, empty file)
 ALL="$ALL ROLL:dark ROLL:boot"                     # RAWB9: roll frames without the look, the Darkroom with a full task table
 ALL="$ALL FX:bloom"                                # RAWB11: Bloom on its own row (halation alone, bloom alone, the old config)
+ALL="$ALL MIST:levels"                             # owner 11-15: every Mist level, the combo with Bloom + Halation, the long shot line
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
 B=${OUT:-$R/build/$cam}
