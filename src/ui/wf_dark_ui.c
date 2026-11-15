@@ -654,6 +654,7 @@ static const char *phase_text(int ph)
     case WF_DP_EXPOSE: return "Exposing the paper";
     case WF_DP_FIX:    return "In the fixer";
     case WF_DP_DRY:    return "Washing and drying";
+    case WF_DP_MIX:    return "Mixing the chemistry";
     }
     return "";
 }
@@ -671,12 +672,14 @@ static void dr_right(const struct wf_dark_view *v, int now)
     int eta = wf_dark_eta_s(v);
     if (v->state == WF_DR_RUN || v->state == WF_DR_STOPPING)
     {
-        snprintf(b, sizeof b, "Frame %d of %d", v->frame + 1, r->nshot);
+        if (v->frame < 0) snprintf(b, sizeof b, "Getting ready");   /* the look's effects first (WF_DP_MIX) */
+        else snprintf(b, sizeof b, "Frame %d of %d", v->frame + 1, r->nshot);
         text_c(F_15, cx, 172, b, C_AMBER);
         dr_dial(cx, 250, 58, v->t_frame, v->prog, 1);
         text_c(F_15, cx, 318, v->state == WF_DR_STOPPING ? "Stopping after this step" : phase_text(v->phase), C_TXT);
-        int m = (eta + 59) / 60;
-        if (left - 1 > 0) snprintf(b, sizeof b, "%d to go - about %d min", left - 1, m < 1 ? 1 : m);
+        int m = (eta + 59) / 60, togo = v->frame < 0 ? left : left - 1;   /* getting ready: no frame in work yet */
+        if (v->frame < 0) snprintf(b, sizeof b, "%d to develop - about %d min", togo, m < 1 ? 1 : m);
+        else if (togo > 0) snprintf(b, sizeof b, "%d to go - about %d min", togo, m < 1 ? 1 : m);
         else snprintf(b, sizeof b, "Last frame - about %d min", m < 1 ? 1 : m);
         text_c(F_13, cx, 340, b, C_TXT2);
         wfg_rrect(cx - 100, 362, cx + 100, 365, 2, C_TRACK, -1, 0);
