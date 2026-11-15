@@ -448,7 +448,8 @@ static __attribute__((noinline)) uint32_t hot_pair(const mist_ctx *g, uint32_t w
        dark / bright edge pair's chroma by ~ slope ratio / 4 (a green line round every sky gap). Glow chroma: output codes. */
     int yr = Y0 > Y1 ? Y0 : Y1;
     int32_t c = (int32_t)g->oc[yr], rdi = (int32_t)g->rd[yr], rdo = (int32_t)((g->rd[o0] + g->rd[o1]) >> 1);
-    int u = (int)(((int64_t)(U * c) * rdi + (int64_t)gu * rdo) >> 24), v = (int)(((int64_t)(V * c) * rdi + (int64_t)gv * rdo) >> 24);
+    int u = (int)(((int64_t)(U * c) * rdi + (int64_t)gu * rdo + (1 << 23)) >> 24);   /* rounded, as smulsh */
+    int v = (int)(((int64_t)(V * c) * rdi + (int64_t)gv * rdo + (1 << 23)) >> 24);
     u = u < -128 ? -128 : u > 127 ? 127 : u;
     v = v < -128 ? -128 : v > 127 ? 127 : v;
     return (uint32_t)(u & 255) | (uint32_t)o0 << 8 | (uint32_t)(v & 255) << 16 | (uint32_t)o1 << 24;
@@ -461,10 +462,13 @@ static inline int enc2(const uint8_t *e, uint32_t L)
     if (L < 1048576) return e[1024 + (L >> 9)];
     return 255;
 }
-static inline int32_t smulsh(int32_t a, int32_t b)   /* (a * b) >> 24, signed 64-bit product (SMULL) */
+/* (a * b + 2^23) >> 24: the signed 64-bit product, rounded (SMLAL onto 2^23). A plain >> 24 rounds down: U and V of every
+ * pixel lost up to a code (the dark of a frame -0.5 with white mist, -1.0 with black: a green cast in the shadows, found by
+ * MIST:levels 11-15) */
+static inline int32_t smulsh(int32_t a, int32_t b)
 {
-    int32_t lo, hi;
-    __asm__("smull %0, %1, %2, %3" : "=&r"(lo), "=&r"(hi) : "r"(a), "r"(b));
+    int32_t lo = 1 << 23, hi = 0;
+    __asm__("smlal %0, %1, %2, %3" : "+&r"(lo), "+&r"(hi) : "r"(a), "r"(b));
     return (int32_t)(((uint32_t)lo >> 24) | ((uint32_t)hi << 8));
 }
 
