@@ -124,7 +124,7 @@ static int gsel[WF_NGROUPS], gfirst[WF_NGROUPS];
 static int last_id;                     /* selection kept between opens */
 static int dirty;
 static uint32_t drawn_gen;
-/* the rows: WF_NROWS (9) do not fit above the tabs, so ROWS_VIS of them show at 19 px and the list scrolls with the
+/* the rows: WF_NROWS (10, Bloom since RAWB11) do not fit above the tabs, so ROWS_VIS of them show at 19 px and the list scrolls with the
    focus (the font keeps its size); rtop = the first row shown */
 #define ROWS_VIS 7
 static int rtop;

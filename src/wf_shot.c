@@ -125,7 +125,7 @@ int wf_look_now(struct wf_look *lk)
     lk->lei = (int8_t)wf_lut_ei_t();
     lk->incurve = (uint8_t)wf_incurve_t();
     lk->strength = s >= 0 && s < WF_NSTRENGTH ? s : 1;
-    lk->grain = (uint8_t)wf_grain; lk->halo = (uint8_t)wf_halo; lk->mist = (uint8_t)wf_mist;
+    lk->grain = (uint8_t)wf_grain; lk->halo = (uint8_t)wf_halo; lk->mist = (uint8_t)wf_mist; lk->bloom = (uint8_t)wf_bloom;
     lk->light = (uint8_t)wf_light;
     switch (out) {
     case WF_OUT_FILM:
@@ -1010,14 +1010,19 @@ static void wf_apt(char *o, int n, int *l, int ms)          /* tenths of a secon
     wf_ap(o, n, l, b);
 }
 
-/* "shot #3 Portra 400 WS: 16.4 s = look 4.6 + mist 9.2 + halation 1.8 + grain 0.6 (TOP 8.1, BOT 8.3) EV12" */
+/* "shot #3 Portra 400 WS: 16.4 s = look 4.6 + mist 9.2 + halation+bloom normal 1.8 + grain 0.6 (TOP 8.1, BOT 8.3) EV12";
+ * the halation stage is named by what ran in it: "halation", "bloom low", "halation+bloom strong" */
 static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const struct wf_look *lk, int st, int ev)
 {
     if (!WF_ST_TOUCHED(st)) {
         wf_exif_none();
         return;
     }
-    static const char *const en[3] = { " + mist ", " + halation ", " + grain " };
+    static const char *const bn[WF_BLOOM_MAX + 1] = { "", "bloom low", "bloom normal", "bloom strong" };
+    char hn[32];
+    int hb = lk->bloom <= WF_BLOOM_MAX ? lk->bloom : 0;
+    snprintf(hn, sizeof hn, " + %s%s%s ", lk->halo || !hb ? "halation" : "", lk->halo && hb ? "+" : "", bn[hb]);
+    const char *const en[3] = { " + mist ", hn, " + grain " };
     char line[WF_SHOT_LINE], title[48];
     int l = 0;
     char nb[16];
@@ -1057,7 +1062,7 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
     }
     wf_log("%s", line);
     int hr = a->hst == 1 && (!b || b->hst == 1), gr = a->gst == 1 && (!b || b->gst == 1), mr = a->mst == 1 && (!b || b->mst == 1);
-    wf_exif_shot(lk, gr ? lk->grain : 0, hr ? lk->halo : 0, mr ? lk->mist : 0, ev);
+    wf_exif_shot(lk, gr ? lk->grain : 0, hr ? lk->halo : 0, hr ? lk->bloom : 0, mr ? lk->mist : 0, ev);
 }
 
 static void wf_shot_note(const struct wf_ev *e)

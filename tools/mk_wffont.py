@@ -19,8 +19,8 @@ WFFONTS.DAT v1 (little endian, own format):
   bitmaps       rows top to bottom, MSB first, rows padded to whole bytes
 Pen positions are 26.6 fixed point; a glyph is drawn at ((pen + 32) >> 6) + x, as PIL places mono glyphs.
 
---icons OUT.h  also writes the 9 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
-               as the mockup's icon() (Light, Print, Grain, Halation, Mist, Strength, Highlights, Shadows, Film LUT).
+--icons OUT.h  also writes the 10 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
+               as the mockup's icon() (Light, Print, Grain, Halation, Bloom, Mist, Strength, Highlights, Shadows, Film LUT).
 --check        renders sample strings with the pack's own algorithm and compares them with PIL (pixel mismatches).
 --render DIR   writes a PNG sample sheet of the three fonts.
 Deterministic: same inputs, same bytes."""
@@ -216,7 +216,7 @@ def check(fonts):
 
 
 # ------------------------------------------------------------------ row icons (mockup.py icon(), our own drawing)
-ICONS = ('Light', 'Print', 'Grain', 'Halation', 'Mist', 'Strength', 'Highlights', 'Shadows', 'Film LUT')
+ICONS = ('Light', 'Print', 'Grain', 'Halation', 'Bloom', 'Mist', 'Strength', 'Highlights', 'Shadows', 'Film LUT')
 
 
 def icon_img(k):
@@ -240,6 +240,12 @@ def icon_img(k):
     elif k == 'Halation':
         d.ellipse([x + 1, y + 1, x + 14, y + 14], outline=col)
         d.ellipse([x + 5, y + 5, x + 10, y + 10], fill=col)
+    elif k == 'Bloom':                             # a light in a soft glow: a solid core, then a dither thinning outwards
+        for yy in range(16):
+            for xx in range(16):
+                r2 = (xx - 7.5) ** 2 + (yy - 7.5) ** 2
+                if r2 <= 2.6 ** 2 or (r2 <= 4.9 ** 2 and (xx + yy) % 2 == 0) or (r2 <= 7.4 ** 2 and xx % 2 == 0 and yy % 2 == 0):
+                    d.point((x + xx, y + yy), fill=col)
     elif k == 'Mist':
         for yy in (4, 8, 12):
             d.arc([x + 1, y + yy - 3, x + 8, y + yy + 3], 200, 340, fill=col)

@@ -8,6 +8,8 @@
  *   SHOT [nocam|busy]  film / strength / print-less shots bit-exact vs wf_film_build + wf_film_words, B&W, identity, aspects
  *                      and gates (EOS M), Diana halves, Log 1..5, Log + LUT (+ .FRT cache, can), Off, preview, keys
  *   FX                 grain + halation through the shot: ready keys, glow round a light, grain texture, no memory, free
+ *   FX bloom           Bloom on its own row (RAWB11): halation alone, bloom alone, both, both off, levels, rows, EXIF text;
+ *                      WF_FX_DUMP=1 [WF_FX_UYVY=frame] also writes bloom_<level>.ppm (the harness strip)
  *   MIST               white / black mist: glow, veil, halves vs whole frame, seam
  *   EXIF               wf_ex_write on LE / BE files and odd files; the ring vs IMG_nnnn.JPG numbers (RAW-only gap, JPEG M)
  *   EXPSIM             dEV, smoothing, gain tables, ExpSim off / back / stuck, the display filter (EOS M; 5D2: stays off)
@@ -963,7 +965,8 @@ static void t_fx(void)
     /* no shoot memory for a new halation key: the shot goes without, then the retry */
     h_shoot_fail = 1;
     log_mark();
-    wf_halo = 1;
+    chk(wf_halo == 1 && wf_bloom == 2, "halation=bloom (before RAWB11) read as Film + Bloom Normal (%d, %d)", wf_halo, wf_bloom);
+    wf_bloom = 1;                                /* a new halation-stage key */
     chk(LOGW("fx halation: no memory", 20000), "no memory: %s", log_line("fx halation"));
     log_mark();
     shot(in, out, FW, FH);
@@ -975,8 +978,153 @@ static void t_fx(void)
     chk(LOGW(": film ", 5000) && fx_line_ok(log_line(": film "), " h", " g"), "halation back: %s", log_line(": film "));
     /* effects off: every block given back */
     wf_halo = 0;
+    wf_bloom = 0;
     wf_grain = 0;
     chk(WAIT(!wf_fx_hk && !wf_fx_gk && h_arena_live == 0, 20000), "effects off: shoot memory and heap blocks freed (%d live)", h_arena_live);
+    mod_deinit();
+}
+
+/* ------------------------------------------------------------------ FX:bloom */
+/* RAWB11 (owner 11-15): Bloom on its own row. Halation alone, bloom alone, both, both off: the keys, the ready line, the
+ * shot line, the EXIF text, the rows. Then the bloom strip with WF_FX_DUMP set: halation off, bloom Off / Low / Normal /
+ * Strong on one frame (WF_FX_UYVY = an FW x FH UYVY file, words {U s8, Y0, V s8, Y1}; else the disc), written as
+ * bloom_<level>.ppm at 1/2 size for the harness strip (tests/ui/bloom_strip.sh) */
+const char *wf_exif_text(const struct wf_look *lk, int g, int h, int bl, int m, int ev, char *b, int bn);
+static void dump_half(const char *path, const uint32_t *p, int w, int h)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    int ow = w / 2, oh = h / 2;
+    fprintf(f, "P6\n%d %d\n255\n", ow, oh);
+    unsigned char *row = malloc((size_t)ow * 3);
+    for (int y = 0; row && y < oh; y++) {
+        for (int x = 0; x < ow; x++) {
+            uint32_t q = p[(size_t)y * 2 * (w / 2) + x];
+            int u = (int8_t)(q & 255), yy = (q >> 8) & 255, v = (int8_t)((q >> 16) & 255);
+            row[x * 3] = (unsigned char)clampi(yy + 1402 * v / 1000, 0, 255);
+            row[x * 3 + 1] = (unsigned char)clampi(yy - (344 * u + 714 * v) / 1000, 0, 255);
+            row[x * 3 + 2] = (unsigned char)clampi(yy + 1772 * u / 1000, 0, 255);
+        }
+        fwrite(row, 1, (size_t)ow * 3, f);
+    }
+    free(row);
+    fclose(f);
+}
+/* set halation / bloom, wait for the stage's key (or none), shoot the frame in `in`; the glow ring's mean dY (dV in *rv) */
+static double fx_bloom_shot(const char *what, int halo, int bloom, double *rv)
+{
+    log_mark();
+    wf_halo = halo;
+    wf_bloom = bloom;
+    int want = halo || bloom;
+    chk(WAIT(want ? wf_fx_hk && WF_FXK_HALO(wf_fx_hk) == halo && WF_FXK_BLOOM(wf_fx_hk) == bloom : !wf_fx_hk, 60000),
+        "%s: halation-stage key %x (halation %d, bloom %d)", what, wf_fx_hk, WF_FXK_HALO(wf_fx_hk), WF_FXK_BLOOM(wf_fx_hk));
+    shot(in, out, FW, FH);
+    chk(LOGW("shot #", 5000), "%s: %s", what, log_line("shot #"));
+    double ry = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'y', 0);
+    if (rv)
+        *rv = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'v', 0);
+    return ry;
+}
+static void t_fx_bloom(void)
+{
+    struct pk e[] = { { fC, 0, tab_make(0, 0, 0, 0) } };
+    pack_write(e, 1, 0);
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=halation\nbloom=off\nmist=off\n", wf_films[fC].id);
+    wf_fx_retry_ms = 500;
+    mod_init(1);
+    chk(wf_halo == 1 && wf_bloom == 0, "halation=halation + bloom=off: two settings (%d, %d)", wf_halo, wf_bloom);
+#ifndef WF_BUILD_5D2
+    h_prop_send(PROP_ASPECT, 0);
+#endif
+    disc_r = 60;
+    gen_frame(in, FW, FH, 1);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+    chk(WAIT(look_table_ready(), 10000), "table published");
+    chk(WAIT(wf_fx_hk != 0, 120000) && strstr(log_line("fx halation "), ", bloom off ready") && !strstr(log_line("fx halation "), "off ("),
+        "halation alone: ready line '%s'", log_line("fx halation "));
+    double rvh, rvb, rvhb, rv0;
+    double ryh = fx_bloom_shot("halation alone", 1, 0, &rvh);
+    const char *sl = log_line("shot #");
+    chk(strstr(sl, " + halation ") && !strstr(sl, "bloom") && fx_line_ok(log_line(": film "), " h", 0),
+        "halation alone: shot line '%s'", sl);
+    chk(rvh > 0.2 && ryh > 0.3, "halation alone: the red edge (dY %+.2f, dV %+.2f)", ryh, rvh);
+    chk(wf_fx_state(WF_FX_HAL) == WF_FXS_READY && wf_fx_state(WF_FX_BLM) == WF_FXS_OFF, "menu state: Halation ready, Bloom Off");
+
+    double ryb = fx_bloom_shot("bloom alone", 0, 2, &rvb);
+    sl = log_line("shot #");
+    chk(strstr(sl, " + bloom normal ") && !strstr(sl, "halation") && fx_line_ok(log_line(": film "), " h", 0),
+        "bloom alone: shot line '%s'", sl);
+    chk(strstr(log_line("fx halation "), "fx halation off (") && strstr(log_line("fx halation "), ", bloom normal ready"),
+        "bloom alone: ready line '%s'", log_line("fx halation "));
+    chk(ryb > 0.3 && fabs(rvb) < rvh / 2, "bloom alone: a glow in the light's own colour (dY %+.2f, dV %+.2f; halation dV %+.2f)",
+        ryb, rvb, rvh);
+    chk(wf_fx_state(WF_FX_HAL) == WF_FXS_OFF && wf_fx_state(WF_FX_BLM) == WF_FXS_READY, "menu state: Halation Off, Bloom ready");
+
+    double ryhb = fx_bloom_shot("halation + bloom", 1, 2, &rvhb);
+    sl = log_line("shot #");
+    chk(strstr(sl, " + halation+bloom normal ") != 0, "both: shot line '%s'", sl);
+    chk(ryhb > ryh && ryhb > ryb && rvhb > rvb, "both: more than either alone (dY %+.2f vs %+.2f / %+.2f, dV %+.2f)", ryhb, ryh,
+        ryb, rvhb);
+
+    double ry1 = fx_bloom_shot("bloom low", 0, 1, 0), ry3 = fx_bloom_shot("bloom strong", 0, 3, 0);
+    chk(ry1 > 0.1 && ry1 < ryb && ryb < ry3, "bloom levels rise: low %+.2f < normal %+.2f < strong %+.2f", ry1, ryb, ry3);
+    chk(strstr(log_line("shot #"), " + bloom strong ") != 0, "strong: shot line '%s'", log_line("shot #"));
+
+    double ry0 = fx_bloom_shot("both off", 0, 0, &rv0);
+    sl = log_line("shot #");
+    chk(!strstr(sl, "halation") && !strstr(sl, "bloom") && !strstr(log_line(": film "), " h"),
+        "both off: no halation stage ('%s' | '%s')", sl, log_line(": film "));
+    chk(fabs(ry0) < 0.3 && fabs(rv0) < 0.3, "both off: no glow (dY %+.2f, dV %+.2f)", ry0, rv0);
+    chk(WAIT(!wf_fx_hk && h_arena_live == 0, 20000), "both off: the stage's memory given back (%d live)", h_arena_live);
+
+    /* the rows: Bloom right after Halation, the same availability, steps independently, wraps */
+    wf_halo = 2;
+    wf_bloom = 3;
+    chk(!strcmp(wf_row_name(WF_ROW_BLOOM), "Bloom") && WF_ROW_BLOOM == WF_ROW_HALO + 1 && !strcmp(wf_row_text(WF_ROW_BLOOM), "Strong")
+        && !strcmp(wf_row_text(WF_ROW_HALO), "Spektra"), "rows: '%s' = '%s', Halation '%s'", wf_row_name(WF_ROW_BLOOM),
+        wf_row_text(WF_ROW_BLOOM), wf_row_text(WF_ROW_HALO));
+    chk(wf_row_avail(WF_ROW_BLOOM) == wf_row_avail(WF_ROW_HALO) && wf_row_avail(WF_ROW_BLOOM) == 1, "Bloom available like Halation");
+    wf_row_step(WF_ROW_BLOOM, 1);
+    chk(wf_bloom == 0 && wf_halo == 2, "Bloom Strong + 1 wraps to Off, Halation untouched (%d, %d)", wf_bloom, wf_halo);
+    wf_row_step(WF_ROW_HALO, 1);
+    chk(wf_halo == 0 && wf_bloom == 0, "Halation Spektra + 1 wraps to Off (%d, %d)", wf_halo, wf_bloom);
+#ifndef WF_BUILD_5D2
+    h_prop_send(PROP_ASPECT, 1);
+    chk(WAIT(!wf_row_avail(WF_ROW_BLOOM), 2000) && !wf_row_avail(WF_ROW_HALO), "1:1 aspect: Bloom greyed like Halation");
+    h_prop_send(PROP_ASPECT, 0);
+#endif
+
+    /* the EXIF / print text names each part */
+    struct wf_look lk;
+    char tb[200];
+    wf_look_now(&lk);
+    const char *t = wf_exif_text(&lk, 0, 1, 2, 0, WF_EV_NONE, tb, sizeof tb);
+    chk(strstr(t, " | Halation Film | Bloom Normal") != 0, "EXIF text, both: '%s'", t);
+    t = wf_exif_text(&lk, 0, 0, 1, 0, WF_EV_NONE, tb, sizeof tb);
+    chk(strstr(t, " | Bloom Low") && !strstr(t, "Halation"), "EXIF text, bloom alone: '%s'", t);
+    t = wf_exif_text(&lk, 0, 2, 0, 0, WF_EV_NONE, tb, sizeof tb);
+    chk(strstr(t, " | Halation Spektra") && !strstr(t, "Bloom"), "EXIF text, halation alone: '%s'", t);
+
+    /* the bloom strip (harness only): halation off, each bloom level on one frame */
+    if (getenv("WF_FX_DUMP")) {
+        const char *src = getenv("WF_FX_UYVY");
+        long n = 0;
+        char *b = src ? get_file(src, &n) : 0;
+        if (b && n == (long)NW * 4)
+            memcpy(in, b, NW * 4);
+        free(b);
+        printf("bloom strip on %s\n", b && n == (long)NW * 4 ? src : "the disc frame");
+        for (int lv = 0; lv <= WF_BLOOM_MAX; lv++) {
+            char pth[32];
+            fx_bloom_shot("strip", 0, lv, 0);
+            printf("  %s\n", log_line("shot #"));
+            snprintf(pth, sizeof pth, "bloom_%d.ppm", lv);
+            dump_half(pth, out, FW, FH);
+        }
+    }
     mod_deinit();
 }
 
@@ -1303,9 +1451,9 @@ static void t_cfg(void)
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
     chk(wf_incurve == WF_INC_FILM1 && wf_incurve_t() == (wf_ll_curve_have(WF_INC_FILM1) ? WF_INC_FILM1 : WF_INC_SRGB),
         "incurve %d (in use %d)", wf_incurve, wf_incurve_t());
-    chk(wf_print == 1 && wf_light == 3 && wf_strength == 2 && wf_grain == 1 && wf_halo == 4 && wf_mist == 7 && wf_pv_mode == 2,
-        "print %d light %d strength %d grain %d halation %d mist %d preview %d", wf_print, wf_light, wf_strength, wf_grain, wf_halo,
-        wf_mist, wf_pv_mode);
+    chk(wf_print == 1 && wf_light == 3 && wf_strength == 2 && wf_grain == 1 && wf_halo == 2 && wf_bloom == 2 && wf_mist == 7
+        && wf_pv_mode == 2, "print %d light %d strength %d grain %d halation %d bloom %d mist %d preview %d", wf_print, wf_light,
+        wf_strength, wf_grain, wf_halo, wf_bloom, wf_mist, wf_pv_mode);
     chk(wf_hl == 3 && wf_sh == -2, "hl %d sh %d", wf_hl, wf_sh);
     chk(wf_exp_mode == (WF_EXP_CAN ? WF_EXP_SMOOTH : WF_EXP_CANON) && wf_exp_trim == -5 && wf_exif_off == 1,
         "exposure %d exptrim %d exif off %d", wf_exp_mode, wf_exp_trim, wf_exif_off);
@@ -1318,8 +1466,8 @@ static void t_cfg(void)
     char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
-             "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=%s\nexptrim=-5\nexif=off\n"
-             "blind=off\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
+             "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spk\nbloom=normal\nmist=b2\npreview=fast\nexposure=%s\nexptrim=-5\n"
+             "exif=off\nblind=off\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
     free(b);
     /* Canon busy with a shot: the save waits (a create then could leave two WINDYFLM.CFG entries), then follows */
@@ -1362,6 +1510,21 @@ static void t_cfg(void)
     put_cfg("film=0\n");
     wf_cfg_load();
     chk(wf_film_id == 0, "film=0 (none) read");
+    /* RAWB11: Bloom split from Halation. An old file's halation word carries its bloom; a bloom= line wins */
+    static const struct { const char *cfg; int h, b; } mig[] = {
+        { "halation=bloom\n", 1, 2 },            { "halation=spkbloom\n", 2, 2 },        { "halation=halation\n", 1, 0 },
+        { "halation=spk\n", 2, 0 },              { "halation=off\n", 0, 0 },             { "bloom=low\nhalation=spkbloom\n", 2, 1 },
+        { "halation=halation\nbloom=strong\n", 1, 3 }, { "halation=off\nbloom=normal\n", 0, 2 },
+    };
+    for (int i = 0; i < (int)(sizeof mig / sizeof *mig); i++) {
+        put_cfg("%s", mig[i].cfg);
+        wf_cfg_load();
+        chk(wf_halo == mig[i].h && wf_bloom == mig[i].b, "config '%.*s': halation %d bloom %d (want %d %d)",
+            (int)strlen(mig[i].cfg) - 1, mig[i].cfg, wf_halo, wf_bloom, mig[i].h, mig[i].b);
+    }
+    put_cfg("halation=bogus\nbloom=bogus\n");
+    wf_cfg_load();
+    chk(wf_halo == WF_HALO_DEF && wf_bloom == WF_BLOOM_DEF, "unknown words: the defaults (%d %d)", wf_halo, wf_bloom);
     wf_row_step(WF_ROW_GRAIN, -1);
     h_nchanges = 0;
     mod_deinit();
@@ -3958,7 +4121,7 @@ int main(int argc, char **argv)
     if (!in || !out || !ref || !out2) { fprintf(stderr, "no memory for the frames\n"); return 3; }
     pick_films();
     if (!strcmp(mode, "SHOT")) t_shot(cs);
-    else if (!strcmp(mode, "FX")) t_fx();
+    else if (!strcmp(mode, "FX")) { if (!strcmp(cs, "bloom")) t_fx_bloom(); else t_fx(); }
     else if (!strcmp(mode, "MIST")) t_mist();
     else if (!strcmp(mode, "EXIF")) t_exif();
     else if (!strcmp(mode, "EXPSIM")) t_expsim();

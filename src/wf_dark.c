@@ -69,7 +69,7 @@ extern int  GetBatteryLevel(void);
 int  wf_card_nums(int *folder, int *file);       /* Canon's DCIM folder / last file number, 0 = ok */
 const char *wf_dcim_dir(void);                   /* get_dcim_dir() */
 const char *wf_file_prefix(void);                /* get_file_prefix() */
-const char *wf_exif_text(const struct wf_look *lk, int g, int h, int m, int ev, char *b, int n);
+const char *wf_exif_text(const struct wf_look *lk, int g, int h, int bl, int m, int ev, char *b, int n);
 
 /* ================================================================== the roll (wf_task) */
 static struct wf_roll roll;
@@ -891,7 +891,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
 
     /* 4. dry: the print (Canon's APP1 + our comment), written in chunks; the final thumbnail from the same bands */
     dk_phase(WF_DP_DRY, 800);
-    snprintf(t2, sizeof t2, "%s", wf_exif_text(lk, lk->grain, lk->halo, lk->mist, WF_EV_NONE, txt, sizeof txt));
+    snprintf(t2, sizeof t2, "%s", wf_exif_text(lk, lk->grain, lk->halo, lk->bloom, lk->mist, WF_EV_NONE, txt, sizeof txt));
     const char *body = t2;
     static const char pre[] = "WindyFilm: ";
     int pk = 0;
@@ -969,8 +969,9 @@ static void dk_hang(int i)
  * camera has no memory for stays out of the prints; the log line says what is in ("-" = wanted, not ready). */
 static void dk_look(const struct wf_look *lk)
 {
+    static const char *const bn[WF_BLOOM_MAX + 1] = { "", "bloom low", "bloom normal", "bloom strong" };
     int t0 = get_ms_clock(), hk = 0, gk = 0, mk = 0, n = 0;
-    char b[80];
+    char b[96];
     dv.frame = -1;
     dk_phase(WF_DP_MIX, 0);
     wf_ws_poll();                                /* the look's film table (a pack read) */
@@ -982,8 +983,9 @@ static void dk_look(const struct wf_look *lk)
     b[0] = 0;
     if (lk->output == WF_OUT_FILM)
         n += snprintf(b + n, sizeof b - n, wf_ws_table(lk->row, lk->variant) ? ", film table" : ", film table -");
-    if (hk && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, wf_fx_hk == hk ? ", halation" : ", halation -");
+    if (hk && n < (int)sizeof b)                 /* the halation stage: what runs in it ("halation + bloom normal") */
+        n += snprintf(b + n, sizeof b - n, ", %s%s%s%s", WF_FXK_HALO(hk) ? "halation" : "",
+                      WF_FXK_HALO(hk) && WF_FXK_BLOOM(hk) ? " + " : "", bn[WF_FXK_BLOOM(hk)], wf_fx_hk == hk ? "" : " -");
     if (gk && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, wf_fx_gk == gk ? ", grain" : ", grain -");
     if (mk && n < (int)sizeof b)
