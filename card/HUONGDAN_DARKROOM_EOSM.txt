@@ -11,6 +11,8 @@ Thay đổi 15/11 (sau log RAWB9):
   Bấm SET: màn hình "Getting ready / Mixing the chemistry" vài giây (dựng bảng phim,
   halation, grain) rồi mới tới kiểu 1.
 - Lúc có cuộn, module không dựng bảng LUT / grain / halation nữa: bật máy là cuộn hiện ngay.
+- (15/11 tối) Cuộn bằng lon Film stage (âm bản x print stock) và 7 hàng knob: mục 4
+  "CUỘN PHIM FILM STAGE", thử ở 5s.
 
 Ý tưởng: chụp một cuộn phim (3 / 6 / 12 / 24 / 36 kiểu RAW + L, không xem lại ảnh), rồi
 "tráng" cả cuộn trong máy: Darkroom đọc từng file CR2 trên thẻ, develop bằng RAW
@@ -41,7 +43,9 @@ bộ code Darkroom là code mới của WindyFilm (không dùng code Film Roll).
 2. NẠP CUỘN PHIM
 ----------------
 Menu ML: Shoot > WindyFilm > "Film roll" -> màn hình chọn cuộn:
-- Q (hoặc chạm 1 ngón): đổi kệ Colour / Slide / B&W / Cine / LUT.
+- Q (hoặc chạm 1 ngón): đổi kệ Colour / Slide / B&W / Cine / LUT. 44 lon Film stage
+  (G00..G44, âm bản điện ảnh x print stock, README mục 6) nằm cuối kệ Colour; chip
+  PROCESS của chúng vẫn ghi C-41 (chưa sửa; phim thật là ECN-2).
 - Trái / phải hoặc xoay bánh xe: chọn hộp phim.
 - Lên / xuống (hoặc INFO): 3 / 6 / 12 / 24 / 36 kiểu (mặc định 24; 3 và 6 để thử nhanh).
 - SET: nạp cuộn: chạy hoạt ảnh nạp phim giống lúc nạp phim trong browser ("Loading the
@@ -144,6 +148,19 @@ VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như
 - Chỉ có chữ, không logo. Thiếu file ML/DATA/WFPRINT.DAT thì vẫn in viền nhưng không
   có chữ (log ghi "WFPRINT.DAT missing").
 
+CUỘN PHIM FILM STAGE (15/11)
+- Cuộn nạp bằng lon Film stage được in bằng đúng bảng âm bản x print stock, cùng các
+  hàng Print stock, 7 hàng knob (Film exp, Push / pull, Exp comp, Printer R / G / B,
+  Interlayer), Gauge, Grain, Halation, Bloom như khi chụp thường (README mục 6).
+- Bản in dùng các hàng đang đặt LÚC BẤM SET trong Darkroom, không phải lúc chụp. Muốn
+  so với ảnh chụp thường thì đừng đổi các hàng đó giữa lúc chụp và lúc tráng.
+- Print stock để mặc định (Scan) thì lon Film stage in bằng 2302: bản in ĐEN TRẮNG.
+- Knob khác mặc định: lúc "Mixing the chemistry" máy dựng bảng từ ML/DATA/WFSTAGE.DAT
+  (đọc khoảng 650 KB, cần khoảng 470 KB bộ nhớ tạm, trước khi Darkroom lấy các khối
+  lớn). Log: "stage G08 v4 composed NNms k..." rồi "dark: look ready NNms: film
+  table, halation + bloom normal, grain". "film table -" (có dấu trừ) = bảng chưa
+  sẵn: cuộn in không có màu phim, ghi lại và gửi log.
+
 
 5. NHỮNG GÌ CẦN THỬ
 -------------------
@@ -191,6 +208,32 @@ q. (15/11) Viền + ngày: trong Darkroom đặt Frame White, Info On + roll, Da
    (so với lúc không viền).
 r. (15/11) Đặt lại Frame Off, Date Off: bản in phải như cũ (không viền, không ngày).
    Tắt máy bật lại: 3 dòng PRINT giữ giá trị đã đặt.
+s. (15/11) Cuộn Film stage có knob. Thẻ phải có ML/DATA/WFSTAGE.DAT; log lúc bật máy
+   có "stage ok: 699 of 699 pairs match the pack (44 negatives, 16 prints)".
+   1. Không có cuộn: trình chọn phim, nhóm Film stage, nạp G08 (Vision3 5219 500T).
+      Đặt Print stock 2383, Film exp +1, Printer R +4, Gauge 16 mm, Grain Normal,
+      Halation Wide, Bloom Normal. Chụp 1 tấm RAW+L một cảnh có đèn / điểm sáng: đây
+      là ẢNH CHỤP THƯỜNG để so. Log "stage G08 v4 composed NNms k...", EXIF có
+      "| Print Kodak Vision Color 2383 | ... | Film exp +1 | Printer R+4 G0 B0 | ...
+      | Gauge 16 mm".
+   2. Bật RAW develop On (để ảnh so cũng đi từ CR2). Chụp lại cảnh đó 1 tấm: chờ
+      "RAW develop n%" xong. Đây là ảnh so tốt nhất: cùng CR2-develop như Darkroom.
+   3. Màn hình chọn cuộn: kệ Colour, kéo tới cuối, chọn Vision3 5219 500T, 3 kiểu,
+      SET. Giữ nguyên RAW develop On và mọi hàng ở bước 1. Chụp 3 tấm cùng cảnh (bộ
+      đếm lên sau khoảng 30 s mỗi tấm, như mục g.).
+   4. Vào Darkroom, SET (KHÔNG đổi hàng nào trước đó). Log phải có:
+        stage G08 v4 composed NNms k...   (hoặc không có, nếu bảng đã dựng sẵn từ lúc chụp)
+        dark: look ready NNms: film table, halation + bloom normal, grain
+        mỗi kiểu một dòng "yuv DARK ..." có "G08 v4"
+      Không được có "film table -" hay "stage: no memory for a half".
+   5. So trên máy tính: bản in ROLLS/ROLL00n/F01_xxxx.JPG với JPG trong DCIM cùng số
+      IMG (ở chế độ RAW develop On + cuộn, JPG đó đã là bản develop có màu phim lúc
+      chụp). Phải giống nhau về màu, độ sáng, quầng sáng và cỡ hạt; chỉ khác vân hạt
+      (mỗi lần một khác) và nén JPEG. UserComment của bản in có đủ "Film exp +1",
+      "Printer R+4 G0 B0", "Gauge 16 mm" như EXIF của JPG lúc chụp.
+      So thêm với tấm ở bước 1 (đi từ JPEG 8-bit của Canon): màu gần giống, bản in có
+      nhiều chi tiết vùng sáng hơn; khác nhiều về màu thì ghi lại.
+   6. Ghi lại thời gian mỗi kiểu (so với cuộn phim thường ở n.).
 
 
 6. GỬI LẠI
