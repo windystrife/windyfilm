@@ -434,14 +434,33 @@ assert len(GX_NAMES) == 45, len(GX_NAMES)
 for _n in range(GX_NEG_N):                             # the strip labels first: derive() reads SHORT when the row is made
     if _n not in GX_ALIAS:
         SHORT[89 + _n] = GX_NAMES[_n if _n < 45 else 44][1]
+def gx_speed(official):
+    """(box speed, Light "Day" kelvin) of a chain stock from its official name: the last "<speed>D" / "<speed>T" in it
+    (a stock's published rating; "F-125T" counts). Tungsten-balanced stocks get 3200 K, so Light Day sets the camera to
+    the stock's own balance (daylight turns blue, as unfiltered tungsten film; Light Auto keeps the user's white balance
+    for an 85-filter look). The one name without a rating is Double-X 5222: EI 250 daylight (200 tungsten)."""
+    import re
+    m = re.findall(r"(\d+)([DT])\b", official)
+    if not m:
+        assert "Double-X" in official, official
+        return 250, 5200
+    return int(m[-1][0]), 3200 if m[-1][1] == "T" else 5200
+
+
+def iso_code(iso):
+    """Canon's ISO code (100 = 72, 8 per stop), held inside the camera's 100..3200 like the other rows."""
+    return max(72, min(112, int(round(72 + 8 * math.log2(iso / 100.0)))))
+
+
 for _n in range(GX_NEG_N):
     if _n in GX_ALIAS:
         continue
     _disp, _short, _official = GX_NAMES[_n if _n < 45 else 44]
+    _iso, _kel = gx_speed(_official)
     _pr = tuple("p%02d" % _p for _p in range(GX_PRINT_N) if (_n, _p) not in GX_SKIP)
     if not _pr:
         continue
-    FILMS.append(F(89 + _n, "G%02d" % _n, _disp, "neg", 100, 72, 5200, 0, "cine", 59 + _n,
+    FILMS.append(F(89 + _n, "G%02d" % _n, _disp, "neg", _iso, iso_code(_iso), _kel, 0, "cine", 59 + _n,
                    ("Neg 400", 256), ("neg", 256), _official,
                    "Print stock row picks the print.", ready=True, table="G%02d" % _n, spk=("spk_c", 256),
                    derived=True, prints=_pr,
