@@ -619,6 +619,20 @@ int wf_dark_src(int output, int flut)
          : output != WF_OUT_LLUT ? 0 : WF_FLUT_DISP(flut) ? WF_DEV_DISP : WF_DEV_CUBE;
 }
 
+/* a chain film's log table from WFLOG.DAT for this run (option (c), wf_rawb.h): 1 = M.tabs built (a WF_DEV_CUBE develop,
+ * the look stage then adds the effects only: frame devd 2), 0 = the 8-bit chain (the failure is logged and marked) */
+static int dk_lgk;
+static int dk_logpk(const struct wf_look *lk, struct wf_dev_tabs *t)
+{
+    struct wf_dev_pkinfo pi;
+    int ms;
+    dk_lgk = wf_rawb_logpk_build(t, lk, &ms, &pi) == WF_LL_OK;
+    if (dk_lgk)
+        wf_log("dark: tables log pack %s v%d c%d %dms (offset %d, %d entries, sum %x)", wf_films[lk->row].code,
+               lk->variant, pi.curve, ms, (int)pi.off, pi.count, (unsigned)pi.sum);
+    return dk_lgk;
+}
+
 static struct wf_cr2_dec dk_dec;
 static struct wf_cr2_info dk_inf;
 static uint32_t dk_jpe[1024] __attribute__((aligned(8)));   /* struct wf_jpe (wf_jpe_bytes() <= 4096) */
@@ -966,7 +980,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     fr.fmt = WF_FMT_UYVY8;
     fr.part = WF_PART_FULL;
     fr.aspect = 0;
-    fr.devd = 1;
+    fr.devd = dk_lgk ? 2 : 1;                    /* 2: a chain film's log table, the look stage adds the effects only */
     fr.w = fr.fw = DK_W;
     fr.h = fr.fh = DK_H;
     fr.pitch = DK_W * 2;
@@ -1138,12 +1152,18 @@ static void dk_task(void)
         paused = 1;
     }
     powersave_prohibit();
-    int src = wf_dark_src(lk.output, lk.flut);
+    int src = wf_dark_src(lk.output, lk.flut), lgw = wf_rawb_logpk(&lk);
+    dk_lgk = 0;
     if (!src) {
         end_why = "no look (output Off)";
     } else if (dk_alloc((int)DK_RAW_N + 4096, DK_W * DK_H * 2) != 0) {
         end_why = "no memory";
+    } else if (lgw == WF_RLG_OK && dk_logpk(&lk, M.tabs)) {
+        src = WF_DEV_CUBE;                       /* the chain film's whole look is in these tables */
     } else {
+        if ((lgw = wf_rawb_logpk(&lk)) != WF_RLG_NOTCHAIN)
+            wf_log("dark: chain film %s v%d on the 8-bit chain (%s)", wf_films[lk.row].code, lk.variant,
+                   wf_rawb_logpk_why(lgw));
         char cn[WF_LL_NAME];
         const char *cube = 0;
         struct wf_ll_info li;

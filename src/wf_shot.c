@@ -995,8 +995,8 @@ static int wf_rawb_run(struct wf_frame *f, int bot, struct wf_look *lk, int *llu
     }
     wf_rb_res = 1;
     switch (lk->output) {
-    case WF_OUT_FILM:
-        wf_colour_fx(f, bot, lk, wf_film_words, 0);
+    case WF_OUT_FILM:                            /* 2: a chain film's log table, the look is in the develop already */
+        wf_colour_fx(f, bot, lk, r == 2 ? wf_nop_words : wf_film_words, 0);
         *st = WF_ST_FILM;
         break;
     case WF_OUT_LLUT:
@@ -1023,10 +1023,10 @@ static int wf_dispatch(struct wf_frame *f, int bot, struct wf_look *lk, int *llu
             return WF_ST_NOSTAGE;
         wf_rb_res = 1;
         switch (lk->output) {
-        case WF_OUT_FILM:
+        case WF_OUT_FILM:                        /* devd 2: a chain film's log table, the look is in the develop */
             if (!wf_ws_shot(f->part, bot, lk->row, lk->variant, lk->stk, lk->ftflags))
                 return WF_ST_NOTAB;
-            wf_colour_fx(f, bot, lk, wf_film_words, 0);
+            wf_colour_fx(f, bot, lk, f->devd == 2 ? wf_nop_words : wf_film_words, 0);
             return WF_ST_FILM;
         case WF_OUT_LLUT:
             *llut = lk->flut;                    /* the darkroom's develop tables hold the cube */

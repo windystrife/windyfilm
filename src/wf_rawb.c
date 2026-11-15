@@ -85,11 +85,62 @@ static const char *const rb_whyname[WF_RBW_N] = { "ok", "notab", "buf", "prep", 
                                                    "TOP half not developed", "raw changed since the TOP half" };
 static const char *const rb_skipname[WF_RBS_N] = { "", "quality", "aspect", "drive", "noaddr" };
 
+/* ------------------------------------------------------------------ chain films' log pack (option (c), wf_rawb.h) */
+#define RB_LG_PACK  "ML/DATA/WFLOG.DAT"
+#define RB_LG_ID0   89                           /* the chain rows' first id: 89 + negative (films/catalog.py) */
+#define RB_LG_NNEG  64
+#define RB_K_LG     5                            /* rb_key type of a log pack build (1..4: the others) */
+static uint16_t rb_lg_no[RB_LG_NNEG];            /* bit (variant - WF_PRINT_STOCK0): this pair did not build from the
+                                                    pack (not listed, bad table): the 8-bit chain until the next boot */
+static int rb_lg_none;                           /* the pack is missing or not a pack: all chain films, until next boot */
+static const char *const rb_lgname[WF_RLG_N] = { "log pack", "not a chain print", "knob rows", "strength",
+                                                  "highlights / shadows", "no log pack", "not in the log pack" };
+
+int wf_rawb_logpk(const struct wf_look *lk)
+{
+    if (lk->output != WF_OUT_FILM || lk->row < 0 || lk->variant < WF_PRINT_STOCK0 || lk->variant >= WF_NPRINTS)
+        return WF_RLG_NOTCHAIN;
+    const struct wf_film *f = &wf_films[lk->row];
+    int n = f->id - RB_LG_ID0;
+    if (f->group != WF_GRP_STAGE || n < 0 || n >= RB_LG_NNEG)
+        return WF_RLG_NOTCHAIN;
+    if (lk->stk)                                 /* a composed film-stage table: only the 8-bit chain has it */
+        return WF_RLG_KNOBS;
+    if (lk->strength != 1)                       /* 30 / 125 %: wf_film_words' mix, 8-bit only */
+        return WF_RLG_STRENGTH;
+    if (lk->hl || lk->sh)
+        return WF_RLG_HS;
+    if (rb_lg_none)
+        return WF_RLG_NOPACK;
+    return rb_lg_no[n] >> (lk->variant - WF_PRINT_STOCK0) & 1 ? WF_RLG_NOENT : WF_RLG_OK;
+}
+
+const char *wf_rawb_logpk_why(int why) { return why >= 0 && why < WF_RLG_N ? rb_lgname[why] : "?"; }
+
+int wf_rawb_logpk_build(struct wf_dev_tabs *t, const struct wf_look *lk, int *ms, struct wf_dev_pkinfo *pi)
+{
+    const struct wf_film *f = &wf_films[lk->row];
+    struct wf_ll_info li;
+    int t0 = get_ms_clock();
+    int rc = wf_dev_build_pack(t, RB_CAM, RB_LG_PACK, f->id, lk->variant, f->code, 0, &li, pi);
+    *ms = get_ms_clock() - t0;
+    if (rc == WF_LL_E_OPEN || rc == WF_DEV_PK_E_FORMAT || rc == WF_DEV_PK_E_INDEX)
+        rb_lg_none = 1;                          /* no usable pack: never tried again this boot */
+    else if (rc)
+        rb_lg_no[f->id - RB_LG_ID0] |= (uint16_t)(1u << (lk->variant - WF_PRINT_STOCK0));
+    if (rc)
+        wf_log("rawb: log pack %s v%d: %s (%d), the 8-bit chain", f->code, lk->variant, wf_dev_pk_errstr(rc), rc);
+    return rc;
+}
+
 /* the tables a look needs: 0 = B cannot do it (Off) */
 static int rb_key(const struct wf_look *lk)
 {
     switch (lk->output) {
-    case WF_OUT_FILM: return 1;                                   /* the sRGB base develop, the film tables after */
+    case WF_OUT_FILM:                                             /* a chain film's log table (the whole look) */
+        if (wf_rawb_logpk(lk) == WF_RLG_OK)
+            return RB_K_LG | lk->row << 4 | lk->variant << 16;
+        return 1;                                                 /* the sRGB base develop, the film tables after */
     case WF_OUT_LOG:  return 2 | lk->curve << 4;                  /* the log code itself */
     case WF_OUT_LLUT:
         if (WF_FLUT_DISP(lk->flut))                               /* Leica Vivid: raw -> sRGB -> the display cube */
@@ -294,7 +345,7 @@ rows:;
     e->t_rows = get_ms_clock() - t3;
     e->h1 = rb_hash(raw, f->rpitch, f->ray1);
     e->why = WF_RBW_OK;
-    rc = ab ? -1 : 1;
+    rc = ab ? -1 : (key & 15) == RB_K_LG ? 2 : 1;
     if (top && !ab && e->h0 == e->h1) {          /* the BOT half may continue this develop */
         rb_top_raw = e->addr;
         rb_top_h = e->h1;
@@ -502,6 +553,23 @@ void wf_rawb_poll(void)
         return;
     }
     rb_nomem = 0;
+    if ((want & 15) == RB_K_LG) {                /* a chain film's log table from the pack: no parse, no .RBT */
+        struct wf_dev_pkinfo pi;
+        rb_rc = wf_rawb_logpk_build(rb_tabs, &lk, &rb_build_ms, &pi);
+        if (rb_rc == WF_LL_OK) {
+            /* the SD load time: open + header + index + the 215 KB table streamed through the node sampler */
+            wf_log("rawb: tables log pack %s v%d c%d %dms (offset %d, %d entries, sum %x, %d KB shoot memory)",
+                   wf_films[lk.row].code, lk.variant, pi.curve, rb_build_ms, (int)pi.off, pi.count, (unsigned)pi.sum,
+                   (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10));
+            WF_BARRIER();
+            rb_gen++;
+            rb_have = want;
+        } else {
+            rb_free();                           /* rb_key says 1 now: the next poll builds the 8-bit chain's base */
+        }
+        wf_gen_bump();
+        return;
+    }
     char cn[WF_LL_NAME];
     const char *cube = 0;
     int src = lk.output == WF_OUT_FILM ? WF_DEV_SRGB : lk.output == WF_OUT_LOG ? WF_DEV_LOG
@@ -570,6 +638,10 @@ void wf_rawb_poll(void)
                src == WF_DEV_SRGB ? "srgb" : src == WF_DEV_LOG ? "log" : src == WF_DEV_DISP ? "disp" : "cube",
                curve, cube ? " " : "", cube ? cube + 8 : "", rb_build_ms,
                (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10), rs);
+        int lw = src == WF_DEV_SRGB ? wf_rawb_logpk(&lk) : WF_RLG_NOTCHAIN;
+        if (lw != WF_RLG_NOTCHAIN)
+            wf_log("rawb: chain film %s v%d on the 8-bit chain (%s)", wf_films[lk.row].code, lk.variant,
+                   wf_rawb_logpk_why(lw));
         WF_BARRIER();
         rb_gen++;                                /* a TOP half of the old tables cannot be continued */
         rb_have = want;                          /* published last */
@@ -624,6 +696,14 @@ int  wf_rawb_holds(void) { return 0; }
 int  wf_rawb_rbt_key(const struct wf_look *lk, int src, const char *cube, char *path, uint32_t *key)
 {
     (void)lk; (void)src; (void)cube; (void)path; (void)key;
+    return -1;
+}
+int  wf_rawb_logpk(const struct wf_look *lk) { (void)lk; return WF_RLG_NOTCHAIN; }
+const char *wf_rawb_logpk_why(int why) { (void)why; return "no RAW develop"; }
+int  wf_rawb_logpk_build(struct wf_dev_tabs *t, const struct wf_look *lk, int *ms, struct wf_dev_pkinfo *pi)
+{
+    (void)t; (void)lk; (void)pi;
+    *ms = 0;
     return -1;
 }
 #endif

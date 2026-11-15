@@ -161,6 +161,11 @@ CUỘN PHIM FILM STAGE (15/11)
   lớn). Log: "stage G08 v4 composed NNms k..." rồi "dark: look ready NNms: film
   table, halation + bloom normal, grain". "film table -" (có dấu trừ) = bảng chưa
   sẵn: cuộn in không có màu phim, ghi lại và gửi log.
+- (15/11 tối) Knob mặc định, Strength 100 %, Highlights / Shadows 0: Darkroom develop
+  CR2 bằng bảng log S-Log3 của đúng cặp trong ML/DATA/WFLOG.DAT, như RAW develop khi
+  chụp (README mục 5). Log: "dark: tables log pack G08 v4 c1 NNms (...)". Khác mặc
+  định (hoặc thiếu WFLOG.DAT): đường 8-bit như trên, log "dark: chain film G08 v4 on
+  the 8-bit chain (...)".
 
 
 5. NHỮNG GÌ CẦN THỬ

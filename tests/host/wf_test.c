@@ -40,6 +40,9 @@
  *                      Canon's); Log and Log + LUT tables; playback / no memory / off give the memory back.
  *                      5D2: TOP + BOT halves from MEM1 + 0x76C8 (job handles), bit-exact; no match, raw changed between
  *                      the hooks, no live job, MEM1 past the pool, gates, half-shutter stop in the TOP.
+ *   RAWB chain         (EOS M) option (c): a chain film's RAW shot from its log table in WFLOG.DAT = the direct develop
+ *                      with that table (S-Log3, LUT EI 0, no auto exposure), bit-exact, no film table after it; strength
+ *                      30 %, a print the pack lacks and a bad pack keep the 8-bit chain bit-exact, the reason logged
  *   HS                 Highlights / Shadows: wf_hs_bend vs the formula (121 pairs), never down, 0 / 0 bit-identical to the
  *                      film builder before the feature (FNV), only N changes; rows, film shot + log + EXIF + preview; Log +
  *                      LUT bent after the load (.FRT unbent), an h / s change bends again without a load; flat Log / Off
@@ -3940,13 +3943,15 @@ static void rb_raw(uint8_t *raw, const uint32_t *src)
 static int rb_ref_hl, rb_ref_sh;                 /* WF_DEV_DISP: Highlights / Shadows of the reference */
 static int rb_ref_curve;                         /* WF_DEV_CUBE: the curve and cube of the reference, auto exposure on */
 static const char *rb_ref_cube;
+static int rb_ref_auto = 1;                      /* WF_DEV_CUBE: 0 = no auto exposure (a chain film's log table) */
 static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
 {
     static struct wf_dev_tabs T;
     struct wf_ll_info inf;
     int cu = src == WF_DEV_CUBE;
     int rc = src == WF_DEV_DISP ? wf_dev_build_disp(&T, WF_DEV_EOSM, "ML/DATA/LEICAVSR.CUB", 0, rb_ref_hl, rb_ref_sh, &inf)
-                                : wf_dev_build(&T, src, cu ? rb_ref_curve : 0, WF_DEV_EOSM, cu ? rb_ref_cube : 0, 0, cu, &inf);
+                                : wf_dev_build(&T, src, cu ? rb_ref_curve : 0, WF_DEV_EOSM, cu ? rb_ref_cube : 0, 0,
+                                               cu && rb_ref_auto, &inf);
     void *scr = memalign(32, wf_dev_scratch_bytes(FW, FH));
     struct wf_dev_job j;
     memset(&j, 0, sizeof j);
@@ -4408,6 +4413,179 @@ static void t_rawb(void)
     chk(WAIT(h_arena_live == live0, 3000), "off again: memory given back");
     mod_deinit();
     free(alt); free(rb_dev);
+}
+
+/* RAWB chain (option (c), wf_rawb.h): a chain film on RAW takes its pair's log table from ML/DATA/WFLOG.DAT. The whole look
+ * is in the develop (WF_DEV_CUBE on the pack's curve, LUT EI 0, no auto exposure, the shoulder on) and the stage after it
+ * adds the effects only: the shot = the direct develop with that table as a .cube, bit-exact. A print the pack lacks, a
+ * look the log table cannot express (strength here; knob rows and Highlights / Shadows take the same branch) and a bad
+ * pack keep the 8-bit chain: the sRGB base develop + the print's film table, bit-exact, with the reason in the log. */
+#define LG_TB (33 * 33 * 33 * 6)
+static void lg_write(const struct wf_film *f, int v, const uint8_t *t, int bad)
+{
+    static uint8_t b[512 + LG_TB];
+    memset(b, 0, 512);
+    memcpy(b, "WFLG", 4);
+    b[4] = 1; b[6] = 1;
+    le32(b + 8, 33); le32(b + 12, LG_TB); le32(b + 16, 32); le32(b + 20, 512);
+    b[28] = WF_LL_SLOG3; b[29] = 1;
+    uint8_t *x = b + 32;
+    x[0] = f->id; x[1] = (uint8_t)v;
+    strncpy((char *)x + 4, f->code, 8);
+    le32(x + 12, 512); le32(x + 16, LG_TB);
+    uint32_t a = 1, c = 0;
+    for (int i = 0; i < LG_TB; i++) { a = (a + t[i]) % 65521u; c = (c + a) % 65521u; }
+    le32(x + 20, c << 16 | a);
+    le32(b + 24, fnv(2166136261u, x, 24));
+    memcpy(b + 512, t, LG_TB);
+    if (bad == 'M') b[0] = 'X';
+    put_file("ML/DATA/WFLOG.DAT", b, sizeof b);
+}
+static void t_rawb_chain(void)
+{
+    if (!rb_map) rb_map = map_at(RB_Z, 0x8000000u - 4096);
+    rb_dev = malloc(NW * 4);
+    int kc = -1, v1 = -1, v2 = -1;
+    for (int k = 0; k < wf_nfilms && kc < 0; k++)
+        if (!(wf_films[k].flags & (WF_F_LUTCAN | WF_F_BW)) && wf_films[k].group == WF_GRP_STAGE
+            && (wf_films[k].prints >> WF_PRINT_STOCK0))
+            kc = k;
+    if (kc < 0) {
+        printf("  (no chain film in this catalogue: skipped)\n");
+        return;
+    }
+    const struct wf_film *f = &wf_films[kc];
+    chain_prints(kc, &v1, &v2);
+    chk(v1 >= 0 && v2 >= 0, "chain film %s: two prints (%d, %d)", f->code, v1, v2);
+    if (v2 < 0)
+        return;
+    gen_frame(in, FW, FH, 0);
+    rb_raw((uint8_t *)(uintptr_t)RB_A, in);
+    struct pk ec[] = { { kc, v1, tab_make(12, 0, 0, 0) }, { kc, v2, tab_make(-10, 0, 0, 0) } };
+    pack_write(ec, 2, 0);
+    /* (kc, v1)'s log table: a print-like S curve on the S-Log3 code with a warm tint; v2 is not in the pack */
+    uint8_t *t = malloc(LG_TB);
+    for (int b = 0, i = 0; b < 33; b++)
+        for (int g = 0; g < 33; g++)
+            for (int r = 0; r < 33; r++, i++) {
+                double x[3] = { r / 32.0, g / 32.0, b / 32.0 }, k3[3] = { 1.03, 1.0, 0.94 };
+                for (int c = 0; c < 3; c++) {
+                    double o = k3[c] / (1.0 + exp(-(x[c] - 0.42) * 9.0));
+                    int q = (int)lrint((o > 1 ? 1 : o) * 65535.0);
+                    t[6 * i + 2 * c] = (uint8_t)q;
+                    t[6 * i + 2 * c + 1] = (uint8_t)(q >> 8);
+                }
+            }
+    lg_write(f, v1, t, 0);
+    FILE *cf = fopen("ML/DATA/LGREF.CUB", "w");      /* the same table as a text cube: exact u16 values */
+    fprintf(cf, "TITLE \"log pack reference\"\nLUT_3D_SIZE 33\n");
+    for (int i = 0; i < 33 * 33 * 33; i++) {
+        const uint8_t *p = t + 6 * i;
+        fprintf(cf, "%.6f %.6f %.6f\n", (p[0] | p[1] << 8) / 65535.0, (p[2] | p[3] << 8) / 65535.0,
+                (p[4] | p[5] << 8) / 65535.0);
+    }
+    fclose(cf);
+    put_cfg("film=%d\noutput=film\nprint=scan\ngrain=off\nhalation=off\nmist=off\n", f->id);
+    mod_init(1);
+    h_prop_send(PROP_ASPECT, 0);
+    chk(WAIT(look_table_ready(), 10000), "chain film %s: its 8-bit table published", f->code);
+    usleep(300000);
+    int live0 = h_arena_live;
+    pic_quality = 0x3070000;                     /* RAW + L fine */
+    drive_mode = 0;
+    memset(h_pb, 0, sizeof h_pb);
+    memset(h_edmac, 0, sizeof h_edmac);
+    rb_point(RB_A, 0);
+    struct wf_look lk;
+    wf_look_now(&lk);
+    chk(lk.variant == v1 && wf_rawb_logpk(&lk) == WF_RLG_OK, "chain film on print %d: the log pack's path (%s)", lk.variant,
+        wf_rawb_logpk_why(wf_rawb_logpk(&lk)));
+    char want[96];
+
+    /* on: the pair's log table from the pack (the SD read + build logged), a shot = the direct develop with it */
+    log_mark();
+    wf_rawb = 1;
+    snprintf(want, sizeof want, "rawb: tables log pack %s v%d c1 ", f->code, v1);
+    chk(LOGW(want, 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 2000), "on: the log pack's tables ('%s')",
+        log_line("rawb: tables"));
+    log_mark();
+    int sb = shot(in, out, FW, FH);
+    rb_ref_curve = WF_LL_SLOG3;
+    rb_ref_cube = "ML/DATA/LGREF.CUB";
+    rb_ref_auto = 0;
+    rb_ref(ref, in, WF_DEV_CUBE, 1);
+    rb_ref_auto = 1;
+    rb_ref_cube = 0;
+    chk(sb == 0 && ndiff(out, ref, NW) == 0, "log pack shot: bit-exact vs the direct develop with its table as a .cube "
+        "(S-Log3, LUT EI 0, no auto exposure, shoulder on), no film table after it (%d words differ)", ndiff(out, ref, NW));
+    chk(LOGW("rawb: done rows 3456,", 5000) && strstr(log_line("rawb: black"), "roll 1"), "developed, shoulder on: '%s'",
+        log_line("rawb: black"));
+    chk(LOGW(": film ", 3000) && strstr(log_line(": film "), " raw"), "shot line marks the develop: '%s'", log_line(": film "));
+    memcpy(out2, out, NW * 4);
+
+    /* strength 30 %: the log table has no strength, the 8-bit chain does it (base develop + the print's table) */
+    log_mark();
+    wf_strength = 0;
+    snprintf(want, sizeof want, "rawb: chain film %s v%d on the 8-bit chain (strength)", f->code, v1);
+    chk(LOGW("rawb: tables srgb", 10000) && LOGW(want, 3000), "strength 30 %%: the 8-bit chain ('%s')",
+        log_line("rawb: chain film"));
+    chk(WAIT(wf_rawb_state() == WF_RB_READY && look_table_ready(), 10000), "strength 30 %%: tables ready");
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    rb_ref(rb_dev, in, WF_DEV_SRGB, 1);
+    memcpy(ref, rb_dev, NW * 4);
+    ref_film(ref, NW, tabs[kc][v1], flags_of(kc, 0));
+    chk(sb == 0 && ndiff(out, ref, NW) == 0, "strength 30 %%: bit-exact vs the base develop + the print's table at 30 %% "
+        "(%d words differ)", ndiff(out, ref, NW));
+    log_mark();
+    wf_strength = 1;
+    snprintf(want, sizeof want, "rawb: tables log pack %s v%d c1 ", f->code, v1);
+    chk(LOGW(want, 10000), "strength 100 %%: the log pack again ('%s')", log_line("rawb: tables"));
+
+    /* the second print is not in the pack: one line, then the 8-bit chain for that print */
+    log_mark();
+    chk(wf_row_step(WF_ROW_PRINT, 1), "print steps");
+    wf_look_now(&lk);
+    chk(lk.variant == v2, "the second print (%d, want %d)", lk.variant, v2);
+    snprintf(want, sizeof want, "rawb: log pack %s v%d: not in the pack", f->code, v2);
+    chk(LOGW(want, 10000) && LOGW("rawb: tables srgb", 10000) && LOGW("(not in the log pack)", 3000),
+        "a print the pack lacks: '%s', then the 8-bit chain", log_line("rawb: log pack"));
+    chk(WAIT(wf_rawb_state() == WF_RB_READY && look_table_ready(), 10000), "second print: tables ready");
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    memcpy(ref, rb_dev, NW * 4);
+    ref_film(ref, NW, tabs[kc][v2], flags_of(kc, 1));
+    chk(sb == 0 && ndiff(out, ref, NW) == 0, "second print: bit-exact vs the base develop + its table (%d words differ)",
+        ndiff(out, ref, NW));
+
+    /* back to the first print: the log pack again, the same frame */
+    log_mark();
+    chk(wf_row_step(WF_ROW_PRINT, -1), "print back");
+    snprintf(want, sizeof want, "rawb: tables log pack %s v%d c1 ", f->code, v1);
+    chk(LOGW(want, 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 2000), "first print: the log pack again");
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    chk(sb == 0 && ndiff(out, out2, NW) == 0, "first print: the log pack shot again, bit-exact (%d)", ndiff(out, out2, NW));
+
+    /* a bad pack (its magic): one line, every chain film on the 8-bit chain until the next boot */
+    wf_rawb = 0;
+    chk(WAIT(h_arena_live == live0, 3000) && wf_rawb_state() == WF_RB_OFF, "off: the tables' memory given back");
+    lg_write(f, v1, t, 'M');
+    log_mark();
+    wf_rawb = 1;
+    snprintf(want, sizeof want, "rawb: log pack %s v%d: not a log pack", f->code, v1);
+    chk(LOGW(want, 10000) && LOGW("rawb: tables srgb", 10000) && LOGW("(no log pack)", 3000),
+        "a bad pack: '%s', then the 8-bit chain", log_line("rawb: log pack"));
+    chk(WAIT(wf_rawb_state() == WF_RB_READY, 10000), "bad pack: tables ready");
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    memcpy(ref, rb_dev, NW * 4);
+    ref_film(ref, NW, tabs[kc][v1], flags_of(kc, 1));
+    chk(sb == 0 && ndiff(out, ref, NW) == 0, "bad pack: bit-exact vs the base develop + the print's table (%d)",
+        ndiff(out, ref, NW));
+    wf_rawb = 0;
+    mod_deinit();
+    free(t); free(rb_dev);
 }
 #else
 /* 5D2: RAW develop "B" over Canon's TOP + BOT halves. CR2 row 0 sits at MEM1 + 0x76C8 - pitch (MEM1 = R5_M1, named by the job
@@ -5724,6 +5902,9 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "PRINT:chain")) t_print_chain();
     else if (!strcmp(mode, "STAGE")) t_stage(cs);
     else if (!strcmp(mode, "LOG")) t_log(cs);
+#ifndef WF_BUILD_5D2
+    else if (!strcmp(mode, "RAWB") && !strcmp(cs, "chain")) t_rawb_chain();
+#endif
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();
     else if (!strcmp(mode, "ROLL")) t_roll(cs);

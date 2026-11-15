@@ -12,7 +12,10 @@ paper = <table>_P.T17. Placeholders and Film LUT cans have none.
                neutral U / V 0x00
 
 Entries are sorted by id, then variant. The module accepts an entry only when its id and code match the compiled
-catalogue. Checks on every table: 4913 words, top byte 0, neutral axis rising with Y, a B&W film's U / V bytes all 0x00.
+catalogue. A table that is byte-identical to an earlier entry's is stored once and the entries share its offset (the
+module reads each entry at its own offset, so nothing changes there): the chain's dye tables are identical for five
+print pairs (tools/check_print_slots.py), so 643 chain entries hold 428 distinct tables.
+Checks on every table: 4913 words, top byte 0, neutral axis rising with Y, a B&W film's U / V bytes all 0x00.
 A self-test re-reads the finished file with an independent parser and checks every checksum.
 TEST_SYNTH (--synth N): synthetic entries after the last id, each a copy of a ready film with its U lane shifted by
 1 + i (saturating), so a host test can prove which entry a shot used. --gaps: TEST_GAPS (see catalog.py rows()).
@@ -76,36 +79,44 @@ def main():
     n = len(ents)
     idx_off = 32
     data_off = idx_off + 24 * n
-    idx, data = b"", b""
+    idx, data, at = b"", [], {}
     for k, (i, v, fl, c, tb) in enumerate(ents):
-        idx += struct.pack("<BBBx8sIII", i, v, fl, c.encode().ljust(8, b"\0"), data_off + k * ENT, ENT, fnv(tb))
-        data += tb
+        if tb not in at:                             # an identical table is stored once, its entries share the offset
+            at[tb] = data_off + len(data) * ENT
+            data.append(tb)
+        idx += struct.pack("<BBBx8sIII", i, v, fl, c.encode().ljust(8, b"\0"), at[tb], ENT, fnv(tb))
     hdr = b"WFFT" + struct.pack("<HHIIIIII", 1, n, WORDS, ENT, idx_off, data_off, fnv(idx), 0)
     assert len(hdr) == 32 and len(idx) == 24 * n
-    blob = hdr + idx + data
-    assert len(blob) == 32 + 24 * n + ENT * n
+    blob = hdr + idx + b"".join(data)
+    assert len(blob) == 32 + 24 * n + ENT * len(data)
     open(out, "wb").write(blob)
     selftest(out, ents)
-    print("%s: %d entries (%d films), %d B, md5 %s" % (os.path.basename(out), n, len({e[0] for e in ents}), len(blob),
-                                                      hashlib.md5(blob).hexdigest()))
+    print("%s: %d entries (%d films), %d distinct tables, %d B, md5 %s" % (os.path.basename(out), n,
+          len({e[0] for e in ents}), len(data), len(blob), hashlib.md5(blob).hexdigest()))
 
 def selftest(path, ents):
     b = open(path, "rb").read()
     magic, ver, n, words, ent, io, do, ck, z = struct.unpack_from("<4sHHIIIIII", b, 0)
     assert magic == b"WFFT" and ver == 1 and n == len(ents) and words == WORDS and ent == ENT and io == 32 and z == 0
     assert do == 32 + 24 * n and ck == fnv(b[io:io + 24 * n]), "index checksum"
-    seen = set()
+    seen, used = set(), set()
     for k in range(n):
         i, v, fl, code, off, ln, c = struct.unpack_from("<BBBx8sIII", b, io + 24 * k)
         code = code.rstrip(b"\0").decode()
         assert (i, v) not in seen
         seen.add((i, v))
-        assert (i, v, fl, code) == ents[k][:4] and ln == ENT and off == do + k * ENT, k
+        assert (i, v, fl, code) == ents[k][:4] and ln == ENT and off >= do and (off - do) % ENT == 0 \
+            and off + ENT <= len(b), k
+        used.add(off)
         tb = b[off:off + ln]
+        assert tb == ents[k][4], ("table", code, v)
         assert fnv(tb) == c, ("table checksum", code, v)
         w = struct.unpack("<%dI" % WORDS, tb)
         check(code, list(w), bool(fl & 2))
-    print("self-test: %d entries re-read, index + %d table checksums match, 4913 words, top byte 0, neutral axes rise, B&W U/V 0" % (n, n))
+    assert len(b) == do + ENT * len(used), "every stored table is some entry's (%d stored, %d used)" % (
+        (len(b) - do) // ENT, len(used))
+    print("self-test: %d entries re-read (%d distinct tables), index + %d table checksums match, 4913 words, top byte 0, "
+          "neutral axes rise, B&W U/V 0" % (n, len(used), n))
 
 if __name__ == "__main__":
     main()

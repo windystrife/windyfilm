@@ -15,6 +15,11 @@
  *   wf_dev_test roll              the film shoulder on a neutral exposure ramp: CUBE (identity, film), SRGB, LOG, both cameras
  *   wf_dev_test rsrc              which buffer holds the shot (src/wf_rsrc.c): pointer right / at the previous shot / 0,
  *                                 no match, both buffers the same frame, no address, a frame with no mid-tones
+ *   wf_dev_test pack              the chain films' log pack (wf_dev_build_pack): each entry's tables = its text cube's
+ *                                 byte for byte (two curves, LUT EI, both cameras), shared tables, refusals (missing,
+ *                                 unlisted, bad header / index / checksum, truncated)
+ *   wf_dev_test packreal PACK [L33 ID VARIANT CODE]..  a real WFLOG.DAT: every entry builds; each named entry = a
+ *                                 text cube of its .L33, byte for byte, both cameras
  *   wf_dev_test pick DIR1 DIR2..  real pairs: DIR1's Canon frame + curve against every DIR's raw (DIR1 must win)
  *   wf_dev_test look DIR CUBE R   a real pair through a card cube, film shoulder R (writes DIR/look_r<R>_k<knee>.uyvy)
  *   wf_dev_test cr2 DIR [X0 Y0]   a real EOS M RAW+L pair prepared by tools/dev_cr2.sh: WB fit vs Canon's as-shot WB;
@@ -1074,6 +1079,232 @@ static void mode_roll(void)
     }
 }
 
+/* ------------------------------------------------------------------ pack: the chain films' log pack (WFLOG.DAT) */
+/* The format is written here from wf_dev.h's description, independently of tools/mk_wflog.py. Every u16 value survives
+   a "%.6f" text cube exactly (the parser's Q24 and its u16 rounding), so the pack's tables must equal the text cube's. */
+#define PK_TB WF_DEV_PK_BYTES
+#define PK_P0 3                                  /* WF_PRINT_STOCK0 (wf_api.h): the first chain print variant */
+static void pk_put16(uint8_t *p, uint32_t v) { p[0] = (uint8_t)v; p[1] = (uint8_t)(v >> 8); }
+static void pk_put32(uint8_t *p, uint32_t v) { pk_put16(p, v & 0xffff); pk_put16(p + 2, v >> 16); }
+static uint32_t pk_adler(const uint8_t *p, size_t n)
+{
+    uint32_t a = 1, b = 0;
+    for (size_t i = 0; i < n; i++) { a = (a + p[i]) % 65521u; b = (b + a) % 65521u; }
+    return b << 16 | a;
+}
+static uint32_t pk_fnv(const uint8_t *p, size_t n)
+{
+    uint32_t h = 2166136261u;
+    while (n--) h = (h ^ *p++) * 16777619u;
+    return h;
+}
+struct pk_ent { int id, var, flags; const char *code; int tab; };
+
+/* header + index + the tables at 512-byte boundaries (as mk_wflog.py places them); returns the size */
+static size_t pk_build(uint8_t *buf, uint8_t *const *tab, int ntab, const struct pk_ent *e, int ne, int curve, int feed)
+{
+    uint32_t doff = (32 + ne * 24 + 511) & ~511u, toff[8];
+    size_t end = doff;
+    for (int k = 0; k < ntab; k++) {
+        toff[k] = (uint32_t)end;
+        memcpy(buf + end, tab[k], PK_TB);
+        end = (end + PK_TB + 511) & ~(size_t)511;
+    }
+    memset(buf, 0, doff);
+    memcpy(buf, "WFLG", 4);
+    pk_put16(buf + 4, 1); pk_put16(buf + 6, (uint32_t)ne); pk_put32(buf + 8, WF_DEV_G); pk_put32(buf + 12, PK_TB);
+    pk_put32(buf + 16, 32); pk_put32(buf + 20, doff);
+    buf[28] = (uint8_t)curve; buf[29] = (uint8_t)feed;
+    for (int i = 0; i < ne; i++) {
+        uint8_t *x = buf + 32 + 24 * i;
+        x[0] = (uint8_t)e[i].id; x[1] = (uint8_t)e[i].var; x[2] = (uint8_t)e[i].flags;
+        strncpy((char *)x + 4, e[i].code, 8);
+        pk_put32(x + 12, toff[e[i].tab]); pk_put32(x + 16, PK_TB); pk_put32(x + 20, pk_adler(tab[e[i].tab], PK_TB));
+    }
+    pk_put32(buf + 24, pk_fnv(buf + 32, (size_t)ne * 24));
+    return end;
+}
+static void pk_save(const char *path, const uint8_t *buf, size_t n)
+{
+    FILE *f = fopen(path, "wb");
+    if (f) { fwrite(buf, 1, n, f); fclose(f); }
+}
+/* the same table as a text cube (wf_dev_build's own reader) */
+static void pk_cube(const char *path, const uint8_t *t)
+{
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "TITLE \"wf_dev pack test\"\nLUT_3D_SIZE 33\n");
+    for (int i = 0; i < WF_DEV_NODES; i++) {
+        const uint8_t *p = t + 6 * i;
+        fprintf(f, "%.6f %.6f %.6f\n", (p[0] | p[1] << 8) / 65535.0, (p[2] | p[3] << 8) / 65535.0,
+                (p[4] | p[5] << 8) / 65535.0);
+    }
+    fclose(f);
+}
+static int pk_try(const char *pack, int id, int var, const char *code, struct wf_dev_pkinfo *pi)
+{
+    struct wf_ll_info inf;
+    return wf_dev_build_pack(D, 0, pack, id, var, code, 0, &inf, pi);
+}
+
+static void mode_pack(void)
+{
+    /* three tables: the synthetic film, the film with a hue shift and noise in the low bits, a B&W one (R' = G' = B') */
+    uint8_t *tab[3];
+    for (int k = 0; k < 3; k++) {
+        tab[k] = malloc(PK_TB);
+        for (int b = 0, i = 0; b < WF_DEV_G; b++)
+            for (int g = 0; g < WF_DEV_G; g++)
+                for (int r = 0; r < WF_DEV_G; r++, i++) {
+                    double in[3] = { r / 32.0, g / 32.0, b / 32.0 }, o[3];
+                    sc_film(in, o);
+                    if (k == 1) { o[0] = clamp01(o[0] * 0.97 + 0.01); o[2] = clamp01(o[2] * 1.02); }
+                    if (k == 2) o[0] = o[1] = o[2] = 0.299 * o[0] + 0.587 * o[1] + 0.114 * o[2];
+                    for (int c = 0; c < 3; c++) {
+                        int v = (int)lrint(clamp01(o[c]) * 65535.0) + (k == 1 ? (int)(rnd() % 7) - 3 : 0);
+                        pk_put16(tab[k] + 6 * i + 2 * c, (uint32_t)(v < 0 ? 0 : v > 65535 ? 65535 : v));
+                    }
+                }
+        char nm[32];
+        snprintf(nm, sizeof nm, "PK%d.CUB", k);
+        pk_cube(nm, tab[k]);
+    }
+    static const struct pk_ent ent[4] = {
+        { 89, PK_P0, 0, "G00", 0 }, { 89, PK_P0 + 1, 0, "G00", 0 },   /* one table, two prints */
+        { 90, PK_P0, 0, "G01", 1 }, { 91, PK_P0, 2, "G02", 2 } };
+    uint8_t *buf = malloc(64 * 1024 + 3 * (PK_TB + 512)), *mut = malloc(64 * 1024 + 3 * (PK_TB + 512));
+    size_t n = pk_build(buf, tab, 3, ent, 4, WF_LL_SLOG3, 1);
+    pk_save("WFLOG.DAT", buf, n);
+
+    /* every entry = its text cube, byte for byte: curves S-Log3 / LogC3, LUT EI 0 / +2, both cameras */
+    struct wf_dev_tabs *C = malloc(sizeof *C);
+    struct wf_ll_info inf, cinf;
+    struct wf_dev_pkinfo pi, p0 = { 0 };
+    static const int curves[2] = { WF_LL_SLOG3, WF_LL_LOGC3 };
+    for (int cv = 0; cv < 2; cv++) {
+        if (cv) { buf[28] = (uint8_t)curves[cv]; pk_save("WFLOG3.DAT", buf, n); buf[28] = WF_LL_SLOG3; }
+        const char *pack = cv ? "WFLOG3.DAT" : "WFLOG.DAT";
+        for (int i = 0; i < 4; i++)
+            for (int cam = 0; cam < WF_DEV_NCAM; cam++)
+                for (int ei = 0; ei <= 6; ei += 6) {
+                    char nm[32];
+                    snprintf(nm, sizeof nm, "PK%d.CUB", ent[i].tab);
+                    memset(D, 0, sizeof *D);
+                    memset(C, 0, sizeof *C);
+                    int rc = wf_dev_build_pack(D, cam, pack, ent[i].id, ent[i].var, ent[i].code, ei, &inf, &pi);
+                    int rcc = wf_dev_build(C, WF_DEV_CUBE, curves[cv], cam, nm, ei, 0, &cinf);
+                    CHECK(rc == 0 && rcc == 0, "%s entry %d cam %d ei %d: rc %d (%s), cube rc %d", pack, i, cam, ei, rc,
+                          wf_dev_pk_errstr(rc), rcc);
+                    CHECK(!memcmp(D, C, sizeof *D), "%s entry %d cam %d ei %d: tables differ from the text cube's", pack,
+                          i, cam, ei);
+                    CHECK(D->n == WF_DEV_G && D->curve == curves[cv] && D->src == WF_DEV_CUBE && D->ei == ei,
+                          "%s entry %d: n %d curve %d src %d ei %d", pack, i, D->n, D->curve, D->src, D->ei);
+                    CHECK(inf.n == WF_DEV_G && inf.samples == WF_DEV_NODES && inf.bytes == PK_TB
+                          && !strcmp(inf.title, ent[i].code), "%s entry %d info: n %d samples %d bytes %u title %s",
+                          pack, i, inf.n, inf.samples, (unsigned)inf.bytes, inf.title);
+                    CHECK(pi.curve == curves[cv] && pi.feed == 1 && pi.count == 4 && pi.flags == ent[i].flags,
+                          "%s entry %d pkinfo: curve %d feed %d count %d flags %d", pack, i, pi.curve, pi.feed, pi.count,
+                          pi.flags);
+                    if (i == 0 && cam == 0 && ei == 0) p0 = pi;
+                    if (i == 1 && cam == 0 && ei == 0)
+                        CHECK(pi.off == p0.off && pi.sum == p0.sum, "one table for two prints: off %u / %u", pi.off, p0.off);
+                }
+    }
+    printf("pack: %u bytes, 4 entries, 3 tables; G00 at %u, Adler-32 %08x, index FNV %08x\n", (unsigned)n, p0.off,
+           p0.sum, p0.ixsum);
+
+    /* refusals */
+    CHECK(pk_try("NOPACK.DAT", 89, PK_P0, "G00", &pi) == WF_LL_E_OPEN, "missing pack");
+    CHECK(pk_try("WFLOG.DAT", 92, PK_P0, "G03", &pi) == WF_DEV_PK_E_NOENT, "unlisted id");
+    CHECK(pk_try("WFLOG.DAT", 89, PK_P0 + 2, "G00", &pi) == WF_DEV_PK_E_NOENT, "unlisted print");
+    CHECK(pk_try("WFLOG.DAT", 89, PK_P0, "G01", &pi) == WF_DEV_PK_E_NOENT, "code of another row");
+    CHECK(pk_try("WFLOG.DAT", 89, PK_P0, "G00XXXXXX", &pi) == WF_DEV_PK_E_NOENT, "code longer than 8");
+    CHECK(wf_dev_build_pack(D, 2, "WFLOG.DAT", 89, PK_P0, "G00", 0, 0, 0) == WF_LL_E_MODE, "camera 2");
+    struct { int at, val; int rc; const char *what; } mu[] = {
+        { 0, 'X', WF_DEV_PK_E_FORMAT, "magic" }, { 4, 2, WF_DEV_PK_E_FORMAT, "version 2" },
+        { 6, 0, WF_DEV_PK_E_FORMAT, "count 0" }, { 8, 17, WF_DEV_PK_E_FORMAT, "grid 17" },
+        { 13, 0, WF_DEV_PK_E_FORMAT, "table size" }, { 16, 64, WF_DEV_PK_E_FORMAT, "index offset" },
+        { 23, 0x7f, WF_DEV_PK_E_FORMAT, "data offset past the end" }, { 28, 0, WF_DEV_PK_E_FORMAT, "curve 0" },
+        { 28, WF_LL_NCURVE + 1, WF_DEV_PK_E_FORMAT, "curve 6" }, { 24, -1, WF_DEV_PK_E_INDEX, "index checksum" },
+        { 32 + 12 + 3, 0x7f, WF_DEV_PK_E_INDEX, "entry offset (index checksum fixed)" },
+        { -1, 0, WF_DEV_PK_E_SUM, "one table byte" } };
+    for (unsigned m = 0; m < sizeof mu / sizeof mu[0]; m++) {
+        memcpy(mut, buf, n);
+        if (mu[m].at < 0) mut[p0.off + 100003] ^= 0x10;
+        else if (mu[m].val < 0) mut[mu[m].at] ^= 1;
+        else mut[mu[m].at] = (uint8_t)mu[m].val;
+        if (mu[m].at == 32 + 12 + 3) pk_put32(mut + 24, pk_fnv(mut + 32, 4 * 24));
+        pk_save("BAD.DAT", mut, n);
+        int rc = pk_try("BAD.DAT", 89, PK_P0, "G00", &pi);
+        CHECK(rc == mu[m].rc, "%s: rc %d (%s), want %d", mu[m].what, rc, wf_dev_pk_errstr(rc), mu[m].rc);
+    }
+    pk_save("BAD.DAT", buf, n - 1000);           /* cut inside the last table (G02's) */
+    int rc = pk_try("BAD.DAT", 91, PK_P0, "G02", &pi);
+    CHECK(rc == WF_DEV_PK_E_INDEX, "truncated pack, last table: rc %d", rc);
+    CHECK(pk_try("BAD.DAT", 90, PK_P0, "G01", &pi) == 0, "truncated pack, an earlier table still builds");
+    pk_save("BAD.DAT", buf, 32 + 2 * 24);        /* cut inside the index */
+    CHECK(pk_try("BAD.DAT", 89, PK_P0, "G00", &pi) == WF_DEV_PK_E_FORMAT, "pack cut in the index");
+    CHECK(!strcmp(wf_dev_pk_errstr(WF_DEV_PK_E_SUM), "table checksum") && wf_dev_pk_errstr(WF_LL_E_OPEN)[0],
+          "error texts");
+    free(C); free(buf); free(mut);
+    for (int k = 0; k < 3; k++) free(tab[k]);
+}
+
+/* packreal PACK [L33 ID VARIANT CODE]..: every entry of a real WFLOG.DAT (tools/mk_wflog.py) builds, and each named
+   entry = the text cube this test writes from its .L33 (exact u16 values), byte for byte, on both cameras. Not the
+   generator's own KEEP_CUBE=1 cube: its 6-decimal chain values go through the parser's Q24 and come out 1 / 65535 off
+   the .L33 in 34..76 samples per table (double rounding; one node byte of G38P15 shows it). */
+static void mode_packreal(int argc, char **argv)
+{
+    FILE *f = fopen(argv[0], "rb");
+    uint8_t h[32];
+    CHECK(f && fread(h, 1, 32, f) == 32, "read %s", argv[0]);
+    if (!f) return;
+    int n = h[6] | h[7] << 8, curve = h[28], bad = 0;
+    uint8_t *ix = malloc((size_t)n * 24);
+    CHECK(fread(ix, 24, (size_t)n, f) == (size_t)n, "index");
+    fclose(f);
+    struct wf_ll_info inf;
+    struct wf_dev_pkinfo pi;
+    for (int i = 0; i < n; i++) {
+        char code[9];
+        memcpy(code, ix + 24 * i + 4, 8);
+        code[8] = 0;
+        int rc = wf_dev_build_pack(D, i & 1, argv[0], ix[24 * i], ix[24 * i + 1], code, 0, &inf, &pi);
+        if (rc && bad++ < 5)
+            printf("entry %d (%s v%d): rc %d %s\n", i, code, ix[24 * i + 1], rc, wf_dev_pk_errstr(rc));
+    }
+    CHECK(!bad, "%d of %d entries failed", bad, n);
+    printf("packreal: %d entries built (curve %d, feed %d), %d failed\n", n, curve, h[29], bad);
+    struct wf_dev_tabs *C = malloc(sizeof *C);
+    uint8_t *l33 = malloc(PK_TB + 1);
+    for (int a = 1; a + 3 < argc; a += 4) {
+        FILE *g = fopen(argv[a], "rb");
+        size_t got = g ? fread(l33, 1, PK_TB + 1, g) : 0;
+        if (g) fclose(g);
+        CHECK(got == PK_TB, "%s: %u bytes", argv[a], (unsigned)got);
+        pk_cube("PKREAL.CUB", l33);
+        for (int cam = 0; cam < WF_DEV_NCAM; cam++) {
+            memset(D, 0, sizeof *D);
+            memset(C, 0, sizeof *C);
+            int rc = wf_dev_build_pack(D, cam, argv[0], atoi(argv[a + 1]), atoi(argv[a + 2]), argv[a + 3], 0, &inf, &pi);
+            int rcc = wf_dev_build(C, WF_DEV_CUBE, curve, cam, "PKREAL.CUB", 0, 0, 0);
+            CHECK(rc == 0 && rcc == 0 && !memcmp(D, C, sizeof *D), "%s cam %d: rc %d cube rc %d, %s", argv[a + 3], cam,
+                  rc, rcc, rc || rcc ? "-" : "tables differ from the cube's");
+            int nd = 0, first = -1;
+            for (unsigned k = 0; k < sizeof *D; k++)
+                if (((uint8_t *)D)[k] != ((uint8_t *)C)[k]) { nd++; if (first < 0) first = (int)k; }
+            printf("packreal %s v%s cam %d: %s (offset %u, Adler-32 %08x; %d bytes differ, first at %d of %u)\n",
+                   argv[a + 3], argv[a + 2], cam, !rc && !rcc && !nd ? "= its text cube" : "DIFFERS", pi.off, pi.sum,
+                   nd, first, (unsigned)sizeof *D);
+        }
+    }
+    free(l33);
+    free(C);
+    free(ix);
+}
+
 int main(int argc, char **argv)
 {
     const char *mode = argc > 1 ? argv[1] : "px";
@@ -1086,6 +1317,8 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "span")) mode_span();
     else if (!strcmp(mode, "roll")) mode_roll();
     else if (!strcmp(mode, "rsrc")) mode_rsrc();
+    else if (!strcmp(mode, "pack")) mode_pack();
+    else if (!strcmp(mode, "packreal") && argc > 2) mode_packreal(argc - 2, argv + 2);
     else if (!strcmp(mode, "pick") && argc > 3) mode_pick(argc - 2, argv + 2);
     else if (!strcmp(mode, "leica") && argc > 3)
         mode_leica(argv[2], argv[3], argc > 5 ? atoi(argv[4]) : 0, argc > 5 ? atoi(argv[5]) : 0);

@@ -32,3 +32,5 @@ films/tables/G[0-9][0-9]P[0-9][0-9].T17
 films/tables/fit.csv
 # the chain in two halves (tools/mk_wfstage.py): measured negative / print halves and pair placements, card data source
 films/tables/.stage/
+# option (c), the RAW develop's chain tables (tools/mk_genesis_films.py log): 643 x 215 KB, card data
+films/tables/log/
