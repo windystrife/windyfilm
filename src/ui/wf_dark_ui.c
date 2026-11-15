@@ -1,7 +1,7 @@
 /* wf_dark_ui.c - WindyFilm Roll + Darkroom screens (docs/DESIGN.md 3.6), WindyStrife's own code and art.
  *
  * Three pieces, all drawn with the browser's own toolkit (wf_gfx.c primitives, wf_font.c fonts, wf_cans.c can pack):
- *   Roll picker  shelf tabs Colour / Slide / B&W / Cine / LUT, a carousel of cans (the centre one big, the others
+ *   Roll picker  shelf tabs Colour / Slide / B&W / Cine / Stage / LUT, a carousel of cans (the centre one big, the others
  *                smaller and dimmed further back), the film's kind, name, one-line description and chips ISO / PROCESS /
  *                EXP 12-24-36; SET loads the roll. Top bar: the roll on the camera, its count and the clock.
  *   Darkroom     a red safelight theme (the same palette entries recoloured): the print window on the easel at the left,
@@ -114,21 +114,43 @@ static void mark(int x, int y, int bg)                     /* own mark: a frame 
 }
 
 /* =================================================================== roll picker */
-enum { RT_COLOUR = 0, RT_SLIDE, RT_BW, RT_CINE, RT_LUT, RT_N };
-static const char *const rt_name[RT_N] = { "COLOUR", "SLIDE", "B&W", "CINE", "LUT" };
-static const char *const rt_process[RT_N] = { "C-41", "E-6", "B&W", "ECN-2", "LOG" };
+/* STAGE: the film-stage chain films (WF_GRP_STAGE, the browser's Film stage tab), cine negatives developed ECN-2;
+ * until 11-15 they fell through to COLOUR with a C-41 chip */
+enum { RT_COLOUR = 0, RT_SLIDE, RT_BW, RT_CINE, RT_STAGE, RT_LUT, RT_N };
+static const char *const rt_name[RT_N] = { "COLOUR", "SLIDE", "B&W", "CINE", "STAGE", "LUT" };
+static const char *const rt_process[RT_N] = { "C-41", "E-6", "B&W", "ECN-2", "ECN-2", "LOG" };
 #define NEXP 5
 static const int exps[NEXP] = { 3, 6, 12, 24, 36 };        /* 3 and 6: owner 11-15, a short roll */
 
-static uint8_t rl[RT_N][64];                               /* wf_films index per tab, by catalogue order */
+#define RT_MAX 64                                          /* films per shelf (the STAGE shelf holds 44) */
+static uint8_t rl[RT_N][RT_MAX];                           /* wf_films index per tab, by catalogue order */
 static int rn[RT_N];
 static int rtab, rsel[RT_N], rexp = 3, rbuilt, rglow = -1;   /* 24 */
 static const struct wf_film *cf_film;            /* owner 11-15: "close the finished roll and load this?" (0 = not asked) */
 static int cf_exp;
 
+/* a black-and-white chain negative (Double-X 5222): the catalogue gives it no speed letter and its short name ends in
+ * "B&W" (films/catalog.py gx_speed). It carries no WF_F_BW, which would also zero the chroma of its composed tables
+ * (wf_sg_prn_pass), so the chip goes by the name */
+static int stage_bw(const struct wf_film *f)
+{
+    const char *s = f->shortname;
+    int n = 0;
+    if (f->flags & WF_F_BW) return 1;
+    if (!s) return 0;
+    while (s[n]) n++;
+    return n >= 3 && s[n - 3] == 'B' && s[n - 2] == '&' && s[n - 1] == 'W';
+}
+
+static const char *process_of(const struct wf_film *f, int t)
+{
+    return t == RT_STAGE && stage_bw(f) ? "B&W" : rt_process[t];
+}
+
 static int tab_of(const struct wf_film *f)
 {
     if (f->flags & WF_F_LUTCAN || f->group == WF_GRP_LUT) return RT_LUT;
+    if (f->group == WF_GRP_STAGE) return RT_STAGE;
     if (f->group == WF_GRP_BW || (f->flags & WF_F_BW)) return RT_BW;
     if (f->group == WF_GRP_CINE) return RT_CINE;
     if ((f->flags & WF_F_SLIDE) || (f->kind && !strcmp(f->kind, "SLIDE"))) return RT_SLIDE;
@@ -143,7 +165,7 @@ static void roll_build(void)
         const struct wf_film *f = &wf_films[i];
         if (!(f->flags & WF_F_READY)) continue;
         int t = tab_of(f);
-        if (rn[t] >= 64) continue;
+        if (rn[t] >= RT_MAX) { wf_log("ui: roll shelf %s full (%d), film %d left out", rt_name[t], RT_MAX, f->id); continue; }
         int k = rn[t]++;
         while (k > 0 && wf_films[rl[t][k - 1]].order > f->order) { rl[t][k] = rl[t][k - 1]; k--; }
         rl[t][k] = (uint8_t)i;
@@ -376,11 +398,12 @@ static void roll_info(void)
     snprintf(iso, sizeof iso, "%d", f->iso);
     snprintf(ex, sizeof ex, "%d", exps[rexp]);
     int w1 = ui_textw(F_13, "ISO") + ui_textw(F_15, iso) + 22;
-    int w2 = ui_textw(F_13, "PROCESS") + ui_textw(F_15, rt_process[rtab]) + 22;
+    const char *pr = process_of(f, rtab);
+    int w2 = ui_textw(F_13, "PROCESS") + ui_textw(F_15, pr) + 22;
     int w3 = ui_textw(F_13, "EXP") + ui_textw(F_15, ex) + 22 + 14;
     int x = 360 - (w1 + w2 + w3 + 20) / 2, cy = 386;
     x += chip_kv(x, cy, "ISO", iso, C_TXT3, C_TXT, C_LINE, C_SEP, 0) + 10;
-    x += chip_kv(x, cy, "PROCESS", rt_process[rtab], C_TXT3, C_TXT, C_LINE, C_SEP, 0) + 10;
+    x += chip_kv(x, cy, "PROCESS", pr, C_TXT3, C_TXT, C_LINE, C_SEP, 0) + 10;
     int ew = chip_kv(x, cy, "EXP", ex, C_TXT2, C_TXT, A, AD, 14);
     wfg_tri(x + ew - 17, cy + 9, x + ew - 13, cy + 5, x + ew - 9, cy + 9, A);   /* up / down: the count changes */
     wfg_tri(x + ew - 17, cy + 13, x + ew - 13, cy + 17, x + ew - 9, cy + 13, A);
@@ -1128,4 +1151,8 @@ int wfdr_host_sel_id(void) { const struct wf_film *f = rfilm(rtab, rsel[rtab]); 
 const char *wfdr_host_msg(void) { return msg ? msg : ""; }
 int wfdr_host_confirm(void) { return cf_film != 0; }
 int wfdr_host_pfoc(void) { return dr_pfoc; }
+const char *wfdr_host_tab_name(void) { return rt_name[rtab]; }
+const char *wfdr_host_process(void) { const struct wf_film *f = rfilm(rtab, rsel[rtab]); return f ? process_of(f, rtab) : ""; }
+int wfdr_host_shelf_n(int t) { return t >= 0 && t < RT_N ? rn[t] : -1; }
+int wfdr_host_nshelves(void) { return RT_N; }
 #endif

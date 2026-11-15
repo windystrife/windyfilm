@@ -43,9 +43,9 @@ bộ code Darkroom là code mới của WindyFilm (không dùng code Film Roll).
 2. NẠP CUỘN PHIM
 ----------------
 Menu ML: Shoot > WindyFilm > "Film roll" -> màn hình chọn cuộn:
-- Q (hoặc chạm 1 ngón): đổi kệ Colour / Slide / B&W / Cine / LUT. 44 lon Film stage
-  (G00..G44, âm bản điện ảnh x print stock, README mục 6) nằm cuối kệ Colour; chip
-  PROCESS của chúng vẫn ghi C-41 (chưa sửa; phim thật là ECN-2).
+- Q (hoặc chạm 1 ngón): đổi kệ Colour / Slide / B&W / Cine / Stage / LUT. Kệ Stage có
+  44 lon Film stage (G00..G44, âm bản điện ảnh x print stock, README mục 6), chip
+  PROCESS ECN-2 (Double-X 5222: B&W).
 - Trái / phải hoặc xoay bánh xe: chọn hộp phim.
 - Lên / xuống (hoặc INFO): 3 / 6 / 12 / 24 / 36 kiểu (mặc định 24; 3 và 6 để thử nhanh).
 - SET: nạp cuộn: chạy hoạt ảnh nạp phim giống lúc nạp phim trong browser ("Loading the
@@ -218,7 +218,7 @@ s. (15/11) Cuộn Film stage có knob. Thẻ phải có ML/DATA/WFSTAGE.DAT; log
       | Gauge 16 mm".
    2. Bật RAW develop On (để ảnh so cũng đi từ CR2). Chụp lại cảnh đó 1 tấm: chờ
       "RAW develop n%" xong. Đây là ảnh so tốt nhất: cùng CR2-develop như Darkroom.
-   3. Màn hình chọn cuộn: kệ Colour, kéo tới cuối, chọn Vision3 5219 500T, 3 kiểu,
+   3. Màn hình chọn cuộn: mở ra đã ở kệ Stage, trên G08 (phim đang nạp); 3 kiểu,
       SET. Giữ nguyên RAW develop On và mọi hàng ở bước 1. Chụp 3 tấm cùng cảnh (bộ
       đếm lên sau khoảng 30 s mỗi tấm, như mục g.).
    4. Vào Darkroom, SET (KHÔNG đổi hàng nào trước đó). Log phải có:

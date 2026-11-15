@@ -521,7 +521,8 @@ gave the idea and the layout only. None of its code, bitmaps or fonts was opened
 Stocks keep their Windy names, and there are no brand logos.
 
 **Roll (shooting).**
-- **One roll at a time.** The roll picker (UI screen ROLL) has shelf tabs Colour / Slide / B&W / Cine / LUT, a can
+- **One roll at a time.** The roll picker (UI screen ROLL) has shelf tabs Colour / Slide / B&W / Cine / Stage / LUT
+  (Stage since 11-15: the film-stage chain films, PROCESS chip ECN-2, Double-X 5222 B&W; up to 64 films a shelf), a can
   carousel, and 3 / 6 / 12 / 24 / 36 exposures (default 24). SET loads the roll and plays the same load animation as a film
   load in the browser ("Loading the roll", the can, the film's chips and "12 EXP"), then the UI closes and LiveView
   shows. A key skips the rest of the animation.

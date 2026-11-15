@@ -20,6 +20,10 @@ void wfui_host_beat(int ph, int ago_ms);
 const char *wfdr_host_msg(void);
 int wfdr_host_confirm(void);
 int wfdr_host_pfoc(void);
+const char *wfdr_host_tab_name(void);
+const char *wfdr_host_process(void);
+int wfdr_host_shelf_n(int t);
+int wfdr_host_nshelves(void);
 
 static const char *outdir;
 static int fails, closed;
@@ -149,6 +153,63 @@ int main(int argc, char **argv)
     fake_dark_reset();
     int colour = first_of(WF_GRP_COLOUR, 0), slide = first_of(WF_GRP_COLOUR, 1), bw = first_of(WF_GRP_BW, 0);
     CHECK(colour && bw, "catalogue without colour / B&W films");
+
+    /* 0. shelves (11-15): every ready film sits on a shelf (none dropped by the 64 per shelf), the film-stage chain
+     * films on their own STAGE shelf with an ECN-2 chip (Double-X 5222 B&W), no longer on COLOUR with C-41 */
+    {
+        int nready = 0, nstage = 0, nshelf = 0, dx = 0, cine_neg = 0, worst = 0;
+        for (int i = 0; i < wf_nfilms; i++)
+        {
+            const struct wf_film *f = &wf_films[i];
+            if (!(f->flags & WF_F_READY)) continue;
+            nready++;
+            if (f->group != WF_GRP_STAGE) continue;
+            nstage++;
+            if (f->shortname && !strcmp(f->shortname + (strlen(f->shortname) > 3 ? strlen(f->shortname) - 3 : 0), "B&W"))
+                dx = f->id;
+            else if (!cine_neg) cine_neg = f->id;
+        }
+        fake_set_loaded(colour);
+        open_scr(WFUI_SCR_ROLL);                            /* the shelves are built on the first entry */
+        for (int t = 0; t < wfdr_host_nshelves(); t++)
+        {
+            nshelf += wfdr_host_shelf_n(t);
+            if (wfdr_host_shelf_n(t) > worst) worst = wfdr_host_shelf_n(t);
+        }
+        CHECK(nshelf == nready, "%d of %d ready films on a shelf", nshelf, nready);
+        CHECK(worst <= 64, "a shelf holds %d films (64 at most)", worst);
+        CHECK(!strcmp(wfdr_host_tab_name(), "COLOUR") && !strcmp(wfdr_host_process(), "C-41"),
+              "colour film on %s / %s", wfdr_host_tab_name(), wfdr_host_process());
+        close_ui();
+        CHECK(nstage > 0, "catalogue without film-stage films");
+        if (cine_neg)
+        {
+            fake_set_loaded(cine_neg);
+            open_scr(WFUI_SCR_ROLL);
+            CHECK(wfdr_host_sel_id() == cine_neg, "picker not on the chain film %d (%d)", cine_neg, wfdr_host_sel_id());
+            CHECK(!strcmp(wfdr_host_tab_name(), "STAGE"), "chain film %d on %s", cine_neg, wfdr_host_tab_name());
+            CHECK(!strcmp(wfdr_host_process(), "ECN-2"), "chain film chip %s", wfdr_host_process());
+            int st = wfdr_host_tab();
+            for (int t = 0; t < wfdr_host_nshelves(); t++)
+                if (t == st) CHECK(wfdr_host_shelf_n(t) == nstage, "STAGE shelf %d of %d", wfdr_host_shelf_n(t), nstage);
+            shot("roll_stage");
+            key(MODULE_KEY_TOUCH_1_FINGER);                 /* STAGE -> the next shelf, all the way round back */
+            CHECK(wfdr_host_tab() != st, "TAP stayed on STAGE");
+            for (int k = 0; k < wfdr_host_nshelves() && wfdr_host_tab() != st; k++) key(MODULE_KEY_TOUCH_1_FINGER);
+            CHECK(wfdr_host_tab() == st && wfdr_host_sel_id() == cine_neg, "TAP round trip lost the STAGE shelf");
+            close_ui();
+        }
+        if (dx)
+        {
+            fake_set_loaded(dx);
+            open_scr(WFUI_SCR_ROLL);
+            CHECK(!strcmp(wfdr_host_tab_name(), "STAGE") && !strcmp(wfdr_host_process(), "B&W"),
+                  "Double-X on %s / %s", wfdr_host_tab_name(), wfdr_host_process());
+            shot("roll_stage_bw");
+            close_ui();
+        }
+        printf("shelves: %d ready films, %d on STAGE (Double-X %d)\n", nready, nstage, dx);
+    }
 
     /* 1. roll picker, no roll: Colour shelf, the loaded film in the centre */
     fake_set_loaded(colour);
