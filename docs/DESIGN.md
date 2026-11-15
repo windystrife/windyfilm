@@ -76,7 +76,7 @@ shot: Canon YUV conversion site ─ hook (patch_hook_function) ─ gate ─ sema
   - Off.
   - Loading a Film LUT can sets Log + LUT with the can's cube on that cube's own curve (`WF_FLUT_CURVE`): V-Log, the
     twelve CinePrint looks Canon Log 2 since 11-14 (3.5).
-- **Effects:** grain (`yg_*`), halation and bloom (`yh_*`), Mist (`wf_mist`, EOS M; on the 5D2 halves only once its
+- **Effects:** grain (`yg_*`), halation and bloom (`yh_*`: one stage, two rows and settings since RAWB11), Mist (`wf_mist`, EOS M; on the 5D2 halves only once its
   map hand-over is wired, as before), Strength 30 / 100 / 125, Highlights / Shadows -5..+5 (section 3.3).
 - **Light** (new row): Auto = the camera's WB, untouched. Day = the stock's `kelvin`. Cloudy = kelvin x 1.25, rounded to
   100 K. Tungsten = 3200 K.
@@ -92,7 +92,7 @@ shot: Canon YUV conversion site ─ hook (patch_hook_function) ─ gate ─ sema
 - **Log:** `ML/LOGS/WINDYFLM.LOG`, appended across boots (over 512 KB at boot: kept as `WINDYFLM.OLD`): boot line
   (camera, ROM check, hook result, pack and can status), and per shot: film, variant, timings. Lines wait in a ring
   while the card is busy; lost lines are counted in the log.
-- **Config:** `ML/SETTINGS/WINDYFLM.CFG`, plain `key=value` lines: film id, print, light, grain, halation, mist,
+- **Config:** `ML/SETTINGS/WINDYFLM.CFG`, plain `key=value` lines: film id, print, light, grain, halation, bloom, mist,
   strength, output, curve, Film LUT, LUT EI, preview, preview exposure, EXIF.
 - **Coexistence:** do not load together with `filmroll.mo`. Symbols: everything except ML's `__module_*_windyflm` is
   made local (`objcopy --keep-global-symbols`), so the TCC loader never sees a clash.
@@ -302,7 +302,7 @@ too), never flat Log. The math is WindyStrife's own (the V14U spec); WindyFilm h
   Highlights +3 | Shadows -2` and the log lines (`yuv .. hl+3 sh-2`, `shot #n <title> hl+3 sh-2: ..`, `lut <cube> ..
   hl+3 sh-2`) only when a value is not 0. Text through `wf_hs_text` ("-5".."+5"; no `%+d` on the camera).
 - **UI.** ML menu entries "Highlights" / "Shadows" (row entries, greyed where they do nothing). Browser rows
-  `WF_ROW_HL` / `WF_ROW_SH` between Strength and Film LUT, no wrap at the ends. 9 rows do not fit the 19 px pitch above
+  `WF_ROW_HL` / `WF_ROW_SH` between Strength and Film LUT, no wrap at the ends. 9 rows (10 with Bloom) do not fit the 19 px pitch above
   the tabs (y 136-268), so 7 show and the list scrolls with the focus, with a 2 px scroll bar at x 712. The font keeps
   its size. Icons: a tone disc, upper / lower half lit. Host render: `tests/ui` shots `b2s_hs`, `b2s_hs_top`.
 
@@ -612,13 +612,35 @@ Stocks keep their Windy names, and there are no brand logos.
   - a dial with progress ticks and a seconds hand;
   - "n to go - about m min", battery % and clock.
 
+### 3.7 Bloom on its own row (RAWB11, owner 2026-11-15)
+
+"tách cái bloom ra 1 UI riêng nhé để chọn các mức độ bloom nữa, bạn đừng gắn với halation nữa".
+- **Two settings.** Halation `wf_halo` 0..2 = Off / Film / Spektra (the catalogue's profile or its spk profile).
+  Bloom `wf_bloom` 0..3 = Off / Low / Normal / Strong: bloom_q8 0 / 256 / 512 / 896 of bloom_frac 0.06. Normal is the
+  old "+ bloom" (512 since Strength v2), Low half of it, Strong a clear step that keeps the frame (the bloom strip,
+  `tests/ui/bloom_strip.sh`; GUESSES like the rest). Bloom is a soft glow in the light's own colour (M_k's identity
+  part); halation is the red edge from the base (its `hw x xt` part).
+- **One stage.** Either one on runs `yh_halo` with the matrix built from the two parts (`hal_q8` 0 when Halation is Off;
+  knee / boosts from the film's profile either way). Both off: no key, no stage, no memory (the old Off). The daylight
+  half-strength ramp (`yh_set_hot` hs) scales the halation part only, as before.
+- **Key.** `wf_fx_hk` = (set + 1) | halation << 6 | bloom << 8 (`WF_FXK_HALO` / `WF_FXK_BLOOM`).
+- **Rows / menu.** `WF_ROW_BLOOM` right after Halation, the same availability (3:2, a post code), its own icon (a
+  solid core in a thinning dither); ML menu entry "Bloom" under "Halation".
+- **Config.** `halation=off|halation|spk`, `bloom=off|low|normal|strong`. An old file: `halation=bloom` = Film + Normal,
+  `spkbloom` = Spektra + Normal, `halation` / `spk` = Bloom Off, unless the file has its own `bloom=` line. Defaults:
+  EOS M Film + Normal (the old "Film + bloom"), 5D2 both Off.
+- **Text.** Ready line `fx halation neg x1.25, bloom normal ready` / `fx halation off (neg), bloom low ready`; the shot
+  line names the stage by what ran (`+ halation`, `+ bloom low`, `+ halation+bloom strong`); EXIF / print comment
+  `| Halation Film | Bloom Normal`; the Darkroom's `dark: look ready ..: halation + bloom normal`. A roll's prints use
+  the Halation and Bloom settings of the run, as before.
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`
 
 Frozen: cameras, the catalogue struct, rows, load, status, UI entry points, log and card read. The core implements
 everything except `wf_ui_*`. The UI calls only these functions plus ML's drawing API. Rows (2026-11-14): Light, Print,
-Grain, Halation, Mist, Strength, Highlights, Shadows, Film LUT (`WF_NROWS` 9).
+Grain, Halation, Bloom, Mist, Strength, Highlights, Shadows, Film LUT (`WF_NROWS` 10; Bloom since RAWB11).
 
 ### 4.2 Catalogue
 
@@ -685,7 +707,7 @@ The layout, 720x480 (the ML bitmap):
 | header (0-33) | mark, "WindyFilm" argnor23, "by WindyStrife" 13 px, loaded chip 15 px |
 | big can | 160x226 at (45, 40), glow in the film's colour (16 palette rings, recoloured per film), floor shadow |
 | right column x 262 | name argnor28 at y 38; chips (kind / ISO / format) 13 px at y 72; SET Load button; description 15 px, 2 lines at y 96 / 113 |
-| rows | 9 rows, 7 shown from y 136 at 19 px pitch; the list scrolls with the focus (2 px scroll bar at x 712); focus bar in the accent colour, chevrons on the focused value; Strength as 5 bars |
+| rows | 10 rows, 7 shown from y 136 at 19 px pitch; the list scrolls with the focus (2 px scroll bar at x 712); focus bar in the accent colour, chevrons on the focused value; Strength as 5 bars |
 | tabs | Colour / Cine / B&W / Film LUT with counts at y 276, underline on the active one; counter "n / N" |
 | strip | 35 mm band y 300-436 with sprocket holes; cans 52x73 with short names (13 px condensed) under them; selected can 58x82 framed in the accent colour; edge fades and arrows |
 | scrollbar | y 441-446 |

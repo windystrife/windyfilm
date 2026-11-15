@@ -32,7 +32,7 @@ themselves under qemu-arm, with a shim for ML / DryOS.
 | `wf_film.c` | film tables: 17^3 table -> 2.5D set, `wf_film_words` kernel |
 | `wf_loglut.c`, `wf_llk.c`, `wf_llk_arm.S` | Log + LUT: .cube streaming parser, .FRT cache, `wf_ll_words` (asm) / `wf_ll_words_c` |
 | `wf_logout_arm.S`, `wf_logout_tab.c` | plain log outputs `wf_log_words` (ARMv5TE asm); C reference `tests/host/wf_logout_ref.c` |
-| `wf_fx.c`, `yh_halo.c`, `yg_grain.c`, `yg_stocks.c`, `wf_mist.c` | halation + bloom, grain, mist; memory + hand-over protocol in the `wf_fx.c` header |
+| `wf_fx.c`, `yh_halo.c`, `yg_grain.c`, `yg_stocks.c`, `wf_mist.c` | halation and bloom (one stage, two rows), grain, mist; memory + hand-over protocol in the `wf_fx.c` header |
 | `wf_ui_stub.c` | browser stubs, linked only when `src/ui/wf_ui.c` is missing (and by the host test) |
 
 Thread and sharing rules are written at the top of `wf_main.c`, `wf_shot.c`, `wf_fx.c`, `wf_pv.c`: worker and hooks never
@@ -117,7 +117,8 @@ Deny input: the old module's binary (path assembled inside the script, read only
 - `ML/SETTINGS/WINDYFLM.CFG` (no MODULE_CONFIGS on purpose: ML would write a file of the same name): `input=jpeg`
   (reserved), `film=<id>`, `output=film|log|lut|off`, `curve=slog3|vlog|logc3|clog2|clog3`, `flut=technical|<code>`,
   `lutei=-3..6`, `print=scan|cine|paper`, `light=auto|day|cloudy|tungsten`, `strength=subtle|normal|strong`,
-  `grain=off|fine|normal|strong`, `halation=off|halation|bloom|spk|spkbloom`, `mist=off|w8|w4|w2|w1|b8|b4|b2|b1`,
+  `grain=off|fine|normal|strong`, `halation=off|halation|spk`, `bloom=off|low|normal|strong` (RAWB11; an old `halation=bloom|spkbloom` reads as
+  `halation|spk` + `bloom=normal`), `mist=off|w8|w4|w2|w1|b8|b4|b2|b1`,
   `preview=off|on|fast`, `exposure=camera|smooth`, `exptrim=-16..16`, `exif=on|off`, `userwb=mode,kelvin,gm,ba`
   (only while Light holds the WB). Written by `wf_task` 1.5 s after a change, at most 600 B.
 - `ML/LOGS/WINDYFLM.LOG`: appended across boots. A boot starts with `WindyFilm <date>: camera ..` (logged in
