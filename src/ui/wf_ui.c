@@ -130,7 +130,7 @@ static const char *msg;
 static int msg_until;
 static int t_probe, t_force, t_heal;
 
-static const char *const gname[WF_NGROUPS] = { "Colour", "Cine", "B&W", "Film LUT" };
+static const char *const gname[WF_NGROUPS] = { "Colour", "Cine", "B&W", "Film LUT", "Film stage" };
 
 static inline const struct wf_film *film_at(int i) { return i >= 0 && i < nlist ? &wf_films[list[i]] : 0; }
 static inline int gcount(int g) { return gstart[g + 1] - gstart[g]; }
@@ -390,10 +390,12 @@ static void draw_info_column(const struct wf_film *f, int g)
         wfg_bits16(wf_icons[r], 270, y + 1, !av ? (foc ? C_TXT3 : C_BAROFF) : foc ? A : C_TXT3);
         const char *nm = wf_row_name(r);
         ui_text(F_15, 294, y, nm ? nm : "", !av ? C_TXT3 : foc ? C_TXT : C_TXT2);
-        const char *val = wf_row_text(r);
-        if (!val) val = "";
         int live = foc && av;
         int vx = live ? 684 : 700;
+        /* the long text (a print stock's full name) where it fits between the name and the value's arrows */
+        const char *val = wf_row_text_long(r);
+        if (!val || ui_textw(F_15, val) > vx - 18 - (294 + ui_textw(F_15, nm ? nm : "") + 16)) val = wf_row_text(r);
+        if (!val) val = "";
         int xl = vx - text_r(F_15, vx, y, val, !av ? C_TXT3 : foc ? C_TXT : C_TXT2);   /* left edge of the value */
         if (r == WF_ROW_STRENGTH)
         {

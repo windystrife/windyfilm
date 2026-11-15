@@ -92,9 +92,9 @@ volatile int wf_fx_retry_ms = 10000;             /* "no memory": next attempt af
 #define FX_KEY_GEN 256                           /* halation / grain: the Genesis model (WindyHalation / WindyGrain) */
 #define FX_KEY_GGEN 256
 static const char *const fx_hname[YH_NSTOCK] = { "neg", "800T", "slide", "bw", "spk-s", "spk-w", "spk-c", "spk-n", "spk-bw", "spk-bww",
-                                                 "gen" };
+                                                 "wrap" };
 static const float fx_amount[WF_GRAIN_MAX + 1] = { 0.0f, 0.6f, 1.0f, 1.5f, 0.6f, 1.0f, 1.5f };
-static const char *const fx_aname[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "gen fine", "gen normal", "gen strong" };
+static const char *const fx_aname[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "even fine", "even normal", "even strong" };
 
 /* one block: p = cacheable address; from a shoot memory suite (suite != 0) or Canon's heap (raw) */
 typedef struct { void *p, *raw, *suite; } fx_blk;
@@ -240,7 +240,7 @@ const char *wf_fx_gstock_name(void)
     if (!fx_sets(wf_fx_mode(), &gs, &hs))
         return "-";
     if (wf_grain >= WF_GRAIN_GEN0)
-        return "Genesis";                        /* WindyGrain: the plugin's grain is not a stock of ours */
+        return "Even";                           /* WindyGrain Even ...: the film-stage grain (DESIGN 1a), not a stock of ours */
     const char *s = yg_stocks[wf_cat_gsets[gs].row].name, *x = fx_xname(wf_cat_gsets[gs].scale_q8, xb);
     int i = 0;
     while (s[i] && i < 20) { nm[i] = s[i]; i++; }
@@ -428,7 +428,7 @@ static void fx_g_sync(int want)
         gp.seed = 0x67656E31u;                   /* film_grain_random_seed ("gen1"); yg_set_shot mixes the file number in */
         yg_gen_init(fx_yg, &gp, 0);
         if (want != fx_g_logged)
-            wf_log("fx grain genesis %s %s ready %dms %dKB%s", yg_stocks[row].name, fx_aname[a], get_ms_clock() - t0,
+            wf_log("fx grain %s %s ready %dms %dKB%s", yg_stocks[row].name, fx_aname[a], get_ms_clock() - t0,
                    (int)(sizeof(yg_ctx) >> 10), fx_gb.suite ? " shoot" : "");
         fx_g_logged = want;
         fx_g_errlog = 0;

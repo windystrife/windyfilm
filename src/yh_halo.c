@@ -82,7 +82,7 @@ const yh_stock yh_stocks[YH_NSTOCK] = {
     { "spektrafilm-style B&W, weak AH",              yh_w_spk_bww, YH_XT_BW,   1.0f, 2.0f, 4.0f },
     /* the light wrap of Genesis Pro 1.6.6: the pyramid's weights, crosstalk and knee are not read (yh_params.gen
      * switches the stage to the plugin's own mask / blur / gate, see yh_gen_* at the end of this file) */
-    { "Genesis light wrap (arctan mask, difference of blur)", yh_w_neg, YH_XT_DIAG, 1.0f, 2.0f, 4.0f },
+    { "light wrap (arctan mask, difference of blur)", yh_w_neg, YH_XT_DIAG, 1.0f, 2.0f, 4.0f },
 };
 
 void yh_default_params(yh_params *p, int stock)

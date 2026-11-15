@@ -161,7 +161,8 @@ int main(int argc, char **argv)
     key(MODULE_KEY_PICSTYLE);
     key(MODULE_KEY_Q);
     key(MODULE_KEY_Q);
-    CHECK(wfui_host_group() == g0, "4 group keys did not come back to the group");
+    key(MODULE_KEY_Q);                                              /* 5 groups since 11-15 (Film stage) */
+    CHECK(wfui_host_group() == g0, "5 group keys did not come back to the group");
     CHECK(wfui_host_sel_id() == id_of("SUN200"), "group selection not remembered");
     host_gui_set(0, 1, 1);
     load_and_close(id_of("SUN200"));                                /* EOS M: back to LiveView, nothing else */
@@ -225,8 +226,8 @@ int main(int argc, char **argv)
     CHECK(closed && wf_loaded() == id_of("SUN200"), "a key did not skip the animation");
     end_checks();
 
-    /* 2e. film-stage (11-15): a chain can (G08 = 5219 500T) loaded, Print stock 2302, WindyGrain Gen Normal,
-     * WindyHalation Genesis; the focus walks down to WindyHalation; its INFO page */
+    /* 2e. film-stage (11-15): a chain can (G08 = 5219 500T, the Film stage tab) loaded, Print stock 2302 (its full name
+     * on the row), WindyGrain Even Normal, WindyHalation Light wrap; the focus walks down to WindyHalation; INFO */
     fake_reset();
     fake_set_card(card);
     fake_set_loaded(id_of("G08"));
@@ -235,6 +236,7 @@ int main(int argc, char **argv)
     fake_set_row(WF_ROW_HALO, 5);
     open_ui();
     CHECK(wfui_host_sel_id() == id_of("G08"), "open not on the loaded chain can");
+    CHECK(wfui_host_group() == WF_GRP_STAGE, "chain can in group %d, not Film stage", wfui_host_group());
     shot("fs_chain");
     for (int i = 0; i < WF_ROW_HALO; i++) key(MODULE_KEY_PRESS_DOWN);
     CHECK(wfui_host_focus() == WF_ROW_HALO, "DOWN x3 not on WindyHalation");
@@ -243,6 +245,16 @@ int main(int argc, char **argv)
     CHECK(wfui_host_info(), "INFO did not open the overlay");
     shot("fs_info");
     key(MODULE_KEY_INFO);
+    close_ui(MODULE_KEY_MENU, 0);
+    /* the longest print stock name (2395 Teleprint) on the focused Print stock row, between its arrows */
+    fake_reset();
+    fake_set_card(card);
+    fake_set_loaded(id_of("G08"));
+    fake_set_row(WF_ROW_PRINT, 6);
+    open_ui();
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_PRINT, "DOWN not on Print stock");
+    shot("fs_print_long");
     close_ui(MODULE_KEY_MENU, 0);
 
     /* 2b. Highlights / Shadows: 9 rows, 7 shown, the list scrolls with the focus (the font keeps its size) */

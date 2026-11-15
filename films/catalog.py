@@ -45,7 +45,7 @@ NAME_CH, SHORT_CH, SHORT_PX, LINE_CH, LINE_PX = 24, 11, 66, 44, 440
 FONT_UBUNTU = os.environ.get("WF_FONT", "/usr/share/fonts/truetype/ubuntu/UbuntuSans[wdth,wght].ttf")
 KINDS = ("COLOUR NEG", "SLIDE", "B&W NEG", "CINE NEG", "FILM LUT")
 FMTS = ("35mm", "120", "V-Log", "C-Log2", "Standard")
-GROUPS = ("colour", "cine", "bw", "lut")
+GROUPS = ("colour", "cine", "bw", "lut", "stage")      # stage: the film-stage chain films (derived, DESIGN 1a)
 PRINTS = ("scan", "cine", "paper") + tuple("p%02d" % i for i in range(16))
 # p00..p15: the chain films' sixteen print stocks, in the order of the dumped stock manifest. They sit AFTER the three
 # catalogue variants (src/wf_api.h WF_PRINT_STOCK0 3, WF_NPRINTS 19) so a shipped film keeps bits 0..2 unchanged.
@@ -137,11 +137,16 @@ def gen_of(table):
 def cube_of(table):
     return CUBE.get(table, table + ".CUB")
 
+def group_of(f):
+    """the strip tab of a row: a derived (film-stage chain) film has its own, the rest follow lut / type / family"""
+    return ("lut" if f["lut"] else "stage" if f.get("derived") else "bw" if f["type"] == "bw"
+            else "cine" if f["family"] == "cine" else "colour")
+
 def derive(f):
     """the browser fields that follow from the row: group, kind, fmt, short, prints"""
-    f["group"] = "lut" if f["lut"] else "bw" if f["type"] == "bw" else "cine" if f["family"] == "cine" else "colour"
+    f["group"] = group_of(f)
     f["kind"] = ("FILM LUT" if f["lut"] else "SLIDE" if f["type"] == "slide" else "B&W NEG" if f["type"] == "bw"
-                 else "CINE NEG" if f["group"] == "cine" else "COLOUR NEG")
+                 else "CINE NEG" if f["family"] == "cine" else "COLOUR NEG")
     f["fmt"] = CURVE_FMT[FLUT_CURVE[f["lut"]]] if f["lut"] else "35mm"
     f["short"] = SHORT.get(f["id"], "")
     own = f.get("prints")
@@ -669,8 +674,8 @@ def check():
             if f["kind"] not in KINDS: bad.append("%s: kind %r" % (c, f["kind"]))
             if f["fmt"] not in FMTS: bad.append("%s: fmt %r" % (c, f["fmt"]))
             if f["group"] not in GROUPS: bad.append("%s: group %r" % (c, f["group"]))
-            if f["group"] != ("lut" if f["lut"] else "bw" if f["type"] == "bw" else "cine" if f["family"] == "cine" else "colour"):
-                bad.append("%s: group %r does not follow type / family" % (c, f["group"]))
+            if f["group"] != group_of(f):
+                bad.append("%s: group %r does not follow lut / derived / type / family" % (c, f["group"]))
             if f["lut"]:
                 if f["prints"] != (): bad.append("%s: a Film LUT can has no print variants" % c)
             else:

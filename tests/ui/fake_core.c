@@ -14,14 +14,21 @@ static char logbuf[32768];
 static int loglen;
 static int val[WF_NROWS];
 
-/* the names and choices of src/wf_menu.c (film-stage: print stocks, WindyGrain / WindyHalation with the Gen choices) */
+/* the names and choices of src/wf_menu.c (film-stage: print stocks, WindyGrain / WindyHalation with the Even / Light
+ * wrap choices; the print stocks' full names of wf_row_text_long) */
 static const char *const names[WF_NROWS] = { "Light", "Print stock", "WindyGrain", "WindyHalation", "Mist", "Strength",
                                              "Highlights", "Shadows", "Film LUT" };
 static const char *const v_light[] = { "Auto", "Day", "Cloudy", "Tungsten", 0 };
 static const char *const v_print[] = { "Scan", "Cine", "Paper", "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72",
                                        "5382", "5384/82", "5384/92", "5385/93", "5385/62", "5386", "5383", "3513D", "3523XD", 0 };
-static const char *const v_grain[] = { "Off", "Fine", "Normal", "Strong", "Gen Fine", "Gen Normal", "Gen Strong", 0 };
-static const char *const v_halo[] = { "Off", "Film", "Film + bloom", "Spektra", "Spektra + bloom", "Genesis", 0 };
+static const char *const v_print_full[16] = {
+    "Kodak B&W Print Film 2302", "Kodak Vision Color 2383", "Kodak Vision Premier Color 2393",
+    "Kodak Vision Color Teleprint 2395 500T", "Eastman Color Print LC 5380", "Eastman Color Print 5381 (1950)",
+    "Eastman Color Print 5381 (1972)", "Eastman Color Print 5382", "Eastman Color Print 5384 (1982)",
+    "Eastman Color Print 5384 (1992)", "Eastman Color Print LC 5385 (1993)", "Eastman Color Print 5385 (1962)",
+    "Eastman EXR Color Print 5386", "Eastman Color Print 5383", "Fuji Eterna-CP Type 3513D", "Fuji Eterna-CP 3523XD" };
+static const char *const v_grain[] = { "Off", "Fine", "Normal", "Strong", "Even Fine", "Even Normal", "Even Strong", 0 };
+static const char *const v_halo[] = { "Off", "Film", "Film + bloom", "Spektra", "Spektra + bloom", "Light wrap", 0 };
 static const char *const v_mist[] = { "Off", "1/8", "1/4", "1/2", "1", "Black 1/8", "Black 1/4", "Black 1/2", "Black 1", 0 };
 static const char *const v_flut[] = { "Off", "Vision3 250D", "Vision3 500T", "Portra 400", "Leica Vivid", "Windy 250D P", 0 };
 static const char *const v_hs[] = { "-5", "-4", "-3", "-2", "-1", "0", "+1", "+2", "+3", "+4", "+5", 0 };
@@ -72,6 +79,11 @@ const char *wf_row_text(int r)
     static char b[8];
     if (r == WF_ROW_STRENGTH) { snprintf(b, sizeof(b), "%d%%", val[r] * 25); return b; }
     return r >= 0 && r < WF_NROWS ? vals[r][val[r]] : "";
+}
+
+const char *wf_row_text_long(int r)
+{
+    return r == WF_ROW_PRINT && val[r] >= 3 && val[r] < 19 ? v_print_full[val[r] - 3] : wf_row_text(r);
 }
 
 int wf_row_avail(int r) { return !(grey_mask & (1 << r)); }

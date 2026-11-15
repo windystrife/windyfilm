@@ -38,6 +38,7 @@ static const uint8_t group_rgb[WF_NGROUPS][3] = {
     { 182, 104, 66 },                   /* Cine: rust */
     { 150, 153, 160 },                  /* B&W: grey */
     { 38, 156, 148 },                   /* Film LUT: teal */
+    { 132, 96, 168 },                   /* Film stage: violet */
 };
 
 static inline unsigned rd16(const uint8_t *p) { return p[0] | (p[1] << 8); }

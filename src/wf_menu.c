@@ -169,12 +169,26 @@ static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Tungst
 static const char *const wf_light_key[WF_NLIGHT] = { "auto", "day", "cloudy", "tungsten" };
 static const char *wf_strength_name[WF_NSTRENGTH] = { "30%", "100%", "125%" };
 static const char *const wf_strength_key[WF_NSTRENGTH] = { "subtle", "normal", "strong" };
-static const char *wf_grain_name[WF_GRAIN_MAX + 1] = { "Off", "Fine", "Normal", "Strong", "Gen Fine", "Gen Normal",
-                                                       "Gen Strong" };
-static const char *const wf_grain_key[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "genfine", "gennormal",
+/* the chain's 16 print stocks by full name, p00..p15 = the chain's own index order (its stock manifest print_00..15).
+ * Five pairs make the same table (one dye-amount table each: 2383 = 2393, 5380 = 5381/72, 2395 = 5384/82,
+ * 5384/92 = 5385/93, 5385/62 = 5386); both names stay, as in the plugin's own list. */
+static const char *const wf_print_full[16] = {
+    "Kodak B&W Print Film 2302", "Kodak Vision Color 2383", "Kodak Vision Premier Color 2393",
+    "Kodak Vision Color Teleprint 2395 500T", "Eastman Color Print LC 5380", "Eastman Color Print 5381 (1950)",
+    "Eastman Color Print 5381 (1972)", "Eastman Color Print 5382", "Eastman Color Print 5384 (1982)",
+    "Eastman Color Print 5384 (1992)", "Eastman Color Print LC 5385 (1993)", "Eastman Color Print 5385 (1962)",
+    "Eastman EXR Color Print 5386", "Eastman Color Print 5383", "Fuji Eterna-CP Type 3513D", "Fuji Eterna-CP 3523XD" };
+/* the last three grain choices and the last halation choice are the film-stage model (docs/DESIGN.md 1a); their
+ * WINDYFLM.CFG words until 11-15 (genfine .. gen) still parse */
+static const char *wf_grain_name[WF_GRAIN_MAX + 1] = { "Off", "Fine", "Normal", "Strong", "Even Fine", "Even Normal",
+                                                       "Even Strong" };
+static const char *const wf_grain_key[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "evenfine", "evennormal",
+                                                            "evenstrong" };
+static const char *const wf_grain_old[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "genfine", "gennormal",
                                                             "genstrong" };
-static const char *wf_halo_name[WF_HALO_MAX + 1] = { "Off", "Film", "Film + bloom", "Spektra", "Spektra + bloom", "Genesis" };
-static const char *const wf_halo_key[WF_HALO_MAX + 1] = { "off", "halation", "bloom", "spk", "spkbloom", "gen" };
+static const char *wf_halo_name[WF_HALO_MAX + 1] = { "Off", "Film", "Film + bloom", "Spektra", "Spektra + bloom", "Light wrap" };
+static const char *const wf_halo_key[WF_HALO_MAX + 1] = { "off", "halation", "bloom", "spk", "spkbloom", "wrap" };
+static const char *const wf_halo_old[WF_HALO_MAX + 1] = { "off", "halation", "bloom", "spk", "spkbloom", "gen" };
 static const char *wf_mist_name[WF_MIST_MAX + 1] = { "Off", "1/8", "1/4", "1/2", "1", "Black 1/8", "Black 1/4", "Black 1/2",
                                                      "Black 1" };
 static const char *const wf_mist_key[WF_MIST_MAX + 1] = { "off", "w8", "w4", "w2", "w1", "b8", "b4", "b2", "b1" };
@@ -382,6 +396,15 @@ const char *wf_row_text(int row)
     case WF_ROW_FLUT:     return wf_out == WF_OUT_LLUT ? wf_flut_name[wf_flut > 0 && wf_flut < WF_FLUT_N ? wf_flut : 0] : "Off";
     }
     return "";
+}
+
+/* a chain print stock (p00..p15) by its full name, else 0 */
+static const char *wf_print_long(int v) { return v >= 3 && v < WF_NPRINTS ? wf_print_full[v - 3] : 0; }
+
+const char *wf_row_text_long(int row)
+{
+    const char *s = row == WF_ROW_PRINT ? wf_print_long(wf_print_eff(wf_cat_index(wf_film_id))) : 0;
+    return s ? s : wf_row_text(row);
 }
 
 int wf_row_avail(int row)
@@ -691,9 +714,11 @@ void wf_cfg_load(void)
             if (ok && x >= WF_HS_MIN && x <= WF_HS_MAX)
                 wf_sh = x;
         } else if ((v = wf_cfg_val(l, "grain"))) {
-            wf_grain = wf_cfg_word(v, wf_grain_key, WF_GRAIN_MAX + 1, WF_GRAIN_DEF);
+            wf_grain = wf_cfg_word(v, wf_grain_key, WF_GRAIN_MAX + 1, -1);
+            if (wf_grain < 0) wf_grain = wf_cfg_word(v, wf_grain_old, WF_GRAIN_MAX + 1, WF_GRAIN_DEF);
         } else if ((v = wf_cfg_val(l, "halation"))) {
-            wf_halo = wf_cfg_word(v, wf_halo_key, WF_HALO_MAX + 1, WF_HALO_DEF);
+            wf_halo = wf_cfg_word(v, wf_halo_key, WF_HALO_MAX + 1, -1);
+            if (wf_halo < 0) wf_halo = wf_cfg_word(v, wf_halo_old, WF_HALO_MAX + 1, WF_HALO_DEF);
         } else if ((v = wf_cfg_val(l, "mist"))) {
             wf_mist = WF_MIST_CAN ? wf_cfg_word(v, wf_mist_key, WF_MIST_MAX + 1, 0) : 0;
         } else if ((v = wf_cfg_val(l, "preview"))) {
@@ -825,9 +850,12 @@ void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev)
 {
     char b[WF_EX_T], t[48];
     int n = snprintf(b, sizeof b, "WindyFilm: %s", wf_look_title(lk, t, sizeof t));
-    if (lk->output == WF_OUT_FILM && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, " | Print %s | Strength %d%%", wf_print_name[lk->variant < WF_NPRINTS ? lk->variant : 0],
+    if (lk->output == WF_OUT_FILM && n < (int)sizeof b) {
+        int v = lk->variant < WF_NPRINTS ? lk->variant : 0;
+        const char *pl = wf_print_long(v);                  /* a chain print stock by its full name */
+        n += snprintf(b + n, sizeof b - n, " | Print %s | Strength %d%%", pl ? pl : wf_print_name[v],
                       wf_strength_pct(lk->strength));
+    }
     if (lk->output == WF_OUT_LLUT && lk->row >= 0 && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, " | %s", wf_out_name(WF_OUT_LLUT, lk->curve));
     if (lk->output == WF_OUT_LLUT && lk->lei && lk->lei >= WF_LL_EI_MIN && lk->lei <= WF_LL_EI_MAX && n < (int)sizeof b)
@@ -1216,6 +1244,11 @@ static MENU_UPDATE_FUNC(wf_row_update)
 {
     int row = (int)(intptr_t)entry->priv - 1;     /* priv = row + 1 for the row entries */
     MENU_SET_VALUE("%s", wf_row_text(row));
+    if (row == WF_ROW_PRINT) {                  /* the value field holds the code ("2383"), the help the full name */
+        const char *pl = wf_print_long(wf_print_eff(wf_cat_index(wf_film_id)));
+        if (pl)
+            MENU_SET_HELP("Print stock: %s.", pl);
+    }
     if (!wf_yuv_active())
         WF_NOT_ACTIVE();
     else if (!wf_row_avail(row))
@@ -1370,8 +1403,8 @@ static struct menu_entry wf_menu[] = {
               .help = "How Log + LUT reads the JPEG: sRGB, or a Canon style undone (Film 1, Neutral)." },
             WF_ROWE("Light", WF_ROW_LIGHT, wf_light_select, "White balance: Auto (yours), the stock's Day, Cloudy, Tungsten."),
             WF_ROWE("Print", WF_ROW_PRINT, wf_print_select, "Scan, cine print or paper print of the loaded film."),
-            WF_ROWE("WindyGrain", WF_ROW_GRAIN, wf_grain_select, "Film grain at the shot: Fine / Normal / Strong are ours (Yedlin), Gen ... is the grain of Genesis."),
-            WF_ROWE("WindyHalation", WF_ROW_HALO, wf_halo_select, "Red glow around highlights (3:2); Genesis is the light wrap of Genesis."),
+            WF_ROWE("WindyGrain", WF_ROW_GRAIN, wf_grain_select, "Film grain at the shot: Fine / Normal / Strong are ours (Yedlin), Even ... is the same in every tone."),
+            WF_ROWE("WindyHalation", WF_ROW_HALO, wf_halo_select, "Red glow around highlights (3:2); Light wrap: bright areas spill over their edges."),
             WF_ROWE("Mist", WF_ROW_MIST, wf_mist_select, "Diffusion filter: glow on lights, veil on shadows."),
             { .name = "Strength", .priv = (void *)&wf_strength, .max = WF_NSTRENGTH - 1, .choices = wf_strength_name,
               .select = wf_strength_select, .help = "How strongly the film look is applied." },

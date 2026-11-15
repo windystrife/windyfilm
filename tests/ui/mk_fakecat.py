@@ -9,7 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "films"))
 import catalog as C
 
-GROUPS = {"colour": 0, "cine": 1, "bw": 2, "lut": 3}
+GROUPS = {"colour": 0, "cine": 1, "bw": 2, "lut": 3, "stage": 4}
 PBIT = {"scan": 1, "cine": 2, "paper": 4}
 PBIT.update({"p%02d" % i: 1 << (3 + i) for i in range(16)})   # the chain films' print stocks (WF_PRINT_STOCK0 = 3)
 

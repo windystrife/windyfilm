@@ -10,7 +10,7 @@ enum { WF_CAM_NONE = 0, WF_CAM_EOSM = 1, WF_CAM_5D2 = 2 };
 int wf_cam(void);                         /* core: the camera this build is for, WF_CAM_NONE when the init checks failed */
 
 /* ------------------------------------------------------------------ catalogue (generated, read only) */
-enum { WF_GRP_COLOUR = 0, WF_GRP_CINE, WF_GRP_BW, WF_GRP_LUT, WF_NGROUPS };
+enum { WF_GRP_COLOUR = 0, WF_GRP_CINE, WF_GRP_BW, WF_GRP_LUT, WF_GRP_STAGE, WF_NGROUPS };   /* STAGE: the film-stage chain films */
 
 #define WF_F_READY    0x01                /* a film with a table in films/tables, or a Film LUT can with a cube name */
 #define WF_F_LUTCAN   0x02                /* Film LUT can: output V-Log + LUT with the can's cube, no 17^3 table */
@@ -53,8 +53,10 @@ enum { WF_ROW_LIGHT = 0, WF_ROW_PRINT, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_MIST, W
 const char *wf_row_name(int row);         /* "Light", "Print", "WindyGrain", "WindyHalation", "Mist", "Strength",
                                              "Highlights", "Shadows", "Film LUT"; the last choice of the two effect rows is
                                              the Genesis Pro 1.6.6 model (docs/DESIGN.md 1a) */
-const char *wf_row_text(int row);         /* the current value as text: "Day", "Scan", "Normal", "Genesis", "Off", "100%", "+2",
+const char *wf_row_text(int row);         /* the current value as text: "Day", "Scan", "Normal", "Light wrap", "Off", "100%", "+2",
                                              ... (Highlights / Shadows: "-5" .. "0" .. "+5", no wrap at the ends) */
+const char *wf_row_text_long(int row);    /* the same, with a print stock by its full name ("Kodak Vision Color 2383"); the
+                                             ML menu's value field is too narrow for it, the WindyFilm UI row is not */
 int  wf_row_avail(int row);               /* 0 = has no effect with the current output or camera: the UI greys it */
 int  wf_row_step(int row, int delta);     /* delta -1 / +1; 1 = the value changed (and was saved) */
 int  wf_row_level(int row, int *max);     /* bar rows (Strength): the level 0..*max */

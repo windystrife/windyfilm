@@ -12,7 +12,8 @@ Writes what src/wf_api.h and src/wf_core.h declare:
   wf_cat_ev8[]                    per row: descriptor EV x 8
 
 Fields a row may lack (an older catalogue) get defaults: short = name cut to 11, line1 / line2 = "", kind from type /
-family / lut, fmt "35mm" ("V-Log" for a can), group from type / family / lut, prints ("scan",) for a film, () for a can.
+family / lut, fmt "35mm" ("V-Log" for a can), group from lut / derived / type / family, prints ("scan",) for a film,
+() for a can.
 WF_F_READY = a ready Film LUT can, or a ready film with a table for any of its variants (films/tables/<table>.T17 for
 the scan, <table>_C / _P for Cine / Paper, <table>P00..P15 for the chain films' print stocks). The build prints the
 ready films without one: the browser leaves them off the strip and they cannot be loaded. `can` = the row's entry in WFCANS.DAT (its rank among
@@ -22,7 +23,7 @@ The catalogue is imported by path and only read; nothing is written next to it.
 import importlib.util, os, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GROUPS = ("colour", "cine", "bw", "lut")
+GROUPS = ("colour", "cine", "bw", "lut", "stage")
 PRINTS = ("scan", "cine", "paper") + tuple("p%02d" % i for i in range(16))
 # bits 3..18: the chain films' print stocks (src/wf_api.h WF_PRINT_STOCK0 / WF_NPRINTS 19)
 FLUT_N = 24                       # src/wf_loglut.h WF_FLUT_N (asserted against the catalogue's FLUT_N when it has one)
@@ -54,9 +55,10 @@ def defaults(f):
     lut = int(f.get("lut") or 0)
     typ = f.get("type", "neg")
     fam = f.get("family", "")
-    g = f.get("group") or ("lut" if lut else "bw" if typ == "bw" else "cine" if fam == "cine" else "colour")
+    g = f.get("group") or ("lut" if lut else "stage" if f.get("derived") else "bw" if typ == "bw"
+                           else "cine" if fam == "cine" else "colour")
     kind = f.get("kind") or ("FILM LUT" if lut else "SLIDE" if typ == "slide" else "B&W NEG" if typ == "bw"
-                             else "CINE NEG" if g == "cine" else "COLOUR NEG")
+                             else "CINE NEG" if fam == "cine" else "COLOUR NEG")
     prints = f.get("prints")
     if prints is None:
         prints = () if lut else ("scan",)

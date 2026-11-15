@@ -1498,6 +1498,20 @@ static void t_cfg(void)
     chk(wf_incurve == WF_INC_NEUTRAL && wf_incurve_t() == (wf_ll_curve_have(WF_INC_NEUTRAL) ? WF_INC_NEUTRAL : WF_INC_SRGB),
         "incurve=Neutral read: %d (in use %d)", wf_incurve, wf_incurve_t());
     wf_incurve = inc0;
+    /* the film-stage choices: the words written since 11-15 (evennormal, wrap) and the earlier ones (genstrong, gen) */
+    int gr0 = wf_grain, ha0 = wf_halo;
+    put_cfg("grain=EvenNormal\nhalation=wrap\n");
+    wf_cfg_load();
+    chk(wf_grain == 5 && wf_halo == 5, "grain=EvenNormal / halation=wrap read: %d %d", wf_grain, wf_halo);
+    put_cfg("grain=genstrong\nhalation=gen\n");
+    wf_cfg_load();
+    chk(wf_grain == 6 && wf_halo == 5, "grain=genstrong / halation=gen (before 11-15) read: %d %d", wf_grain, wf_halo);
+    put_cfg("grain=even\nhalation=wrapx\n");
+    wf_cfg_load();
+    chk(wf_grain == WF_GRAIN_DEF && wf_halo == WF_HALO_DEF, "unknown grain / halation words: the defaults (%d %d)",
+        wf_grain, wf_halo);
+    wf_grain = gr0;
+    wf_halo = ha0;
     char big[700];
     memset(big, '#', sizeof big);
     memcpy(big, "film=0\n", 7);
