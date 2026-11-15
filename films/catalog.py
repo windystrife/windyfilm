@@ -437,6 +437,15 @@ GX_NAMES = [
     ("Color A 8518 250T", "8518 250T", "Fuji Color A 8518 250T"),
 ]
 assert len(GX_NAMES) == 45, len(GX_NAMES)
+# The list's one B&W negative, Double-X 5222 (chain negative 9). The chain has no monochrome negative: its negative 9 is a
+# three-layer stock like the others (three distinct spectral rows, its own interlayer and per-channel curves; measured
+# 15/11/2026 on fr_glook_neg.h, pinned by tools/check_print_slots.py), so through a colour print it renders colour
+# (mean |U|+|V| about 100 on 2383) and only the B&W print 2302 makes it grey. The row is therefore a B&W film printed on
+# 2302 only, the stock's own pairing: type "bw" (B&W NEG chip, WF_F_BW, so the film-stage composition writes Y only),
+# B&W grain / halation, and its tables are converted with mk_wtab --bw (tools/mk_genesis_films.py matrix).
+GX_BW = {_n for _n, _x in enumerate(GX_NAMES) if "Double-X" in _x[2]}
+assert GX_BW == {9}, GX_BW
+GX_SKIP |= {(_n, _p) for _n in GX_BW for _p in range(GX_PRINT_N) if _p != 0}
 for _n in range(GX_NEG_N):                             # the strip labels first: derive() reads SHORT when the row is made
     if _n not in GX_ALIAS:
         SHORT[89 + _n] = GX_NAMES[_n if _n < 45 else 44][1]
@@ -466,9 +475,11 @@ for _n in range(GX_NEG_N):
     _pr = tuple("p%02d" % _p for _p in range(GX_PRINT_N) if (_n, _p) not in GX_SKIP)
     if not _pr:
         continue
-    FILMS.append(F(89 + _n, "G%02d" % _n, _disp, "neg", _iso, iso_code(_iso), _kel, 0, "cine", 59 + _n,
-                   ("Neg 400", 256), ("neg", 256), _official,
-                   "Print stock row picks the print.", ready=True, table="G%02d" % _n, spk=("spk_c", 256),
+    _bw = _n in GX_BW
+    FILMS.append(F(89 + _n, "G%02d" % _n, _disp, "bw" if _bw else "neg", _iso, iso_code(_iso), _kel, 0, "cine", 59 + _n,
+                   ("B&W 400", 256) if _bw else ("Neg 400", 256), ("BW", 256) if _bw else ("neg", 256), _official,
+                   "B&W negative: printed on 2302 only." if _bw else "Print stock row picks the print.", ready=True,
+                   table="G%02d" % _n, spk=("spk_bw", 256) if _bw else ("spk_c", 256),
                    derived=True, prints=_pr,
                    prov="Genesis 1.6.6 film chain, negative %02d (%s) x the print stocks (declared exception, "
                         "docs/DESIGN.md 1a) -> tools/mk_genesis_cube.c -> .cube -> tools/mk_wtab.py -> "
@@ -480,6 +491,11 @@ _used = {f["order"] for f in FILMS if f["order"] < 130 and not (f["code"].starts
 _free = [o for o in range(59, 140) if o not in _used]
 for _k, _f in enumerate(f for f in FILMS if f["code"].startswith("G") and f["id"] >= 89):
     _f["order"] = _free[_k]
+# a B&W chain negative follows the owner's strip rule (B&W films last): after every colour film, just before the
+# catalogue's B&W films (order 200 and up)
+for _k, _f in enumerate(f for f in FILMS if f["code"].startswith("G") and f["id"] >= 89 and f["type"] == "bw"):
+    _f["order"] = 199 - _k
+    assert _f["order"] not in {f["order"] for f in FILMS if f is not _f}, _f["code"]
 
 # the author's codes (no own code may equal one; generic notations only, PLAN 5.1)
 AUTHOR_CODE_RULE = "no code equal to one of the author's (P160 .. XP2): checked against tools/brandscan.py's list"

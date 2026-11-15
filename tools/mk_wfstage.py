@@ -160,7 +160,8 @@ def main():
     selftest(out, ents)
     # read back the way the module reads it, every entry composed at default knobs against its shipped table
     lst = os.path.join(BUILD, "tables.txt")
-    open(lst, "w").write("".join(e[5] + "\n" for e in ents))
+    bw = {f["id"] for f in catalog.rows()[0] if f and f["type"] == "bw"}   # WF_F_BW: the module composes Y only
+    open(lst, "w").write("".join(e[5] + (" bw" if e[0] in bw else "") + "\n" for e in ents))
     r = run([TOOL, "dat", out, lst], "mk_wfstage dat")
     print(r.stdout.rstrip())
     print("%s: %d B" % (os.path.basename(out), size))
