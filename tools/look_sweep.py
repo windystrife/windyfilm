@@ -21,7 +21,10 @@ everything made from them stay outside the repository (WORK, OUT): never commit 
 Sets, films mode: neutral (the develop with no look: the "before"), film (every film and can, its default finish), bloom,
 mist (the effect film, one level each, the rest at the default). Stage mode (the film-stage chain films, DESIGN 1a): neutral,
 matrix (every negative x every print it has, on the frames tagged matrix), negative (every negative at the camera's
-default print and at 2383, on every frame), grain, halation, bloom (glow frames), gauge (frames tagged gauge).
+default print, 2383 = WF_PRINT_CHAIN_DEF or a film's first print without it, on every frame), contrast (every frame: a catalogue film at Scan, a Film LUT can
+and three chain films at 2383, side by side), grain, halation, bloom (glow frames), gauge (frames tagged gauge).
+Env (lists): LOOK_SETS = only these sets (comma list; neutral always), e.g. matrix,contrast to show the matrix first;
+LOOK_RESUME=1 leaves out of jobs.txt the shots whose PPMs are already there (meta.json still lists them all).
 """
 import csv, importlib.util, json, math, os, struct, sys
 
@@ -43,6 +46,9 @@ PRINT_FULL = ("", "", "", "Kodak B&W Print Film 2302", "Kodak Vision Color 2383"
               "Fuji Eterna-CP 3523XD")                                                     # src/wf_menu.c wf_print_full
 DEF = dict(pr=0, s=1, g=2, h=1, b=2, m=0, ga=1)   # the EOS M's finish out of the box (src/wf_cam.h WF_*_DEF_CAM, WF_GAUGE_DEF)
 NEUTRAL = "neutral RAW develop"
+STRIP_CAT = (33, 62)          # stage mode's contrast strip: Portra 400 WS (Scan) and the Vision3 250D LUT can ...
+STRIP_CHAIN = (92, 97, 128)   # ... next to three chain films at 2383: Vision3 5207 250D, 5219 500T, Eterna 8563 250D
+STRIP_LEVEL = {33: "catalogue film, Scan", 62: "Film LUT can", 0: "chain film, print 2383"}
 
 
 def catalog():
@@ -182,7 +188,7 @@ def lists(mode, work, card, fx_film, frames):
     dl = ["F %s %s" % (x["name"], x["cr2"]) for x in fr]
     dl.append("D base srgb 0 0 - 1")
     src = {}
-    for f in cans if mode == "films" else []:
+    for f in cans if mode == "films" else [f for f in cans if f["id"] in STRIP_CAT]:
         l = f["lut"]
         cf = os.path.join(card, C.flut_file(l))
         if not os.path.exists(cf):
@@ -199,14 +205,18 @@ def lists(mode, work, card, fx_film, frames):
     if mode == "films":
         looks = films + [f for f in cans if f["id"] in src]
     else:
-        looks = chain + [f for f in films if f["id"] == fx_film]
+        looks = chain + [f for f in films if f["id"] == fx_film or f["id"] in STRIP_CAT] + \
+                [f for f in cans if f["id"] in src]
     for f in looks:
         meta["films"].append(dict(id=f["id"], code=f["code"], name=f["name"], short=f["short"], group=f["group"],
                                   kind=f["kind"], prints=list(f["prints"]), lut=f["lut"], iso=f.get("iso"),
                                   kelvin=f.get("kelvin"), stage=f["group"] == "stage"))
 
     jobs = []
+    only = [s for s in os.environ.get("LOOK_SETS", "").split(",") if s]
     def job(sset, level, x, fid, path="d", crop=True, **kw):
+        if only and sset != "neutral" and sset not in only:
+            return
         st = dict(DEF, **kw)
         if fid == 0:
             inp, source, name = "base", "Darkroom sRGB develop, no film", "000-neutral__%s__neutral" % x["name"]
@@ -247,15 +257,19 @@ def lists(mode, work, card, fx_film, frames):
         p2383 = prints.index("p01") if "p01" in prints else None
         for f in chain:                                             # negative by negative, print by print: one table at a time
             pis = [prints.index(p) for p in f["prints"]]
-            dp = min(pis)                                           # the camera's print at Print Scan (wf_variant_eff)
-            for pi in pis:
+            dp = p2383 if p2383 in pis else min(pis)                # the camera's print at Print Scan (wf_print_eff:
+            for pi in pis:                                          # WF_PRINT_CHAIN_DEF = 2383 when the film has it)
                 for x in tag("matrix"):
                     job("matrix", PRINT_NAME[pi], x, f["id"], pr=pi, crop=False)
-                for x in fr:
-                    if pi == dp:
-                        job("negative", "camera default (%s)" % PRINT_NAME[dp], x, f["id"], pr=dp, crop=False)
-                    elif pi == p2383:
-                        job("negative", PRINT_NAME[p2383], x, f["id"], pr=p2383, crop=False)
+                if pi == dp:                                        # one level: a film without 2383 (Double-X) on its own
+                    for x in fr:                                    # print, which its label names
+                        job("negative", "camera default", x, f["id"], pr=dp, crop=False)
+        for x in fr:                                                # the chain's contrast next to the catalogue's
+            for fid in STRIP_CAT:
+                if any(f["id"] == fid for f in looks):
+                    job("contrast", STRIP_LEVEL[fid], x, fid, crop=False)
+            for fid in STRIP_CHAIN:
+                job("contrast", STRIP_LEVEL[0], x, fid, pr=p2383, crop=False)
         fxf = next(f for f in looks if f["id"] == fx_film)          # a chain film shows its effects through 2383
         fp = p2383 if fxf["group"] == "stage" and "p01" in fxf["prints"] else DEF["pr"]
         meta["fx_print"] = fp
@@ -272,15 +286,17 @@ def lists(mode, work, card, fx_film, frames):
                 job("gauge", GAUGE[ga], x, fx_film, pr=fp, ga=ga)
     meta["jobs"] = jobs
     fmap = {x["name"]: x for x in fr}
+    done = lambda j: os.path.exists(j["out"]) and (not j["crop"] or os.path.exists(j["out"][:-4] + "_c.ppm"))
+    todo = [j for j in jobs if not (os.environ.get("LOOK_RESUME") == "1" and done(j))]
     with open(os.path.join(work, "jobs.txt"), "w") as o:
-        for j in jobs:
+        for j in todo:
             x = fmap[j["frame"]]
             o.write("%s %d %d %d %d %d %d %d %d %d %s %s%s\n" % (
                 j["input"], x["ev8"], j["film"], j["print"], j["strength"], j["grain"], j["halo"], j["bloom"], j["mist"],
                 j["gauge"], j["out"], j["path"], " %d,%d" % tuple(j["crop"]) if j["crop"] else ""))
     json.dump(meta, open(os.path.join(work, "meta.json"), "w"), indent=1)
-    print("look_sweep %s: %d frames, %d looks, %d develops, %d look jobs" % (mode, len(fr), len(looks), len(dl) - len(fr),
-                                                                           len(jobs)))
+    print("look_sweep %s: %d frames, %d looks, %d develops, %d look jobs (%d to render)%s" % (
+        mode, len(fr), len(looks), len(dl) - len(fr), len(jobs), len(todo), ", sets " + ",".join(only) if only else ""))
 
 
 # ------------------------------------------------------------------ gallery
@@ -399,9 +415,22 @@ def gallery(work, out):
         else:
             ng = by.get(("negative", "full", n), [])
             for lv in sorted({r["level"] for r in ng}, key=lambda s: (not s.startswith("camera"), s)):
-                it = nt + [(ims[r["file"]], "%s %s" % (r["film_id"], r["short"])) for r in ng if r["level"] == lv]
-                strips.append(grid(it, 8, 300, "%s: every film-stage negative from the CR2, print %s, default finish (%s)" % (
-                    n, lv, fin), os.path.join(out, "strips", "negatives__%s__%s.jpg" % (clean(lv.split("(")[-1].rstrip(")")), n))))
+                it = nt + [(ims[r["file"]], "%s %s%s" % (r["film_id"], r["short"], "" if r["print_id"] == "p01" else
+                                                          ", " + r["print"])) for r in ng if r["level"] == lv]
+                strips.append(grid(it, 8, 300, "%s: every film-stage negative from the CR2, print %s (2383; a film "
+                                   "without it on the print named), default finish (%s)" % (n, lv, fin),
+                                   os.path.join(out, "strips", "negatives__%s__%s.jpg" % (clean(lv), n))))
+            order = STRIP_CAT + STRIP_CHAIN
+            cs = sorted((r for r in by.get(("contrast", "full", n), []) if r["film_id"] in order),
+                        key=lambda r: order.index(r["film_id"]))
+            if cs:                                                  # Y p5 / p50 / p95 under each: the slope at a glance
+                yl = lambda r: "  Y %.0f/%.0f/%.0f" % tuple(stats[r["file"]][k] for k in ("p5", "p50", "p95"))
+                nf = by.get(("neutral", "full", n), [])
+                lb = lambda r: "%s%s%s" % (r["short"], ", 2383" if r["print_id"] == "p01" else "", yl(r))
+                it = [(ims[r["file"]], NEUTRAL + yl(r)) for r in nf] + [(ims[r["file"]], lb(r)) for r in cs]
+                strips.append(grid(it, 6, 400, "%s: contrast from the CR2: neutral | catalogue film (Scan) | Film LUT "
+                                   "can | chain films at 2383, default finish (%s); Y p5/p50/p95" % (n, fin),
+                                   os.path.join(out, "strips", "contrast__%s.jpg" % n)))
             mx = by.get(("matrix", "full", n), [])
             for fid in sorted({r["film_id"] for r in mx}):
                 rs = sorted((r for r in mx if r["film_id"] == fid), key=lambda r: prints.index(r["print_id"]))
@@ -446,7 +475,8 @@ def gallery(work, out):
         sets.update(film=["default"], bloom=list(BLOOM), mist=list(MIST), grain=[], halation=[], gauge=[])
     else:
         sets.update(matrix=[PRINT_NAME[i] for i in range(3, len(PRINT_NAME))], negative=sorted({r["level"] for r in rows
-                    if r["set"] == "negative"}), grain=list(GRAIN), halation=list(HALO), bloom=list(BLOOM), gauge=list(GAUGE))
+                    if r["set"] == "negative"}), contrast=[STRIP_LEVEL[k] for k in STRIP_CAT + (0,)], grain=list(GRAIN),
+                    halation=list(HALO), bloom=list(BLOOM), gauge=list(GAUGE))
     json.dump(dict(note="Every image from the CR2 through the Darkroom (develop + look stage); the camera's JPEGs give "
                         "Exif captions only. One row per image and set." + (
                         " Film-stage chain films: Genesis-derived tables (docs/DESIGN.md 1a), private." if mode == "stage"
@@ -473,6 +503,11 @@ def gallery(work, out):
                           if a[p].shape == a[q].shape)
             lines.append("%s nearest: %s" % (x["name"], ", ".join("%s-%s %.1f" % (lab(p), lab(q), d) for d, p, q in near[:8])))
         else:                                                       # 120 x 80 thumbnails: the grain averages out
+            cs = by.get(("neutral", "full", x["name"]), []) + by.get(("contrast", "full", x["name"]), [])
+            if len(cs) > 1:
+                cl = lambda r, s: "%s p5 %.0f p50 %.0f p95 %.0f clip %.1f%% crush %.1f%%" % (
+                    r["short"] if r["film_id"] else "neutral", s["p5"], s["p50"], s["p95"], s["clip"], s["crush"])
+                lines.append("%s contrast: %s" % (x["name"], "; ".join(cl(r, stats[r["file"]]) for r in cs)))
             rs = [r for r in by.get(("matrix", "full", x["name"]), []) if r["file"] in small]
             if len(rs) < 2:
                 continue

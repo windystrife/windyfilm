@@ -10,7 +10,8 @@
 #     WORK  work dir (frames, PPMs, logs); OUT the gallery; CARD a card's ML/DATA (the cans' cubes, only read);
 #     FX_FILM the film id of the effect strips; FRAME = NAME=CR2@EV8@TAGS@X,Y (tools/look_sweep.py lists)
 # Env: STEP = dev | look | gallery (one step only), KEEP=1 keeps the full-size develops (dev/*.uyvy, ~36 MB each),
-#      PACK = the WFFILMS.DAT the looks use (default build/eosm/WFFILMS.DAT; stage: a PACKS=1 card's, the chain tables).
+#      PACK = the WFFILMS.DAT the looks use (default build/eosm/WFFILMS.DAT; stage: a PACKS=1 card's, the chain tables),
+#      LOOK_SETS = only these sets (e.g. matrix,contrast first), LOOK_RESUME=1 renders only the missing PPMs (look_sweep.py).
 # The photos and everything written stay in WORK and OUT, outside the repository: never commit them.
 set -e
 R=$(cd "$(dirname "$0")/.." && pwd)
