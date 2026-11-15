@@ -10,7 +10,7 @@ enum { WF_CAM_NONE = 0, WF_CAM_EOSM = 1, WF_CAM_5D2 = 2 };
 int wf_cam(void);                         /* core: the camera this build is for, WF_CAM_NONE when the init checks failed */
 
 /* ------------------------------------------------------------------ catalogue (generated, read only) */
-enum { WF_GRP_COLOUR = 0, WF_GRP_CINE, WF_GRP_BW, WF_GRP_LUT, WF_NGROUPS };
+enum { WF_GRP_COLOUR = 0, WF_GRP_CINE, WF_GRP_BW, WF_GRP_LUT, WF_GRP_STAGE, WF_NGROUPS };   /* STAGE: the film-stage chain films */
 
 #define WF_F_READY    0x01                /* a film with a table in films/tables, or a Film LUT can with a cube name */
 #define WF_F_LUTCAN   0x02                /* Film LUT can: output V-Log + LUT with the can's cube, no 17^3 table */
@@ -20,7 +20,11 @@ enum { WF_GRP_COLOUR = 0, WF_GRP_CINE, WF_GRP_BW, WF_GRP_LUT, WF_NGROUPS };
 #define WF_PRINT_SCAN   0                 /* print variants = table variants in WFFILMS.DAT */
 #define WF_PRINT_CINE   1
 #define WF_PRINT_PAPER  2
-#define WF_NPRINTS      3
+/* 3..18: the chain films' sixteen print stocks, in the order of the dumped stock manifest (the catalogue's
+ * "p00".."p15"). Kept AFTER the three catalogue variants so a shipped film keeps bits 0..2 and its pack entries do not
+ * change. A chain film sets 3..18 and wf_print_eff falls back to its first available variant. */
+#define WF_PRINT_STOCK0 3
+#define WF_NPRINTS      19
 
 struct wf_film {
     uint8_t  id;                          /* stable id (the old catalogue numbering 26..127 is kept; the config stores it) */
@@ -30,8 +34,7 @@ struct wf_film {
     uint16_t iso;                         /* box speed shown on the chip */
     uint16_t kelvin;                      /* Light "Day" white balance for this stock */
     uint16_t order;                       /* strip order inside its group, ascending */
-    uint8_t  prints;                      /* bit v set = print variant v exists (bit 0 for every ready film) */
-    uint8_t  pad;
+    uint32_t prints;                      /* bit v set = print variant v exists (see WF_NPRINTS, 19 variants) */
     const char *code;                     /* <= 8 chars: table code (films/tables/<code>.T17) */
     const char *name;                     /* <= 24 chars: full name (title line) */
     const char *shortname;                /* <= 11 chars: strip label */
@@ -44,13 +47,23 @@ extern const int wf_nfilms;
 const struct wf_film *wf_film_by_id(int id);   /* 0 when unknown */
 
 /* ------------------------------------------------------------------ state the browser shows and changes (core) */
-enum { WF_ROW_LIGHT = 0, WF_ROW_PRINT, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_BLOOM, WF_ROW_MIST, WF_ROW_STRENGTH, WF_ROW_HL,
-       WF_ROW_SH, WF_ROW_FLUT, WF_NROWS };
+enum { WF_ROW_LIGHT = 0, WF_ROW_PRINT, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_BLOOM, WF_ROW_GAUGE, WF_ROW_MIST,
+       WF_ROW_STRENGTH, WF_ROW_HL, WF_ROW_SH, WF_ROW_FLUT,
+       WF_ROW_SEXP, WF_ROW_SPUSH, WF_ROW_SCOMP, WF_ROW_SPR, WF_ROW_SPG, WF_ROW_SPB, WF_ROW_SIIE,   /* film-stage knobs */
+       WF_NROWS };
 
-const char *wf_row_name(int row);         /* "Light", "Print", "Grain", "Halation", "Bloom", "Mist", "Strength", "Highlights",
-                                             "Shadows", "Film LUT" */
-const char *wf_row_text(int row);         /* the current value as text: "Day", "Scan", "Normal", "Film", "Off", "100%", "+2",
-                                             ... (Highlights / Shadows: "-5" .. "0" .. "+5", no wrap at the ends) */
+const char *wf_row_name(int row);         /* "Light", "Print stock", "Grain", "Halation", "Bloom", "Gauge", "Mist",
+                                             "Strength", "Highlights", "Shadows", "Film LUT", "Film exp", "Push / pull",
+                                             "Exp comp", "Printer R", "Printer G", "Printer B", "Interlayer"; the last
+                                             choice of Grain and of Halation is the Genesis Pro 1.6.6 model, the seven
+                                             film-stage knob rows move that chain's own settings on the film-stage films
+                                             (docs/DESIGN.md 1a; available only with ML/DATA/WFSTAGE.DAT) */
+const char *wf_row_text(int row);         /* the current value as text: "Day", "Scan", "Normal", "Wrap", "Off", "100%", "+2",
+                                             ... (Highlights / Shadows: "-5" .. "0" .. "+5", no wrap at the ends; Film exp
+                                             "-2" .. "+0.3" .. "+2", Push / pull "Pull 1" .. "Push 1", Printer "-12" ..
+                                             "+12", Interlayer "0%" .. "200%", none of them wraps) */
+const char *wf_row_text_long(int row);    /* the same, with a print stock by its full name ("Kodak Vision Color 2383"); the
+                                             ML menu's value field is too narrow for it, the WindyFilm UI row is not */
 int  wf_row_avail(int row);               /* 0 = has no effect with the current output or camera: the UI greys it */
 int  wf_row_step(int row, int delta);     /* delta -1 / +1; 1 = the value changed (and was saved) */
 int  wf_row_level(int row, int *max);     /* bar rows (Strength): the level 0..*max */

@@ -58,7 +58,11 @@ def main():
             continue
         bw = f["type"] == "bw"
         for v in f["prints"]:
-            b = open(catalog.t17_path(f, v), "rb").read()
+            p = catalog.t17_path(f, v)
+            if not os.path.exists(p):                # a derived table that this checkout did not make (DESIGN 1a)
+                print("pack: %s %s not on the card, %s is not there" % (f["code"], v, p))
+                continue
+            b = open(p, "rb").read()
             assert len(b) == ENT, (f["code"], v, len(b))
             w = list(struct.unpack("<%dI" % WORDS, b))
             if f.get("synth") and v == "scan":

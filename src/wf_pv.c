@@ -43,10 +43,15 @@ static int wf_pv_want = -1;                      /* wf_task: the last key handle
 static volatile int wf_pv_nomem;
 static uint32_t wf_pv_scr[WF_LV_ROW] __attribute__((aligned(32)));   /* display task only */
 
-/* the key of a film look: catalogue row, print variant, strength, Highlights / Shadows (the table and the build flags) */
+/* the key of a film look: catalogue row, print variant (5 bits: 19 of them), strength, Highlights / Shadows (the table
+ * and the build flags); a composed film-stage table (stk != 0) is mixed in, bit 30 set, never -1 or 0 */
 static int wf_pv_fkey(const struct wf_look *lk)
 {
-    return (lk->row + 1) | lk->variant << 8 | lk->strength << 10 | (lk->hl & 15) << 12 | (lk->sh & 15) << 16;
+    uint32_t k = (uint32_t)(lk->row + 1) | (uint32_t)lk->variant << 8 | (uint32_t)lk->strength << 13
+               | (uint32_t)(lk->hl & 15) << 16 | (uint32_t)(lk->sh & 15) << 20;
+    if (lk->stk)
+        k = (((k * 2654435761u) ^ lk->stk) & 0x3fffffff) | 0x40000000;
+    return (int)k;
 }
 
 /* the look the shot would get now: WF_PVK_* and *arg (FILM: its key; LOG / LLUT: the curve) */
@@ -113,7 +118,7 @@ static void wf_pv_film_poll(int want, const struct wf_look *lk)
 {
     if (want == wf_pv_want)
         return;
-    const uint32_t *T = want ? wf_ws_table(lk->row, lk->variant) : 0;
+    const uint32_t *T = want ? wf_ws_table(lk->row, lk->variant, lk->stk) : 0;
     if (want && !T) {
         if (wf_pv_film) {
             wf_pv_film = 0;                      /* another film is wanted: the old set is no longer shown */

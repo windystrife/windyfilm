@@ -39,7 +39,10 @@
 /* YH_SPK_*: the spektrafilm halation model (fit_levels.py): 3 bounces from the base, the same sigma in every channel
  * (65 um still, 50 um cine), strengths by the film's anti-halation class; S still strong, W still weak, C cine strong,
  * N cine none (no rem-jet), BW / BWW B&W strong / weak (GUESS, spektrafilm has no B&W) */
-enum { YH_NEG = 0, YH_C800T, YH_SLIDE, YH_BW, YH_SPK_S, YH_SPK_W, YH_SPK_C, YH_SPK_N, YH_SPK_BW, YH_SPK_BWW, YH_NSTOCK };
+enum { YH_NEG = 0, YH_C800T, YH_SLIDE, YH_BW, YH_SPK_S, YH_SPK_W, YH_SPK_C, YH_SPK_N, YH_SPK_BW, YH_SPK_BWW,
+       YH_GEN,                   /* the light wrap of Genesis Pro 1.6.6 (yh_halo.c + DESIGN 1a): its own mask, blur,
+                                  * difference-of-blur and gate; strength / radius / gauge from yh_params.gen_* */
+       YH_NSTOCK };
 #define YH_STOCK_BW(s) ((s) == YH_BW || (s) == YH_SPK_BW || (s) == YH_SPK_BWW)   /* one grey layer: the halo writes Y only */
 enum { YH_WHOLE = 0, YH_TOP = 1, YH_BOTTOM = 2 };
 
@@ -67,6 +70,14 @@ typedef struct {
     int   xfade;                 /* Diana: crossfade below the seam in 32-px rows (0 = off, default 8) */
     int   exact_only;            /* 1 = exact per-channel path everywhere (reference for tests) */
     int   pair_t;                /* pair path threshold abs(Y0 - Y1), default 40; < 0 = no pair path */
+    int   gauge_q8;              /* film gauge: 256 = 35 mm (the profiles as fitted, default), 128 = 16 mm, 474 = 65 mm;
+                                  * halo and bloom keep their size on the film (yh_init: yh_gauge_w) */
+    /* YH_GEN (Genesis light wrap): the mask, its blur and the gate of the plugin; hal_q8 is halation_strength */
+    int   gen;                   /* 1 = the Genesis model (stock must be YH_GEN; knee / boost / bloom / tint unused) */
+    int   gen_radius;            /* light_wrap_radius: the halo radius in px at 2048 px and 35 mm, default 10 */
+    int   gen_gauge_q8;          /* halation_film_gauge: 16 mm 128, 35 mm 256, 65 mm 474 */
+    int   gen_thr;               /* first display code of the mask ramp, default 240 (Genesis's luma threshold 0.94) */
+    int   gen_rgb_q8[3];         /* light_wrap_color * 256, default 102 128 115 (0.40 / 0.50 / 0.45, GUESS on B) */
 } yh_params;
 
 typedef struct {
@@ -96,6 +107,14 @@ typedef struct {
     uint32_t rsl[256];           /* 2^24 / sl[v] (pair path luma gain) */
     uint8_t  moff[1024];         /* conservative max(R'-Y, G'-Y, B'-Y, 0) per (U>>3, V>>3) bin */
     uint8_t  encA[1024], encB[1024], encC[2048];
+    /* YH_GEN (Genesis light wrap): the two tables of its two arctans, the wrap colour, the blur radius and a
+     * reciprocal of the box length (init only; the model needs no display model) */
+    int      gen, g_rad, g_str_q8, g_thr;
+    int      g_keep;             /* halves: the seam row (L0 grid) whose mask rows the TOP build kept in L[1], -1 none */
+    int16_t  gcol[3];            /* light_wrap_color, Q15 */
+    uint16_t gta[256];           /* the highlight mask (lightWrapI1Val's arctan), Q15 of 0..1 */
+    uint16_t gti[256];           /* the per-channel gate (LightWrapStepTwo's i2), Q8 of 0..1 (0..256) */
+    uint32_t grq[18];            /* 65536 / k, k = 1..17: the box blur's normaliser (its length at the edges) */
     /* buffers (one block from yh_mem_bytes) */
     uint16_t *L[YH_NLEV];        /* drive levels, 3 ch interleaved, Q10 */
     uint16_t *A[YH_NLEV];        /* A[k] (k >= 1) accumulated halo at level k, RGB Q16 */

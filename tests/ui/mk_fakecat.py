@@ -9,8 +9,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "films"))
 import catalog as C
 
-GROUPS = {"colour": 0, "cine": 1, "bw": 2, "lut": 3}
+GROUPS = {"colour": 0, "cine": 1, "bw": 2, "lut": 3, "stage": 4}
 PBIT = {"scan": 1, "cine": 2, "paper": 4}
+PBIT.update({"p%02d" % i: 1 << (3 + i) for i in range(16)})   # the chain films' print stocks (WF_PRINT_STOCK0 = 3)
 
 def cs(s):
     return '"%s"' % (s or "").replace("\\", "\\\\").replace('"', '\\"')
@@ -21,13 +22,16 @@ def main():
     rows = []
     for can, f in enumerate(ready):
         flags = 0x01 | (0x02 if f["lut"] else 0) | (0x04 if f["type"] == "bw" else 0) | (0x08 if f["type"] == "slide" else 0)
-        prints = 1
+        prints = 0
         for p in f.get("prints") or ():
             prints |= PBIT[p]
+        if not prints >> 3:
+            prints |= 1                            # Scan for every film but the chain films (tools/mk_catalog_c.py)
         if f["lut"]:
             prints = 0
         code = f["table"] if len(f["table"]) <= 8 else f["code"]
-        rows.append("    { %d, %d, 0x%02x, %d, %d, %d, %d, %d, 0, %s, %s, %s, %s, %s, %s, %s }," % (
+        # wf_film.prints is a uint32_t now (no pad byte after it)
+        rows.append("    { %d, %d, 0x%02x, %d, %d, %d, %d, 0x%xu, %s, %s, %s, %s, %s, %s, %s }," % (
             f["id"], GROUPS[f["group"]], flags, can, f["iso"], f["kelvin"], f["order"], prints, cs(code), cs(f["name"]),
             cs(f["short"]), cs(f["line1"]), cs(f["line2"]), cs(f["kind"]), cs(f["fmt"])))
     with open(out, "w") as fp:

@@ -1083,7 +1083,7 @@ static void dk_look(const struct wf_look *lk)
     }
     b[0] = 0;
     if (lk->output == WF_OUT_FILM)
-        n += snprintf(b + n, sizeof b - n, wf_ws_table(lk->row, lk->variant) ? ", film table" : ", film table -");
+        n += snprintf(b + n, sizeof b - n, wf_ws_table(lk->row, lk->variant, lk->stk) ? ", film table" : ", film table -");
     if (hk && n < (int)sizeof b)                 /* the halation stage: what runs in it ("halation + bloom normal") */
         n += snprintf(b + n, sizeof b - n, ", %s%s%s%s", WF_FXK_HALO(hk) ? "halation" : "",
                       WF_FXK_HALO(hk) && WF_FXK_BLOOM(hk) ? " + " : "", bn[WF_FXK_BLOOM(hk)], wf_fx_hk == hk ? "" : " -");

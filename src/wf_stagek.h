@@ -1,0 +1,76 @@
+/* wf_stagek.h - WindyStrife: a film-stage film's 17^3 YUV table composed from two halves (branch film-stage, DESIGN 1a).
+ *
+ * The film-stage films (catalogue ids 85..88 and 89..133 x the 16 print stocks) ship one 17^3 table per pair, baked at
+ * the chain's default settings. To move the chain's own knobs on the camera (Film exp, Push / pull, Exp comp, Printer
+ * R / G / B, Interlayer) the generator also writes the chain in two halves, as sampled card data (ML/DATA/WFSTAGE.DAT,
+ * tools/mk_wfstage.py):
+ *   negative half (one per negative stock): X[] display code -> exposure axis x, A1[c][] x -> density per channel,
+ *                 A2 33^3 density -> printing density at interlayer 0 (base) and its interlayer part (quad)
+ *   print half    (one per print stock):    B1[c][] printing density / 4 -> print density per channel,
+ *                 B2 33^3 print density -> display (the print's raw output, before the ends are pinned)
+ *   pair          (one per film x print):   the fitted exposure and the two pinned ends of the shipped table
+ * wf_sg_compose() walks the 4913 nodes (two passes, one half each): node Y'CbCr -> R'G'B' (clamped) -> X + exposure offset -> A1 -> A2
+ * (tetrahedral) -> + interlayer x quad + timing - printer -> B1 -> B2 (tetrahedral) -> pinned ends -> Y'CbCr word, the
+ * same words a .T17 holds. Generic 1D / 3D interpolation only: no formula of the chain is in here, the halves are data.
+ * Integer arithmetic (armv5t, no float, no 64-bit division); runs in wf_task when a knob or the film changes, never per
+ * pixel: the per-pixel kernel and its cost stay as they are.
+ *
+ * Accuracy (tools/mk_wfstage.c check, 7 pairs, against the chain run directly at the 4913 nodes): at default knobs
+ * mean 0.2..0.3 codes, max 4..10 codes on saturated nodes near the gamut edge; the shipped 33^3-cube tables measure
+ * mean 0.15, max 2..18 the same way. Default knobs use the shipped table, not this. */
+#ifndef WF_STAGEK_H
+#define WF_STAGEK_H
+#include <stdint.h>
+
+#define WF_SG_NA 33                        /* negative 3D grid */
+#define WF_SG_NB 33                        /* print 3D grid */
+#define WF_SG_N1 257                       /* 1D tables over 0..1 (index = x >> 8) */
+#define WF_SG_NX 1021                      /* X: display code c = i / 4, i = 0..1020 */
+#define WF_SG_A3 (WF_SG_NA * WF_SG_NA * WF_SG_NA)
+#define WF_SG_B3 (WF_SG_NB * WF_SG_NB * WF_SG_NB)
+
+/* the card blobs, read as they are (little-endian, 4-byte aligned) */
+struct wf_sg_neg {
+    int32_t lo[3], sc[3];                  /* A2 axis c: grid = ((A1 value - lo) * sc) >> 14, Q16 grid units */
+    uint16_t X[WF_SG_NX + 1];              /* exposure axis x, Q16 (one pad entry) */
+    uint16_t A1[3][WF_SG_N1];              /* density, Q14 */
+    uint16_t pad;
+    int16_t A2[WF_SG_A3][6];               /* base R G B, quad R G B: printing density, Q12 */
+};
+struct wf_sg_prn {
+    int32_t lo[3], sc[3];                  /* B2 axis c: grid = ((B1 value - lo) * sc) >> 12 */
+    uint16_t B1[3][WF_SG_N1];              /* print density, Q12 */
+    uint16_t pad;
+    uint16_t B2[WF_SG_B3][3];              /* raw display R G B, Q16 */
+    uint16_t pad2;
+};
+struct wf_sg_pair {
+    int32_t fit;                           /* fitted exposure, Q16 stops */
+    int32_t bk;                            /* raw output pinned to 0, Q16 */
+    uint32_t inv;                          /* 2^32 / (white - black) */
+};
+
+/* knob ranges (menu rows, WINDYFLM.CFG) */
+#define WF_SG_FEXP_MAX 6                   /* Film exp: -6..+6 thirds of a stop */
+#define WF_SG_PUSH_MAX 3                   /* Push / pull: -3..+3 thirds of a stop */
+#define WF_SG_PRN_MAX 12                   /* Printer R / G / B: -12..+12 printer points (0.025 logE each) */
+#define WF_SG_IIE_MAX 8                    /* Interlayer: 0..8 = 0..200 % in 25 % steps */
+#define WF_SG_IIE_DEF 4                    /* 100 %, the chain's default */
+#define WF_SG_OFF_MAX (WF_SG_FEXP_MAX + WF_SG_PUSH_MAX)   /* Film exp + Push / pull, thirds of a stop */
+struct wf_sg_knobs { int fexp, push, comp, prn[3], iie; };
+
+/* 1 = these knobs give the shipped table (no offset left after Exp comp, printer 0, interlayer 100 %) */
+int wf_sg_default(const struct wf_sg_knobs *k);
+/* a nonzero key for knob values that need a composed table (0 = default knobs), so two equal sets share one table;
+ * the table depends on the key alone: wf_sg_unkey gives knobs that compose to the very same words */
+uint32_t wf_sg_key(const struct wf_sg_knobs *k);
+void wf_sg_unkey(uint32_t key, struct wf_sg_knobs *k);
+/* the composed table in two passes, so the camera holds one half at a time (wf_shot.c reads the negative half, runs
+ * pass 1, frees it, then reads the print half): pd = WF_SG_NODES x 3 printing densities / 4 (B1's axis, Q16, 65535
+ * standing for the top end), T = the 4913 words; bw: U and V bytes 0 (a B&W film) */
+#define WF_SG_NODES 4913
+void wf_sg_neg_pass(const struct wf_sg_neg *n, const struct wf_sg_pair *pr, const struct wf_sg_knobs *k, uint16_t *pd);
+void wf_sg_prn_pass(const struct wf_sg_prn *p, const struct wf_sg_pair *pr, const uint16_t *pd, int bw, uint32_t *T);
+void wf_sg_compose(const struct wf_sg_neg *n, const struct wf_sg_prn *p, const struct wf_sg_pair *pr,
+                   const struct wf_sg_knobs *k, int bw, uint16_t *pd, uint32_t *T);
+#endif

@@ -19,9 +19,10 @@ WFFONTS.DAT v1 (little endian, own format):
   bitmaps       rows top to bottom, MSB first, rows padded to whole bytes
 Pen positions are 26.6 fixed point; a glyph is drawn at ((pen + 32) >> 6) + x, as PIL places mono glyphs.
 
---icons OUT.h  also writes the 10 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
-               as the mockup's icon() (Light, Print, Grain, Halation, Bloom, Mist, Strength, Highlights, Shadows, Film LUT),
-               and the 3 Darkroom print rows' icons (Frame, Info, Date) as wf_picons.
+--icons OUT.h  also writes the 18 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
+               as the mockup's icon() (Light, Print, Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights, Shadows,
+               Film LUT, and the film-stage knobs Film exp, Push, Exp comp, Printer R / G / B, Interlayer), and the 3
+               Darkroom print rows' icons (Frame, Info, Date) as wf_picons.
 --check        renders sample strings with the pack's own algorithm and compares them with PIL (pixel mismatches).
 --render DIR   writes a PNG sample sheet of the three fonts.
 --print-only   OUT is that print font pack alone (build.sh's pack step: mk_wffont.py WFPRINT.DAT --print-only).
@@ -231,7 +232,8 @@ def check(fonts):
 
 
 # ------------------------------------------------------------------ row icons (mockup.py icon(), our own drawing)
-ICONS = ('Light', 'Print', 'Grain', 'Halation', 'Bloom', 'Mist', 'Strength', 'Highlights', 'Shadows', 'Film LUT')
+ICONS = ('Light', 'Print', 'Grain', 'Halation', 'Bloom', 'Gauge', 'Mist', 'Strength', 'Highlights', 'Shadows', 'Film LUT',
+         'Film exp', 'Push', 'Exp comp', 'Printer R', 'Printer G', 'Printer B', 'Interlayer')
 
 
 def icon_img(k):
@@ -261,6 +263,12 @@ def icon_img(k):
                 r2 = (xx - 7.5) ** 2 + (yy - 7.5) ** 2
                 if r2 <= 2.6 ** 2 or (r2 <= 4.9 ** 2 and (xx + yy) % 2 == 0) or (r2 <= 7.4 ** 2 and xx % 2 == 0 and yy % 2 == 0):
                     d.point((x + xx, y + yy), fill=col)
+    elif k == 'Gauge':                             # a strip of film: the frame between two rows of perforations
+        d.rectangle([x + 1, y + 0, x + 14, y + 15], outline=col)
+        d.rectangle([x + 5, y + 4, x + 10, y + 11], outline=col)
+        for yy in (2, 6, 10, 14):
+            d.point((x + 3, y + yy), fill=col)
+            d.point((x + 12, y + yy), fill=col)
     elif k == 'Mist':
         for yy in (4, 8, 12):
             d.arc([x + 1, y + yy - 3, x + 8, y + yy + 3], 200, 340, fill=col)
@@ -281,6 +289,39 @@ def icon_img(k):
         d.line([x + 8, y + 7, x + 8, y + 14], fill=col)
         d.line([x + 2, y + 4, x + 8, y + 7], fill=col)
         d.line([x + 14, y + 4, x + 8, y + 7], fill=col)
+    elif k == 'Film exp':                          # a square cut on its diagonal: plus above, minus below
+        d.rectangle([x + 1, y + 1, x + 14, y + 14], outline=col)
+        d.line([x + 14, y + 1, x + 1, y + 14], fill=col)
+        d.line([x + 3, y + 5, x + 7, y + 5], fill=col)
+        d.line([x + 5, y + 3, x + 5, y + 7], fill=col)
+        d.line([x + 8, y + 10, x + 12, y + 10], fill=col)
+    elif k == 'Push':                              # a double arrow, up and down, on a frame line
+        d.line([x + 8, y + 1, x + 8, y + 14], fill=col)
+        d.polygon([(x + 8, y + 0), (x + 4, y + 4), (x + 12, y + 4)], fill=col)
+        d.polygon([(x + 8, y + 15), (x + 4, y + 11), (x + 12, y + 11)], fill=col)
+        d.line([x + 2, y + 7, x + 5, y + 7], fill=col)
+        d.line([x + 11, y + 7, x + 14, y + 7], fill=col)
+    elif k == 'Exp comp':                          # a balance: a beam level on its pivot
+        d.line([x + 1, y + 5, x + 14, y + 5], fill=col)
+        d.polygon([(x + 8, y + 6), (x + 4, y + 13), (x + 12, y + 13)], outline=col)
+        d.line([x + 1, y + 5, x + 1, y + 8], fill=col)
+        d.line([x + 14, y + 5, x + 14, y + 8], fill=col)
+        d.line([x + 2, y + 14, x + 13, y + 14], fill=col)
+    elif k in ('Printer R', 'Printer G', 'Printer B'):   # three printer lights, the row's own one lit
+        lit = ('Printer R', 'Printer G', 'Printer B').index(k)
+        for i in range(3):
+            box = [x + 1 + i * 5, y + 3, x + 4 + i * 5, y + 12]
+            if i == lit:
+                d.rectangle(box, fill=col)
+            else:
+                d.rectangle(box, outline=col)
+        d.line([x + 1, y + 14, x + 14, y + 14], fill=col)
+    elif k == 'Interlayer':                        # three emulsion layers, the effect crossing between them
+        for yy in (2, 7, 12):
+            d.rectangle([x + 1, y + yy, x + 14, y + yy + 2], outline=col)
+        for xx in (5, 10):
+            d.line([x + xx, y + 5, x + xx, y + 6], fill=col)
+            d.line([x + xx, y + 10, x + xx, y + 11], fill=col)
     return im
 
 

@@ -38,10 +38,52 @@ AUTHOR_MO = os.path.join("/mnt/f/MagicLatern/6D/ML/modules", "film" + "roll" + "
 DER_ROOT = "/root/ml/wf_src"
 DENY = ["florin" + "kiritescu", "FILM" + "CAN", "FILM" + "ROLL", "film" + "roll",
         # DER file names (phase 1 audit: derived from the author's binary or from Genesis)
-        "fr_" + "kern.c", "fr_" + "opt110", "fr_" + "authprev", "fr_" + "5d2.c", "fr_" + "glook", "fr_" + "gx",
-        "patch" + "_mo.py", "audit" + "_mo.py", "proto/" + "speed",
+        "fr_" + "kern.c", "fr_" + "opt110", "fr_" + "authprev", "fr_" + "5d2.c", "patch" + "_mo.py",
+        "audit" + "_mo.py", "proto/" + "speed",
         # Genesis file names
         "Genesis" + "_Pro", "genesis" + "_re", "HANDOFF-" + "GENESIS"]
+
+# Declared exception: branch `film-stage` only (DESIGN 1a, owner 14 Nov 2026). The Genesis-derived table *generator*
+# lives in tools/ there, so its name is allowed on that branch and nowhere else: denied by default, taken out of the
+# list on the declared branch. The gate then says out loud that the tree is not clean-room, so a PASS there can never
+# be read as a clean tree.
+BRANCH_EXCEPTIONS = ("fr_" + "glook", "fr_" + "gx", "mk_" + "print_lut.py")
+
+
+def branch():
+    """the checked-out branch name, or '' when this is not a git tree (a `git archive` build).
+    In a worktree `.git` is a *file* holding `gitdir: <path>`, so that is followed first."""
+    g = os.path.join(REPO, ".git")
+    try:
+        if os.path.isfile(g):
+            for ln in open(g, encoding="utf-8"):
+                if ln.startswith("gitdir:"):
+                    g = ln.split(":", 1)[1].strip()
+                    break
+            else:
+                return ""
+            if re.match(r"[A-Za-z]:[/\\]", g) and not os.path.isdir(g):   # a worktree made from Windows, read in WSL
+                g = "/mnt/" + g[0].lower() + g[2:].replace("\\", "/")
+            g = os.path.join(REPO, g)                    # a relative gitdir is relative to the worktree
+        head = open(os.path.join(g, "HEAD"), encoding="utf-8").read().strip()
+    except OSError:
+        return ""
+    if not head.startswith("ref:"):
+        return ""                                    # detached HEAD: no branch to name
+    return head[4:].strip().rsplit("/", 1)[-1]
+
+
+BRANCH = branch()
+# `grain-halation` is cut from `film-stage` and carries the same declared exception plus the plugin's *code*
+# constants (the grain amplitude tables and the halation formula, DESIGN 1a "what this branch adds on top"):
+# it is not clean-room either, and it must not be published or merged into `main` without that paragraph.
+# `print-frame` took `film-stage` in on 15 Nov 2026 (the owner: merge it in when it is done), so it carries the same
+# exception from that merge on; its clean-room print work ends at 47f9597, the commit before the merge.
+NOT_CLEAN = BRANCH in ("film-stage", "grain-halation", "print-frame")
+DENY += list(BRANCH_EXCEPTIONS)                       # the derived generator's names are denied by default ...
+if NOT_CLEAN:                                         # ... and allowed only under the declared exception
+    DENY = [w for w in DENY if w not in BRANCH_EXCEPTIONS]
+    print("gate: this tree is NOT clean-room (Genesis-derived tables and effect constants, DESIGN 1a, branch %s)" % BRANCH)
 SCAN_DIRS = ("src", "tools", "films", "cans", "tests")
 SCAN_FILES = ("build.sh", "test.sh")
 EQUAL_DIRS = ("src", "tools", "films", "cans")
