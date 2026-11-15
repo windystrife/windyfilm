@@ -742,15 +742,16 @@ I 4.1-4.9 ms, D 4.0-4.7 ms. Rows, the frame 5184 x 3456 (instructions per pixel 
 - On the camera: `shoulder i NNms` (the table) and `rows NN ms` on B's lines; the Darkroom's `expose` time.
 
 **Colour trim on i** (the owner after the 16-raw preview: i a little less saturated, saturation and vibrance -10 %, the
-detail kept). `wf_dev_trim(t, sat, vib)` works on the built nodes: Y' of every node stays, Cb / Cr x (1 + sat / 100)
+detail kept; 16 Nov, after the trim preview: still a bit strong, that again x 0.9, so -19 / -19). `wf_dev_trim(t, sat, vib)` works on the built nodes: Y' of every node stays, Cb / Cr x (1 + sat / 100)
 (1 + vib / 100 x s), s = max - min of the node's R'G'B' (BT.601 back from its Y'CbCr, 0..1). `WF_DEV_HUE_I_SAT` =
-`WF_DEV_HUE_I_VIB` = -10: a muted colour x 0.9, the strongest x 0.81 (x 0.808 .. 0.882 over the dev test cube's nodes with
-|c| >= 64); a neutral is untouched, so the tone, the shoulder table (it reads the nodes' Y') and every detail stay.
+`WF_DEV_HUE_I_VIB` = -19 (were -10 / -10 on 15 Nov): a muted colour x 0.81, the strongest x 0.81 x 0.81 = 0.656, the -10
+trim applied twice to 0.3 % (x 0.655 .. 0.776 over the dev test cube's nodes with |c| >= 64); a neutral is untouched, so the tone, the shoulder table (it reads the nodes' Y') and every detail stay.
 `wf_rawb_logpk_build` applies it when `wf_rb_hue` is I, so B and the Darkroom both get it with the table. B's `rb_key`
 carries bit 24 = trim: leaving i (shoulder=a / d) rebuilds the table without it, a stays the RAWB14 / RAWB15 frame bit
 for bit, D has no trim. Cost: once per table build, 20.6 ms in memsim (2.9 M instructions over the 35 937 nodes, two
 software divisions each), inside the logged `tables log pack ... NNms`; nothing per pixel. Tests: dev `hue` part 4 (0 / 0
-a no-op, only the nodes change, Y' and neutrals kept, each Cb / Cr between 0.81 and 0.9 of its own with its sign),
+a no-op, only the nodes change, Y' and neutrals kept, each Cb / Cr between (1 + sat)(1 + vib) and 1 + sat of its own
+with its sign, from the two defines),
 wf_test RAWB:chain (I + trim bit-exact against the direct develop with the trim; without it every Y byte equal and U / V
 nearer 0), darkroom `devset` hue field `i` (the camera's, with the trim) / `i0` (without). On the owner's 16 raws through
 the darkroom devset, i0 and i differ in no Y byte (cmp).

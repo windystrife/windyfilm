@@ -528,8 +528,8 @@ static void mode_span(void)
    3. on a neutral exposure ramp through the clip (roll's raw), I and D stay within 2 codes of A everywhere (a neutral's
       luma index is its own: the same knee and target) and differ from it nowhere below the knee;
    4. the colour trim i takes on the chain films (wf_dev_trim, WF_DEV_HUE_I_SAT / _VIB): 0 / 0 leaves the table as built;
-      -10 / -10 keeps every node's Y' and every neutral, touches nothing but the nodes, and scales each node's Cb and Cr by
-      0.9 x (0.9 .. 1) with its sign kept (within a code of rounding). */
+      SAT / VIB (-19 / -19) keeps every node's Y' and every neutral, touches nothing but the nodes, and scales each
+      node's Cb and Cr by (1 + SAT / 100) x (1 + VIB / 100 .. 1) with its sign kept (within a code of rounding). */
 extern const int16_t *wf_dev_hue_luma(int curve);
 extern uint32_t wf_dev_hue_paths[3];
 static const int roll_gdn[3];                    /* roll's ramp (below) */
@@ -697,7 +697,7 @@ static void mode_hue(void)
         CHECK(!memcmp((const char *)&T1 + sizeof T1.node, (const char *)D + sizeof T1.node, sizeof T1 - sizeof T1.node),
               "trim: only the nodes change");
         int nn = 0, nch = 0, bad = 0;
-        double kmin = 2, kmax = 0;
+        double kmin = 2, kmax = 0, khi = 1 + WF_DEV_HUE_I_SAT / 100.0, klo = khi * (1 + WF_DEV_HUE_I_VIB / 100.0);
         for (int b = 0; b < WF_DEV_G; b++)
             for (int g = 0; g < WF_DEV_G; g++)
                 for (int r = 0; r < WF_DEV_G; r++) {
@@ -715,8 +715,8 @@ static void mode_hue(void)
                     nch += c1[0] != c0[0] || c1[1] != c0[1];
                     for (int k = 0; k < 2; k++) {
                         int a = abs(c0[k]), z = abs(c1[k]);
-                        if ((c0[k] > 0 && c1[k] < 0) || (c0[k] < 0 && c1[k] > 0) || z > a || z < (int)(0.81 * a) - 1 ||
-                            z > (int)(0.9 * a + 0.5) + 1) {
+                        if ((c0[k] > 0 && c1[k] < 0) || (c0[k] < 0 && c1[k] > 0) || z > a || z < (int)(klo * a) - 1 ||
+                            z > (int)(khi * a + 0.5) + 1) {
                             if (bad++ < 8) printf("  node %d %d %d: c%d %d -> %d\n", r, g, b, k, c0[k], c1[k]);
                         }
                         if (a >= 64) {
@@ -726,8 +726,8 @@ static void mode_hue(void)
                         }
                     }
                 }
-        CHECK(bad == 0 && nch > nn / 2, "trim -10 / -10: %d nodes off (Y', a neutral, sign or a scale outside 0.81 .. 0.9), "
-              "%d of %d nodes moved", bad, nch, nn);
+        CHECK(bad == 0 && nch > nn / 2, "trim %d / %d: %d nodes off (Y', a neutral, sign or a scale outside %.3f .. %.3f), "
+              "%d of %d nodes moved", WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB, bad, klo, khi, nch, nn);
         printf("hue: trim %d / %d: %d of %d nodes moved, Y' and neutrals kept, chroma x %.3f .. %.3f (nodes with |c| >= 64)\n",
                WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB, nch, nn, kmin, kmax);
     }
