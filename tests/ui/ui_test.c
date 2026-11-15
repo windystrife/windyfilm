@@ -176,6 +176,20 @@ int main(int argc, char **argv)
     key(MODULE_KEY_WHEEL_DOWN);                                     /* 5D2 rear wheel */
     CHECK(fake_row_value(WF_ROW_GRAIN) == 3, "WHEEL_DOWN did not step Grain");
     key(MODULE_KEY_WHEEL_UP);
+    /* Bloom, its own row right after Halation (RAWB11): the same row style, the ring (WHEEL_RIGHT / LEFT) steps it */
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_BLOOM && WF_ROW_BLOOM == WF_ROW_HALO + 1 && !strcmp(wf_row_name(WF_ROW_BLOOM), "Bloom"),
+          "DOWN x2 from Grain not on Bloom (focus %d, '%s')", wfui_host_focus(), wf_row_name(wfui_host_focus()));
+    CHECK(!strcmp(wf_row_text(WF_ROW_BLOOM), "Normal"), "Bloom starts on Normal ('%s')", wf_row_text(WF_ROW_BLOOM));
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(!strcmp(wf_row_text(WF_ROW_BLOOM), "Strong") && !strcmp(wf_row_text(WF_ROW_HALO), "Film"),
+          "WHEEL_RIGHT on Bloom: Strong, Halation untouched ('%s', '%s')", wf_row_text(WF_ROW_BLOOM), wf_row_text(WF_ROW_HALO));
+    shot("b2s_bloom");
+    key(MODULE_KEY_WHEEL_LEFT);                                     /* (the core's wrap at the ends: host FX:bloom) */
+    CHECK(!strcmp(wf_row_text(WF_ROW_BLOOM), "Normal"), "WHEEL_LEFT: Normal again ('%s')", wf_row_text(WF_ROW_BLOOM));
+    key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
     int g0 = wfui_host_group();

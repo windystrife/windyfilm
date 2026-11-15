@@ -51,9 +51,15 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 - Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
   WB của bạn được trả lại khi về Auto hoặc khi tắt module.
 - Hàng Print: Scan / Cine print / Paper (chỉ với phim có mô hình in).
+- Hàng Halation / Bloom (từ 15/11, hai hàng riêng; mặc định Film + Normal): Halation = viền đỏ cam quanh
+  điểm sáng (ánh sáng dội từ đế phim): Off / Film / Spektra. Bloom = quầng sáng mềm
+  cùng màu với chính điểm sáng: Off / Low / Normal / Strong. Bật riêng từng cái được
+  (Bloom không cần Halation và ngược lại); tắt cả hai thì không tốn thời gian. File
+  cài đặt cũ: "Film + bloom" thành Film + Bloom Normal, "Spektra + bloom" thành
+  Spektra + Bloom Normal. Cũng có trong menu ML (mục Bloom ngay dưới Halation).
 - Hàng Highlights / Shadows: -5 .. +5, mặc định 0. Dương làm sáng vùng sáng /
   nâng vùng tối, âm làm tối. Áp cho phim và Log + LUT (cả lon Film LUT), không
-  áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 9 hàng: hiện 7,
+  áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 10 hàng: hiện 7,
   danh sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.

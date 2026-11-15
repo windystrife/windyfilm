@@ -67,6 +67,7 @@ struct wf_look {
     uint8_t  variant;                             /* print variant WF_PRINT_* (FILM) */
     uint8_t  strength;                            /* level 0..2 (30 / 100 / 125 %) */
     uint8_t  grain, halo, mist;                   /* the settings as the menu counts them */
+    uint8_t  bloom;                               /* Bloom 0..WF_BLOOM_MAX (its own row since RAWB11; runs in the halation stage) */
     uint8_t  light;                               /* WF_LIGHT_* (WB itself is set by the menu, not by the worker) */
     uint8_t  why;                                 /* WF_OUT_OFF: 0 set Off, 1 no film loaded, 2 film without a table */
     uint8_t  incurve;                             /* WF_INC_*: how Log + LUT read the JPEG (LLUT) */
@@ -190,7 +191,7 @@ int  wf_style_con(void);                          /* the active style's Contrast
 int  wf_style_con_of(int inc);                    /* the Contrast input curve `inc` was measured at */
 int  wf_style_raw(void);                          /* PROP_PICTURE_STYLE value, 0 = not reported yet */
 int  wf_strength_pct(int level);
-void wf_exif_shot(const struct wf_look *lk, int g, int h, int m, int ev);   /* a shot of ours: its text (ring) */
+void wf_exif_shot(const struct wf_look *lk, int g, int h, int b, int m, int ev);   /* a shot of ours: its text (ring) */
 void wf_exif_none(void);                          /* a JPEG that got no look: keeps the ring aligned */
 const char *wf_out_name(int out, int curve);
 const char *wf_look_title(const struct wf_look *lk, char *b, int n);      /* "Portra 400 WS Scan", "V-Log + LUT Vision3 250D" */
