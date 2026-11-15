@@ -7,12 +7,16 @@
  *   Darkroom     a red safelight theme (the same palette entries recoloured): the print window on the easel at the left,
  *                the picture fading in on the paper as the develop exposes it (palette ramp only, no pixel redraw), the
  *                roll / film / "Frame n of N", a timer dial, the phase ("Exposing the paper"), "n to go - about m min";
- *                developed prints slide up to the wire along the top and hang there to dry. MENU stops.
- *   HUD          the frame counter drawn over LiveView while a roll shoots, in ML's own colour indices (the UI's palette
+ *                developed prints slide up to the wire along the top and hang there to dry. MENU stops. Before a run
+ *                (and after a stop) the print finishes' rows Frame / Info / Date instead of the dial (UP / DOWN, LEFT /
+ *                RIGHT / wheel; DESIGN 3.9) and, while no print is on the easel, a small picture of how they look.
+ *   HUD         the frame counter drawn over LiveView while a roll shoots, in ML's own colour indices (the UI's palette
  *                entries are not ours outside the UI): wfdr_hud (wf_dark.c calls it from wf_task).
  * Threads: UI task only (wf_ui.c calls wfdr_*); the darkroom state comes from wf_dark_view() (wf_dark.h). */
 #include "wf_ui_int.h"
 #include "../wf_dark.h"
+#include "../wf_print.h"                                   /* the finishes' setting values (WF_PFR_*, ...) */
+#include "wf_icons.h"                                      /* wf_picons: the print rows' icons */
 
 typedef char scr_ids_match[WF_UI_SCR_ROLL == WFUI_SCR_ROLL && WF_UI_SCR_DARK == WFUI_SCR_DARK ? 1 : -1];
 
@@ -481,6 +485,7 @@ static const uint8_t PAPER[3] = { 236, 66, 74 };           /* unexposed paper un
 static int dr_expose_shown = -1, dr_pready = -1;
 static uint32_t dr_gen = 0xFFFFFFFFu;
 static int dr_confirm;                                     /* MENU once while running: "MENU again to stop" */
+static int dr_pfoc;                                        /* the print finishes: the focused row (WF_PO_*) */
 
 /* developed tone of level v (0..1000): shadows to a near black red, highlights to the paper */
 static void tone(int v, int out[3])
@@ -526,6 +531,7 @@ static void dark_enter(void)
     dr_pready = -1;
     dr_gen = 0xFFFFFFFFu;
     dr_confirm = 0;
+    dr_pfoc = 0;
     msg = 0;
 }
 
@@ -551,6 +557,8 @@ static void luma_blit(const uint8_t *l, int lw, int lh, int x, int y, int w, int
     }
 }
 
+static void dr_ppreview(void);
+
 /* the print window: easel frame, paper, the print */
 #define PR_X 40
 #define PR_Y 146
@@ -562,6 +570,8 @@ static void dr_easel(const struct wf_dark_view *v, int now)
     wfg_rect(24, 368, 344, 370, C_FRAME);
     if (v->print_ready && v->print)
         luma_blit(v->print, WF_DR_PW, WF_DR_PH, PR_X, PR_Y, WF_DR_PW, WF_DR_PH, C_DEV0, DR_NDEV);
+    else if (v->state != WF_DR_RUN && v->state != WF_DR_STOPPING && v->state != WF_DR_DONE)
+        dr_ppreview();                                     /* no print yet: how the finishes will look */
 }
 
 /* the wire with the hung prints; the newest one slides up from the easel for 700 ms */
@@ -659,6 +669,76 @@ static const char *phase_text(int ph)
     return "";
 }
 
+/* the print finishes (owner 11-15, DESIGN 3.9): three rows in the browser's style while no run lives; UP / DOWN pick one,
+ * LEFT / RIGHT / the wheel change it (wf_menu.c keeps them and saves the config) */
+#define DR_RX0 384
+#define DR_RX1 696
+#define DR_RY  208
+#define DR_RH  27
+
+static void dr_prows(void)
+{
+    spaced(F_13, DR_RX0 + 4, DR_RY - 22, "PRINT", C_TXT3, 3);
+    for (int k = 0; k < WF_PO_N; k++)
+    {
+        char b[24];
+        int y = DR_RY + k * DR_RH, foc = k == dr_pfoc, av = wf_popt_avail(k);
+        if (foc)
+        {
+            wfg_rrect(DR_RX0, y - 1, DR_RX1, y + 19, 6, C_AMBERD, -1, 0);
+            wfg_rrect(DR_RX0, y - 1, DR_RX0 + 3, y + 19, 2, C_AMBER, -1, 0);
+        }
+        wfg_bits16(wf_picons[k], DR_RX0 + 12, y + 2, !av ? (foc ? C_TXT3 : C_BAROFF) : foc ? C_AMBER : C_TXT3);
+        ui_text(F_15, DR_RX0 + 36, y + 1, wf_popt_name(k), !av ? C_TXT3 : foc ? C_TXT : C_TXT2);
+        const char *val = wf_popt_text(k, b, sizeof b);
+        int vx = foc ? DR_RX1 - 16 : DR_RX1 - 4;
+        int xl = vx - text_r(F_15, vx, y + 1, val, !av ? C_TXT3 : foc ? C_TXT : C_TXT2);
+        if (foc)
+        {
+            wfg_tri(DR_RX1 - 10, y + 5, DR_RX1 - 5, y + 10, DR_RX1 - 10, y + 15, C_AMBER);
+            wfg_tri(xl - 7, y + 5, xl - 12, y + 10, xl - 7, y + 15, C_AMBER);
+        }
+        else if (k != WF_PO_N - 1 && k + 1 != dr_pfoc)
+            wfg_rect(DR_RX0 + 36, y + 22, DR_RX1 - 4, y + 22, C_SEP);
+    }
+}
+
+/* the easel before a print: what the finishes look like, drawn small on the paper (the picture a plain scene) */
+static void dr_ppreview(void)
+{
+    char b[24];
+    int pf = wf_pr_frame, pi = wf_pr_info;
+    int fr = pf == WF_PFR_WHITE || pf == WF_PFR_WHITE_W ? 1 : pf == WF_PFR_BLACK || pf == WF_PFR_BLACK_W ? 2 : 0;
+    int wide = pf == WF_PFR_WHITE_W || pf == WF_PFR_BLACK_W;
+    int info = fr && (pi == WF_PIN_ON || pi == WF_PIN_ROLL), roll = info && pi == WF_PIN_ROLL;
+    int date = wf_pr_date > WF_PDT_OFF && wf_pr_date < WF_PDT_N;
+    const char *dt = wf_popt_text(WF_PO_DATE, b, sizeof b);
+    /* proportions of the print (wf_print.h, at 3456 px): border 112 / 256, caption 464 */
+    int bd = fr ? (wide ? 256 : 112) : 0, bb = bd + (info ? 464 : 0);
+    int dw = 5184 + 2 * bd, dh = 3456 + bd + bb;
+    int k = 288 * 1000 / dw < 212 * 1000 / dh ? 288 * 1000 / dw : 212 * 1000 / dh;   /* scale, 1/1000 */
+    int w = dw * k / 1000, h = dh * k / 1000, x0 = 184 - w / 2, y0 = 248 - h / 2;
+    int px0 = x0 + bd * k / 1000, py0 = y0 + bd * k / 1000, pw = 5184 * k / 1000, ph = 3456 * k / 1000;
+    int paper = C_DRY0 + DR_NDRY - 1, ink = C_DRY0 + 2;
+    if (fr) wfg_rect(x0, y0, x0 + w - 1, y0 + h - 1, fr == 1 ? paper : C_DRY0);
+    for (int y = 0; y < ph; y++)                           /* sky to the horizon, then the ground */
+    {
+        int t = y < ph * 3 / 5 ? DR_NDRY - 6 - y * 10 / (ph * 3 / 5) : 9 - (y - ph * 3 / 5) * 5 / (ph - ph * 3 / 5);
+        wfg_rect(px0, py0 + y, px0 + pw - 1, py0 + y, C_DRY0 + t);
+    }
+    wfg_ellipse(px0 + pw * 2 / 3, py0 + ph / 6, px0 + pw * 2 / 3 + ph / 6, py0 + ph / 6 + ph / 6, paper);   /* the sun */
+    if (info)
+    {
+        int fg = fr == 1 ? ink : paper - 4, fg2 = fr == 1 ? C_DRY0 + 12 : C_DRY0 + 18, ty = py0 + ph + (bb - bd) * k / 2000;
+        wfg_rect(px0, ty - 4, px0 + pw * 45 / 100, ty - 2, fg);           /* line 1 */
+        if (roll) wfg_rect(px0 + pw * 80 / 100, ty - 4, px0 + pw - 1, ty - 2, fg2);
+        wfg_rect(px0, ty + 2, px0 + pw * 38 / 100, ty + 3, fg2);          /* lines 2 and 3 */
+        wfg_rect(px0, ty + 7, px0 + pw * 55 / 100, ty + 8, fg2);
+    }
+    if (date)
+        text_r(F_13, px0 + pw - pw * 7 / 100, py0 + ph - ph * 7 / 100 - ui_texth(F_13), dt, C_GRN);
+}
+
 static void dr_right(const struct wf_dark_view *v, int now)
 {
     const struct wf_roll *r = wf_roll_now();
@@ -698,7 +778,7 @@ static void dr_right(const struct wf_dark_view *v, int now)
         int m = (eta + 59) / 60;
         snprintf(b, sizeof b, "%d frame%s to develop", left, left == 1 ? "" : "s");
         text_c(F_15, cx, 172, b, C_AMBER);
-        dr_dial(cx, 250, 58, 0, 0, 0);
+        dr_prows();                                        /* the print finishes (no run: they can change) */
         if (v->state == WF_DR_STOPPED || v->state == WF_DR_FAIL)
             text_c(F_15, cx, 318, v->msg && *v->msg ? v->msg : "Stopped", v->state == WF_DR_FAIL ? C_WARN : C_TXT);
         else
@@ -777,6 +857,16 @@ static int dark_key(int key, int now)
             if (rc == -1) say("Nothing to develop", now);
             else if (rc == -3) say("Not now: the camera is busy", now);
         }
+        break;
+    case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:  /* the print finishes (no run, nothing done yet) */
+        if (!run && v->state != WF_DR_DONE)
+            dr_pfoc = (dr_pfoc + (key == MODULE_KEY_PRESS_UP ? WF_PO_N - 1 : 1)) % WF_PO_N;
+        break;
+    case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_UP:
+    case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_DOWN:
+        if (!run && v->state != WF_DR_DONE)
+            wf_popt_step(dr_pfoc, key == MODULE_KEY_PRESS_LEFT || key == MODULE_KEY_WHEEL_LEFT || key == MODULE_KEY_WHEEL_UP
+                                  ? -1 : 1);
         break;
     case MODULE_KEY_MENU: case MODULE_KEY_TRASH: case MODULE_KEY_PLAY: case MODULE_KEY_LV:
         if (!run) return 1;
@@ -1037,4 +1127,5 @@ int wfdr_host_exp(void) { return exps[rexp]; }
 int wfdr_host_sel_id(void) { const struct wf_film *f = rfilm(rtab, rsel[rtab]); return f ? f->id : 0; }
 const char *wfdr_host_msg(void) { return msg ? msg : ""; }
 int wfdr_host_confirm(void) { return cf_film != 0; }
+int wfdr_host_pfoc(void) { return dr_pfoc; }
 #endif
