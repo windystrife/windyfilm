@@ -100,6 +100,12 @@ int  wf_clock_ymd(void);                         /* the camera clock's date as y
    WF_DS_OFF = while a run lives the display is turned off WF_DS_WAKE_MS after the last key on the Darkroom screen; a key
    while it is dark only wakes it; the run's end (done, stopped, failed) turns it on. EOS M (the 5D2 has no Darkroom). */
 extern volatile int wf_dk_scr;
+/* a JPEG 8-bit roll (owner 11-17, the browser's Film stage section, DESIGN 3.14): 1 = each frame of the roll in the camera
+   gets the look on Canon's JPEG at the shot (wf_look_use = WF_LU_SHOTS) and still counts on the roll; 0 = as before
+   (Canon's own JPEG, the Darkroom prints it later; RAW develop on = B at the shot). The browser sets it with the roll's
+   mode; config rolllook=on|off keeps it over a reboot */
+extern volatile int wf_roll_look8;
+void wf_roll_look8_set(int on);                  /* the browser (GUI task): set it, the config saves it */
 enum { WF_DS_ON = 0, WF_DS_OFF, WF_DS_N };
 #define WF_DS_WAKE_MS 10000
 void wf_dk_scr_step(int d);                      /* the chip's LEFT / RIGHT / wheel: On <-> Off; the config is saved later */

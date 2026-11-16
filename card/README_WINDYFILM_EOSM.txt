@@ -71,15 +71,28 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
   nạp rồi hoặc lỗi thì giao diện vẫn mở như cũ, kèm dòng báo.
 - Nếu giao diện không lên được ngay (ví dụ máy đang xử lý ảnh vừa chụp), sau
   2 giây các phím lại về Canon / menu ML: chạm 2 ngón vẫn mở menu ML.
-- Hàng Light: Auto WB, Day (WB theo phim), Cloudy, Tungsten. Auto WB (17/11): lúc chụp
+- Hàng Light: Auto, Day (WB theo phim), Cloudy, Shade, Tungsten. Auto (17/11): lúc chụp
   giữ WB của bạn (không đổi WB của máy); Darkroom in bằng Auto WB của Canon ghi trong
-  từng CR2 (HUONGDAN_DARKROOM_EOSM.txt bước x). WB của bạn được trả lại khi về Auto WB
-  hoặc khi tắt module.
+  từng CR2 (HUONGDAN_DARKROOM_EOSM.txt bước x). Shade = 1,45 x nhiệt độ màu ban ngày của
+  phim (5200 K -> 7500 K; phim T: Day = 3200 K -> 4600 K). WB của bạn được trả lại khi
+  về Auto hoặc khi tắt module.
 - (17/11, nhánh wf-onescreen) Chip chế độ ở góc trên phải browser: JPEG / RAW develop /
   Darkroom (có cuộn: "Darkroom 5/24"). Bấm lên từ hàng đầu (hoặc xuống từ hàng cuối) để
   tới chip; trái / phải / bánh xe / SET đổi chế độ. Darkroom thêm hàng Exposures, SET
   trên lon là nạp cuộn (HUONGDAN_DARKROOM_EOSM.txt mục 2). Rời Darkroom khi cuộn đã có
   kiểu: máy hỏi "End the roll now" (SET) hay "Keep the roll" (MENU).
+- (17/11, round 2) Nút "Film | Film stage" ở góc trên trái: bấm lên tới thanh trên cùng,
+  trái = nút section, phải = chip chế độ, SET đổi section / chế độ, xuống = về các hàng.
+  Film: tab Colour / Cine / B&W / Film LUT. Film stage: tab Vision3 / Vision / ECN/EXR /
+  Fuji / B&W (44 phim chuỗi); TAP chỉ đổi tab trong section. Film stage có JPEG 8-bit /
+  RAW develop / Darkroom, luôn có hàng Exposures, SET luôn nạp cuộn: RAW develop tráng
+  từng kiểu lúc chụp, JPEG 8-bit áp look lúc chụp, Darkroom in sau; kiểu nào cũng đếm
+  trên cuộn. Rời Film stage khi cuộn có kiểu: máy hỏi "Close and switch" (SET) hay
+  "Keep the roll" (MENU). Cuộn Darkroom: SET tua lại cuộn, các kiểu chờ Darkroom. Cuộn
+  RAW develop / JPEG 8-bit: các kiểu đã tráng lúc chụp, SET kết thúc cuộn luôn (file
+  vẫn trên thẻ). Dưới tên phim Film stage là 2
+  dòng EXIF (âm bản -> print, Exp, Push, Comp; Printer R/G/B, Interlayer, Light). INFO
+  mở trang Info: mọi thứ ghi vào EXIF, thời gian tráng lần cuối.
 - Hàng Print stock (trước gọi là Print): Scan / Cine print / Paper với phim có mô
   hình in; với lon Film stage là 15 print stock (mục 6).
 - Hàng Grain: Off / Fine / Normal / Strong (độ hạt đổi theo độ sáng của vùng ảnh) và
@@ -168,7 +181,7 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
    (dòng "stage ok" là của Film stage, xem mục 7).
 2. Chụp một ảnh mỗi chế độ: phim (Print Scan / Cine / Paper), Log, Log + LUT,
    một lon Film LUT. Mỗi ảnh có dòng "yuv NN ..." trong log.
-3. Light Day / Cloudy / Tungsten rồi về Auto WB: WB trở lại như cũ.
+3. Light Day / Cloudy / Shade / Tungsten rồi về Auto: WB trở lại như cũ.
 4. Các phím của trình chọn phim; màu giao diện khi LiveView ở phía sau.
 5. EXIF (UserComment) của ảnh có dòng "WindyFilm: ...".
 6. Picture Style Film 1 (User Def. 1, Contrast -2), Log + LUT, Input curve
@@ -328,7 +341,7 @@ Phim chuỗi (chain film): mỗi lon là một phim âm bản điện ảnh (ví
 hàng Print stock. Mỗi cặp âm bản x print có bảng màu 17^3 riêng trong WFFILMS.DAT.
 - ISO và nhiệt độ màu trên header là của âm bản thật: 33 phim T (tungsten) 3200 K,
   11 phim D (daylight) 5200 K, Double-X 5222 EI 250. Light Day với phim T đặt 3200 K:
-  ảnh ngoài trời ngả xanh như phim tungsten không kính lọc. Light Auto WB giữ WB của
+  ảnh ngoài trời ngả xanh như phim tungsten không kính lọc. Light Auto giữ WB của
   bạn (giống gắn kính lọc 85).
 
 Hàng Print stock: 15 print:

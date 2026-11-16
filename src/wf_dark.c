@@ -132,7 +132,8 @@ int wf_look_use(void)
 {
     if (dk_running)
         return WF_LU_DARK;
-    if (wf_roll_open(&roll) && !wf_roll_shelved() && !(WF_RAWB_CAN && wf_rawb))   /* shelved: the chip's mode shoots */
+    if (wf_roll_open(&roll) && !wf_roll_shelved() && !(WF_RAWB_CAN && wf_rawb)    /* shelved: the chip's mode shoots */
+        && !wf_roll_look8)                                                        /* a JPEG 8-bit roll: the look now */
         return WF_LU_NONE;
     return WF_LU_SHOTS;
 }
@@ -640,6 +641,16 @@ int wf_clock_ymd(void)
 /* print finishes (wf_dark.h, DESIGN 3.9): the settings; a run takes them at its start */
 volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg;
 volatile int wf_dk_scr;                          /* Screen Off (wf_dark.h, DESIGN 3.11): read live, a run follows a change */
+volatile int wf_roll_look8;                      /* a JPEG 8-bit roll (wf_dark.h, DESIGN 3.14): config rolllook=, read live */
+void wf_roll_look8_set(int on)
+{
+    on = on != 0;
+    if (wf_roll_look8 == on)
+        return;
+    wf_roll_look8 = on;
+    wf_cfg_dirty = 1;
+    wf_log("roll: JPEG 8-bit %s", on ? "on (the look at the shot)" : "off");
+}
 
 #if WF_DARK_CAN
 /* the develop tables a run builds for a look, B's choice (wf_rawb.c): Leica Vivid (WF_FLUT_DISP) = the sRGB develop + the
@@ -1633,7 +1644,9 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
 
     /* 4. dry: the print (Canon's APP1 + our comment), written in chunks; the final thumbnail from the same bands */
     dk_phase(WF_DP_DRY, 800);
-    snprintf(t2, sizeof t2, "%s", wf_exif_text(lk, lk->grain, lk->halo, lk->bloom, lk->mist, WF_EV_NONE, txt, sizeof txt));
+    wf_exif_text(lk, lk->grain, lk->halo, lk->bloom, lk->mist, WF_EV_NONE, txt, sizeof txt);
+    wf_exif_tail(lk, WF_PATH_DARK, dk_t[0] + dk_t[1] + dk_t[2], txt, sizeof txt);   /* the time to the print (11-17) */
+    snprintf(t2, sizeof t2, "%s", txt);
     const char *body = t2;
     static const char pre[] = "WindyFilm: ";
     int pk = 0;
@@ -1660,6 +1673,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     if (dk_pjp == WF_PJ_OVER)                    /* stopped in it: the print is done, the run stops at the next frame */
         dk_camjpg(i, jpg, out, &wr, M.app1 + ao, al, &L, rowbuf);
     dk_t[3] = get_ms_clock() - t;
+    wf_dev_note(lk, WF_PATH_DARK, dk_t[0] + dk_t[1] + dk_t[2] + dk_t[3]);   /* the whole print, dry included (11-17) */
     *bytes = (int)wr.n;
     dv.print_ready = 2;
     wf_log("dark: F%02d IMG_%04d iso %d: load %d expose %d fix %d dry %d ms, %d KB, wb %s, trim %d, black %d white %d%s, "

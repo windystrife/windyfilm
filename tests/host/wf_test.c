@@ -20,7 +20,7 @@
  *   EXPSIM             dEV, smoothing, gain tables, ExpSim off / back / stuck, the display filter (EOS M; 5D2: stays off)
  *   CFG                WINDYFLM.CFG load (every key), save, garbage, oversize, userwb restore at unload
  *   PACK CASE          ok | missing | magic | index | top | fnv | code | dup | flags | real FILE
- *   LIGHT              Day / Cloudy / Tungsten / Auto, film kelvin, user WB back
+ *   LIGHT              Day / Cloudy / Shade / Tungsten / Auto, film kelvin, user WB back
  *   LEICA              Leica Vivid can (its cube on the JPEG's sRGB codes, no V-Log; no auto exposure, its load asks
  *                      for Picture Style Standard),
  *                      hidden without its cube, Film LUT row, flut=leicav; the Windy names (no Tung left)
@@ -1132,6 +1132,31 @@ static void t_fx_bloom(void)
     chk(strstr(t, " | Bloom Low") && !strstr(t, "Halation"), "EXIF text, bloom alone: '%s'", t);
     t = wf_exif_text(&lk, 0, 2, 0, 0, WF_EV_NONE, tb, sizeof tb);
     chk(strstr(t, " | Halation Tight") && !strstr(t, "Bloom"), "EXIF text, halation alone: '%s'", t);
+    /* owner 11-17: a Film stage film's text ends with the develop path and its time (the Info page's "Last develop"
+       reads the same); the Film section's films keep their text */
+    int tn = wf_exif_tail(&lk, WF_PATH_RAW, 31240, tb, sizeof tb);
+    chk(tn == (int)strlen(tb) && !strstr(tb, "Mode") && !strstr(tb, "Dev "), "EXIF tail, a Film section film: "
+        "nothing added ('%s')", tb);
+    struct wf_look ls = lk;
+    for (int k = 0; k < wf_nfilms; k++)
+        if (wf_films[k].group == WF_GRP_STAGE) { ls.row = k; break; }
+    wf_exif_text(&ls, 0, 2, 0, 0, WF_EV_NONE, tb, sizeof tb);
+    tn = wf_exif_tail(&ls, WF_PATH_RAW, 31240, tb, sizeof tb);
+    chk(tn == (int)strlen(tb) && strstr(tb, " | Halation Tight | Mode RAW develop | Dev 31.2 s"), "EXIF tail, RAW "
+        "develop 31240 ms: '%s'", tb);
+    wf_exif_text(&ls, 0, 0, 0, 0, WF_EV_NONE, tb, sizeof tb);
+    wf_exif_tail(&ls, WF_PATH_DARK, 0, tb, sizeof tb);
+    chk(strstr(tb, " | Mode Darkroom") && !strstr(tb, "Dev "), "EXIF tail, Darkroom, no time: '%s'", tb);
+    wf_exif_text(&ls, 0, 0, 0, 0, WF_EV_NONE, tb, sizeof tb);
+    wf_exif_tail(&ls, WF_PATH_JPEG, 1949, tb, sizeof tb);
+    chk(strstr(tb, " | Mode JPEG 8-bit | Dev 1.9 s") != 0, "EXIF tail, a Film stage film's JPEG path: '%s'", tb);
+    char sm[40] = "WindyFilm: X";
+    wf_exif_tail(&ls, WF_PATH_DARK, 1234567, sm, sizeof sm);
+    chk(strlen(sm) < sizeof sm && !strncmp(sm, "WindyFilm: X | Mode Darkroom", 28), "EXIF tail, a short buffer: '%s'", sm);
+    int lp = -1;
+    wf_dev_note(&ls, WF_PATH_JPEG, 1949);
+    chk(wf_dev_last(&lp) == 1949 && lp == WF_PATH_JPEG8 && !strcmp(wf_path_name(lp), "JPEG 8-bit")
+        && LOGW("dev time: JPEG 8-bit 1949 ms", 2000), "Last develop: %d ms, path %d", wf_dev_last(0), lp);
 
     /* the bloom strip (harness only): halation off, each bloom level on one frame */
     if (getenv("WF_FX_DUMP")) {
@@ -2485,20 +2510,22 @@ static void t_cfg(void)
     const char *code1 = wf_flut_code[1];
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
-            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=Overwrite\ndkscreen=Off\nshoulder=D\nuserwb=1,5600,2,-3\n",
+            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=Overwrite\ndkscreen=Off\nrolllook=ON\nshoulder=D\n"
+            "userwb=1,5600,2,-3\n",
             wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
     chk(wf_incurve == WF_INC_FILM1 && wf_incurve_t() == (wf_ll_curve_have(WF_INC_FILM1) ? WF_INC_FILM1 : WF_INC_SRGB),
         "incurve %d (in use %d)", wf_incurve, wf_incurve_t());
-    chk(wf_print == 1 && wf_light == 3 && wf_strength == 2 && wf_grain == 1 && wf_halo == 2 && wf_bloom == 2 && wf_mist == 7
+    chk(wf_print == 1 && wf_light == WF_LIGHT_TUNGSTEN && wf_strength == 2 && wf_grain == 1 && wf_halo == 2 && wf_bloom == 2 && wf_mist == 7
         && wf_pv_mode == 2 && wf_gauge == WF_GAUGE_DEF, "print %d light %d strength %d grain %d halation %d bloom %d mist %d "
         "preview %d", wf_print, wf_light, wf_strength, wf_grain, wf_halo, wf_bloom, wf_mist, wf_pv_mode);
     chk(wf_hl == 3 && wf_sh == -2, "hl %d sh %d", wf_hl, wf_sh);
     chk(wf_exp_mode == (WF_EXP_CAN ? WF_EXP_SMOOTH : WF_EXP_CANON) && wf_exp_trim == -5 && wf_exif_off == 1,
         "exposure %d exptrim %d exif off %d", wf_exp_mode, wf_exp_trim, wf_exif_off);
     chk(wf_blind == 0, "blind=OFF read: Blind roll off (%d)", wf_blind);
+    chk(wf_roll_look8 == 1, "rolllook=ON read: a JPEG 8-bit roll (%d)", wf_roll_look8);
     chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
     chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_OVER && wf_dk_scr == WF_DS_OFF,
         "print finishes read: frame %d info %d date %d jpeg %d dkscreen %d (want 4 2 2 1 1)", wf_pr_frame, wf_pr_info,
@@ -2513,7 +2540,8 @@ static void t_cfg(void)
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\npaper=glossy\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\n"
              "exposure=%s\n"
-             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=overwrite\ndkscreen=off\nshoulder=d\n"
+             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=overwrite\ndkscreen=off\nrolllook=on\n"
+             "shoulder=d\n"
              "stage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
@@ -2538,6 +2566,7 @@ static void t_cfg(void)
     b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     chk(b && !strcmp(b, want), "back to the first file");
     free(b);
+    wf_roll_look8 = 0;                           /* the other checks: a roll keeps Canon's JPEG */
     put_cfg("film=99999\noutput=nope\nlutei=77\nexptrim=99\ncurve=x\nprint=\nhl=7\nsh=\n");
     wf_cfg_load();
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_lut_ei == -2 && wf_exp_trim == -5 && wf_curve == 4
@@ -2744,19 +2773,17 @@ static void t_light(void)
     mod_init(1);
     usleep(300000);
     chk(h_kelvin_n == 0 && h_nchanges == 0, "Light Auto: white balance untouched");
-#ifdef WF_BUILD_5D2
-    chk(!strcmp(wf_row_text(WF_ROW_LIGHT), "Auto"), "5D2 Light: '%s' (no Darkroom: Auto, the camera's WB)",
-        wf_row_text(WF_ROW_LIGHT));
-#else
-    chk(!strcmp(wf_row_text(WF_ROW_LIGHT), "Auto WB"), "EOS M Light: '%s' (the Darkroom prints with Canon's Auto WB)",
-        wf_row_text(WF_ROW_LIGHT));
-#endif
-    int day = wf_films[kd].kelvin, cloudy = (day * 5 / 4 + 50) / 100 * 100;
+    chk(!strcmp(wf_row_text(WF_ROW_LIGHT), "Auto"), "Light: '%s' (owner 11-17: Auto / Day / Cloudy / Shade / Tungsten; "
+        "on the EOS M Auto = Canon's Auto WB in the Darkroom)", wf_row_text(WF_ROW_LIGHT));
+    int day = wf_films[kd].kelvin, cloudy = (day * 5 / 4 + 50) / 100 * 100, shade = (day * 29 / 20 + 50) / 100 * 100;
     wf_row_step(WF_ROW_LIGHT, 1);
     chk(WAIT(h_kelvin_last == day, 3000) && h_li_get("wb_mode") == 9 && !strcmp(wf_row_text(WF_ROW_LIGHT), "Day"),
         "Day: %dK from the film (%s)", h_kelvin_last, wf_films[kd].code);
     wf_row_step(WF_ROW_LIGHT, 1);
     chk(WAIT(h_kelvin_last == cloudy, 3000), "Cloudy: %dK (want %d)", h_kelvin_last, cloudy);
+    wf_row_step(WF_ROW_LIGHT, 1);
+    chk(WAIT(h_kelvin_last == shade, 3000) && !strcmp(wf_row_text(WF_ROW_LIGHT), "Shade"), "Shade: %dK (want %d, '%s')",
+        h_kelvin_last, shade, wf_row_text(WF_ROW_LIGHT));
     wf_row_step(WF_ROW_LIGHT, 1);
     chk(WAIT(h_kelvin_last == 3200, 3000), "Tungsten: %dK", h_kelvin_last);
     h_clock_add_ms += 2000;
@@ -5831,6 +5858,10 @@ static void t_roll_lock(void)
     chk(wf_roll_shelve(0) == 0 && !wf_roll_shelved() && LOGW("roll: 002 back from the shelf", 3000)
         && LOGW("roll: shutter blocked (full)", 3000) && (icu_uilock & 1) && wf_look_use() == WF_LU_NONE,
         "back on Darkroom: held again (lock %x), nothing of the look (%d)", icu_uilock, wf_look_use());
+    wf_roll_look8 = 1;                           /* owner 11-17: a Film stage roll in JPEG 8-bit: the look at the shot */
+    chk(wf_look_use() == WF_LU_SHOTS, "a JPEG 8-bit roll: the look for shots (%d)", wf_look_use());
+    wf_roll_look8 = 0;
+    chk(wf_look_use() == WF_LU_NONE, "rolllook off again: nothing of the look (%d)", wf_look_use());
     chk(wf_roll_shelve(1) == 0 && wf_roll_req_close() == 0 && WAIT(!wf_roll_open(wf_roll_now()), 5000)
         && LOGW("roll: 002 off the shelf (close)", 3000) && !wf_roll_shelved() && wf_roll_shelve(1) == -1,
         "closed while set aside: off the shelf, nothing left to set aside");
@@ -6145,6 +6176,7 @@ static void t_roll_mem(void)
         log_line("dark: roll 001 end"));
     chk(strstr(log_line("dark: F01 IMG_"), ", wb auto,") && strstr(log_line("dark: F03 IMG_"), ", wb auto,")
         && !log_has("no Auto WB levels"), "full: Light Auto = Canon's Auto WB of each CR2 ('%s')", log_line("dark: F01 IMG_"));
+    chk(log_has("dev time: Darkroom "), "full: each print's develop time logged ('%s')", log_line("dev time: Darkroom"));
     chk(strstr(log_line("dark: look ready"), "halation + bloom normal") && strstr(log_line("dark: look ready"), ", mist")
         && !strstr(log_line("dark: look ready"), " -"), "full: the look's effects in ('%s')", log_line("dark: look ready"));
     char *ref[3] = { 0, 0, 0 };

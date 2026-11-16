@@ -57,8 +57,9 @@ def c_strings(path, start):
 
 # ---- 1. labels
 short = [n.replace("_", "/") for n in G.PRINT_NAMES]
+# (src/ui/wf_ui.c had its own list for the INFO overlay's Prints line until 11-17; the Info page (DESIGN 3.14) shows the
+#  rows' own texts, from the core)
 for path, start, lead in (("src/wf_menu.c", "static const char *wf_print_name[", 3),
-                          ("src/ui/wf_ui.c", "static const char *const pn[WF_NPRINTS]", 3),
                           ("tests/ui/fake_core.c", "static const char *const v_print[]", 3)):
     s = c_strings(os.path.join(REPO, path), start)
     check(s[:lead] == ["Scan", "Cine", "Paper"] and s[lead:] == short,

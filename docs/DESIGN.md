@@ -1011,6 +1011,8 @@ picker screen is gone (owner 11-17: "the original WindyFilm UI looks nicer"): ev
   name; with a roll in the camera it reads "Darkroom 5/24" (frames shot / exposures). It looks and works like the
   Darkroom screen's Screen chip: UP from the first row (or DOWN from the last) focuses it, LEFT / RIGHT / the wheel /
   SET step it. Messages (`say`) show in an amber chip to its left; "by WindyStrife" hides when there is no room.
+  Round 2 (3.14): the top bar holds the section pill (left, in place of "by WindyStrife") and this chip; LEFT / RIGHT
+  pick one of them, SET / the wheel step the chip; messages are a toast over the browser.
 - **Modes.** JPEG = `wf_rawb` off, no roll; RAW develop = `wf_rawb` on, no roll; Darkroom = the Film roll flow. The
   mode is read from live state each frame (`mode_now`): a roll on the camera that is not set aside = Darkroom (whatever
   `wf_rawb` says: "both at once" stays reachable through the ML menu and the chip shows the main mode), else Darkroom
@@ -1051,8 +1053,8 @@ picker screen is gone (owner 11-17: "the original WindyFilm UI looks nicer"): ev
 - **PLAY.** In Darkroom mode, or with a roll on the camera, PLAY goes to the Darkroom screen when there are frames to
   develop, else says why ("Load a roll first", "No frames to develop"); in JPEG / RAW develop mode with no roll it closes
   the browser as before.
-- **Footer.** It follows the mode: "SET Load" / "SET Load roll"; chip focused "SET Next mode", "L/R Mode"; a question
-  "SET Yes  MENU No" (the PLAY hint hides then). The INFO key map adds "Up from the top row: mode chip: L / R".
+- **Footer.** It follows the mode: "SET Load" / "SET Load roll"; chip focused "SET <the next mode's name>", "L/R
+  Section / mode" (round 2); a question "SET Yes  MENU No" (the PLAY hint hides then). The INFO key map adds "Up from the top row: mode chip: L / R".
 - **Departures from today's rewind**, for the owner: the rewound roll no longer holds the shutter or blocks PLAY while
   it waits (that is what lets the new mode shoot), and its film stays loaded until the Darkroom. After a reboot the
   shelf is gone: the roll is the camera's roll again (the chip shows Darkroom, the shutter is held as a finished roll);
@@ -1090,15 +1092,101 @@ you set". Canon's WB setting is never changed for it.
   memory at the shot, before Canon writes the CR2, and Canon's Auto levels are only in that file; the JPEG path works
   on Canon's YUV, already balanced. Neither can rebalance to Auto inside our own processing today, and the camera's WB
   is not touched to get it.
-- **Name.** The Light row reads "Auto WB" on the EOS M (browser, ML menu; help "Auto WB: Darkroom prints use Canon's
-  auto WB (shots: yours). Day, Cloudy, Tungsten."); the 5D2, with no Darkroom, keeps "Auto". The config key stays
-  `light=auto`. There is no Shade value (Light has Auto / Day / Cloudy / Tungsten).
-- **Checks.** `test.sh` LIGHT: the row's name on each camera. LIGHT:awb (EOS M): a synthetic CR2 head (ColorData 1312,
+- **Name** (round 2, owner 11-17). The Light row reads Auto / Day / Cloudy / Shade / Tungsten on both cameras ("Auto
+  WB" of round 1 is "Auto" again; EOS M help "Auto: Darkroom prints use Canon's auto WB (shots: yours). Day, Cloudy,
+  Shade, Tungsten."). The config keys are `light=auto|day|cloudy|shade|tungsten`. Shade sets 1.45 x the stock's
+  daylight kelvin, rounded to 100 K (5200 -> 7500 K; a T stock, Day = 3200 K, -> 4600 K); Cloudy stays 1.25 x.
+  Day / Cloudy / Shade / Tungsten set the camera's kelvin as before; Auto never changes the camera's WB.
+- **Checks.** `test.sh` LIGHT: the row's name on each camera ("Auto" on both since round 2) and the Shade step.
+  LIGHT:awb (EOS M): a synthetic CR2 head (ColorData 1312,
   as shot on Daylight, Auto different) parses both sets; Light Auto picks Auto and the scales' R/G and B/G follow it;
   Day / Cloudy / Tungsten keep as shot; bad Auto levels and the 582-entry layout fall back to as shot; the owner's
   IMG_0208.CR2 gives the levels above. ROLL:mem: the real RAW+L pairs develop with `wb auto` (default Light Auto).
 - **Not checked:** the 5D2's CR2 layout (no 5D2 CR2 on disk; the 5D2 has no Darkroom), the prints' colour on the
   camera.
+
+### 3.14 Film | Film stage: two sections in the browser (owner 2026-11-17, round 2, branch `wf-onescreen`)
+
+The owner's mock `_windyfilm_docs/onescreen_ui/MOCK_film_filmstage_flow_v2.html` (left as it is) splits the browser
+into the Film section (the film looks on Canon's JPEG) and the Film stage section (the chain films: a negative printed
+on a print stock), with JPEG 8-bit / RAW develop / Darkroom in Film stage, so the 8-bit JPEG path and RAW develop can be
+compared, the develop time shown.
+- **Section pill** (`src/ui/wf_ui.c` `sec_pill`, `sec_set`, `sec_apply`). "Film | Film stage" at the top left in place
+  of "by WindyStrife", the section in white; the mode chip stays at the top right. The top bar is one focus stop above
+  the rows (UP from the first row, DOWN from the last; `FOC_TOP`, `tsub` 0 pill / 1 chip): LEFT = the pill, RIGHT = the
+  chip, SET / the wheel / the joystick press toggle the pill or step the chip, DOWN goes back to the rows. The section
+  is the selected film's; the pill selects the other section's last tab and film (its first tab with films the first
+  time). The 5D2 gets the pill (no chip: no RAW develop, no rolls). Footer on the top bar: "SET Film / Film stage" on
+  the pill, "SET <next mode>" on the chip, "L/R Section / mode", "DOWN Rows".
+- **Tabs per section** (`tab_of`, `next_tab`, `film_step`; virtual tabs, the catalogue's groups unchanged). Film =
+  Colour 15 / Cine 4 / B&W 11 / Film LUT 23; Film stage = the chain films by their negative's family, read from the
+  name's start: Vision3 4, Vision 15 (Vision, Vision2, Primetime), ECN/EXR 15 (EXR, ECN), Fuji 9 (the rest), B&W 1
+  (Double-X) = 44. TAP cycles the section's tabs only; LEFT / RIGHT walk its films across its tabs and stop at its ends;
+  the counter ("4 / 44") and the strip's scroll bar count inside the section. A tab of 8 cans or fewer shows them all.
+- **Film stage modes** (`mode_now`, `mname`, `rollrows`). JPEG reads "JPEG 8-bit" in Film stage (the chip, SET's footer
+  label, Info's Mode row; Film keeps "JPEG"). The Exposures row is always there and SET always loads a roll:
+  - RAW develop: B develops each frame at the shot (`wf_look_use` = `WF_LU_SHOTS` for a roll with RAW develop on).
+  - JPEG 8-bit: the look at the shot on Canon's 8-bit JPEG (`wf_roll_look8` = 1, `wf_look_use` = `WF_LU_SHOTS`).
+  - Darkroom: Canon's own files on the roll; the Darkroom prints them later (as in Film).
+  Every frame counts on the roll (frame detection is unchanged: Canon's files). With a roll in, the chip changes how the
+  next frames develop, no question ("Roll 001 goes on: the next frames develop at the shot"): nothing is lost.
+  `wf_roll_look8` (`src/wf_dark.c`, `wf_roll_look8_set` logs `roll: JPEG 8-bit on|off`) is saved as `rolllook=on|off`
+  in WINDYFLM.CFG. Film keeps the Exposures row and rolls in Darkroom mode only.
+- **Leaving a section with its roll in** (`sec_set`, `sec_answer`, `draw_sec_leave`). Never a frame lost; the words
+  say what happens in the current mode (coordinator 11-17: only a Darkroom roll has frames waiting). `roll_devd()` = a
+  Film stage roll in RAW develop or JPEG 8-bit (`wf_rawb` or `wf_roll_look8`: its frames were developed at the shot):
+  - LOADED with frames: "Roll 001: 7 of 24 frames shot", "Close it and switch to Film?", SET = Close and switch, MENU =
+    Keep the roll (MENU there does not close the browser). Darkroom roll: "The 7 frames shot wait for the Darkroom:
+    PLAY develops them", "with <film>, which stays loaded until then"; SET rewinds it and sets it aside
+    (`wf_roll_req_rewind` + `wf_roll_shelve(1)`), "Roll 001 ended: 7 frames wait for the Darkroom (PLAY)". Developed
+    roll: "The 7 frames are already developed. The roll just ends here.", "The files stay on the card."; SET closes it
+    (`wf_roll_req_close`: not set aside, so no film is held for a Darkroom it does not need), "Roll 001 ended: 7 frames
+    developed".
+  - LOADED with 0 frames: taken out ("Roll 001 taken out: no frame on it").
+  - FULL / REWOUND: no question. Darkroom roll: set aside ("Roll 009 waits for the Darkroom: PLAY develops it");
+    developed roll: closed ("Roll 009 ended: 12 frames developed").
+  - The close-and-load question (`draw_swap`, a finished roll and SET on another can) reads "Roll 009: 12 frames,
+    already developed." for a developed roll, "Roll 009 has 12 undeveloped frames." otherwise.
+  The words follow the mode at the time of the question: a Film stage roll whose mode changed part way is judged by its
+  current mode. The browser opens on the roll's section (its film under the cursor); a new-roll request in Film stage
+  keeps the mode.
+- **EXIF lines** (`exif_lines`). Under a Film stage film's chips, the row values for the film under the cursor:
+  "EXIF <negative> -> <print stock> . Exp <film exp> . Push <n> . Comp <exp comp>" and "Printer R/G/B . Interlayer
+  <n> . <Light>"; the dots and the arrow are drawn (our fonts are ASCII). Film films keep their two description lines.
+- **What the develop writes** (`src/wf_menu.c` `wf_exif_tail`, `wf_dev_note`, `wf_dev_last`, `wf_path_name`;
+  `WF_PATH_*` in `wf_api.h`). The EXIF text (`wf_exif_text`: the non-default knobs, as before) gets " | Mode <path> |
+  Dev <n.n> s" for Film stage films only: at the shot (`src/wf_shot.c` flush: JPEG 8-bit, or RAW develop when B ran;
+  the time = its two stages) and in the Darkroom's print comment (`src/wf_dark.c`: Darkroom, the develop stages). Every
+  develop (all films) is noted for the UI and logged `dev time: <path> <ms> ms`.
+- **Info page** (INFO in both sections, `draw_info`; INFO again closes it). Two columns over the browser: Film, the rows
+  the film writes (the Film stage's own keys in amber: Film exp, Push / pull, Exp comp, Printer R G B, Interlayer,
+  Bleach bypass, Print bleach, Neutral neg / print), Mode (with the roll's count), Last develop "31.2 s (RAW develop)",
+  On the card; a note on when it is written.
+- **Messages** (`draw_toast`). `say()` shows an amber toast over the browser (y 188..224, the mock's): the header holds
+  the pill and the chip now (round 1's message chip in the header went).
+- **Cans** (`cans/gen_cans.py` `chain_style`). The Film stage cans are our own Vision3-style cassette: vertical text, no
+  logo glyphs; Kodak / Eastman yellow, Fuji green, Double-X white. The Film section's cans are unchanged.
+- **Light** (3.13): Auto / Day / Cloudy / Shade / Tungsten on both cameras; Auto = Auto WB inside our own develop
+  (the Darkroom), never the camera's WB.
+- **Decisions taken here** (for the owner): leaving a section with a Darkroom roll rewinds and sets it aside (not a
+  close that drops its frames), with a developed roll closes it (it needs no Darkroom); the stage tab is "ECN/EXR" (ASCII); a Film stage mode change with a roll needs no question; the
+  Info's stage keys are amber (the mock's accent, no new colour); a JPEG 8-bit roll's frames are still counted by
+  Canon's files.
+- **Checks.** `tests/ui/ui_test.c` section 8 (the tab counts above; the pill: focus, SET, LEFT / RIGHT, DOWN; TAP inside
+  each section; JPEG 8-bit + Exposures in Film stage; a roll of 24 G08 with `wf_roll_look8`; the chip with the roll:
+  RAW develop / Darkroom / JPEG 8-bit, no question, the roll goes on; Info Film / Film stage with `fake_set_dev`; the
+  leave question: RIGHT ignored, MENU keeps, SET ends it; an empty roll taken out; a finished roll set aside; the
+  5D2's pill), shots `fs_pill_focus`, `fs_pill_stage`, `fs_jpeg8_chip`, `fs_rawdev_roll`, `fs_darkroom`,
+  `fs_info_stage`, `fs_leave_stage`, `fs_ended_jpeg8`, `fs_info_film`, `fs_stage_tab_cans`, `fs_stage_tab_fuji`,
+  `fs_swap_jpeg8`, `fs_leave_stage_dark`, `fs_5d2_pill` (a JPEG 8-bit roll ends at the pill, closed; a finished JPEG
+  8-bit roll's close-and-load words and its end at the pill; a Darkroom Film stage roll keeps the Darkroom words and is
+  set aside); sections 1,
+  2, 7 and `dr_ui_test.c` follow the top bar's keys. `test.sh` CFG (`rolllook`), FX:bloom (`wf_exif_tail` strings: Film
+  films none, RAW develop 31240 ms = "Dev 31.2 s", Darkroom without a time, JPEG 8-bit, a short buffer; `wf_dev_note` /
+  `wf_dev_last` and its log), ROLL (a JPEG 8-bit roll = `WF_LU_SHOTS`), ROLL:mem (the Darkroom's `dev time` log),
+  LIGHT (Auto on both, Shade).
+- **Not checked on the camera:** all of it (the pill and tabs on the EOS M / 5D2 screens, the three Film stage modes
+  shooting onto a roll, the develop times, the EXIF / print comment text).
 
 ## 4. Interfaces
 
@@ -1183,11 +1271,11 @@ The layout, 720x480 (the ML bitmap):
 
 | area | content |
 |---|---|
-| header (0-33) | mark, "WindyFilm" argnor23, "by WindyStrife" 13 px, loaded chip 15 px (EOS M on `wf-onescreen`: the MODE chip and a message chip left of it, 3.12) |
+| header (0-33) | mark, "WindyFilm" argnor23, "by WindyStrife" 13 px, loaded chip 15 px (on `wf-onescreen`: the section pill "Film \| Film stage" in place of "by WindyStrife", 3.14; EOS M: the MODE chip at the right, 3.12; the 5D2 keeps the loaded chip) |
 | big can | 160x226 at (45, 40), glow in the film's colour (16 palette rings, recoloured per film), floor shadow |
-| right column x 262 | name argnor28 at y 38; chips (kind / ISO / format) 13 px at y 72; SET Load button; description 15 px, 2 lines at y 96 / 113 |
+| right column x 262 | name argnor28 at y 38; chips (kind / ISO / format) 13 px at y 72; SET Load button; description 15 px, 2 lines at y 96 / 113 (Film stage: the two EXIF lines 13 px, 3.14) |
 | rows | 18 rows since the film-stage merge (10 before), 7 shown from y 136 at 19 px pitch; the list scrolls with the focus (2 px scroll bar at x 712); focus bar in the accent colour, chevrons on the focused value; Strength as 5 bars |
-| tabs | Colour / Cine / B&W / Film LUT with counts at y 276, underline on the active one; counter "n / N" |
+| tabs | Colour / Cine / B&W / Film LUT with counts at y 276, underline on the active one; counter "n / N" (`wf-onescreen`: the section's tabs, Film stage Vision3 / Vision / ECN/EXR / Fuji / B&W, the counter inside the section, 3.14) |
 | strip | 35 mm band y 300-436 with sprocket holes; cans 52x73 with short names (13 px condensed) under them; selected can 58x82 framed in the accent colour; edge fades and arrows |
 | scrollbar | y 441-446 |
 | footer | key hints 13 px: SET Load, L/R Film, UP/DN Row, RING Value, TAP Group, INFO Info, MENU Exit (5D2: DIAL Value, JOY Edit, PICT Group; while editing L/R Value, JOY Done) |

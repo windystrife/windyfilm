@@ -56,8 +56,11 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
   khi nạp. Bấm phím bất kỳ trong lúc hoạt cảnh để đóng ngay; bấm nửa nút chụp
   thì đóng và không bật LiveView. Phim đã nạp rồi hoặc lỗi thì giao diện vẫn
   mở như cũ, kèm dòng báo.
-- Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
+- Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Shade, Tungsten.
   WB của bạn được trả lại khi về Auto hoặc khi tắt module.
+- (17/11) Nút "Film | Film stage" ở góc trên trái: bấm lên tới đó, SET (hoặc nhấn
+  joystick) đổi section; TAP / PICT chỉ đổi tab trong section (Film: Colour / Cine /
+  B&W / Film LUT; Film stage: Vision3 / Vision / ECN/EXR / Fuji / B&W).
 - Hàng Print stock (trước gọi là Print): Scan / Cine print / Paper với phim có mô
   hình in; với lon Film stage là 15 print stock (mục 6).
 - Hàng Grain: Off / Fine / Normal / Strong (độ hạt đổi theo độ sáng của vùng ảnh) và
@@ -143,7 +146,7 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
    (dòng "stage ok" là của Film stage, xem mục 7).
 2. Chụp một ảnh mỗi chế độ: phim (Print Scan / Cine / Paper), Log, Log + LUT,
    một lon Film LUT. Mỗi nửa ảnh có dòng "yuv TOP ..." / "yuv BOT ..." trong log.
-3. Light Day / Cloudy / Tungsten rồi về Auto: WB trở lại như cũ.
+3. Light Day / Cloudy / Shade / Tungsten rồi về Auto: WB trở lại như cũ.
 4. Các phím của trình chọn phim; màu giao diện khi LiveView ở phía sau.
 5. EXIF (UserComment) của ảnh có dòng "WindyFilm: ...".
 

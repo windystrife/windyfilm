@@ -10,6 +10,12 @@
 
 int wfui_host_sel_id(void);
 int wfui_host_group(void);
+int wfui_host_tab(void);
+int wfui_host_tab_of(int id);
+int wfui_host_sec(void);
+int wfui_host_tsub(void);
+int wfui_host_secq(void);
+int wfui_host_rows(void);
 int wfui_host_focus(void);
 int wfui_host_rtop(void);
 int wfui_host_info(void);
@@ -25,7 +31,8 @@ int wfui_host_nr(void);
 int wfui_host_scr(void);
 const char *wfui_host_msg(void);
 extern volatile int wf_rawb;
-#define FOC_CHIP (-2)                           /* wf_ui.c's focus on the mode chip */
+extern volatile int wf_roll_look8;
+#define FOC_TOP  (-2)                           /* wf_ui.c's focus on the top bar: the section pill or the mode chip */
 #define FOC_EXP  (-1)
 
 static const char *outdir;
@@ -64,18 +71,50 @@ static int id_of(const char *c)
     return f ? f->id : 0;
 }
 
-/* walk there with the keys a user has: Q for the group, LEFT / RIGHT for the film */
+/* the top bar: UP until the focus is there (the section pill or the mode chip) */
+static void to_top(void)
+{
+    for (int i = 0; i < 40 && wfui_host_focus() != FOC_TOP; i++) key(MODULE_KEY_PRESS_UP);
+    CHECK(wfui_host_focus() == FOC_TOP, "UP did not reach the top bar (focus %d)", wfui_host_focus());
+}
+
+/* the mode chip one step (d > 0 the ring right): the top bar, RIGHT onto the chip, the ring */
+static void chip_step(int d)
+{
+    to_top();
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfui_host_tsub() == 1, "RIGHT on the top bar: not the chip");
+    key(d > 0 ? MODULE_KEY_WHEEL_RIGHT : MODULE_KEY_WHEEL_LEFT);
+}
+
+/* walk there with the keys a user has: the section pill (UP to the top bar, LEFT, SET, DOWN back to the row), TAP for the
+ * tab, LEFT / RIGHT for the film */
 static void go_to(const char *code)
 {
     const struct wf_film *t = by_code(code);
     CHECK(t, "no film %s", code);
     if (!t) return;
-    for (int i = 0; i < WF_NGROUPS && wfui_host_group() != t->group; i++) key(MODULE_KEY_Q);
-    CHECK(wfui_host_group() == t->group, "Q did not reach group %d", t->group);
+    int tt = wfui_host_tab_of(t->id), ts = tt >= WF_GRP_STAGE;
+    if (wfui_host_sec() != ts)
+    {
+        int f0 = wfui_host_focus();
+        to_top();
+        key(MODULE_KEY_PRESS_LEFT);
+        key(MODULE_KEY_PRESS_SET);
+        CHECK(wfui_host_sec() == ts && wfui_host_secq() < 0, "the pill did not switch to section %d", ts);
+        if (f0 != FOC_TOP)
+            for (int i = 0; i < 40 && wfui_host_focus() != f0; i++)
+            {
+                key(MODULE_KEY_PRESS_DOWN);
+                if (f0 == FOC_EXP && !wfui_host_rows()) break;  /* no Exposures row in this section: Light */
+            }
+    }
+    for (int i = 0; i < 5 && wfui_host_tab() != tt; i++) key(MODULE_KEY_Q);
+    CHECK(wfui_host_tab() == tt, "TAP did not reach tab %d", tt);
     for (int i = 0; i < 80 && wfui_host_sel_id() != t->id; i++)
     {
         const struct wf_film *c = wf_film_by_id(wfui_host_sel_id());
-        int right = c->group < t->group || (c->group == t->group && c->order < t->order);
+        int ct = wfui_host_tab_of(c->id), right = ct < tt || (ct == tt && c->order < t->order);
         key(right ? MODULE_KEY_PRESS_RIGHT : MODULE_KEY_PRESS_LEFT);
     }
     CHECK(wfui_host_sel_id() == t->id, "LEFT / RIGHT did not reach %s", code);
@@ -213,15 +252,15 @@ int main(int argc, char **argv)
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
-    int g0 = wfui_host_group();
+    int g0 = wfui_host_tab();
     key(MODULE_KEY_TOUCH_1_FINGER);
-    CHECK(wfui_host_group() != g0, "1-finger tap did not change the group");
+    CHECK(wfui_host_tab() != g0 && wfui_host_sec() == 0, "1-finger tap did not change the tab, or left Film");
     key(MODULE_KEY_PICSTYLE);
     key(MODULE_KEY_Q);
-    key(MODULE_KEY_Q);
-    key(MODULE_KEY_Q);                                              /* 5 groups since 11-15 (Film stage) */
-    CHECK(wfui_host_group() == g0, "5 group keys did not come back to the group");
-    CHECK(wfui_host_sel_id() == id_of("SUN200"), "group selection not remembered");
+    CHECK(wfui_host_sec() == 0, "TAP left the Film section (tab %d)", wfui_host_tab());
+    key(MODULE_KEY_Q);                                              /* the Film section's 4 tabs (11-17: Film stage */
+    CHECK(wfui_host_tab() == g0, "4 tab keys did not come back to the tab");   /* has its own) */
+    CHECK(wfui_host_sel_id() == id_of("SUN200"), "tab selection not remembered");
     host_gui_set(0, 1, 1);
     load_and_close(id_of("SUN200"));                                /* EOS M: back to LiveView, nothing else */
     CHECK(host_lv_starts() == 0 && host_gui_requests() == 0, "EOS M load: %d LV starts, %d gui requests",
@@ -261,10 +300,11 @@ int main(int argc, char **argv)
     fake_set_row(WF_ROW_FLUT, 2);
     open_ui();
     go_to("LV500T");
-    key(MODULE_KEY_PRESS_UP);                                       /* UP from Light: the mode chip (11-17) .. */
-    CHECK(wfui_host_focus() == FOC_CHIP, "UP from Light not on the mode chip (focus %d)", wfui_host_focus());
+    key(MODULE_KEY_PRESS_UP);                                       /* UP from Light: the top bar (11-17) .. */
+    CHECK(wfui_host_focus() == FOC_TOP && wfui_host_tsub() == 0, "UP from Light not on the section pill (focus %d)",
+          wfui_host_focus());
     key(MODULE_KEY_PRESS_UP);                                       /* .. then it wraps to the last row */
-    CHECK(wfui_host_focus() == WF_NROWS - 1, "UP from the chip not on the last row (Interlayer)");
+    CHECK(wfui_host_focus() == WF_NROWS - 1, "UP from the top bar not on the last row (Interlayer)");
     CHECK(wfui_host_rtop() == WF_NROWS - 7, "last row focused: the list shows its last 7 rows (top %d)", wfui_host_rtop());
     for (int i = WF_NROWS - 1; i > WF_ROW_FLUT; i--)
         key(MODULE_KEY_PRESS_UP);                                   /* up the seven film-stage knob rows */
@@ -380,10 +420,10 @@ int main(int argc, char **argv)
     CHECK(wfui_host_focus() == WF_NROWS - 1 && wfui_host_rtop() == WF_NROWS - 7, "DOWN to the last row: focus %d top %d",
           wfui_host_focus(), wfui_host_rtop());
     key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfui_host_focus() == FOC_CHIP && wfui_host_rtop() == WF_NROWS - 7, "DOWN from the last row: the mode chip "
+    CHECK(wfui_host_focus() == FOC_TOP && wfui_host_rtop() == WF_NROWS - 7, "DOWN from the last row: the top bar "
           "(focus %d top %d)", wfui_host_focus(), wfui_host_rtop());
     key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfui_host_focus() == WF_ROW_LIGHT && wfui_host_rtop() == 0, "DOWN from the chip wraps to Light (top %d)",
+    CHECK(wfui_host_focus() == WF_ROW_LIGHT && wfui_host_rtop() == 0, "DOWN from the top bar wraps to Light (top %d)",
           wfui_host_rtop());
     for (int i = 0; i < 4; i++) key(MODULE_KEY_PRESS_UP);
     CHECK(wfui_host_focus() == WF_NROWS - 3 && wfui_host_rtop() == WF_NROWS - 7, "UP x4 from Light: focus %d top %d",
@@ -922,24 +962,32 @@ int main(int argc, char **argv)
     fake_set_loaded(id_of("PRT160"));
     open_ui();
     CHECK(wfui_host_chip() && wfui_host_mode() == 0 && wf_rawb == 0, "EOS M: the chip on JPEG (mode %d)", wfui_host_mode());
-    /* the Light row (owner 11-17): Auto = Auto WB (the Darkroom prints with Canon's Auto WB of each CR2) */
-    CHECK(wfui_host_focus() == WF_ROW_LIGHT && !strcmp(wf_row_text(WF_ROW_LIGHT), "Auto WB"), "EOS M Light: '%s' (want "
-          "Auto WB)", wf_row_text(WF_ROW_LIGHT));
-    shot("one_light_autowb");
+    /* the Light row (round 2): Auto = Auto WB inside our develop (the camera's WB is never changed) */
+    CHECK(wfui_host_focus() == WF_ROW_LIGHT && !strcmp(wf_row_text(WF_ROW_LIGHT), "Auto"), "EOS M Light: '%s' (want "
+          "Auto)", wf_row_text(WF_ROW_LIGHT));
+    shot("one_light_auto");
     key(MODULE_KEY_PRESS_UP);
-    CHECK(wfui_host_focus() == FOC_CHIP, "UP from Light: the chip (focus %d)", wfui_host_focus());
+    CHECK(wfui_host_focus() == FOC_TOP && wfui_host_tsub() == 0, "UP from Light: the top bar, the pill (focus %d)",
+          wfui_host_focus());
+    key(MODULE_KEY_PRESS_RIGHT);                                    /* round 2: LEFT / RIGHT pick the pill or the chip */
+    CHECK(wfui_host_tsub() == 1 && wfui_host_mode() == 0, "RIGHT on the top bar: the chip, still JPEG (mode %d)",
+          wfui_host_mode());
     shot("one_jpeg_chip");
     key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfui_host_tsub() == 1 && wfui_host_mode() == 0, "RIGHT on the chip: nothing more");
+    key(MODULE_KEY_PRESS_SET);
     CHECK(wfui_host_mode() == 1 && wf_rawb == 1 && wfui_host_sel_id() == id_of("PRT160"),
-          "RIGHT on the chip: RAW develop (wf_rawb %d), the film stays", wf_rawb);
+          "SET on the chip: RAW develop (wf_rawb %d), the film stays", wf_rawb);
     shot("one_rawb");
     key(MODULE_KEY_PRESS_SET);
     CHECK(wfui_host_mode() == 2 && wf_rawb == 0 && !wfui_host_anim(), "SET on the chip: Darkroom, RAW develop off");
-    key(MODULE_KEY_PRESS_LEFT);
-    key(MODULE_KEY_PRESS_LEFT);
-    CHECK(wfui_host_mode() == 0, "LEFT x2: JPEG again (mode %d)", wfui_host_mode());
+    key(MODULE_KEY_WHEEL_LEFT);
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wfui_host_mode() == 0, "the ring left x2: JPEG again (mode %d)", wfui_host_mode());
     key(MODULE_KEY_WHEEL_LEFT);
     CHECK(wfui_host_mode() == 2, "the ring left: Darkroom (wraps, mode %d)", wfui_host_mode());
+    key(MODULE_KEY_PRESS_LEFT);
+    CHECK(wfui_host_tsub() == 0 && wfui_host_mode() == 2 && wfui_host_sec() == 0, "LEFT: the pill, nothing else changed");
     key(MODULE_KEY_PRESS_DOWN);
     CHECK(wfui_host_focus() == FOC_EXP, "DOWN: the Exposures row (focus %d)", wfui_host_focus());
     for (int i = 0; i < 6 && wfui_host_exp() != 24; i++) key(MODULE_KEY_WHEEL_RIGHT);   /* (the last count is kept) */
@@ -982,8 +1030,9 @@ int main(int argc, char **argv)
           && wf_roll_now()->film == id_of("PRT160"), "another film while the roll shoots: refused ('%s')", wfui_host_msg());
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
-    CHECK(wfui_host_focus() == FOC_CHIP, "UP x2 from Light: the chip (%d)", wfui_host_focus());
+    CHECK(wfui_host_focus() == FOC_TOP, "UP x2 from Light: the top bar (%d)", wfui_host_focus());
     key(MODULE_KEY_PRESS_RIGHT);
+    key(MODULE_KEY_PRESS_SET);
     CHECK(wfui_host_leave() == 0 && wfui_host_mode() == 2 && wf_roll_now()->state == WF_RS_LOADED,
           "leaving Darkroom with 5 frames: the question (for %d), nothing changed yet", wfui_host_leave());
     tick(150);
@@ -993,8 +1042,8 @@ int main(int argc, char **argv)
     key(MODULE_KEY_MENU);
     CHECK(wfui_host_leave() < 0 && wfui_host_mode() == 2 && !closed && wf_roll_now()->nshot == 5
           && wf_roll_now()->state == WF_RS_LOADED, "MENU: the roll kept, still Darkroom, the browser open");
-    key(MODULE_KEY_PRESS_LEFT);
-    CHECK(wfui_host_leave() == 1, "LEFT: the question for RAW develop (%d)", wfui_host_leave());
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wfui_host_leave() == 1, "the ring left: the question for RAW develop (%d)", wfui_host_leave());
     key(MODULE_KEY_PRESS_SET);
     CHECK(wf_roll_now()->state == WF_RS_REWOUND && wf_roll_shelved() && wf_roll_left(wf_roll_now()) == 5
           && wfui_host_mode() == 1 && wf_rawb == 1 && strstr(wfui_host_msg(), "5 frames wait"),
@@ -1004,8 +1053,7 @@ int main(int argc, char **argv)
     key(MODULE_KEY_PRESS_SET);
     CHECK(!wfui_host_anim() && wf_loaded() == id_of("PRT160") && strstr(wfui_host_msg(), "film stays"),
           "set aside: another film refused, its film stays ('%s')", wfui_host_msg());
-    for (int i = 0; i < 40 && wfui_host_focus() != FOC_CHIP; i++) key(MODULE_KEY_PRESS_UP);
-    key(MODULE_KEY_PRESS_RIGHT);
+    chip_step(1);
     CHECK(wfui_host_mode() == 2 && !wf_roll_shelved() && wf_rawb == 0, "back to Darkroom: off the shelf (mode %d)",
           wfui_host_mode());
     key(MODULE_KEY_PRESS_DOWN);
@@ -1016,8 +1064,7 @@ int main(int argc, char **argv)
     shot("one_swap");
     key(MODULE_KEY_MENU);
     CHECK(!wfui_host_swap() && !closed && fake_nswap() == 0, "MENU: no close-and-load");
-    for (int i = 0; i < 40 && wfui_host_focus() != FOC_CHIP; i++) key(MODULE_KEY_PRESS_UP);
-    key(MODULE_KEY_PRESS_RIGHT);
+    chip_step(1);
     CHECK(wfui_host_leave() < 0 && wf_roll_shelved() && wfui_host_mode() == 0 && wf_rawb == 0,
           "a finished roll: set aside at once, no question, JPEG (mode %d)", wfui_host_mode());
     close_ui(MODULE_KEY_MENU, 0);
@@ -1028,8 +1075,7 @@ int main(int argc, char **argv)
         wf_roll_load(r, id_of("PRT160"), 12, 100, 300);
     }
     open_ui();
-    for (int i = 0; i < 40 && wfui_host_focus() != FOC_CHIP; i++) key(MODULE_KEY_PRESS_UP);
-    key(MODULE_KEY_PRESS_LEFT);
+    chip_step(-1);
     CHECK(wfui_host_leave() < 0 && !wf_roll_open(wf_roll_now()) && wfui_host_mode() == 1 && strstr(wfui_host_msg(), "no frame"),
           "an empty roll: taken out, RAW develop ('%s')", wfui_host_msg());
     close_ui(MODULE_KEY_MENU, 0);
@@ -1070,8 +1116,9 @@ int main(int argc, char **argv)
     /* .. while open (the notice cannot show then, the ML menu can): the request switches the open browser */
     fake_dark_reset();
     open_ui();
-    for (int i = 0; i < 40 && wfui_host_focus() != FOC_CHIP; i++) key(MODULE_KEY_PRESS_UP);
-    for (int i = 0; i < 3 && wfui_host_mode() != 0; i++) key(MODULE_KEY_PRESS_RIGHT);
+    to_top();
+    key(MODULE_KEY_PRESS_RIGHT);
+    for (int i = 0; i < 3 && wfui_host_mode() != 0; i++) key(MODULE_KEY_WHEEL_RIGHT);
     CHECK(wfui_host_mode() == 0, "JPEG before the request (mode %d)", wfui_host_mode());
     wf_ui_open_scr(WF_UI_NEW_ROLL);
     tick(1);
@@ -1086,8 +1133,19 @@ int main(int argc, char **argv)
     CHECK(!strcmp(wf_row_text(WF_ROW_LIGHT), "Auto"), "5D2 Light: '%s' (no Darkroom: Auto, the camera's WB)",
           wf_row_text(WF_ROW_LIGHT));
     key(MODULE_KEY_PRESS_UP);
-    CHECK(!wfui_host_chip() && wfui_host_focus() == WF_NROWS - 1, "5D2: no chip, UP from Light wraps as before (%d)",
+    CHECK(!wfui_host_chip() && wfui_host_focus() == FOC_TOP, "5D2: no chip, UP from Light: the section pill (%d)",
           wfui_host_focus());
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfui_host_tsub() == 0, "5D2: RIGHT on the top bar: no chip to go to");
+    key(MODULE_KEY_JOY_CENTER);
+    CHECK(wfui_host_sec() == 1 && !wfui_host_edit() && wfui_host_focus() == FOC_TOP, "5D2: the joystick press on the "
+          "pill: Film stage (section %d, edit %d)", wfui_host_sec(), wfui_host_edit());
+    CHECK(!wfui_host_rows(), "5D2 Film stage: no Exposures row (no rolls)");
+    shot("fs_5d2_pill");
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_sec() == 0, "5D2: SET on the pill: Film again");
+    key(MODULE_KEY_PRESS_UP);
+    CHECK(wfui_host_focus() == WF_NROWS - 1, "5D2: UP from the top bar wraps to the last row (%d)", wfui_host_focus());
     close_ui(MODULE_KEY_MENU, 0);
     closed = 0;                                                     /* 5D2, the ML menu's Film roll: no rolls there */
     wf_ui_open_scr(WF_UI_NEW_ROLL);
@@ -1097,6 +1155,222 @@ int main(int argc, char **argv)
           && strstr(wfui_host_msg(), "EOS M first"), "5D2 Film roll: the browser says why ('%s')", wfui_host_msg());
     close_ui(MODULE_KEY_MENU, 0);
     fake_set_cam(WF_CAM_EOSM);
+    fake_reset();
+
+    /* 8. Film | Film stage (owner 11-17, round 2): the section pill at the top left (UP to the top bar, LEFT / RIGHT pill
+     * or chip, SET toggles, DOWN back to the rows); each section's tabs (TAP cycles inside it); Film stage: JPEG 8-bit /
+     * RAW develop / Darkroom, the Exposures row and a roll in every mode, the chip changes how the next frames develop;
+     * leaving Film stage with a roll asks (SET closes: rewound, set aside; MENU keeps); the EXIF lines; INFO in both */
+    {
+        static const int want_n[9] = { 15, 4, 11, 23, 4, 15, 15, 9, 1 };
+        int n[9] = { 0 };
+        for (int i = 0; i < wf_nfilms; i++)
+            if (wf_films[i].flags & WF_F_READY)
+            {
+                int t = wfui_host_tab_of(wf_films[i].id);
+                if (t >= 0 && t < 9) n[t]++;
+            }
+        for (int t = 0; t < 9; t++)
+            CHECK(n[t] == want_n[t], "tab %d: %d films (want %d: Colour 15, Cine 4, B&W 11, Film LUT 23 | Vision3 4, "
+                  "Vision 15, ECN/EXR 15, Fuji 9, B&W 1)", t, n[t], want_n[t]);
+    }
+    fake_reset();
+    fake_dark_reset();
+    fake_set_card(card);
+    fake_set_loaded(id_of("PRT160"));
+    open_ui();
+    to_top();                                                       /* the chip keeps its mode between opens: JPEG */
+    key(MODULE_KEY_PRESS_RIGHT);
+    for (int i = 0; i < 3 && wfui_host_mode() != 0; i++) key(MODULE_KEY_WHEEL_RIGHT);
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_sec() == 0 && !wfui_host_rows() && wfui_host_mode() == 0 && wfui_host_focus() == WF_ROW_LIGHT,
+          "Film, JPEG: no Exposures row, DOWN from the top bar on Light (focus %d)", wfui_host_focus());
+    key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_PRESS_LEFT);
+    CHECK(wfui_host_focus() == FOC_TOP && wfui_host_tsub() == 0, "UP from Light, LEFT: the pill");
+    shot("fs_pill_focus");
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_sec() == 1 && wfui_host_tab() == WF_GRP_STAGE && wfui_host_focus() == FOC_TOP && wfui_host_rows()
+          && wfui_host_mode() == 0, "SET on the pill: Film stage, its first tab (Vision3), the Exposures row, JPEG 8-bit "
+          "(section %d tab %d rows %d mode %d)", wfui_host_sec(), wfui_host_tab(), wfui_host_rows(), wfui_host_mode());
+    shot("fs_pill_stage");
+    {
+        int t0 = wfui_host_tab(), seen = 0;
+        for (int i = 0; i < 5; i++)
+        {
+            key(MODULE_KEY_Q);
+            CHECK(wfui_host_sec() == 1, "TAP left Film stage (tab %d)", wfui_host_tab());
+            seen |= 1 << (wfui_host_tab() - WF_GRP_STAGE);
+        }
+        CHECK(wfui_host_tab() == t0 && seen == 31, "5 TAPs: the 5 Film stage tabs and back (seen 0x%x)", seen);
+    }
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfui_host_tsub() == 1 && wfui_host_mode() == 0, "RIGHT: the chip, JPEG 8-bit");
+    shot("fs_jpeg8_chip");
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == FOC_EXP, "Film stage, JPEG 8-bit: DOWN from the top bar on Exposures (%d)", wfui_host_focus());
+    for (int i = 0; i < 6 && wfui_host_exp() != 24; i++) key(MODULE_KEY_WHEEL_RIGHT);   /* (the last count is kept) */
+    key(MODULE_KEY_PRESS_DOWN);
+    go_to("G08");
+    fake_set_row(WF_ROW_PRINT, 4);                                  /* 2383 */
+    fake_set_row(WF_ROW_SPUSH, 4);
+    CHECK(key(MODULE_KEY_PRESS_SET) == 0 && fake_req_film() == id_of("G08") && fake_req_exp() == 24 && wf_roll_look8 == 1
+          && wf_rawb == 0 && wf_roll_now()->state == WF_RS_LOADED && wfui_host_anim(), "Film stage JPEG 8-bit, SET: a roll "
+          "of 24 G08 with the look at the shot (asked %d x%d, look8 %d)", fake_req_film(), fake_req_exp(), wf_roll_look8);
+    tick(80);
+    CHECK(closed, "not closed after the Film stage roll's animation");
+    end_checks();
+    {
+        struct wf_roll *r = fake_roll();
+        r->nshot = 7;
+        for (int i = 0; i < 7; i++) { r->folder[i] = 100; r->file[i] = 401 + i; r->fst[i] = WF_RF_SHOT; }
+    }
+    open_ui();
+    CHECK(wfui_host_sec() == 1 && wfui_host_sel_id() == id_of("G08") && wfui_host_mode() == 0 && wfui_host_exp() == 24,
+          "reopen with the roll: Film stage, G08, JPEG 8-bit, 24 (section %d mode %d)", wfui_host_sec(), wfui_host_mode());
+    chip_step(1);
+    CHECK(wfui_host_mode() == 1 && wf_rawb == 1 && wf_roll_look8 == 0 && wfui_host_leave() < 0
+          && wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->nshot == 7 && strstr(wfui_host_msg(), "goes on"),
+          "the chip with a Film stage roll: RAW develop at once, the roll goes on ('%s')", wfui_host_msg());
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_PRESS_DOWN);
+    tick(150);                                                      /* the message times out */
+    shot("fs_rawdev_roll");
+    chip_step(1);
+    CHECK(wfui_host_mode() == 2 && wf_rawb == 0 && wf_roll_look8 == 0 && wf_roll_now()->state == WF_RS_LOADED,
+          "the chip: Darkroom, the roll goes on (mode %d)", wfui_host_mode());
+    key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_PRESS_DOWN);
+    tick(150);
+    shot("fs_darkroom");
+    chip_step(1);
+    CHECK(wfui_host_mode() == 0 && wf_roll_look8 == 1 && wf_rawb == 0, "the chip: JPEG 8-bit again, the look at the shot");
+    fake_set_dev(31240, WF_PATH_RAW);
+    key(MODULE_KEY_PRESS_DOWN);
+    tick(150);                                                      /* the message times out */
+    key(MODULE_KEY_INFO);
+    CHECK(wfui_host_info(), "INFO: the Info page (Film stage)");
+    shot("fs_info_stage");
+    key(MODULE_KEY_INFO);
+    CHECK(!wfui_host_info(), "INFO again closes the Info page");
+    /* leaving Film stage with 7 frames of a JPEG 8-bit roll: the question says they are developed; MENU keeps the roll;
+     * SET ends it (developed at the shot: closed, not set aside for the Darkroom) */
+    to_top();
+    key(MODULE_KEY_PRESS_LEFT);
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_secq() == 0 && wfui_host_sec() == 1 && wf_roll_now()->state == WF_RS_LOADED,
+          "the pill with 7 frames: the question (for %d), nothing changed yet", wfui_host_secq());
+    tick(150);
+    shot("fs_leave_stage");
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfui_host_secq() == 0 && wfui_host_tsub() == 0, "RIGHT under the question: nothing");
+    key(MODULE_KEY_MENU);
+    CHECK(wfui_host_secq() < 0 && wfui_host_sec() == 1 && !closed && wf_roll_now()->state == WF_RS_LOADED
+          && wf_roll_now()->nshot == 7, "MENU: the roll kept, still Film stage, the browser open");
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_secq() == 0, "SET on the pill again: the question");
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_secq() < 0 && wfui_host_sec() == 0 && !wf_roll_open(wf_roll_now()) && !wf_roll_shelved()
+          && strstr(wfui_host_msg(), "Roll 001 ended: 7 frames developed"),
+          "SET on a JPEG 8-bit roll: it ends (developed at the shot), Film ('%s')", wfui_host_msg());
+    fake_set_row(WF_ROW_PRINT, 0);                                  /* (the fake's rows are one set: Scan for Portra) */
+    shot("fs_ended_jpeg8");
+    fake_set_dev(1949, WF_PATH_JPEG);
+    key(MODULE_KEY_PRESS_DOWN);
+    tick(150);
+    key(MODULE_KEY_INFO);
+    CHECK(wfui_host_info(), "INFO: the Info page (Film)");
+    shot("fs_info_film");
+    key(MODULE_KEY_INFO);
+    close_ui(MODULE_KEY_MENU, 0);
+    /* a Film stage tab with the new cans (the Kodak / Eastman yellow, Fuji green, Double-X white cassettes) */
+    fake_reset();
+    fake_dark_reset();
+    fake_set_card(card);
+    fake_set_loaded(id_of("PRT160"));
+    open_ui();
+    go_to("G08");
+    fake_set_row(WF_ROW_PRINT, 4);
+    shot("fs_stage_tab_cans");
+    for (int i = 0; i < 5 && wfui_host_tab() != WF_GRP_STAGE + 3; i++) key(MODULE_KEY_Q);
+    CHECK(wfui_host_tab() == WF_GRP_STAGE + 3, "TAP to the Fuji tab (%d)", wfui_host_tab());
+    shot("fs_stage_tab_fuji");
+    /* an empty Film stage roll comes out at the pill; a finished one is set aside at once */
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wf_roll_now()->state == WF_RS_LOADED && wf_roll_look8 == 1 && wfui_host_anim(), "SET on a Fuji can: a roll");
+    tick(80);
+    end_checks();
+    open_ui();
+    to_top();
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_secq() < 0 && wfui_host_sec() == 0 && !wf_roll_open(wf_roll_now()) && strstr(wfui_host_msg(), "no frame"),
+          "an empty Film stage roll: taken out at the pill ('%s')", wfui_host_msg());
+    close_ui(MODULE_KEY_MENU, 0);
+    fake_dark_reset();
+    {
+        struct wf_roll *r = fake_roll();
+        wf_roll_load(r, id_of("G08"), 12, 100, 500);
+        r->num = 9;
+        for (int i = 0; i < 12; i++) { r->folder[i] = 100; r->file[i] = 501 + i; r->fst[i] = WF_RF_SHOT; }
+        r->nshot = 12;
+        r->state = WF_RS_FULL;
+    }
+    open_ui();
+    CHECK(wfui_host_sec() == 1 && wfui_host_sel_id() == id_of("G08"), "open with a Film stage roll: Film stage, its film");
+    to_top();
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_secq() < 0 && wfui_host_sec() == 0 && wf_roll_shelved() && strstr(wfui_host_msg(), "PLAY develops"),
+          "a finished Film stage roll: set aside at once, Film ('%s')", wfui_host_msg());
+    close_ui(MODULE_KEY_MENU, 0);
+    /* .. the same finished roll shot in JPEG 8-bit: the close-and-load question says its frames are developed, the
+     * pill ends it */
+    fake_dark_reset();
+    {
+        struct wf_roll *r = fake_roll();
+        wf_roll_load(r, id_of("G08"), 12, 100, 500);
+        r->num = 9;
+        for (int i = 0; i < 12; i++) { r->folder[i] = 100; r->file[i] = 501 + i; r->fst[i] = WF_RF_SHOT; }
+        r->nshot = 12;
+        r->state = WF_RS_FULL;
+    }
+    wf_roll_look8 = 1;
+    open_ui();
+    CHECK(wfui_host_sec() == 1 && wfui_host_mode() == 0, "a finished JPEG 8-bit roll: Film stage, JPEG 8-bit (mode %d)",
+          wfui_host_mode());
+    go_to("G09");
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_swap() && !wfui_host_anim(), "a finished JPEG 8-bit roll, SET on G09: close and load? (%d)",
+          wfui_host_swap());
+    shot("fs_swap_jpeg8");
+    key(MODULE_KEY_MENU);
+    CHECK(!wfui_host_swap() && !closed, "MENU: no close-and-load");
+    to_top();
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_secq() < 0 && wfui_host_sec() == 0 && !wf_roll_open(wf_roll_now()) && !wf_roll_shelved()
+          && strstr(wfui_host_msg(), "Roll 009 ended: 12 frames developed"),
+          "a finished JPEG 8-bit roll at the pill: it ends ('%s')", wfui_host_msg());
+    close_ui(MODULE_KEY_MENU, 0);
+    /* .. a Film stage roll in Darkroom mode with frames: the question keeps the Darkroom words, SET sets it aside */
+    fake_dark_reset();
+    {
+        struct wf_roll *r = fake_roll();
+        wf_roll_load(r, id_of("G08"), 12, 100, 600);
+        r->num = 10;
+        for (int i = 0; i < 3; i++) { r->folder[i] = 100; r->file[i] = 601 + i; r->fst[i] = WF_RF_SHOT; }
+        r->nshot = 3;
+    }
+    open_ui();
+    CHECK(wfui_host_sec() == 1 && wfui_host_mode() == 2, "a Darkroom Film stage roll: Darkroom (mode %d)", wfui_host_mode());
+    to_top();
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_secq() == 0, "the pill with 3 Darkroom frames: the question (%d)", wfui_host_secq());
+    shot("fs_leave_stage_dark");
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_sec() == 0 && wf_roll_now()->state == WF_RS_REWOUND && wf_roll_shelved()
+          && wf_roll_left(wf_roll_now()) == 3 && strstr(wfui_host_msg(), "3 frames wait for the Darkroom"),
+          "SET on a Darkroom roll: rewound, set aside with its 3 frames ('%s')", wfui_host_msg());
+    close_ui(MODULE_KEY_MENU, 0);
+    fake_dark_reset();
     fake_reset();
 
     /* 6. keys while closed pass on; the open key */

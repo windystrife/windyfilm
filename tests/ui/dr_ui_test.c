@@ -456,7 +456,8 @@ int main(int argc, char **argv)
     /* 14. owner 11-15: the Darkroom from inside the UI (PLAY, EOS M), the close-and-load question, the notice while the
      * shutter is held, rolls of 3 */
     /* .. browser in JPEG mode, no roll: as before (no entry, PLAY closes it). Darkroom mode is kept from the opens above
-     * (the mode chip, owner 11-17): UP past Exposures to the chip, RIGHT = JPEG (no Exposures row), DOWN back to Light */
+     * (the mode chip, owner 11-17): UP past Exposures to the top bar, RIGHT to the chip (round 2: LEFT / RIGHT pick the
+     * section pill or the chip), SET = JPEG (no Exposures row), DOWN back to Light */
     fake_dark_reset();
     open_scr(0);
     if (wfui_host_mode() == M_DARK)
@@ -464,6 +465,7 @@ int main(int argc, char **argv)
         key(MODULE_KEY_PRESS_UP);
         key(MODULE_KEY_PRESS_UP);
         key(MODULE_KEY_PRESS_RIGHT);
+        key(MODULE_KEY_PRESS_SET);
         key(MODULE_KEY_PRESS_DOWN);
     }
     CHECK(wfui_host_mode() == 0 && wfui_host_focus() == WF_ROW_LIGHT, "JPEG mode on Light (mode %d, focus %d)",

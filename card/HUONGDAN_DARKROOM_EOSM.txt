@@ -316,11 +316,11 @@ w. (16/11, RAWB22) Screen Off: chọn nút góc trên phải = Screen Off, trán
    không phím nào được thì thử nửa nút chụp), màn hình có tự sáng lại giữa chừng không,
    thời gian tráng và % pin trước / sau so với một cuộn Screen On. Xong thì đặt lại Screen
    On nếu muốn.
-x. (17/11) Light Auto WB: WB của máy (menu Canon) đặt Daylight, hàng Light = Auto WB,
+x. (17/11) Light Auto: WB của máy (menu Canon) đặt Daylight, hàng Light = Auto,
    cuộn 3 kiểu chụp trong nhà dưới đèn vàng. Tráng: bản in phải cân màu như Auto WB của
    Canon (không vàng như JPG Daylight trong DCIM); log mỗi kiểu có "wb auto". Rồi Light
    = Day, cuộn 3 kiểu cùng cảnh: bản in theo WB lúc chụp ("wb as-shot"). WB trong menu
-   Canon không bị đổi vì Light Auto WB. Ghi lại nếu bản in Auto WB lệch màu so với ảnh
+   Canon không bị đổi vì Light Auto. Ghi lại nếu bản in Auto WB lệch màu so với ảnh
    chụp thử bằng AWB của Canon.
 
 

@@ -1323,7 +1323,7 @@ int wf_shot_run(struct wf_frame *f, int *status)
 }
 
 /* ------------------------------------------------------------------ the shot log (wf_task) */
-struct wf_sp { int ms, lk, h, g, m; uint8_t hst, gst, mst; };
+struct wf_sp { int ms, lk, h, g, m; uint8_t hst, gst, mst, rb; };
 static struct { int on, t; struct wf_sp p; struct wf_look lk; int st, ev; } wf_top;
 static int wf_shot_n;
 int wf_shot_pending(void) { return wf_top.on; }
@@ -1422,7 +1422,10 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
         wf_log("%s", l2);
     }
     int hr = a->hst == 1 && (!b || b->hst == 1), gr = a->gst == 1 && (!b || b->gst == 1), mr = a->mst == 1 && (!b || b->mst == 1);
-    wf_exif_shot(lk, gr ? lk->grain : 0, hr ? lk->halo : 0, hr && !WF_HALO_GEN(lk->halo) ? lk->bloom : 0, mr ? lk->mist : 0, ev);
+    int path = a->rb || (b && b->rb) ? WF_PATH_RAW : WF_PATH_JPEG, ms = a->ms + (b ? b->ms : 0);
+    wf_dev_note(lk, path, ms);                   /* owner 11-17: the develop time per path, "Last develop" on Info */
+    wf_exif_shot(lk, gr ? lk->grain : 0, hr ? lk->halo : 0, hr && !WF_HALO_GEN(lk->halo) ? lk->bloom : 0, mr ? lk->mist : 0, ev,
+                 path, ms);
 }
 
 static void wf_shot_note(const struct wf_ev *e)
@@ -1432,7 +1435,7 @@ static void wf_shot_note(const struct wf_ev *e)
     p.lk = p.ms - p.h - p.g - p.m;
     if (p.lk < 0)
         p.lk = 0;
-    p.hst = e->hst; p.gst = e->gst; p.mst = e->mst;
+    p.hst = e->hst; p.gst = e->gst; p.mst = e->mst; p.rb = e->rb == 1;
     int ev = e->evs && e->evs != '?' ? (e->ev8 + 4) >> 3 : WF_EV_NONE;
     if (wf_top.on && e->kind != WF_PART_BOT) {   /* the TOP before this one never got its BOT */
         wf_top.on = 0;

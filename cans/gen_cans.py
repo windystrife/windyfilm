@@ -179,7 +179,7 @@ def put_text(art, s, box, col, maxsize, wd=100, wg=800, sh=None, glow=None, alig
         return
     x0, y0, x1, y1 = box
     f, (l, t, r, b) = fit_font(s, x1 - x0, y1 - y0, maxsize, wd, wg)
-    cx = (x0 + x1) / 2.0 * SS - (l + r) / 2.0 if align == "c" else x0 * SS - l
+    cx = (x0 + x1) / 2.0 * SS - (l + r) / 2.0 if align == "c" else x1 * SS - r if align == "r" else x0 * SS - l
     cy = (y0 + y1) / 2.0 * SS - (t + b) / 2.0
     if glow is not None:
         gm = Image.new("L", art.size, 0)
@@ -207,12 +207,31 @@ def body_art(st, ftype, small):
     paint(art, Rc(5.5, 0, 6.6, DH, tuple(int(c * 0.55) for c in edge)))
     mw = lay["maxw"]
     cxl = DW / 2.0 + 0.5
+    vt = st.get("vert")
+    if vt:                                             # a hand-rolled cassette (Film stage, owner 11-17): the text runs
+        can = Image.new("RGBA", (DH * SS, DW * SS), (0, 0, 0, 0))   # down the can, drawn across and turned clockwise
+        def T(s_, b_, col, mx, wg=800, al="l"):
+            put_text(can, s_, b_, tuple(col) + (255,), mx, wg=wg, align=al)
+        if not small:
+            T(vt["proc"], (6, 3, 68, 11), vt["smc"], 9, wg=600)
+            T(vt["temp"], (74, 3, 136, 11), vt["smc"], 9, wg=600, al="r")
+        T(st["maker"][0], (6, 13, 76, 23), st["maker"][1], 11, wg=760)
+        T(st["lines"][0][0], (6, 24, 136, 50), st["lines"][0][1], 30, wg=820)
+        T(st["iso"][0], (6, 52, 136, 84), st["iso"][1], 40, wg=850)
+        if not small:
+            T(vt["fine"], (6, 86, 136, 92), vt["smc"], 7, wg=600)
+        T(vt["iso"], (6, 96, 84, 116), vt["isoc"], 22, wg=820)
+        T(vt["ex"], (90, 96, 136, 116), st["iso"][1], 20, wg=820, al="r")
+        art = art.convert("RGBA")
+        art.alpha_composite(can.rotate(-90, expand=True))
+        art = art.convert("RGB")
     def box(y0, y1, w=mw):
         g = 2.5 if y1 - y0 > 6 else 0.0
         return (cxl - w / 2.0, y0 + g, cxl + w / 2.0, y1 - g)
     mk = st["maker"]
-    put_text(art, mk[0], box(*lay["maker"]), mk[1], 30, wg=760)
-    lines = st["lines"]
+    if not vt:
+        put_text(art, mk[0], box(*lay["maker"]), mk[1], 30, wg=760)
+    lines = [] if vt else st["lines"]
     iso0 = st["iso"][0]
     if lines and not (small and iso0):
         y0, y1 = lay["name"]
@@ -223,8 +242,9 @@ def body_art(st, ftype, small):
             put_text(art, l[0], box(y, y + hh), l[1], 40, sh=st.get("nsh"), glow=st.get("glow"))
             y += hh
     iso = st["iso"]
-    put_text(art, iso[0], box(*lay["iso"], w=st.get("isow", mw)), iso[1], 66, sh=st.get("isosh"))
-    if not small:
+    if not vt:
+        put_text(art, iso[0], box(*lay["iso"], w=st.get("isow", mw)), iso[1], 66, sh=st.get("isosh"))
+    if not small and not vt:
         for e in st.get("extra", []):
             put_text(art, e[0], box(e[2], e[3], e[4] if len(e) > 4 else mw), e[1], 14, wg=700)
         put_text(art, st.get("foot_text", "36 EXP."), (9, DH - 15, 62, DH - 5), st["foot"], 11, wg=760, align="l")
@@ -552,59 +572,35 @@ GOLD = V((252, 208, 60), (244, 176, 20))
 SILVER = V((222, 224, 230), (164, 168, 178))
 FUJI_G = V((20, 138, 96), (10, 92, 64))
 
+# The hand-rolled cassette (owner 11-17, from a photo of a hand-rolled motion-picture cassette): a full colour label,
+# Kodak / Eastman yellow, Fuji green, Double-X white, the text running down the can - the maker, the family word in red
+# (white on Fuji), the big "500T/5219", "ISO500" and "36EX", the process and colour temperature in small print. Our own
+# layout and words in our font; no logo glyph, no maker artwork. The Film section's cans keep their styles.
+VERT_INK = {      # label, lip accent, maker + family, the big number and 36EX, ISO, fine print
+    "kodak": (V((247, 197, 30), (239, 165, 21)), (247, 186, 25), (216, 38, 29), (23, 18, 14), (216, 38, 29), (42, 29, 16)),
+    "fuji": (V((17, 132, 73), (11, 99, 56)), (150, 224, 180), (255, 255, 255), (255, 255, 255), (255, 210, 60),
+             (233, 246, 238)),
+    "bw": (V((241, 239, 232), (217, 214, 204)), (241, 239, 232), (216, 38, 29), (23, 18, 14), (216, 38, 29), (42, 29, 16)),
+}
+VERT_FAM = {"V3": ("KODAK", "VISION3"), "V2": ("KODAK", "VISION2"), "V1": ("KODAK", "VISION"), "PT": ("KODAK", "PRIMETIME"),
+            "EXR": ("EASTMAN", "EXR"), "ECN": ("EASTMAN", None), "DX": ("EASTMAN", "DOUBLE-X"),
+            "EV": ("FUJIFILM", "ETERNA VIVID"), "ET": ("FUJIFILM", "ETERNA"), "RE": ("FUJIFILM", "REALA"),
+            "SF": ("FUJIFILM", "SUPER F"), "CA": ("FUJIFILM", "COLOR A")}
+
 def chain_style(code, name):
     fam, words, num, speed = CHAIN_STOCKS[code]
-    day = speed.endswith("D")
-    foot = "%s  35mm" % num
-    lines = [(w, None, 1.0 if i == 0 else 0.7) for i, w in enumerate(words)]
-    def L(*cols):                                     # the family word(s) in their colours
-        return [(w, cols[min(i, len(cols) - 1)], k) for i, (w, _, k) in enumerate(lines)]
-    if fam in ("V3", "V2", "V1"):                     # Kodak motion picture: black body, a coloured top band
-        acc = Y3 if day else (150, 196, 255)
-        top = {"V3": GOLD, "V2": SILVER, "V1": V((246, 166, 44), (212, 112, 18))}[fam]
-        rule = {"V3": RD, "V2": Y3, "V1": CR}[fam]
-        word = {"V3": WH, "V2": (222, 224, 230), "V1": Y1}[fam]
-        S(code, name, ("Kodak", BK), L(word, acc), (speed, acc), WH, acc, V((30, 30, 34), (8, 8, 10)),
-          [Rc(0, 7, DW, 36, top), Rc(0, 39, DW, 41.5, rule), Rc(0, 124, DW, 125.6, acc)],
-          lay=dict(maker=(8, 35), name=(46, 80), iso=(80, 122)), foot_text=foot)
-    elif fam == "EXR":                                # Kodak yellow, black band, red rule, black ribbon
-        S(code, name, ("Kodak", Y2), L(BK), (speed, RD2), Y2, Y3, V((254, 220, 90), (244, 182, 22)),
-          [band(0, 33, V(KB0, KB1), RD), ribbon(BK, BK2, hi=(90, 90, 96))], lay=TOP, foot_text=foot)
-    elif fam == "ECN":                                # the old Eastman Color Negative: cream, red band and ribbon
-        S(code, name, ("Eastman", CR), L(RD2), (speed, BRN), CR, (230, 120, 90), V((250, 240, 218), (232, 212, 176)),
-          [band(0, 33, V((204, 42, 34), (150, 20, 20)), BRN), ribbon((200, 40, 34), (150, 20, 20), hi=(240, 150, 120))],
-          lay=TOP, foot_text=foot)
-    elif fam == "DX":                                 # Double-X: black body, Kodak yellow band, white panel
-        S(code, name, ("Kodak", BK), L(BK), ("5222", RD), WH, Y2, V(KG0, KG1),
-          [Rc(0, 7, DW, 36, V((252, 214, 80), (246, 190, 30))), Rc(7, 42, DW, 106, V((250, 250, 248), (224, 224, 222))),
-           Rc(7, 106, DW, 108.4, Y3)],
-          lay=dict(maker=(8, 35), name=(46, 76), iso=(76, 104)), extra=[("black & white", WH, 110, 122, 84)],
-          foot_text="35mm", side="black & white")
-    elif fam == "PT":                                 # Primetime: red body, black band
-        S(code, name, ("Kodak", WH), L(WH), (speed, Y2), WH, Y2, V((226, 30, 30), (140, 10, 14)),
-          [band(0, 33, V(KB0, KB1), Y2), ribbon(RD3, (86, 12, 30), hi=(235, 90, 70))], lay=TOP,
-          isosh=(110, 18, 38), foot_text=foot)
-    elif fam == "ET":                                 # Fuji Eterna: deep green-black, green band, teal rule
-        acc = (150, 224, 196) if day else (150, 196, 255)
-        S(code, name, ("Fujifilm", WH), L(WH), (speed, acc), WH, acc, V((24, 70, 64), (6, 24, 22)),
-          [Rc(0, 7, DW, 33, FUJI_G), Rc(0, 36, DW, 38.4, TL), Rc(0, 124, DW, 125.6, acc)],
-          lay=dict(maker=(8, 30), name=(44, 80), iso=(80, 122)), foot_text=foot)
-    elif fam == "EV":                                 # Eterna Vivid: bright green, white and red stripes
-        S(code, name, ("Fujifilm", WH), L(WH, Y2), (speed, WH), WH, Y2, V((12, 168, 76), (14, 100, 60)),
-          [Pg([(0, 124), (DW, 112), (DW, 116.5), (0, 128.5)], WH), Pg([(0, 130), (DW, 118), (DW, 121), (0, 133)], RD)],
-          lay=dict(maker=(7, 26), name=(30, 76), iso=(76, 112)), nsh=(8, 70, 40), isow=84, foot_text=foot)
-    elif fam == "RE":                                 # Reala: teal, dark band
-        S(code, name, ("Fujifilm", WH), L(WH), (speed, Y2), WH, Y2, V((16, 128, 140), (8, 70, 92)),
-          [band(0, 30, V((8, 64, 72), (4, 40, 48)), Y2), ribbon((8, 64, 72), (4, 40, 48), hi=(120, 220, 230))],
-          lay=dict(maker=(6, 27), name=(36, 80), iso=(80, 120)), foot_text=foot)
-    elif fam == "SF":                                 # Super F: white panel on Fuji green, red rule
-        S(code, name, ("Fujifilm", WH), L(GR2), (speed, TL), WH, (160, 226, 190), FUJI_G,
-          [band(0, 30, V((10, 80, 56), (6, 56, 40))), Rc(7, 36, DW, 108, V((250, 250, 248), (226, 232, 228))),
-           Rc(7, 108, DW, 110.4, RD)],
-          lay=dict(maker=(6, 28), name=(40, 72), iso=(72, 106), maxw=100), isow=96, foot_text=foot)
-    else:                                             # Color A: cream, Fuji green band and ribbon
-        S(code, name, ("Fujifilm", CR), L(GR2), (speed, RD2), GR2, (120, 210, 160), V((250, 240, 218), (232, 212, 176)),
-          [band(0, 33, FUJI_G, GR2), ribbon((20, 120, 84), (10, 84, 58), hi=(150, 220, 180))], lay=TOP, foot_text=foot)
+    maker, word = VERT_FAM[fam]
+    word = word or words[0].upper()                   # ECN-I / ECN-II
+    kind = "fuji" if maker == "FUJIFILM" else "bw" if fam == "DX" else "kodak"
+    bg, lip, famc, numc, isoc, smc = VERT_INK[kind]
+    bw = kind == "bw"
+    big = num if bw else "%s/%s" % (speed, num)
+    proc = "B&W negative" if bw else "%s process" % ("ECN-I" if word == "ECN-I" else "ECN-II")
+    temp = "EI 250 daylight" if bw else "3200K tungsten" if speed.endswith("T") else "5500K daylight"
+    S(code, name, (maker, famc), [(word, famc)], (big, numc), smc, lip, bg,
+      vert=dict(iso="ISO" + ("250" if bw else speed[:-1]), ex="36EX", isoc=isoc, smc=smc, proc=proc, temp=temp,
+                fine="%s %s 35MM %s 36EX" % (maker, word, big)),
+      side="black & white" if bw else "colour negative")
 
 for _c, (_f, _w, _num, _sp) in CHAIN_STOCKS.items():   # the style's name only labels it (rows keep catalog.py's name)
     chain_style(_c, "%s %s %s" % (" ".join(_w), _num, _sp))
@@ -691,6 +687,9 @@ def texts(f):
     st = f["style"]
     t = [st["maker"][0]] + [l[0] for l in st["lines"]] + [st["iso"][0]] + [e[0] for e in st.get("extra", [])]
     t += [st["badge"]["text"]] if st.get("badge") else []
+    vt = st.get("vert")
+    if vt:                                             # the hand-rolled cassette prints these instead of the foot
+        return [x for x in t if x] + [vt[k] for k in ("iso", "ex", "proc", "temp", "fine")] + [st.get("side", "")]
     return [x for x in t if x] + [st.get("foot_text", "36 EXP."), TYPE_TEXT[f["type"]], "35mm"]
 
 

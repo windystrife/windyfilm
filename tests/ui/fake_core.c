@@ -14,6 +14,7 @@ static int busy_n, busy_from, nreads;      /* Canon holds the card: the next bus
 static char logbuf[32768];
 static int loglen;
 static int val[WF_NROWS];
+static int dev_ms, dev_path;               /* wf_dev_last */
 
 /* the names and choices of src/wf_menu.c (film-stage: print stocks, Grain / Halation with the Even / Wrap choices,
  * Bloom and Gauge; the print stocks' full names of wf_row_text_long) */
@@ -22,7 +23,7 @@ static const char *const names[WF_NROWS] = { "Light", "Print stock", "Paper", "G
                                              "Exp comp", "Printer R", "Printer G", "Printer B", "Interlayer",
                                              "Bleach bypass", "Print bleach", "Neutral neg", "Neutral print" };
 static const char *const v_paper[] = { "Glossy", "Matte", "Warm", "Cool", 0 };
-static const char *const v_light[] = { "Auto WB", "Day", "Cloudy", "Tungsten", 0 };   /* wf_menu.c (EOS M; the 5D2 "Auto") */
+static const char *const v_light[] = { "Auto", "Day", "Cloudy", "Shade", "Tungsten", 0 };   /* wf_menu.c (11-17) */
 static const char *const v_print[] = { "Scan", "Cine", "Paper", "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72",
                                        "5382", "5384/82", "5384/92", "5385/93", "5385/62", "5386", "5383", "3513D", "3523XD", 0 };
 static const char *const v_print_full[16] = {
@@ -67,6 +68,7 @@ void fake_reset(void)
     cam = WF_CAM_EOSM; loaded = 0; gen++; grey_mask = 0; nmissing = 0; status = ""; films_state = 1;
     film_grey_id = film_grey_mask = 0;
     busy_n = 0;
+    dev_ms = dev_path = 0;
     for (int r = 0; r < WF_NROWS; r++) val[r] = 0;
     val[WF_ROW_GRAIN] = 2;                  /* Normal */
     val[WF_ROW_HALO] = 1;                   /* Wide */
@@ -162,6 +164,15 @@ const char *wf_status(void) { return status; }
 int wf_films_state(void) { return films_state; }
 void fake_set_films_state(int s) { films_state = s; gen++; }
 uint32_t wf_gen(void) { return gen; }
+/* the last develop (wf_menu.c wf_dev_note): the Info page's "Last develop" */
+
+void fake_set_dev(int ms, int path) { dev_ms = ms; dev_path = path; gen++; }
+int wf_dev_last(int *path) { if (path) *path = dev_path; return dev_ms; }
+const char *wf_path_name(int path)
+{
+    static const char *const n[WF_PATH_N] = { "", "JPEG", "JPEG 8-bit", "RAW develop", "Darkroom" };
+    return path > 0 && path < WF_PATH_N ? n[path] : "";
+}
 
 void wf_log(const char *fmt, ...)
 {

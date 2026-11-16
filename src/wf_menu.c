@@ -12,7 +12,7 @@
  *   film=<id>        loaded film / Film LUT can id (0 none)          output=film|log|lut|off
  *   curve=slog3|vlog|logc3|clog2|clog3                                 flut=technical|<cube code>   lutei=<1/3 EV>
  *   incurve=srgb|film1|neutral   how Log + LUT reads the JPEG (film1 / neutral: only when the build has that curve)
- *   print=scan|cine|paper   light=auto|day|cloudy|tungsten   strength=subtle|normal|strong
+ *   print=scan|cine|paper   light=auto|day|cloudy|shade|tungsten   strength=subtle|normal|strong
  *   hl=<-5..5>  sh=<-5..5>   Highlights / Shadows (films and Log + LUT; 0 = the curve as it was)
  *   paper=glossy|matte|warm|cool   the print's paper (films and Log + LUT, last in the tables; glossy = as before)
  *   grain=off|fine|normal|strong|evenfine|evennormal|evenstrong   halation=off|halation|spk|wrap
@@ -233,16 +233,16 @@ static const char *wf_print_name[WF_NPRINTS] = { "Scan", "Cine", "Paper",
     "5386", "5383", "3513D", "3523XD" };
 static const char *const wf_print_key[WF_NPRINTS] = { "scan", "cine", "paper",
     "p00", "p01", "p02", "p03", "p04", "p05", "p06", "p07", "p08", "p09", "p10", "p11", "p12", "p13", "p14", "p15" };
+/* owner 11-17: Auto / Day / Cloudy / Shade / Tungsten. Auto = Auto WB inside our own develop: the Darkroom prints with
+   Canon's Auto WB levels of each CR2 (wf_dark.c); a shot (JPEG, RAW develop) keeps the camera's own WB, never changed:
+   Canon's Auto levels are only in the CR2 written after it. Day .. Tungsten set the stock's kelvin as before */
+static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Shade", "Tungsten" };
 #ifdef WF_BUILD_5D2
-static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Tungsten" };   /* no Darkroom: the camera's WB */
-#define WF_LIGHT_HELP "White balance: Auto (yours), the stock's Day, Cloudy, Tungsten."
+#define WF_LIGHT_HELP "White balance: Auto (yours), the stock's Day, Cloudy, Shade, Tungsten."
 #else
-/* owner 11-17: Light Auto = Auto WB. The Darkroom prints with Canon's Auto WB levels of each CR2 (wf_dark.c); a shot
-   (JPEG, RAW develop) keeps the camera's own WB, never changed: Canon's Auto levels are only in the CR2 written after it */
-static const char *wf_light_name[WF_NLIGHT] = { "Auto WB", "Day", "Cloudy", "Tungsten" };
-#define WF_LIGHT_HELP "Auto WB: Darkroom prints use Canon's auto WB (shots: yours). Day, Cloudy, Tungsten."
+#define WF_LIGHT_HELP "Auto: Darkroom prints use Canon's auto WB (shots: yours). Day, Cloudy, Shade, Tungsten."
 #endif
-static const char *const wf_light_key[WF_NLIGHT] = { "auto", "day", "cloudy", "tungsten" };
+static const char *const wf_light_key[WF_NLIGHT] = { "auto", "day", "cloudy", "shade", "tungsten" };
 static const char *wf_strength_name[WF_NSTRENGTH] = { "30%", "100%", "125%" };
 static const char *const wf_strength_key[WF_NSTRENGTH] = { "subtle", "normal", "strong" };
 static const char *const wf_paper_key[WF_NPAPER] = { "glossy", "matte", "warm", "cool" };
@@ -304,6 +304,7 @@ static const char *const wf_popt_nm[WF_PO_N] = { "Frame", "Info", "Date", "Camer
 static volatile int *const wf_popt_v[WF_PO_N] = { &wf_pr_frame, &wf_pr_info, &wf_pr_date, &wf_pr_jpeg };
 static const int wf_popt_n[WF_PO_N] = { WF_PFR_N, WF_PIN_N, WF_PDT_N, WF_PJ_N };
 
+static const char *const wf_rl_key[2] = { "off", "on" };            /* a JPEG 8-bit roll (wf_dark.h, DESIGN 3.14) */
 static const char *const wf_ds_key[WF_DS_N] = { "on", "off" };   /* Screen Off (DESIGN 3.11): the Darkroom's chip only */
 void wf_dk_scr_step(int d)
 {
@@ -786,6 +787,7 @@ static int wf_light_kelvin(int light)
     switch (light) {
     case WF_LIGHT_DAY:      return day;
     case WF_LIGHT_CLOUDY:   return (day * 5 / 4 + 50) / 100 * 100;
+    case WF_LIGHT_SHADE:    return (day * 29 / 20 + 50) / 100 * 100;   /* 5200 -> 7500 K, a T stock 3200 -> 4600 K */
     case WF_LIGHT_TUNGSTEN: return 3200;
     }
     return 0;
@@ -982,6 +984,8 @@ void wf_cfg_load(void)
             wf_pr_jpeg = wf_cfg_word(v, wf_pj_key, WF_PJ_N, WF_PJ_KEEP);
         } else if ((v = wf_cfg_val(l, "dkscreen"))) {
             wf_dk_scr = wf_cfg_word(v, wf_ds_key, WF_DS_N, WF_DS_ON);
+        } else if ((v = wf_cfg_val(l, "rolllook"))) {
+            wf_roll_look8 = wf_cfg_word(v, wf_rl_key, 2, 0);
         } else if ((v = wf_cfg_val(l, "stage"))) {
             int q[11] = { 0 }, okq = 1, nq = 0;            /* 7 values (before the last four rows) or 11 */
             for (int i = 0; i < 11 && okq; i++) {
@@ -1048,7 +1052,7 @@ static int wf_cfg_save(void)
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
                      "strength=%s\nhl=%d\nsh=%d\npaper=%s\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\n"
                      "exposure=%s\nexptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\njpeg=%s\ndkscreen=%s\n"
-                     "shoulder=%s\n",
+                     "rolllook=%s\nshoulder=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
@@ -1060,7 +1064,7 @@ static int wf_cfg_save(void)
                      wf_exif_off ? "off" : "on", wf_blind ? "on" : "off", wf_pick(wf_pfr_key, WF_PFR_N, wf_pr_frame),
                      wf_pick(wf_pin_key, WF_PIN_N, wf_pr_info), wf_pick(wf_pdt_key, WF_PDT_N, wf_pr_date),
                      wf_pick(wf_pj_key, WF_PJ_N, wf_pr_jpeg), wf_pick(wf_ds_key, WF_DS_N, wf_dk_scr),
-                     wf_pick(wf_hue_key, WF_DEV_HUE_N, wf_rb_hue));
+                     wf_pick(wf_rl_key, 2, wf_roll_look8), wf_pick(wf_hue_key, WF_DEV_HUE_N, wf_rb_hue));
     struct wf_sg_knobs sk;
     wf_sg_knobs_now(&sk);
     if (n > 0 && n < (int)sizeof b)
@@ -1145,10 +1149,59 @@ void wf_exif_none(void) { wf_ex_push(""); }
  * | Mist 1/8 | EV12". g / h / bl / m: the grain / halation / bloom / mist setting when it ran on this shot, 0 = it did not;
  * the gauge (lk) only when grain or the halation stage ran and it is not 35 mm */
 const char *wf_exif_text(const struct wf_look *lk, int g, int h, int bl, int m, int ev, char *b, int bn);
-void wf_exif_shot(const struct wf_look *lk, int g, int h, int bl, int m, int ev)
+void wf_exif_shot(const struct wf_look *lk, int g, int h, int bl, int m, int ev, int path, int ms)
 {
     char b[WF_EX_T];
-    wf_ex_push(wf_exif_text(lk, g, h, bl, m, ev, b, sizeof b));
+    wf_exif_text(lk, g, h, bl, m, ev, b, sizeof b);
+    wf_exif_tail(lk, path, ms, b, sizeof b);
+    wf_ex_push(b);
+}
+
+/* the develop path of a look (owner 11-17: Film stage compares its 8-bit JPEG path with RAW develop): a chain film's
+   JPEG path is "JPEG 8-bit", the rest "JPEG" */
+static int wf_path_of(const struct wf_look *lk, int path)
+{
+    if (path == WF_PATH_JPEG && lk && lk->row >= 0 && lk->row < wf_nfilms && wf_films[lk->row].group == WF_GRP_STAGE)
+        return WF_PATH_JPEG8;
+    return path;
+}
+const char *wf_path_name(int path)
+{
+    static const char *const n[WF_PATH_N] = { "", "JPEG", "JPEG 8-bit", "RAW develop", "Darkroom" };
+    return path > 0 && path < WF_PATH_N ? n[path] : "";
+}
+int wf_exif_tail(const struct wf_look *lk, int path, int ms, char *b, int bn)
+{
+    int n = 0;
+    while (n < bn - 1 && b[n])
+        n++;
+    if (!lk || lk->row < 0 || lk->row >= wf_nfilms || wf_films[lk->row].group != WF_GRP_STAGE)
+        return n;                                /* the Film section's films: their text as before */
+    path = wf_path_of(lk, path);
+    if (path > 0 && path < WF_PATH_N && n < bn)
+        n += snprintf(b + n, bn - n, " | Mode %s", wf_path_name(path));
+    if (ms > 0 && n < bn) {
+        unsigned t = ((unsigned)ms + 50) / 100;                       /* tenths: no 64-bit division (W2) */
+        if (t > 99999) t = 99999;
+        unsigned q = t / 10;
+        n += snprintf(b + n, bn - n, " | Dev %d.%d s", (int)q, (int)(t - q * 10));
+    }
+    return n < bn ? n : bn - 1;
+}
+
+/* the last develop (any task writes, the UI reads: two plain words) */
+static volatile int wf_dev_ms, wf_dev_path;
+void wf_dev_note(const struct wf_look *lk, int path, int ms)
+{
+    path = wf_path_of(lk, path);
+    wf_dev_path = path;
+    wf_dev_ms = ms > 0 ? ms : 0;
+    wf_log("dev time: %s %d ms", wf_path_name(path), ms);
+}
+int wf_dev_last(int *path)
+{
+    if (path) *path = wf_dev_path;
+    return wf_dev_ms;
 }
 
 /* the text itself (the Darkroom's print comment too, wf_dark.c) */

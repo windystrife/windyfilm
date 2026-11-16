@@ -90,6 +90,11 @@ int  wf_films_state(void);                /* the film tables: 1 read, 0 starting
                                              worker or the hooks failed, -2 the pack is missing or bad */
 const char *wf_status(void);              /* one line, "" when all is well: "Unsupported firmware", "Disable filmroll.mo", ... */
 uint32_t wf_gen(void);                    /* bumped on every state change: the UI redraws when it differs */
+/* the develop paths (owner 11-17: the Info page's "Last develop", the EXIF "Mode"): JPEG = the look on Canon's JPEG,
+ * JPEG 8-bit = the same for a Film stage film, RAW develop = B at the shot, Darkroom = a roll's print */
+enum { WF_PATH_NONE = 0, WF_PATH_JPEG, WF_PATH_JPEG8, WF_PATH_RAW, WF_PATH_DARK, WF_PATH_N };
+int wf_dev_last(int *path);               /* ms of the last develop (0 = none yet), *path its WF_PATH_* */
+const char *wf_path_name(int path);       /* "JPEG", "JPEG 8-bit", "RAW develop", "Darkroom" ("" for none) */
 
 /* ------------------------------------------------------------------ browser UI (src/ui) */
 void wf_ui_init(void);                    /* module init: no allocation, no file access */

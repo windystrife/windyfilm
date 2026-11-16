@@ -118,9 +118,7 @@ static int edit;                        /* 5D2: joystick press, LEFT / RIGHT cha
 
 static uint8_t *list;                   /* wf_films index of each ready film: by group, then order */
 static int nlist;
-static int gstart[WF_NGROUPS + 1];
 static int sel, focus, info;
-static int gsel[WF_NGROUPS], gfirst[WF_NGROUPS];
 #define FIRST_UNSET (-100)
 static int last_id;                     /* selection kept between opens */
 static int dirty;
@@ -145,22 +143,66 @@ static int t_probe, t_force, t_heal;
  * else RAW develop as its menu says. RAW develop with a roll at once stays the ML menu's: the chip shows Darkroom then.
  * Leaving Darkroom with a roll never loses a frame: one with frames asks first (End the roll now: rewound, the frames
  * wait for the Darkroom / Keep the roll), a finished one is set aside at once (wf_roll_shelve, wf_dark.h), an empty
- * one comes out. Focus: UP from the first row (or DOWN from the last) reaches the chip, LEFT / RIGHT / the wheel / SET
- * step it, as the Darkroom's Screen chip. EOS M (RAW develop and rolls are EOS M only): the 5D2 keeps the film chip.
+ * one comes out. Focus (11-17, round 2): the top bar holds the section pill and this chip (below). EOS M (RAW develop and rolls are EOS M only): the 5D2 keeps the film chip.
  * The Roll picker screen is gone (owner 11-17: "the WindyFilm UI is nicer"): the ML menu's Film roll and the end-of-roll
  * notice's INFO open this browser in Darkroom mode on the Exposures row (wf_ui_open_scr(WF_UI_NEW_ROLL), new_roll_view). */
+/* The section pill (owner 11-17, DESIGN 3.14) at the top left: Film | Film stage. Each section has its own tabs (TAP
+ * cycles them, the counter counts inside it): Film = Colour / Cine / B&W / Film LUT, Film stage = the chain films by
+ * their negative's family (Vision3 / Vision / ECN-EXR / Fuji / B&W). The section is the film under the cursor's; the
+ * pill switches to the other section's last tab and film. Film stage: the chip reads JPEG 8-bit for JPEG (the look on
+ * Canon's 8-bit JPEG, to compare with RAW develop's time), the Exposures row is there in every mode and SET always loads
+ * a roll: RAW develop = B develops each frame at the shot, JPEG 8-bit = the look at the shot (wf_roll_look8), Darkroom
+ * = Canon's own JPEG, the Darkroom prints later; every frame counts on the roll, and with a roll in the chip changes how
+ * the next frames develop (no question: nothing is lost). Leaving a section with a roll in never loses a frame: one with
+ * frames asks first (Close it and switch: rewound, set aside for the Darkroom / Keep the roll), a finished one is set
+ * aside at once, an empty one comes out. Focus: the top bar is one stop above the rows (UP from the first row, DOWN
+ * from the last); LEFT / RIGHT pick the pill or the chip there, SET / the ring / the joystick press toggle or step it.
+ * The 5D2 gets the pill (no chip: no RAW develop, no rolls). The film stage's two EXIF lines under the film name and
+ * the INFO page show what the develop writes (wf_exif_text + wf_exif_tail). */
 enum { M_JPEG = 0, M_RAW, M_DARK, M_N };
 static const char *const mode_name[M_N] = { "JPEG", "RAW develop", "Darkroom" };
-#define FOC_CHIP (-2)                           /* focus on the chip */
-#define FOC_EXP  (-1)                           /* focus on the Exposures row (Darkroom mode) */
+#define FOC_TOP  (-2)                           /* focus on the top bar: the section pill or the mode chip (tsub) */
+#define FOC_EXP  (-1)                           /* focus on the Exposures row (a roll can be loaded) */
 #define NEXP 5
 static const int exps[NEXP] = { 3, 6, 12, 24, 36 };
 static int mode_dk;                             /* Darkroom picked on the chip, no roll on the camera yet */
 static int exp_i = 3;                           /* the Exposures row: 24 */
 static int leave_to = -1;                       /* the leave-Darkroom question is up: the mode asked for */
+static int sec_to = -1;                         /* the leave-section question is up: the section asked for */
+static int tsub;                                /* the top bar's focus: 0 the section pill, 1 the mode chip */
 static const struct wf_film *sw_film;           /* the close-and-load question (a finished roll, SET on another film) */
 static int sw_exp;
 static char msgb[96];                           /* a say() text built here */
+
+/* the tabs: 0 .. 3 the Film section's groups, TAB_STAGE .. NTAB - 1 the Film stage families */
+#define TAB_STAGE WF_GRP_STAGE
+#define NTAB      (TAB_STAGE + 5)
+static const char *const tname[NTAB] = { "Colour", "Cine", "B&W", "Film LUT", "Vision3", "Vision", "ECN/EXR", "Fuji", "B&W" };
+static int tstart[NTAB + 1];
+static int tsel[NTAB], tfirst[NTAB];
+static int stab[2] = { 0, TAB_STAGE };          /* the last tab of each section */
+
+static int pre(const char *s, const char *p) { while (*p) if (*s++ != *p++) return 0; return 1; }
+/* a film's tab: its group, or for a chain film the family of its negative by name (catalog.py "Vision3 5219 500T",
+ * "Vision2 ..", "Vision ..", "Primetime ..", "EXR ..", "ECN-I ..", "Double-X 5222", the Fuji stocks) */
+static int tab_of(const struct wf_film *f)
+{
+    int g = f->group % WF_NGROUPS;
+    if (g != WF_GRP_STAGE) return g;
+    const char *n = f->name ? f->name : "";
+    return TAB_STAGE + (pre(n, "Vision3") ? 0 : pre(n, "Vision") || pre(n, "Primetime") ? 1
+                        : pre(n, "EXR") || pre(n, "ECN") ? 2 : pre(n, "Double-X") ? 4 : 3);
+}
+static inline const struct wf_film *film_at(int i) { return i >= 0 && i < nlist ? &wf_films[list[i]] : 0; }
+static inline int tcount(int t) { return tstart[t + 1] - tstart[t]; }
+static inline int tab_of_sel(void) { return nlist ? tab_of(&wf_films[list[sel]]) : 0; }
+static inline int sec_of_tab(int t) { return t >= TAB_STAGE; }
+static inline int sec_now(void) { return sec_of_tab(tab_of_sel()); }   /* 0 Film, 1 Film stage */
+static inline int sec_lo(int s) { return s ? TAB_STAGE : 0; }
+static inline int sec_hi(int s) { return s ? NTAB : TAB_STAGE; }
+static inline int acc(int t) { return t == WF_GRP_LUT ? C_TEAL : C_AMBER; }
+static inline int accd(int t) { return t == WF_GRP_LUT ? C_TEALD : C_AMBERD; }
+static inline int is5d2(void) { return wf_cam() == WF_CAM_5D2; }
 
 static int mode_ok(int m)
 {
@@ -168,12 +210,30 @@ static int mode_ok(int m)
 }
 static int chip_on(void) { return mode_ok(M_RAW) || mode_ok(M_DARK); }
 static int roll_in(void) { const struct wf_roll *r = wf_roll_now(); return wf_roll_open(r) && !wf_roll_shelved(); }
+static int roll_sec(void)                       /* the section of the roll on the camera (set aside too), -1 none */
+{
+    const struct wf_roll *r = wf_roll_now();
+    const struct wf_film *f = wf_roll_open(r) ? wf_film_by_id(r->film) : 0;
+    return f ? sec_of_tab(tab_of(f)) : -1;
+}
+/* a Film stage roll whose frames develop at the shot (RAW develop or JPEG 8-bit: wf_look_use builds the look for it):
+ * nothing waits for the Darkroom, so leaving the section or a close-and-load just ends it, and the questions say so
+ * (owner 11-17, round 2: the dialogs say what happens in the current mode) */
+static int roll_devd(void)
+{
+    return roll_sec() == 1 && ((wf_rawb_can() && wf_rawb) || wf_roll_look8);
+}
 static int mode_now(void)
 {
+    if (mode_ok(M_DARK) && sec_now() && roll_in())          /* a Film stage roll: how its frames develop */
+        return mode_ok(M_RAW) && wf_rawb ? M_RAW : wf_roll_look8 ? M_JPEG : M_DARK;
     if (mode_ok(M_DARK) && (roll_in() || mode_dk)) return M_DARK;
     return mode_ok(M_RAW) && wf_rawb ? M_RAW : M_JPEG;
 }
+static const char *mname(int m) { return m == M_JPEG && sec_now() ? "JPEG 8-bit" : mode_name[m]; }
 static inline int dkm(void) { return mode_now() == M_DARK; }
+/* the Exposures row and SET = a roll: Film in Darkroom mode, Film stage in every mode (EOS M) */
+static int rollrows(void) { return mode_ok(M_DARK) && (sec_now() || dkm()); }
 /* a roll still shooting with frames keeps its count (the Exposures row shows it, greyed); a finished one (full, rewound)
  * leaves the row to the next roll: SET on a can then asks to close it and load that count (the close-and-load question) */
 static int exp_locked(void)
@@ -183,22 +243,23 @@ static int exp_locked(void)
 }
 static int exp_now(void) { return exp_locked() ? wf_roll_now()->exp : exps[exp_i]; }
 
-/* positions UP / DOWN walk: [the chip] [Exposures] the WF_NROWS rows; lines (the list that scrolls): [Exposures] rows */
-static int nlines(void) { return WF_NROWS + dkm(); }
-static int line_of(int f) { return f == FOC_EXP ? 0 : f >= 0 ? f + dkm() : -1; }
-static int npos(void) { return nlines() + chip_on(); }
-static int pos_of(int f) { return f == FOC_CHIP ? 0 : line_of(f) + chip_on(); }
+/* positions UP / DOWN walk: the top bar, [Exposures], the WF_NROWS rows; lines (the list that scrolls): [Exposures] rows */
+static int nlines(void) { return WF_NROWS + rollrows(); }
+static int line_of(int f) { return f == FOC_EXP ? 0 : f >= 0 ? f + rollrows() : -1; }
+static int npos(void) { return nlines() + 1; }
+static int pos_of(int f) { return f == FOC_TOP ? 0 : line_of(f) + 1; }
 static int foc_at(int p)
 {
-    if (chip_on() && !p--) return FOC_CHIP;
-    if (dkm() && !p--) return FOC_EXP;
+    if (!p--) return FOC_TOP;
+    if (rollrows() && !p--) return FOC_EXP;
     return p;
 }
 /* the focus still valid (the mode may change under it: a roll loaded / closed by wf_task) and its line on screen */
 static void focus_fix(void)
 {
-    if ((focus == FOC_EXP && !dkm()) || (focus == FOC_CHIP && !chip_on()) || focus >= WF_NROWS || focus < FOC_CHIP)
+    if ((focus == FOC_EXP && !rollrows()) || focus >= WF_NROWS || focus < FOC_TOP)
         focus = WF_ROW_LIGHT;
+    if (!chip_on()) tsub = 0;
     int l = line_of(focus), top_max = nlines() - ROWS_VIS;
     if (l >= 0 && l < rtop) rtop = l;
     if (l >= 0 && l >= rtop + ROWS_VIS) rtop = l - ROWS_VIS + 1;
@@ -217,15 +278,6 @@ static void focus_move(int d)
     focus_to(foc_at((pos_of(focus) + d + n * 2) % n));
 }
 
-static const char *const gname[WF_NGROUPS] = { "Colour", "Cine", "B&W", "Film LUT", "Film stage" };
-
-static inline const struct wf_film *film_at(int i) { return i >= 0 && i < nlist ? &wf_films[list[i]] : 0; }
-static inline int gcount(int g) { return gstart[g + 1] - gstart[g]; }
-static inline int group_of_sel(void) { return nlist ? wf_films[list[sel]].group % WF_NGROUPS : 0; }
-static inline int acc(int g) { return g == WF_GRP_LUT ? C_TEAL : C_AMBER; }
-static inline int accd(int g) { return g == WF_GRP_LUT ? C_TEALD : C_AMBERD; }
-static inline int is5d2(void) { return wf_cam() == WF_CAM_5D2; }
-
 /* ------------------------------------------------------------------ film list and selection */
 static int build_list(void)
 {
@@ -233,19 +285,19 @@ static int build_list(void)
     nlist = 0;
     list = malloc(n > 0 ? n : 1);
     if (!list) return -1;
-    for (int g = 0; g < WF_NGROUPS; g++)
+    for (int t = 0; t < NTAB; t++)
     {
-        int start = gstart[g] = nlist;
+        int start = tstart[t] = nlist;
         for (int i = 0; i < n; i++)
         {
             const struct wf_film *f = &wf_films[i];
-            if (f->group != g || !(f->flags & WF_F_READY)) continue;
+            if (!(f->flags & WF_F_READY) || tab_of(f) != t) continue;
             int k = nlist++;
             while (k > start && wf_films[list[k - 1]].order > f->order) { list[k] = list[k - 1]; k--; }
             list[k] = i;
         }
     }
-    gstart[WF_NGROUPS] = nlist;
+    tstart[NTAB] = nlist;
     return 0;
 }
 
@@ -256,10 +308,10 @@ static int index_of_id(int id)
     return -1;
 }
 
-/* strip scroll of group g so that local index l sits in slots 1..8 (slot 0 and 9..10 are under the edge fades) */
-static void place(int g, int l)
+/* strip scroll of tab t so that local index l sits in slots 1..8 (slot 0 and 9..10 are under the edge fades) */
+static void place(int t, int l)
 {
-    int n = gcount(g), first = gfirst[g];
+    int n = tcount(t), first = tfirst[t];
     if (first == FIRST_UNSET)
     {
         first = l - 4;
@@ -267,34 +319,44 @@ static void place(int g, int l)
         int lo = l > 0 ? 0 : -1;
         if (first < lo) first = lo;
     }
+    if (n <= 8) first = -1;                                 /* a short tab (Vision3 4, Fuji 9 no): all its cans in view */
     if (l - first < 1) first = l - 1;
     if (l - first > 8) first = l - 8;
-    gfirst[g] = first;
+    tfirst[t] = first;
 }
 
 static void select_film(int i)
 {
     if (i < 0 || i >= nlist) return;
     sel = i;
-    int g = group_of_sel();
-    gsel[g] = i;
-    place(g, i - gstart[g]);
+    int t = tab_of_sel();
+    tsel[t] = i;
+    stab[sec_of_tab(t)] = t;
+    place(t, i - tstart[t]);
     dirty = 1;
 }
 
-static void next_group(void)
+/* TAP: the next tab with films, inside the section */
+static void next_tab(void)
 {
-    int g = group_of_sel();
-    for (int k = 1; k <= WF_NGROUPS; k++)
+    int t = tab_of_sel(), lo = sec_lo(sec_of_tab(t)), n = sec_hi(sec_of_tab(t)) - lo;
+    for (int k = 1; k <= n; k++)
     {
-        int h = (g + k) % WF_NGROUPS;
-        if (!gcount(h)) continue;
-        if (h == g) return;
-        int i = gsel[h];
-        if (i < gstart[h] || i >= gstart[h + 1]) i = gstart[h];
+        int h = lo + (t - lo + k) % n;
+        if (!tcount(h)) continue;
+        if (h == t) return;
+        int i = tsel[h];
+        if (i < tstart[h] || i >= tstart[h + 1]) i = tstart[h];
         select_film(i);
         return;
     }
+}
+
+/* LEFT / RIGHT: the previous / next film, across the tabs of the section only */
+static void film_step(int d)
+{
+    int s = sec_now(), i = sel + d;
+    if (i >= tstart[sec_lo(s)] && i < tstart[sec_hi(s)]) select_film(i);
 }
 
 static void say(const char *s)
@@ -350,6 +412,7 @@ static void roll_load(const struct wf_film *f)
         return;
     }
     if (!wf_avail(f->id)) { say(roll_why(f)); return; }
+    wf_roll_look8_set(sec_of_tab(tab_of(f)) && mode_now() == M_JPEG);   /* Film stage JPEG 8-bit: the look at the shot */
     int rc = wf_roll_req_load(f->id, ne);
     if (rc >= 0)
     {
@@ -368,6 +431,7 @@ static void swap_answer(int yes)
     sw_film = 0;
     dirty = 1;
     if (!yes) { wf_log("ui: close-and-load dropped (MENU)"); return; }
+    wf_roll_look8_set(sec_of_tab(tab_of(nf)) && mode_now() == M_JPEG);
     int rc = wf_roll_req_swap(nf->id, ne);
     if (rc >= 0)
     {
@@ -382,8 +446,10 @@ static void mode_apply(int was, int m)
 {
     mode_dk = m == M_DARK;
     if (mode_ok(M_RAW)) wf_rawb = m == M_RAW;               /* the ML menu's RAW develop follows (off at boot) */
-    if (m == M_DARK && wf_roll_shelved()) wf_roll_shelve(0);   /* the roll set aside is the camera's roll again */
-    wf_log("ui: mode %s -> %s", mode_name[was], mode_name[m]);
+    if (sec_now() && roll_in()) wf_roll_look8_set(m == M_JPEG);   /* a Film stage roll: how its next frames develop */
+    if (m == M_DARK && wf_roll_shelved() && roll_sec() == sec_now())
+        wf_roll_shelve(0);                                  /* this section's roll set aside is the camera's roll again */
+    wf_log("ui: mode %s -> %s", mname(was), mname(m));
     focus_fix();
     dirty = 1;
 }
@@ -394,6 +460,14 @@ static void mode_set(int m)
     int cur = mode_now();
     if (m == cur || !mode_ok(m)) return;
     const struct wf_roll *r = wf_roll_now();
+    if (sec_now() && roll_in())                             /* a Film stage roll stays in every mode: nothing is lost */
+    {
+        mode_apply(cur, m);
+        snprintf(msgb, sizeof msgb, "Roll %03d goes on: the next frames %s", r->num,
+                 m == M_JPEG ? "get the look at the shot" : m == M_RAW ? "develop at the shot" : "for the Darkroom");
+        say(msgb);
+        return;
+    }
     if (cur != M_DARK || !roll_in()) { mode_apply(cur, m); return; }
     if (r->state == WF_RS_LOADED && r->nshot == 0)          /* nothing shot: the roll comes out */
     {
@@ -408,7 +482,7 @@ static void mode_set(int m)
     {
         leave_to = m;
         dirty = 1;
-        wf_log("ui: roll %03d has %d frame(s): end it for %s?", r->num, r->nshot, mode_name[m]);
+        wf_log("ui: roll %03d has %d frame(s): end it for %s?", r->num, r->nshot, mname(m));
         return;
     }
     wf_roll_shelve(1);                                      /* finished: its frames wait for the Darkroom */
@@ -417,7 +491,7 @@ static void mode_set(int m)
     say(msgb);
 }
 
-static void mode_step(int d)
+static int mode_next(int d)
 {
     int m = mode_now();
     for (int k = 0; k < M_N; k++)
@@ -425,8 +499,9 @@ static void mode_step(int d)
         m = (m + (d < 0 ? M_N - 1 : 1)) % M_N;
         if (mode_ok(m)) break;
     }
-    mode_set(m);
+    return m;
 }
+static void mode_step(int d) { mode_set(mode_next(d)); }
 
 static void leave_answer(int yes)
 {
@@ -443,6 +518,96 @@ static void leave_answer(int yes)
     say(msgb);
 }
 
+/* the section pill: the other section's last tab and film; a roll of this section in the camera: see above */
+static void sec_apply(int ns)
+{
+    int t = stab[ns];
+    if (t < sec_lo(ns) || t >= sec_hi(ns) || !tcount(t))
+        for (t = sec_lo(ns); t < sec_hi(ns) && !tcount(t); t++) ;
+    if (t >= sec_hi(ns)) { say(ns ? "No Film stage films in this build" : "No Film section films in this build"); return; }
+    int i = tsel[t];
+    if (i < tstart[t] || i >= tstart[t + 1]) i = tstart[t];
+    select_film(i);
+    wf_log("ui: section %s", ns ? "Film stage" : "Film");
+    focus_fix();
+}
+
+static void sec_set(int ns)
+{
+    int cs = sec_now();
+    if (ns == cs) return;
+    const struct wf_roll *r = wf_roll_now();
+    if (!roll_in() || roll_sec() != cs) { sec_apply(ns); return; }
+    if (r->state == WF_RS_LOADED && r->nshot == 0)          /* nothing shot: the roll comes out */
+    {
+        int rc = wf_roll_req_close();
+        if (rc < 0) { say(rc == -3 ? "Busy, press again" : "Cannot take the roll out"); return; }
+        snprintf(msgb, sizeof msgb, "Roll %03d taken out: no frame on it", r->num);
+        sec_apply(ns);
+        say(msgb);
+        return;
+    }
+    if (r->state == WF_RS_LOADED)                           /* frames on it: ask (Close it and switch / Keep the roll) */
+    {
+        sec_to = ns;
+        dirty = 1;
+        wf_log("ui: roll %03d has %d frame(s): close it for %s?", r->num, r->nshot, ns ? "Film stage" : "Film");
+        return;
+    }
+    if (roll_devd())                                        /* finished, developed at the shot: it ends */
+    {
+        int n = r->nshot, rc = wf_roll_req_close();
+        if (rc < 0) { say(rc == -3 ? "Busy, press again" : "Cannot end the roll"); return; }
+        wf_log("ui: roll %03d ended: %d frame(s) developed at the shot", r->num, n);
+        snprintf(msgb, sizeof msgb, "Roll %03d ended: %d frame%s developed", r->num, n, n == 1 ? "" : "s");
+        sec_apply(ns);
+        say(msgb);
+        return;
+    }
+    wf_roll_shelve(1);                                      /* finished: its frames wait for the Darkroom */
+    snprintf(msgb, sizeof msgb, "Roll %03d waits for the Darkroom: PLAY develops it", r->num);
+    sec_apply(ns);
+    say(msgb);
+}
+
+/* the leave-section question's answer: SET = a Darkroom roll rewound and set aside (never a frame lost), a roll
+ * developed at the shot ends (its files stay on the card); MENU = the roll stays */
+static void sec_answer(int yes)
+{
+    int ns = sec_to;
+    sec_to = -1;
+    dirty = 1;
+    if (!yes) { wf_log("ui: roll kept, still %s", ns ? "Film" : "Film stage"); return; }
+    const struct wf_roll *r = wf_roll_now();
+    int n = r->nshot, devd = roll_devd(), rc = devd ? wf_roll_req_close() : wf_roll_req_rewind();
+    if (rc < 0) { say(rc == -3 ? "Busy, press SET again" : "Cannot end the roll"); return; }
+    if (devd)
+    {
+        wf_log("ui: roll %03d ended: %d frame(s) developed at the shot", r->num, n);
+        snprintf(msgb, sizeof msgb, "Roll %03d ended: %d frame%s developed", r->num, n, n == 1 ? "" : "s");
+    }
+    else
+    {
+        wf_roll_shelve(1);
+        snprintf(msgb, sizeof msgb, "Roll %03d ended: %d frame%s wait for the Darkroom (PLAY)", r->num, n,
+                 n == 1 ? "" : "s");
+    }
+    sec_apply(ns);
+    say(msgb);
+}
+
+/* the top bar: SET / the ring / the joystick press on the pill toggles the section, on the chip steps the mode */
+static void top_step(int d)
+{
+    if (tsub && chip_on()) mode_step(d);
+    else sec_set(!sec_now());
+}
+static void top_lr(int t)                                   /* LEFT: the pill, RIGHT: the chip */
+{
+    if (t && !chip_on()) return;
+    if (tsub != t) { tsub = t; dirty = 1; }
+}
+
 static void exp_step(int d)
 {
     if (exp_locked()) { say("The roll in the camera keeps its count"); return; }
@@ -454,7 +619,7 @@ static void load_sel(void)
 {
     const struct wf_film *f = film_at(sel);
     if (!f) return;
-    if (dkm()) { roll_load(f); return; }
+    if (rollrows()) { roll_load(f); return; }
     if (wf_loaded() == f->id) { anim_start(f, 0); return; } /* picked again (a roll's own film too): the same animation,
                                                                then LiveView, without a load (owner 11-14) */
     const struct wf_roll *ro = wf_roll_now();
@@ -487,7 +652,7 @@ static int row_film(void)
 
 static void step_row(int d)
 {
-    if (focus == FOC_CHIP) { mode_step(d); return; }
+    if (focus == FOC_TOP) { top_step(d); return; }
     if (focus == FOC_EXP) { exp_step(d); return; }
     int id = row_film();
     if (!wf_row_avail_for(focus, id)) return;
@@ -517,22 +682,23 @@ static void act(int k)
         dirty = 1;
         return;
     }
-    if (leave_to >= 0 || sw_film)                           /* a question is up: SET yes, MENU no, nothing else */
+    if (leave_to >= 0 || sw_film || sec_to >= 0)           /* a question is up: SET yes, MENU no, nothing else */
     {
         int yes = k == MODULE_KEY_PRESS_SET || k == MODULE_KEY_JOY_CENTER;
         if (yes || k == MODULE_KEY_MENU)
         {
             if (leave_to >= 0) leave_answer(yes);
+            else if (sec_to >= 0) sec_answer(yes);
             else swap_answer(yes);
         }
         return;
     }
     focus_fix();
-    int chip = focus == FOC_CHIP;
+    int top = focus == FOC_TOP;
     switch (k)
     {
-    case MODULE_KEY_PRESS_LEFT:   if (edit || chip) step_row(-1); else select_film(sel - 1); break;
-    case MODULE_KEY_PRESS_RIGHT:  if (edit || chip) step_row(1); else select_film(sel + 1); break;
+    case MODULE_KEY_PRESS_LEFT:   if (top) top_lr(0); else if (edit) step_row(-1); else film_step(-1); break;
+    case MODULE_KEY_PRESS_RIGHT:  if (top) top_lr(1); else if (edit) step_row(1); else film_step(1); break;
     case MODULE_KEY_PRESS_UP:     focus_move(-1); break;
     case MODULE_KEY_PRESS_DOWN:   focus_move(1); break;
     case MODULE_KEY_WHEEL_LEFT:
@@ -540,17 +706,17 @@ static void act(int k)
     case MODULE_KEY_WHEEL_RIGHT:
     case MODULE_KEY_WHEEL_DOWN:   step_row(1); break;
     case MODULE_KEY_JOY_CENTER:
+        if (top) { top_step(1); break; }
         if (is5d2()) { edit = !edit; dirty = 1; break; }   /* 5D2: the joystick press edits the focused row */
-        if (chip) mode_step(1);
-        else load_sel();
+        load_sel();
         break;
-    case MODULE_KEY_PRESS_SET:    edit = 0; if (chip) mode_step(1); else load_sel(); break;
+    case MODULE_KEY_PRESS_SET:    edit = 0; if (top) top_step(1); else load_sel(); break;
     case MODULE_KEY_Q:
     case MODULE_KEY_PICSTYLE:
-    case MODULE_KEY_TOUCH_1_FINGER: edit = 0; next_group(); break;
+    case MODULE_KEY_TOUCH_1_FINGER: edit = 0; next_tab(); break;
     case MODULE_KEY_INFO:         info = !info; dirty = 1; break;
     case MODULE_KEY_PLAY:                                   /* a roll on the camera or Darkroom mode: the Darkroom */
-        if (!is5d2() && (wf_roll_open(wf_roll_now()) || dkm())) { dev_key(); break; }   /* entry (or why not); else */
+        if (!is5d2() && (wf_roll_open(wf_roll_now()) || rollrows())) { dev_key(); break; }   /* entry (or why not) */
         close_req = 1;                                      /* it closes, as before */
         break;
     case MODULE_KEY_MENU:
@@ -639,8 +805,13 @@ static int mode_chip(int xr, int foc)
     int m = mode_now();
     const struct wf_roll *r = wf_roll_now();
     char b[32];
-    const char *t = mode_name[m];
-    if (m == M_DARK && roll_in()) { snprintf(b, sizeof b, "Darkroom %d/%d", r->nshot, r->exp); t = b; }
+    const char *t = mname(m);
+    if (roll_in() && (m == M_DARK || sec_now()))            /* the name, then the count (two calls: the gate's string list) */
+    {
+        int n = snprintf(b, sizeof b, "%s ", t);
+        if (n > 0 && n < (int)sizeof b) snprintf(b + n, sizeof b - n, "%d/%d", r->nshot, r->exp);
+        t = b;
+    }
     int pad = foc ? 20 : 12, w = pad + 18 + 8 + ui_textw(F_13, t) + pad, x0 = xr - w, ix = x0 + pad;
     int ic = foc ? C_AMBER : C_TXT2;
     wfg_rrect(x0, 5, xr, 27, 11, foc ? C_AMBERD : C_CHIPF, foc ? C_AMBER : C_CHIPO, 1);
@@ -654,9 +825,27 @@ static int mode_chip(int xr, int foc)
     return w;
 }
 
+/* the section pill at x (the chip's look and keys): "Film | Film stage", the section in white; returns its right edge */
+static int sec_pill(int x, int foc)
+{
+    int s = sec_now(), wa = ui_textw(F_13, "Film"), wb = ui_textw(F_13, "Film stage"), ws = ui_textw(F_13, "|");
+    int pad = foc ? 20 : 12, w = pad + wa + 7 + ws + 7 + wb + pad, xr = x + w, tx = x + pad;
+    wfg_rrect(x, 5, xr, 27, 11, foc ? C_AMBERD : C_CHIPF, foc ? C_AMBER : C_CHIPO, 1);
+    ui_text(F_13, tx, 8, "Film", !s ? C_TXT : C_TXT3);
+    ui_text(F_13, tx + wa + 7, 8, "|", C_LINE);
+    ui_text(F_13, tx + wa + 7 + ws + 7, 8, "Film stage", s ? C_TXT : C_TXT3);
+    if (foc)
+    {
+        wfg_tri(xr - 13, 11, xr - 8, 16, xr - 13, 21, C_AMBER);
+        wfg_tri(x + 13, 11, x + 8, 16, x + 13, 21, C_AMBER);
+    }
+    return xr;
+}
+
 /* ------------------------------------------------------------------ areas */
 static void draw_header(int now)
 {
+    (void)now;
     wfg_rrect(14, 6, 36, 28, 6, C_AMBER, -1, 0);                       /* own mark: a frame with sprockets + hill */
     for (int i = 0; i < 3; i++)
     {
@@ -665,46 +854,51 @@ static void draw_header(int now)
     }
     wfg_tri(18, 21, 25, 14, 32, 21, C_BGLAST);
     int x = 44 + ui_text(F_ML23, 44, 4, "WindyFilm", C_TXT);
+    int pe = sec_pill(x + 10, focus == FOC_TOP && !tsub && !info) + 10;   /* owner 11-17: in place of "by WindyStrife" */
     const char *s, *st_s = wf_status();
-    if (chip_on())                                          /* EOS M: the mode chip; a message / status left of it */
+    if (chip_on())                                          /* EOS M: the mode chip; a core status left of it */
     {
-        int xr = WFUI_W - 12 - mode_chip(WFUI_W - 12, focus == FOC_CHIP && !info) - 10;
-        s = msg && now - msg_until < 0 ? msg : st_s && *st_s ? st_s : 0;
-        int tag = x + 8 + ui_textw(F_13, "by WindyStrife");
-        if (s)
+        int xr = WFUI_W - 12 - mode_chip(WFUI_W - 12, focus == FOC_TOP && tsub && !info) - 10;
+        if (st_s && *st_s && xr - pe > 60)
         {
-            int lw = ui_textw(F_13, s), lmax = xr - (x + 8) - 30;
+            int lw = ui_textw(F_13, st_s), lmax = xr - pe - 30;
             if (lw > lmax) lw = lmax;
             int x0 = xr - lw - 30;
             wfg_rrect(x0, 7, xr, 27, 10, C_SEP, C_WARN, 1);
             wfg_ellipse(x0 + 9, 13, x0 + 16, 20, C_WARN);
-            ui_text_clip(F_13, x0 + 22, 9, s, C_TXT, xr - 8);
-            if (x0 > tag + 10) ui_text(F_13, x + 8, 11, "by WindyStrife", C_TXT3);
+            ui_text_clip(F_13, x0 + 22, 9, st_s, C_TXT, xr - 8);
         }
-        else ui_text(F_13, x + 8, 11, "by WindyStrife", C_TXT3);
         wfg_rect(12, 33, WFUI_W - 13, 33, C_LINE);
         return;
     }
-    ui_text(F_13, x + 8, 11, "by WindyStrife", C_TXT3);
-
-    const struct wf_film *lf = wf_film_by_id(wf_loaded());
+    const struct wf_film *lf = wf_film_by_id(wf_loaded());  /* 5D2: the loaded film's chip, right of the pill */
     int fill = C_SEP, out = C_WARN, dot = C_WARN, tc = C_TXT;
-    if (msg && now - msg_until < 0) s = msg;
-    else if (st_s && *st_s) s = st_s;
+    if (st_s && *st_s) s = st_s;
     else if (lf) { s = lf->name; fill = C_CHIPF; out = C_CHIPO; dot = C_GRN; }
     else { s = "No film loaded"; out = C_LINE; dot = C_BAROFF; tc = C_TXT2; }
-    int lw = ui_textw(F_15, s);
-    if (lw > 400) lw = 400;
+    int lw = ui_textw(F_15, s), lmax = WFUI_W - 12 - 48 - pe;
+    if (lw > lmax) lw = lmax;
     wfg_rrect(WFUI_W - 30 - lw - 18, 7, WFUI_W - 12, 27, 10, fill, out, 1);
     wfg_ellipse(WFUI_W - 26 - lw - 14, 13, WFUI_W - 26 - lw - 6, 21, dot);
     ui_text_clip(F_15, WFUI_W - 20 - lw, 8, s, tc, WFUI_W - 20);
     wfg_rect(12, 33, WFUI_W - 13, 33, C_LINE);
 }
 
+/* a message (say): a toast over the browser for MSG_MS (owner 11-17 mock: the header has the pill and the chip now) */
+static void draw_toast(int now)
+{
+    if (!msg || now - msg_until >= 0) return;
+    int w = ui_textw(F_15, msg), mw = WFUI_W - 80;
+    if (w > mw) w = mw;
+    int x0 = (WFUI_W - w) / 2 - 18, x1 = x0 + w + 36;
+    wfg_rrect(x0, 188, x1, 224, 10, C_AMBERD, C_AMBER, 2);
+    ui_text_clip(F_15, x0 + 18, 197, msg, C_TXT, x1 - 18);
+}
+
 /* SET Load button (or its Loaded / not-on-card state); returns its left edge */
 static int draw_load_button(const struct wf_film *f, int g)
 {
-    int A = acc(g), dk = dkm();
+    int A = acc(g), dk = rollrows();
     const struct wf_roll *r = wf_roll_now();
     if (dk ? roll_in() && r->film == f->id : wf_loaded() == f->id)   /* Darkroom: the roll's film; else the loaded one */
     {
@@ -771,6 +965,54 @@ static void draw_exp_line(int y, int A, int AD, int last)
     if (!foc && !last) wfg_rect(294, y + 18, 700, y + 18, C_SEP);
 }
 
+/* Film stage (owner 11-17): two EXIF lines under the film's chips, what the develop writes (wf_exif_text, DESIGN 3.14):
+ *   EXIF  <negative> -> <print stock> . Exp <film exp> . Push <n> . Comp <exp comp>
+ *         Printer R/G/B . Interlayer <n> . <Light>
+ * the separators drawn (our fonts are ASCII): a centre dot, an arrow after the negative */
+static void seg_line(int x, int y, const char *const *t, int arrow, int c, int xmax)
+{
+    for (int i = 0; t[i]; i++)
+    {
+        if (i && i == 1 && arrow)
+        {
+            if (x + 20 > xmax) return;
+            wfg_rect(x + 5, y + 8, x + 12, y + 8, c);
+            wfg_tri(x + 11, y + 5, x + 15, y + 8, x + 11, y + 11, c);
+            x += 20;
+        }
+        else if (i)
+        {
+            if (x + 12 > xmax) return;
+            wfg_rect(x + 5, y + 7, x + 6, y + 8, c);
+            x += 12;
+        }
+        if (x + ui_textw(F_13, t[i]) > xmax) { ui_text_clip(F_13, x, y, t[i], c, xmax); return; }
+        x += ui_text(F_13, x, y, t[i], c);
+    }
+}
+static const char *rv(int r, int id)                        /* a row's value for the film (a table's: no copy needed) */
+{
+    const char *v = wf_row_avail_for(r, id) ? wf_row_text_for(r, id) : 0;
+    return v && *v ? v : "-";
+}
+static void exif_lines(const struct wf_film *f)
+{
+    char a[24], b[24], c[24], d[48], e[32];
+    int id = f->id;
+    const char *pu = rv(WF_ROW_SPUSH, id);
+    snprintf(a, sizeof a, "Exp %s", rv(WF_ROW_SEXP, id));
+    if (pre(pu, "Push") || pre(pu, "Pull")) snprintf(b, sizeof b, "%s", pu);
+    else snprintf(b, sizeof b, "Push %s", pu);
+    snprintf(c, sizeof c, "Comp %s", rv(WF_ROW_SCOMP, id));
+    snprintf(d, sizeof d, "Printer %s/%s/%s", rv(WF_ROW_SPR, id), rv(WF_ROW_SPG, id), rv(WF_ROW_SPB, id));
+    snprintf(e, sizeof e, "Interlayer %s", rv(WF_ROW_SIIE, id));
+    const char *l1[] = { f->name ? f->name : "", rv(WF_ROW_PRINT, id), a, b, c, 0 };
+    const char *l2[] = { d, e, rv(WF_ROW_LIGHT, id), 0 };
+    int x = 264 + ui_text(F_13, 264, 97, "EXIF", C_AMBER) + 8;
+    seg_line(x, 97, l1, 1, C_TXT2, 712);
+    seg_line(x, 114, l2, 0, C_TXT2, 712);
+}
+
 static void draw_info_column(const struct wf_film *f, int g)
 {
     int A = acc(g), AD = accd(g);
@@ -781,10 +1023,14 @@ static void draw_info_column(const struct wf_film *f, int g)
     snprintf(b, sizeof(b), "ISO %d", f->iso);
     x = chip_s(x, 72, b, C_TXT2, bx - 6);
     chip_s(x, 72, f->format, C_TXT2, bx - 6);
-    if (f->line1) ui_text_clip(F_15, 264, 96, f->line1, C_TXT2, 712);
-    if (f->line2) ui_text_clip(F_15, 264, 113, f->line2, C_TXT2, 712);
+    if (sec_now()) exif_lines(f);                           /* Film stage: what the develop writes */
+    else
+    {
+        if (f->line1) ui_text_clip(F_15, 264, 96, f->line1, C_TXT2, 712);
+        if (f->line2) ui_text_clip(F_15, 264, 113, f->line2, C_TXT2, 712);
+    }
 
-    int dk = dkm(), nl = WF_NROWS + dk;
+    int dk = rollrows(), nl = WF_NROWS + dk;
     for (int li = rtop; li < rtop + ROWS_VIS && li < nl; li++)
     {
         int y = 136 + (li - rtop) * 19, r = li - dk;
@@ -832,19 +1078,20 @@ static void draw_info_column(const struct wf_film *f, int g)
     }
 }
 
-static void draw_tabs(int g)
+static void draw_tabs(int t)
 {
     char b[32];
-    int tx = 22;
-    for (int h = 0; h < WF_NGROUPS; h++)
+    int s = sec_of_tab(t), tx = 22;
+    for (int h = sec_lo(s); h < sec_hi(s); h++)
     {
-        snprintf(b, sizeof(b), "%s %d", gname[h], gcount(h));
+        snprintf(b, sizeof(b), "%s %d", tname[h], tcount(h));
         int w = ui_textw(F_15, b);
-        ui_text(F_15, tx, 276, b, h == g ? C_TXT : C_TXT3);
-        if (h == g) wfg_rrect(tx, 294, tx + w, 296, 1, acc(h), -1, 0);
+        ui_text(F_15, tx, 276, b, h == t ? C_TXT : C_TXT3);
+        if (h == t) wfg_rrect(tx, 294, tx + w, 296, 1, acc(h), -1, 0);
         tx += w + 24;
     }
-    snprintf(b, sizeof(b), "%d / %d", sel + 1, nlist);
+    int a = tstart[sec_lo(s)];                              /* the counter counts inside the section */
+    snprintf(b, sizeof(b), "%d / %d", sel - a + 1, tstart[sec_hi(s)] - a);
     text_r(F_13, 700, 278, b, C_TXT3);
 }
 
@@ -858,7 +1105,8 @@ static void draw_strip(int g)
         wfg_rrect(hx, 303, hx + 11, 308, 2, C_HOLE, -1, 0);
         wfg_rrect(hx, 428, hx + 11, 433, 2, C_HOLE, -1, 0);
     }
-    int n = gcount(g), first = gfirst[g], l = sel - gstart[g];
+    int n = tcount(g), first = tfirst[g], l = sel - tstart[g], s = sec_of_tab(g);
+    int sa = tstart[sec_lo(s)], sn = tstart[sec_hi(s)] - sa;   /* the section's films */
     for (int i = 0; i < STRIP_SLOTS; i++)
     {
         int x = -20 + i * 72;
@@ -868,7 +1116,7 @@ static void draw_strip(int g)
     {
         int li = first + i;
         if (li < 0 || li >= n || li == l) continue;
-        const struct wf_film *f = film_at(gstart[g] + li);
+        const struct wf_film *f = film_at(tstart[g] + li);
         int x = -20 + i * 72;
         wfc_draw(f, CAN_STRIP, x, 320, C_FRAME);
         text_c(F_13C, x + 26, 399, label_of(f), wf_avail(f->id) ? C_TXT3 : C_LINE, 66);
@@ -885,18 +1133,18 @@ static void draw_strip(int g)
         if (f->id == loaded) wfg_ellipse(x + 23, 384, x + 30, 391, C_GRN);
     }
     wfg_fade_edges(307, 430);
-    wfg_tri(8, 368, 16, 360, 16, 376, sel > 0 ? C_TXT2 : C_BAROFF);
-    wfg_tri(711, 368, 703, 360, 703, 376, sel < nlist - 1 ? C_TXT2 : C_BAROFF);
+    wfg_tri(8, 368, 16, 360, 16, 376, sel > sa ? C_TXT2 : C_BAROFF);
+    wfg_tri(711, 368, 703, 360, 703, 376, sel < sa + sn - 1 ? C_TXT2 : C_BAROFF);
 
-    /* scrollbar: the strip's window in the whole list */
+    /* scrollbar: the strip's window in the section's list */
     wfg_rrect(22, 442, 698, 445, 2, C_TRACK, -1, 0);
-    if (nlist)
+    if (sn)
     {
-        int gf = gstart[g] + (first < 0 ? 0 : first);
-        int tw = 676 * STRIP_VIS / nlist;
+        int gf = tstart[g] - sa + (first < 0 ? 0 : first);
+        int tw = 676 * STRIP_VIS / sn;
         if (tw > 676) tw = 676;
         if (tw < 8) tw = 8;
-        int t0 = 22 + 676 * gf / nlist;
+        int t0 = 22 + 676 * gf / sn;
         if (t0 + tw > 698) t0 = 698 - tw;
         wfg_rrect(t0, 441, t0 + tw, 446, 3, A, -1, 0);
     }
@@ -912,14 +1160,20 @@ static void draw_footer(void)
                                           "SET", "Load", "MENU", "Exit", 0 };
     static const char *const k_dark[] = { "SET", "Load roll", "L/R", "Film", "UP/DN", "Row", "RING", "Value",   /* the */
                                           "TAP", "Group", "INFO", "Info", "MENU", "Exit", 0 };                /* mode */
-    static const char *const k_chip[] = { "SET", "Next mode", "L/R", "Mode", "UP/DN", "Row", "TAP", "Group",  /* chip */
-                                          "INFO", "Info", "MENU", "Exit", 0 };
+    static const char *const k_pill[] = { "SET", "Film / Film stage", "L/R", "Section / mode", "DOWN", "Rows",
+                                          "TAP", "Group", "INFO", "Info", "MENU", "Exit", 0 };   /* the top bar */
+    static const char *const k_pill5[] = { "SET", "Film / Film stage", "DOWN", "Rows", "PICT", "Group", "INFO", "Info",
+                                           "MENU", "Exit", 0 };
+    const char *k_chip[] = { "SET", mname(mode_next(1)), "L/R", "Section / mode", "DOWN", "Rows", "TAP", "Group",
+                             "INFO", "Info", "MENU", "Exit", 0 };      /* SET names the mode it goes to (11-17) */
+    static const char *const k_info[] = { "INFO", "Close", "MENU", "Exit", 0 };
     static const char *const k_darkp[] = { "SET", "Load roll", "L/R", "Film", "UP/DN", "Row", "RING", "Value",
                                            "TAP", "Group", "MENU", "Exit", 0 };   /* room for "[PLAY] Darkroom" */
     static const char *const k_ask[] = { "SET", "Yes", "MENU", "No", 0 };
-    int ask = leave_to >= 0 || sw_film, play = !is5d2() && !ask && wf_roll_open(wf_roll_now());
-    const char *const *k = ask ? k_ask : is5d2() ? (edit ? k_5d2e : k_5d2)
-                         : focus == FOC_CHIP ? k_chip : dkm() ? (play ? k_darkp : k_dark) : k_eosm;
+    int ask = leave_to >= 0 || sw_film || sec_to >= 0, play = !is5d2() && !ask && !info && wf_roll_open(wf_roll_now());
+    const char *const *k = ask ? k_ask : info ? k_info
+                         : focus == FOC_TOP ? (tsub && chip_on() ? k_chip : is5d2() ? k_pill5 : k_pill)
+                         : is5d2() ? (edit ? k_5d2e : k_5d2) : rollrows() ? (play ? k_darkp : k_dark) : k_eosm;
     hints(k, 14, 455, C_TXT2, C_TXT3);
     if (play)                                               /* owner 11-15: "[PLAY] Darkroom" while a roll is on the */
         wfdr_dev_hint(706 - wfdr_dev_hint_w(), 455);         /* camera, dim without frames (no roll: as before) */
@@ -936,7 +1190,7 @@ static void draw_leave(void)
     wfg_rrect(x0, y0, x1, y1, 12, C_BGLAST, C_WARN, 2);
     snprintf(a, sizeof a, "Roll %03d: %d of %d frames shot", r->num, n, r->exp);
     text_c(F_ML23, cx, y0 + 20, a, C_TXT, mw);
-    snprintf(b, sizeof b, "End the roll now and shoot %s?", mode_name[leave_to >= 0 ? leave_to : M_JPEG]);
+    snprintf(b, sizeof b, "End the roll now and shoot %s?", mname(leave_to >= 0 ? leave_to : M_JPEG));
     text_c(F_15, cx, y0 + 64, b, C_TXT, mw);
     snprintf(b, sizeof b, "The %d frame%s shot go%s to the Darkroom: PLAY develops %s", n, n == 1 ? "" : "s",
              n == 1 ? "es" : "", n == 1 ? "it" : "them");
@@ -949,6 +1203,40 @@ static void draw_leave(void)
     hints(k, cx - w / 2, y1 - 40, C_TXT, C_TXT2);
 }
 
+/* the leave-section question (owner 11-17: the pill with a roll of this section shooting; never a frame lost) */
+static void draw_sec_leave(void)
+{
+    const struct wf_roll *r = wf_roll_now();
+    const struct wf_film *rf = wf_film_by_id(r->film);
+    int x0 = 96, x1 = 624, y0 = 120, y1 = 344, cx = 360, mw = x1 - x0 - 40, n = r->nshot;
+    char a[64], b[96];
+    wfg_scrim(x0, y0, x1, y1);
+    wfg_rrect(x0, y0, x1, y1, 12, C_BGLAST, C_WARN, 2);
+    snprintf(a, sizeof a, "Roll %03d: %d of %d frames shot", r->num, n, r->exp);
+    text_c(F_ML23, cx, y0 + 20, a, C_TXT, mw);
+    snprintf(b, sizeof b, "Close it and switch to %s?", sec_to ? "Film stage" : "Film");
+    text_c(F_15, cx, y0 + 64, b, C_TXT, mw);
+    if (roll_devd())                                        /* RAW develop / JPEG 8-bit: developed at the shot */
+    {
+        snprintf(b, sizeof b, "The %d frame%s %s already developed. The roll just ends here.", n, n == 1 ? "" : "s",
+                 n == 1 ? "is" : "are");
+        text_c(F_15, cx, y0 + 92, b, C_AMBER, mw);
+        text_c(F_13, cx, y0 + 124, "The files stay on the card.", C_TXT2, mw);
+    }
+    else
+    {
+        snprintf(b, sizeof b, "The %d frame%s shot wait%s for the Darkroom: PLAY develops %s", n, n == 1 ? "" : "s",
+                 n == 1 ? "s" : "", n == 1 ? "it" : "them");
+        text_c(F_15, cx, y0 + 92, b, C_AMBER, mw);
+        snprintf(b, sizeof b, "with %s, which stays loaded until then.", rf ? rf->name : "the roll's film");
+        text_c(F_13, cx, y0 + 124, b, C_TXT2, mw);
+        text_c(F_13, cx, y0 + 142, "New shots are not on the roll.", C_TXT2, mw);
+    }
+    static const char *const k[] = { "SET", "Close and switch", "MENU", "Keep the roll", 0 };
+    int w = hints(k, 2000, y1 - 40, C_TXT, C_TXT2) - 2000 - 12;
+    hints(k, cx - w / 2, y1 - 40, C_TXT, C_TXT2);
+}
+
 /* the close-and-load question (a finished roll, SET on another film in Darkroom mode; moved here from the old Roll picker) */
 static void draw_swap(void)
 {
@@ -957,7 +1245,10 @@ static void draw_swap(void)
     char a[64], b[64];
     wfg_scrim(x0, y0, x1, y1);
     wfg_rrect(x0, y0, x1, y1, 12, C_BGLAST, C_WARN, 2);
-    snprintf(a, sizeof a, "Roll %03d has %d undeveloped frame%s.", r->num, left, left == 1 ? "" : "s");
+    if (roll_devd())                                        /* developed at the shot: nothing waits */
+        snprintf(a, sizeof a, "Roll %03d: %d frame%s, already developed.", r->num, r->nshot, r->nshot == 1 ? "" : "s");
+    else
+        snprintf(a, sizeof a, "Roll %03d has %d undeveloped frame%s.", r->num, left, left == 1 ? "" : "s");
     text_c(F_ML23, cx, y0 + 22, a, C_TXT, mw);
     text_c(F_15, cx, y0 + 66, "Close it and load the new roll?", C_TXT, mw);
     snprintf(b, sizeof b, "%s  x%d", sw_film->name, sw_exp);
@@ -968,118 +1259,77 @@ static void draw_swap(void)
     hints(k, cx - w / 2, y1 - 40, C_TXT, C_TXT2);
 }
 
-/* INFO: the film's details and the key map of this camera, over a dimmed browser */
+/* INFO (owner 11-17, both sections): what the develop writes into the EXIF and the print comment, two columns over the
+ * browser between the top bar and the footer; the Film stage's own keys in amber; the mode, the last develop's time
+ * and path (wf_dev_last), the film table on the card. INFO again closes it. */
+static int ipair;                                           /* the pairs drawn so far (row-major, two columns) */
+static void info_pair(const char *k, const char *v, int kc)
+{
+    int col = ipair & 1, x = col ? 372 : 22, y = 88 + (ipair >> 1) * 21, xm = col ? 698 : 356;
+    ui_text_clip(F_15, x, y, k, kc, x + 124);
+    ui_text_clip(F_15, x + 128, y, v ? v : "", C_TXT, xm);
+    ipair++;
+}
+static void info_row(int r, int id, int st)
+{
+    if (!wf_row_avail_for(r, id)) return;
+    const char *nm = wf_row_name(r), *v = wf_row_text_long_for(r, id);
+    if (!v || ui_textw(F_15, v) > 220) v = wf_row_text_for(r, id);
+    info_pair(nm ? nm : "", v, st ? C_AMBER : C_TXT3);
+}
+
 static void draw_info(const struct wf_film *f, int g)
 {
-    static const char *const h_eosm[] = { "Left / Right", "previous / next film", "Up / Down", "choose a row",
-        "Rear ring", "change the row", "SET", "load the film", "1-finger tap", "next group",
-        "INFO", "this page", "PLAY", "Darkroom (a roll on)", "MENU, 2-finger tap", "close", "Half-shutter",
-        "close, shoot", "Up from the top row", "mode chip: L / R", 0 };
-    static const char *const h_5d2[] = { "Joystick left / right", "previous / next film", "Joystick up / down",
-        "choose a row", "Main or rear dial", "change the row", "Joystick press", "edit row: L / R",
-        "SET", "load the film", "Pict.Style", "next group", "INFO", "this page", "MENU, TRASH", "close",
-        "Half-shutter", "close, shoot", 0 };
-    int A = acc(g);
-    int x0 = 104, y0 = 44, x1 = 616, y1 = 440;
-    char b[48];
-    wfg_scrim(x0, y0, x1, y1);
-    wfg_rrect(x0, y0, x1, y1, 10, C_SEP, C_LINE, 1);
-    int x = x0 + 20, y = y0 + 10;
-    ui_text_clip(F_ML28, x, y, f->name, C_TXT, x1 - 20);
-    y += 36;
-    int cx = chip_s(x, y, f->kind, A, x1 - 20);
-    snprintf(b, sizeof(b), "ISO %d", f->iso);
-    cx = chip_s(cx, y, b, C_TXT2, x1 - 20);
-    chip_s(cx, y, f->format, C_TXT2, x1 - 20);
-    y += 26;
-    if (f->line1) ui_text_clip(F_15, x, y, f->line1, C_TXT2, x1 - 20);
-    if (f->line2) ui_text_clip(F_15, x, y + 17, f->line2, C_TXT2, x1 - 20);
-    y += 42;
-    wfg_rect(x, y, x1 - 20, y, C_LINE);
-    y += 8;
-
-    int lut = f->flags & WF_F_LUTCAN, av = wf_avail(f->id);
-    static const char *const pn[WF_NPRINTS] = { "Scan", "Cine", "Paper",
-        "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72", "5382", "5384/82", "5384/92", "5385/93",
-        "5385/62", "5386", "5383", "3513D", "3523XD" };
-    char pr[160], pl[3][72];
-    int npl = 0;
-    pr[0] = 0;
-    for (int v = 0; v < WF_NPRINTS; v++)
-        if (f->prints & (1u << v))
-        {
-            int n = strlen(pr);
-            snprintf(pr + n, sizeof(pr) - n, "%s%s", n ? ", " : "", pn[v]);
-        }
-    /* the Prints value in up to 3 lines, each broken after the last comma that fits (a chain film has up to 16 print
-     * stocks: until 11-15 the list was cut after the seventh); the third line is clipped as before */
+    int s = sec_of_tab(g), id = f->id, m = mode_now();
+    char b[64];
+    wfg_rect(0, 34, WFUI_W - 1, 447, C_BG0);
+    int w = ui_text(F_ML23, 22, 40, "Info", C_TXT);
+    wfg_rect(22 + w + 8, 53, 22 + w + 10, 55, C_TXT3);
+    ui_text_clip(F_ML23, 22 + w + 18, 40, f->name, C_TXT, 600);
+    text_r(F_13, 698, 48, s ? "FILM STAGE" : "FILM", C_AMBER);
+    wfg_rect(22, 76, 697, 76, C_LINE);
+    ipair = 0;
+    info_pair("Film", f->name, C_TXT3);
+    static const uint8_t rows_film[] = { WF_ROW_PRINT, WF_ROW_STRENGTH, WF_ROW_PAPER, WF_ROW_HL, WF_ROW_SH, WF_ROW_FLUT,
+                                         WF_ROW_LIGHT, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_BLOOM, WF_ROW_GAUGE, WF_ROW_MIST };
+    static const uint8_t rows_stage[] = { WF_ROW_SEXP, WF_ROW_SPUSH, WF_ROW_SCOMP, 0xFF, WF_ROW_SIIE, WF_ROW_SBL,
+                                          WF_ROW_SPBL, WF_ROW_SNN, WF_ROW_SNP };
+    for (int i = 0; i < (int)sizeof rows_film; i++)
     {
-        const char *s = lut ? "-" : pr;
-        int pw = x1 - 20 - (x + 112);
-        while (*s && npl < 3)
-        {
-            int n = strlen(s), cut = n;
-            if (npl < 2 && ui_textw(F_15, s) > pw)
+        int r = rows_film[i];
+        if (s && r == WF_ROW_FLUT) continue;               /* a chain film has no Film LUT */
+        info_row(r, id, 0);
+        if (s && r == WF_ROW_STRENGTH)                      /* the film stage's knobs after the print and its strength */
+            for (int j = 0; j < (int)sizeof rows_stage; j++)
             {
-                cut = 0;
-                for (int i = 0; s[i] && i + 1 < (int)sizeof pl[0]; i++)
-                    if (s[i] == ',' && s[i + 1] == ' ')
-                    {
-                        memcpy(pl[npl], s, i + 1);
-                        pl[npl][i + 1] = 0;
-                        if (ui_textw(F_15, pl[npl]) > pw) break;
-                        cut = i + 1;
-                    }
-                if (!cut) cut = n;
+                if (rows_stage[j] != 0xFF) { info_row(rows_stage[j], id, 1); continue; }
+                snprintf(b, sizeof b, "%s / %s / %s", rv(WF_ROW_SPR, id), rv(WF_ROW_SPG, id), rv(WF_ROW_SPB, id));
+                info_pair("Printer R G B", b, C_AMBER);
             }
-            int k = cut < (int)sizeof pl[0] - 1 ? cut : (int)sizeof pl[0] - 1;
-            memcpy(pl[npl], s, k);
-            pl[npl][k] = 0;
-            npl++;
-            s += cut;
-            while (*s == ' ') s++;
-        }
-        if (!npl) pl[npl++][0] = 0;
     }
-    char kel[16], outp[40];
-    snprintf(kel, sizeof(kel), "%d K", f->kelvin);
-    /* a can's chip 3 names the curve its Load sets ("V-Log", "C-Log2" for the CinePrint looks), "Standard" a display look */
-    if (f->format && !strcmp(f->format, "Standard")) snprintf(outp, sizeof outp, "Look on the Standard picture");
-    else snprintf(outp, sizeof outp, "%s + the can's LUT",
-                  f->format && !strcmp(f->format, "C-Log2") ? "Canon Log 2" : "V-Log");
-    const char *kv[] = {
-        "Table", f->code ? f->code : "",
-        "Daylight", kel,
-        "Prints", pl[0],
-        "Output", lut ? outp : "Film look",
-        "On the card", av ? (lut ? "LUT cube found" : "Film table found") : lut ? "LUT cube missing"
-                       : wf_films_state() == 0 ? "Starting (tables not read yet)"
-                       : wf_films_state() == -1 ? "Worker not running" : "Film table missing",
-        "State", wf_loaded() == f->id ? "Loaded" : "Not loaded",
-        0 };
-    for (int i = 0; kv[i]; i += 2, y += 19)
+    if (rollrows() && roll_in()) snprintf(b, sizeof b, "%s, roll %d exp", mname(m), wf_roll_now()->exp);
+    else snprintf(b, sizeof b, "%s", mname(m));
+    info_pair("Mode", b, C_TXT3);
+    int lp = 0, ms = wf_dev_last(&lp);
+    if (ms > 0)
     {
-        ui_text(F_15, x, y, kv[i], C_TXT3);
-        ui_text_clip(F_15, x + 112, y, kv[i + 1], i == 8 && !av ? C_WARN : C_TXT, x1 - 20);
-        for (int j = 1; i == 4 && j < npl; j++)  /* the rest of the print stocks */
-        {
-            y += 19;
-            ui_text_clip(F_15, x + 112, y, pl[j], C_TXT, x1 - 20);
-        }
+        int t = (ms + 50) / 100;
+        snprintf(b, sizeof b, "%d.%d s (%s)", t / 10, t % 10, wf_path_name(lp));
     }
-    y += 4;
-    wfg_rect(x, y, x1 - 20, y, C_LINE);
-    y += 8;
-    const char *const *h = is5d2() ? h_5d2 : h_eosm;
-    int col = 0, yy = y;
-    for (; *h; h += 2)
-    {
-        int hx = x + col * 250;
-        ui_text_clip(F_13, hx, yy, h[0], C_TXT2, hx + 126);
-        ui_text_clip(F_13, hx + 130, yy, h[1], C_TXT3, col ? x1 - 20 : hx + 246);
-        if (++col == 2) { col = 0; yy += 17; }
-    }
-    text_r(F_13, x1 - 20, y1 - 22, "INFO: close this page", C_TXT3);
+    else snprintf(b, sizeof b, "none yet");
+    info_pair("Last develop", b, C_TXT3);
+    int lut = f->flags & WF_F_LUTCAN, av = wf_avail(f->id), fs = wf_films_state();
+    info_pair("On the card", av ? (lut ? "LUT cube found" : "Film table found") : lut ? "LUT cube missing"
+              : fs == 0 ? "Starting (tables not read yet)" : fs == -1 ? "Worker not running" : "Film table missing",
+              C_TXT3);
+    wfg_rect(22, 402, 697, 402, C_LINE);
+    char nb[112];
+    snprintf(nb, sizeof nb, "Written to EXIF and the print comment %s",
+             m == M_DARK ? "when the Darkroom develops the roll." : m == M_RAW ? "right after the shot (RAW develop)."
+             : s ? "with the JPEG at the shot (8-bit path)." : "with the JPEG at the shot.");
+    ui_text_clip(F_13, 22, 410, nb, C_TXT2, 698);
+    ui_text_clip(F_13, 22, 427, s ? "Amber = Film stage only; the mode and the develop time are written too. INFO closes."
+                                  : "INFO closes.", C_TXT2, 698);
 }
 
 void wfui_render(void)
@@ -1091,7 +1341,7 @@ void wfui_render(void)
         return;
     }
     const struct wf_film *f = film_at(sel);
-    int g = group_of_sel();
+    int g = tab_of_sel();
     if (f && f->id != glow_id)
     {
         uint8_t rgb[3];
@@ -1114,7 +1364,9 @@ void wfui_render(void)
     draw_strip(g);
     draw_footer();
     if (info) draw_info(f, g);
+    draw_toast(now);
     if (leave_to >= 0) draw_leave();
+    else if (sec_to >= 0) draw_sec_leave();
     else if (sw_film) draw_swap();
 }
 
@@ -1189,11 +1441,11 @@ static void new_roll_view(void)
 {
     nr_req = 0;
     if (!mode_ok(M_DARK)) { say("Rolls come to this camera later (EOS M first)"); return; }
-    int cur = mode_now();
-    if (cur != M_DARK) mode_apply(cur, M_DARK);
     const struct wf_roll *r = wf_roll_now();
     int i = wf_roll_open(r) ? index_of_id(r->film) : -1;
-    if (i >= 0) select_film(i);
+    if (i >= 0) select_film(i);                             /* the roll's film: its section too */
+    int cur = mode_now();
+    if (!sec_now() && cur != M_DARK) mode_apply(cur, M_DARK);   /* Film: rolls are Darkroom's; Film stage: any mode */
     focus_to(FOC_EXP);
     wf_log("ui: a new roll: Darkroom mode, Exposures %d", exp_now());
 }
@@ -1218,18 +1470,27 @@ void wfui_task_begin(void)
     }
     beat(PH_LIST);
     if (build_list()) { close_req = 1; return; }
-    for (int g = 0; g < WF_NGROUPS; g++) { gsel[g] = gstart[g]; gfirst[g] = FIRST_UNSET; }
+    for (int t = 0; t < NTAB; t++) { tsel[t] = tstart[t]; tfirst[t] = FIRST_UNSET; }
+    stab[0] = 0;
+    stab[1] = TAB_STAGE;
     int i = index_of_id(wf_loaded());
     if (i < 0) i = index_of_id(last_id);
     if (i < 0) i = 0;
     sel = 0;
     if (nlist) select_film(i);
+    if (nlist && roll_in() && roll_sec() >= 0 && roll_sec() != sec_now())   /* a roll in the camera: its section */
+    {
+        int k = index_of_id(wf_roll_now()->film);
+        if (k >= 0) select_film(k);
+    }
     focus = WF_ROW_LIGHT;
     rtop = 0;
     info = 0;
     msg = 0;
     glow_id = -1;
     leave_to = -1;
+    sec_to = -1;
+    tsub = 0;
     sw_film = 0;
     {
         const struct wf_roll *r = wf_roll_now();
@@ -1460,7 +1721,13 @@ static void ui_task(void *arg)
 
 #ifdef WF_HOST
 int wfui_host_sel_id(void) { const struct wf_film *f = film_at(sel); return f ? f->id : 0; }
-int wfui_host_group(void) { return group_of_sel(); }
+int wfui_host_group(void) { return nlist ? wf_films[list[sel]].group % WF_NGROUPS : 0; }
+int wfui_host_tab(void) { return tab_of_sel(); }
+int wfui_host_tab_of(int id) { const struct wf_film *f = wf_film_by_id(id); return f ? tab_of(f) : -1; }
+int wfui_host_sec(void) { return sec_now(); }
+int wfui_host_tsub(void) { return tsub; }
+int wfui_host_secq(void) { return sec_to; }             /* the leave-section question: the section asked for, -1 none */
+int wfui_host_rows(void) { return rollrows(); }
 int wfui_host_focus(void) { return focus; }
 int wfui_host_rtop(void) { return rtop; }
 int wfui_host_info(void) { return info; }
@@ -1659,7 +1926,7 @@ unsigned int wf_ui_key(unsigned int key)
     {
         int w = kq_w, nw = (w + 1) % KQ_N;
         if (nw != kq_r) { kq[w] = key; kq_w = nw; }
-        if (key == MODULE_KEY_MENU && scr == WFUI_SCR_BROWSER && leave_to < 0 && !sw_film)
+        if (key == MODULE_KEY_MENU && scr == WFUI_SCR_BROWSER && leave_to < 0 && !sw_film && sec_to < 0)
             close_req = 1;                                  /* EOS M 2-finger tap: the ML menu opens in 3 s (the Roll /
                                                                Darkroom screens and the browser's questions decide on
                                                                MENU themselves: there it is "no") */

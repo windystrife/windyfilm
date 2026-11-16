@@ -18,6 +18,8 @@ volatile int wf_blind = 1;
 static int locked, nswap;
 static int fshelf, rawb_can = 1;
 volatile int wf_rawb;
+volatile int wf_roll_look8;                      /* a JPEG 8-bit roll (wf_dark.h): the browser sets it */
+void wf_roll_look8_set(int on) { wf_roll_look8 = on != 0; }
 void fake_set_locked(int k) { locked = k; }
 int fake_nswap(void) { return nswap; }
 int wf_roll_shutter_locked(void) { return locked; }
@@ -34,6 +36,7 @@ void fake_dark_reset(void)
     locked = nswap = 0;
     fshelf = 0;
     wf_rawb = 0;
+    wf_roll_look8 = 0;
     rawb_can = 1;
     rgen++;
 }

@@ -44,7 +44,7 @@ extern int  is_play_mode(void);
 enum { WF_OUT_FILM = 0, WF_OUT_LOG, WF_OUT_LLUT, WF_OUT_OFF, WF_NOUT };
 #define WF_NCURVE 5                               /* log curves 1..5 (wf_loglut.h WF_LL_SLOG3 .. WF_LL_CLOG3) */
 #define WF_CURVE_VLOG 2                           /* a Film LUT can's Load sets V-Log + LUT */
-enum { WF_LIGHT_AUTO = 0, WF_LIGHT_DAY, WF_LIGHT_CLOUDY, WF_LIGHT_TUNGSTEN, WF_NLIGHT };
+enum { WF_LIGHT_AUTO = 0, WF_LIGHT_DAY, WF_LIGHT_CLOUDY, WF_LIGHT_SHADE, WF_LIGHT_TUNGSTEN, WF_NLIGHT };   /* Shade 11-17 */
 /* Log + LUT input curve (DESIGN 3.2 A1): the JPEG as sRGB, or through a measured Canon Picture Style curve ("Film 1"
    in User Def. 1, "Neutral"). The values are the wf_loglut.h input curve slots (wf_ll_incurve, WF_LL_NINC). */
 enum { WF_INC_SRGB = 0, WF_INC_FILM1, WF_INC_NEUTRAL, WF_INC_N };
@@ -215,7 +215,12 @@ int  wf_style_con(void);                          /* the active style's Contrast
 int  wf_style_con_of(int inc);                    /* the Contrast input curve `inc` was measured at */
 int  wf_style_raw(void);                          /* PROP_PICTURE_STYLE value, 0 = not reported yet */
 int  wf_strength_pct(int level);
-void wf_exif_shot(const struct wf_look *lk, int g, int h, int b, int m, int ev);   /* a shot of ours: its text (ring) */
+void wf_exif_shot(const struct wf_look *lk, int g, int h, int b, int m, int ev, int path, int ms);   /* a shot of ours:
+                                                     its text (ring); path WF_PATH_* and its develop ms (wf_api.h) */
+int  wf_exif_tail(const struct wf_look *lk, int path, int ms, char *b, int bn);   /* " | Mode RAW develop | Dev 31.2 s"
+                                                     appended at b's end (bn = its size) for a Film stage film (owner
+                                                     11-17; the rest: nothing); returns the new length */
+void wf_dev_note(const struct wf_look *lk, int path, int ms);   /* a develop done: the log line, "Last develop" (wf_dev_last) */
 void wf_exif_none(void);                          /* a JPEG that got no look: keeps the ring aligned */
 const char *wf_out_name(int out, int curve);
 const char *wf_look_title(const struct wf_look *lk, char *b, int n);      /* "Portra 400 WS Scan", "V-Log + LUT Vision3 250D" */
