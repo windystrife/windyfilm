@@ -178,7 +178,7 @@ VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như
 - CHƯA THỬ ĐƯỢC trên máy thật: máy Canon có mở và hiện ảnh thu nhỏ của file đã đè hay
   không (giả lập không có phần xem lại của Canon). Lần đầu thử nên dùng cuộn ngắn.
 
-TẮT MÀN HÌNH KHI TRÁNG (16/11; mặc định Screen On = như cũ)
+TẮT MÀN HÌNH KHI TRÁNG (16/11, RAWB22; mặc định Screen On = như cũ)
 - Góc trên bên phải màn hình Darkroom có nút "Screen On" / "Screen Off" (hình màn hình
   sáng = On, chỉ có viền = Off). Chỉ chỉnh ở đây, không có trong menu ML; máy nhớ trong
   cấu hình (dkscreen=on/off).
@@ -298,11 +298,14 @@ u. (16/11, RAWB21) Camera JPEG = Overwrite, Frame Off, cuộn 3 kiểu RAW+L. Tr
 v. (16/11, RAWB21) Như u. nhưng Frame White + Info: PLAY trên máy phải mở được (ảnh
    không viền, cỡ 5184x3456); bản có viền ở ROLLS. Máy báo lỗi / không mở được / ảnh thu
    nhỏ sai thì chụp màn hình và ghi lại tấm nào. Xong thì đặt lại Camera JPEG = Keep.
-w. (16/11) Screen Off: chọn nút góc trên phải = Screen Off, tráng cuộn 3 kiểu. Sau khoảng
-   10 giây màn hình phải tắt. Bấm nút bất kỳ (thử cả MENU): màn hình sáng lại, cuộn không
-   bị dừng; 10 giây sau tắt lại. Tráng xong màn hình phải tự sáng. Ghi lại: phím nào không
-   làm sáng được màn hình, màn hình có tự sáng lại giữa chừng không, và % pin trước / sau
-   so với một cuộn Screen On.
+w. (16/11, RAWB22) Screen Off: chọn nút góc trên phải = Screen Off, tráng cuộn 3 kiểu.
+   Sau khoảng 10 giây màn hình phải tắt. Bấm nút bất kỳ (thử cả MENU): màn hình sáng lại,
+   cuộn không bị dừng; 10 giây sau tắt lại. Lúc màn hình đang sáng, MENU hai lần vẫn dừng
+   được cuộn. Tráng xong màn hình phải tự sáng. Log cuối cuộn có "dark: Screen Off: display
+   turned off N times, woken M times". Ghi lại: phím nào không làm sáng được màn hình (nếu
+   không phím nào được thì thử nửa nút chụp), màn hình có tự sáng lại giữa chừng không,
+   thời gian tráng và % pin trước / sau so với một cuộn Screen On. Xong thì đặt lại Screen
+   On nếu muốn.
 
 
 6. GỬI LẠI

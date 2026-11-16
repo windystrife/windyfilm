@@ -7,6 +7,11 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
 dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB22 (16/11 khuya, nhánh dk-screen, từ dr-logo = RAWB21): Darkroom thêm nút
+"Screen On / Screen Off" ở góc trên bên phải: Screen Off tắt màn hình lúc tráng để đỡ
+tốn pin, bấm phím bất kỳ thì sáng lại 10 giây. Xem HUONGDAN_DARKROOM_EOSM.txt ("TẮT MÀN
+HÌNH KHI TRÁNG", bước w.). Mặc định Screen On = y hệt RAWB21.
+
 Thẻ RAWB21 (16/11 đêm, nhánh dr-logo, từ rawb20 = RAWB20): Darkroom thêm logo Canon
 trên viền bản in (ML/data/WFLOGO.DAT) và hàng Camera JPEG (Keep / Overwrite: bản in đè
 lên JPG của máy trong DCIM, bản trong ROLLS vẫn giữ). Xem HUONGDAN_DARKROOM_EOSM.txt
