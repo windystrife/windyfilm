@@ -26,7 +26,7 @@
  *                    <neutral print>   the film-stage knob rows (wf_stagek.h): thirds of a stop -6..6 and -3..3, 0|1,
  *                    printer points -12..12, interlayer 0..8 (x 25 %), the last four 0..4 (x 25 %); a line of the first
  *                    seven alone (before those rows) reads the last four as 0; a bad line keeps the defaults
- *                    0,0,0,0,0,0,4,0,0,0,0
+ *                    0,0,0,0,0,0,2,0,0,0,0 (Interlayer starts at 50 %, WF_SG_IIE_START; 4 = 100 % = the shipped table)
  *   userwb=<mode>,<kelvin>,<gm>,<ba>   the user's white balance while Light holds it (restored on Auto / unload, also
  *                    after a power cycle in between) */
 #include <dryos.h>
@@ -65,7 +65,7 @@ volatile int wf_lut_ei;                           /* 1/3 EV, WF_LL_EI_MIN..WF_LL
 volatile int wf_incurve;                          /* WF_INC_*: how Log + LUT reads the JPEG (wf_incurve_t) */
 volatile int wf_strength = 1;                     /* 30 / 100 / 125 % */
 volatile int wf_hl, wf_sh;                        /* Highlights / Shadows, WF_HS_MIN..WF_HS_MAX, 0 = off */
-volatile int wf_sg_exp, wf_sg_push, wf_sg_comp, wf_sg_prn[3], wf_sg_iie = WF_SG_IIE_DEF;   /* film-stage knob rows */
+volatile int wf_sg_exp, wf_sg_push, wf_sg_comp, wf_sg_prn[3], wf_sg_iie = WF_SG_IIE_START;   /* film-stage knob rows */
 volatile int wf_sg_bl, wf_sg_pbl, wf_sg_nn, wf_sg_np;   /* Bleach bypass, Print bleach, Neutral neg / print 0..4 */
 volatile int wf_exif_off;
 volatile int wf_cfg_dirty;
@@ -105,7 +105,7 @@ void wf_sg_knobs_now(struct wf_sg_knobs *k)
     k->comp = wf_sg_comp ? 1 : 0;
     for (int c = 0; c < 3; c++)
         k->prn[c] = wf_sg_in(wf_sg_prn[c], -WF_SG_PRN_MAX, WF_SG_PRN_MAX, 0);
-    k->iie = wf_sg_in(wf_sg_iie, 0, WF_SG_IIE_MAX, WF_SG_IIE_DEF);
+    k->iie = wf_sg_in(wf_sg_iie, 0, WF_SG_IIE_MAX, WF_SG_IIE_START);
     int kd = wf_sg_kdata() != 0;
     k->bleach = kd ? wf_sg_in(wf_sg_bl, 0, WF_SG_AMT_MAX, 0) : 0;
     k->pbleach = kd ? wf_sg_in(wf_sg_pbl, 0, WF_SG_AMT_MAX, 0) : 0;
@@ -127,7 +127,7 @@ typedef char wf_sg_check[WF_SG_FEXP_MAX == 6 && WF_SG_PUSH_MAX == 3 && WF_SG_PRN
 static const char *wf_sg_exp_text(int v) { return wf_sg_exp_name[wf_sg_in(v, -6, 6, 0) + 6]; }
 static const char *wf_sg_push_text(int v) { return wf_sg_push_name[wf_sg_in(v, -3, 3, 0) + 3]; }
 static const char *wf_sg_prn_text(int v) { return wf_sg_prn_name[wf_sg_in(v, -12, 12, 0) + 12]; }
-static const char *wf_sg_iie_text(int v) { return wf_sg_iie_name[wf_sg_in(v, 0, 8, WF_SG_IIE_DEF)]; }
+static const char *wf_sg_iie_text(int v) { return wf_sg_iie_name[wf_sg_in(v, 0, 8, WF_SG_IIE_START)]; }
 static const char *wf_sg_amt_text(int v) { return wf_sg_amt_name[wf_sg_in(v, 0, WF_SG_AMT_MAX, 0)]; }
 static volatile int *wf_sg_amt_var(int row)
 {
@@ -503,9 +503,13 @@ static int wf_print_ok(int k, int v)
     return k >= 0 && (wf_films[k].prints & (1u << v)) && (wf_ws_state() != 1 || wf_ws_has(k, v));
 }
 
-const char *wf_row_text(int row)
+/* the rows for film id (wf_api.h *_for): an id not in the catalogue is the loaded film */
+static int wf_row_id(int id) { return wf_cat_index(id) >= 0 ? id : wf_film_id; }
+
+const char *wf_row_text(int row) { return wf_row_text_for(row, wf_film_id); }
+const char *wf_row_text_for(int row, int id)
 {
-    int k = wf_cat_index(wf_film_id);
+    int k = wf_cat_index(wf_row_id(id));
     switch (row) {
     case WF_ROW_LIGHT:    return wf_pick(wf_light_name, WF_NLIGHT, wf_light);
     case WF_ROW_PRINT:    return wf_print_name[wf_print_eff(k)];
@@ -536,21 +540,41 @@ const char *wf_row_text(int row)
 /* a chain print stock (p00..p15) by its full name, else 0 */
 static const char *wf_print_long(int v) { return v >= 3 && v < WF_NPRINTS ? wf_print_full[v - 3] : 0; }
 
-const char *wf_row_text_long(int row)
+const char *wf_row_text_long(int row) { return wf_row_text_long_for(row, wf_film_id); }
+const char *wf_row_text_long_for(int row, int id)
 {
-    const char *s = row == WF_ROW_PRINT ? wf_print_long(wf_print_eff(wf_cat_index(wf_film_id))) : 0;
-    return s ? s : wf_row_text(row);
+    id = wf_row_id(id);
+    const char *s = row == WF_ROW_PRINT ? wf_print_long(wf_print_eff(wf_cat_index(id))) : 0;
+    return s ? s : wf_row_text_for(row, id);
 }
 
+/* row for catalogue index k with look lk; out = the output Light reads (the one set: Light works with no film loaded) */
+static int wf_row_avail_at(int row, int k, const struct wf_look *lkp, int out);
 int wf_row_avail(int row)
 {
     if (!wf_cam_ok)
         return 0;
     struct wf_look lk;
     wf_look_now(&lk);
-    int k = wf_cat_index(wf_film_id), post = lk.post;
+    return wf_row_avail_at(row, wf_cat_index(wf_film_id), &lk, wf_out);
+}
+/* the film under the browser's cursor: the loaded one as now, any other as SET would load it (wf_look_for; the loaded
+ * film id on plain log or Off is not loaded: SET gives it its output again) */
+int wf_row_avail_for(int row, int id)
+{
+    int k = wf_cat_index(id);
+    if (!wf_cam_ok || k < 0 || id == wf_loaded())
+        return wf_row_avail(row);
+    struct wf_look lk;
+    wf_look_for(&lk, id);
+    return wf_row_avail_at(row, k, &lk, lk.output);
+}
+static int wf_row_avail_at(int row, int k, const struct wf_look *lkp, int out)
+{
+    struct wf_look lk = *lkp;
+    int post = lk.post;
     switch (row) {
-    case WF_ROW_LIGHT:    return wf_out != WF_OUT_OFF;
+    case WF_ROW_LIGHT:    return out != WF_OUT_OFF;
     case WF_ROW_PRINT:
         if (lk.output != WF_OUT_FILM)
             return 0;
@@ -626,9 +650,10 @@ static int wf_flut_step(int d)
     return 1;
 }
 
-int wf_row_step(int row, int delta)
+int wf_row_step(int row, int delta) { return wf_row_step_for(row, delta, wf_film_id); }
+int wf_row_step_for(int row, int delta, int id)
 {
-    int k = wf_cat_index(wf_film_id), ch = 1;
+    int k = wf_cat_index(wf_row_id(id)), ch = 1;
     switch (row) {
     case WF_ROW_LIGHT:
         if (!wf_cam_ok)
@@ -692,7 +717,7 @@ int wf_row_step(int row, int delta)
             return 0;
         break;
     case WF_ROW_SIIE:
-        if (!wf_sg_bump(&wf_sg_iie, 0, WF_SG_IIE_MAX, WF_SG_IIE_DEF, delta))
+        if (!wf_sg_bump(&wf_sg_iie, 0, WF_SG_IIE_MAX, WF_SG_IIE_START, delta))
             return 0;
         break;
     case WF_ROW_SBL:
@@ -1803,7 +1828,7 @@ static struct menu_entry wf_menu[] = {
             WF_ROWE("Printer R", WF_ROW_SPR, wf_spr_select, "Film-stage films: printer light R, +-12 points (0.025 logE)."),
             WF_ROWE("Printer G", WF_ROW_SPG, wf_spg_select, "Film-stage films: printer light G, +-12 points (0.025 logE)."),
             WF_ROWE("Printer B", WF_ROW_SPB, wf_spb_select, "Film-stage films: printer light B, +-12 points (0.025 logE)."),
-            WF_ROWE("Interlayer", WF_ROW_SIIE, wf_siie_select, "Film-stage films: interlayer effect, 0..200 percent (100 default)."),
+            WF_ROWE("Interlayer", WF_ROW_SIIE, wf_siie_select, "Film-stage films: interlayer effect, 0..200 percent (50 default)."),
             WF_ROWE("Bleach bypass", WF_ROW_SBL, wf_sbl_select, "Film-stage films: silver left in the negative, 0..100 percent."),
             WF_ROWE("Print bleach", WF_ROW_SPBL, wf_spbl_select, "Film-stage films: silver left in the print, 0..100 percent."),
             WF_ROWE("Neutral neg", WF_ROW_SNN, wf_snn_select, "Film-stage films: negative R, B curves toward green's, 0..100 percent."),

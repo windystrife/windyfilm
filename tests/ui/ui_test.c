@@ -427,6 +427,28 @@ int main(int argc, char **argv)
     shot("b2s_noworker");
     close_ui(MODULE_KEY_MENU, 0);
 
+    /* 4c. the rows follow the film under the cursor, before SET (owner 11-16): a row greyed for that film does not step
+       there, and steps again on the loaded film */
+    fake_reset();
+    fake_set_card(card);
+    fake_set_loaded(id_of("PRT160"));
+    fake_set_film_grey(id_of("SUN200"), 1 << WF_ROW_SIIE);
+    open_ui();
+    go_to("SUN200");
+    for (int i = 0; i < WF_ROW_SIIE; i++) key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_SIIE, "focus on Interlayer (%d)", wfui_host_focus());
+    int iv = fake_row_value(WF_ROW_SIIE);
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(fake_row_value(WF_ROW_SIIE) == iv, "Interlayer stepped on a film it is greyed for (%d -> %d)", iv,
+          fake_row_value(WF_ROW_SIIE));
+    shot("b2s_rows_by_film");
+    go_to("PRT160");
+    CHECK(wfui_host_focus() == WF_ROW_SIIE, "focus kept on Interlayer (%d)", wfui_host_focus());
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(fake_row_value(WF_ROW_SIIE) == iv + 1, "Interlayer did not step on the loaded film (%d -> %d)", iv,
+          fake_row_value(WF_ROW_SIIE));
+    close_ui(MODULE_KEY_MENU, 0);
+
     /* 5. no can pack: plain cans in the group colour */
     fake_reset();
     fake_set_card(nocans);

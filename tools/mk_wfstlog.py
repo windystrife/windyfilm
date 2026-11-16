@@ -57,7 +57,7 @@ def rd_stage(path):
     f = struct.unpack_from("<4sHHHHHHHHIIIIIIIIIII", b, 0)
     magic, ver, n, nn, np_ = f[:5]
     io, no, po = f[11], f[12], f[13]
-    assert magic == b"WFSG" and ver == 1, path
+    assert magic == b"WFSG" and ver in (1, 2), path      # 2 appends the knob data; index and blobs as 1
     out = {}
     for k in range(n):
         i, v, ni, pi, code = struct.unpack_from("<BBBB8s", b, io + 28 * k)

@@ -72,6 +72,14 @@ const char *wf_row_text_long(int row);    /* the same, with a print stock by its
 int  wf_row_avail(int row);               /* 0 = has no effect with the current output or camera: the UI greys it */
 int  wf_row_step(int row, int delta);     /* delta -1 / +1; 1 = the value changed (and was saved) */
 int  wf_row_level(int row, int *max);     /* bar rows (Strength): the level 0..*max */
+/* the same four for film id as SET would load it (Film for a film, its cube's Log + LUT for a can; the loaded film or an
+   unknown id: as above). The WindyFilm UI's rows follow the film under the cursor with these, before SET (owner 11-16):
+   a film-stage film lights its knob rows, a can greys Print stock, and Print stock shows and steps that film's prints.
+   The values stay the module's own (one set for all films), so a row set before SET is the film's look once loaded. */
+const char *wf_row_text_for(int row, int id);
+const char *wf_row_text_long_for(int row, int id);
+int  wf_row_avail_for(int row, int id);
+int  wf_row_step_for(int row, int delta, int id);
 
 enum { WF_LOAD_OK = 0, WF_LOAD_NOTABLE, WF_LOAD_NOCUBE, WF_LOAD_BUSY, WF_LOAD_UNKNOWN };
 int  wf_load(int id);                     /* make film id the active look: output Film, or V-Log + LUT for a can */

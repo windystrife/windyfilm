@@ -262,10 +262,18 @@ static void load_sel(void)
     wf_log("ui: load %d -> %d", f->id, r);
 }
 
+/* the rows follow the film under the cursor, before SET (owner 11-16: a film-stage film lights its knob rows) */
+static int row_film(void)
+{
+    const struct wf_film *f = film_at(sel);
+    return f ? f->id : wf_loaded();
+}
+
 static void step_row(int d)
 {
-    if (!wf_row_avail(focus)) return;
-    if (wf_row_step(focus, d)) dirty = 1;
+    int id = row_film();
+    if (!wf_row_avail_for(focus, id)) return;
+    if (wf_row_step_for(focus, d, id)) dirty = 1;
 }
 
 /* PLAY with a roll on the camera: the Darkroom (owner 11-15, EOS M) while it has frames to develop, else why not */
@@ -427,7 +435,7 @@ static void draw_info_column(const struct wf_film *f, int g)
     for (int r = rtop; r < rtop + ROWS_VIS && r < WF_NROWS; r++)
     {
         int y = 136 + (r - rtop) * 19;
-        int foc = r == focus, av = wf_row_avail(r);
+        int foc = r == focus, av = wf_row_avail_for(r, f->id);
         if (foc)
         {
             wfg_rrect(258, y - 1, 708, y + 18, 6, AD, edit ? A : -1, 1);  /* 5D2 edit: outlined, LEFT / RIGHT step */
@@ -439,8 +447,8 @@ static void draw_info_column(const struct wf_film *f, int g)
         int live = foc && av;
         int vx = live ? 684 : 700;
         /* the long text (a print stock's full name) where it fits between the name and the value's arrows */
-        const char *val = wf_row_text_long(r);
-        if (!val || ui_textw(F_15, val) > vx - 18 - (294 + ui_textw(F_15, nm ? nm : "") + 16)) val = wf_row_text(r);
+        const char *val = wf_row_text_long_for(r, f->id);
+        if (!val || ui_textw(F_15, val) > vx - 18 - (294 + ui_textw(F_15, nm ? nm : "") + 16)) val = wf_row_text_for(r, f->id);
         if (!val) val = "";
         int xl = vx - text_r(F_15, vx, y, val, !av ? C_TXT3 : foc ? C_TXT : C_TXT2);   /* left edge of the value */
         if (r == WF_ROW_STRENGTH)

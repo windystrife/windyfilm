@@ -964,3 +964,44 @@ pack: seven rows, the four greyed, Film exp +1's key with the cfg's four nonzero
 50 %, Print bleach 75 %, Neutral neg 100 %, Neutral print 25 %, then + Film exp +1: bit-exact against the test's
 reference with the weighted residual; back to the shipped table). dev_check 1177/0 (pack 238/0), EOS M 1840/0, 5D2 1344/0, gate
 PASS on both.
+
+### 10.13 Interlayer starts at 50 %; the browser's rows follow the film under the cursor (chain-log, 2026-11-16)
+
+Owner, 11-16, after the four rows: "mặc định interlayer cỡ 50 thôi nhé để mình chụp thử", and the rows in the WindyFilm
+UI changed only after SET ("ý là hàng ui ấy cái nào bấm đc cái nào ko").
+
+**Interlayer start.** `WF_SG_IIE_START` 2 (wf_stagek.h) is where the row starts: the variable's initial value, a bad or
+out-of-range value, a bad stage= line. `WF_SG_IIE_DEF` 4 keeps its meaning: 100 %, the chain's own setting, and with the
+other rows at 0 the shipped table (`wf_sg_default`, the key 0). So the default look of a film-stage film is now a
+composed table: on the 8-bit path the composer once per knob set (37..43 ms), on RAW the knob table (about half a
+second per knob set, memsim in 10.12; it needs WFSTLOG.DAT, else the 8-bit chain), not the log pack's table. EXIF says "| Interlayer 50%". A card
+whose WINDYFLM.CFG already has a stage= line keeps that line's value (every save writes it, so any card that saved since
+the knob rows has one): the README tells the owner to set the row once. "shoulder=a bit-exact to RAWB15" and "default
+knobs = the shipped table" now mean Interlayer 100 % with the other rows at 0.
+
+**Rows by the film under the cursor.** The browser drew the info column of the film under the cursor but greyed its
+rows by the loaded film (`wf_row_avail` reads `wf_look_now`). New in wf_api.h: `wf_row_avail_for`, `wf_row_text_for`,
+`wf_row_text_long_for`, `wf_row_step_for` (row, film id); the plain four are these with the loaded film. wf_shot.c
+`wf_look_for(lk, id)` is the look SET on that film would give (a film on its tables with output Film, a can on its
+cube's own curve + LUT); the look code moved into `wf_look_at(lk, out, k, curve, flut)`, which `wf_look_now` calls with
+the menu state, so its output is unchanged. `wf_row_avail_for` takes the loaded film (`wf_loaded()`) through
+`wf_row_avail` (its output and curve as set); the last film on plain log or Off is not loaded, so its rows show as SET
+would load it. wf_ui.c draws the rows and steps them (`step_row`) with the browser film's id: a film-stage film lights
+its knob rows, a plain film greys them, a can greys Print stock and Strength, and Print stock shows and steps that film's
+prints. The values are the module's own (one set for every film), so a row set before SET is the look once the film is
+loaded. The ML menu still reads the loaded film. wf_look_for needs nothing of wf_menu.c beyond what wf_look_now reads
+(the darkroom WASM builds wf_shot.c with its own menu stub, not wf_ui.c / wf_menu.c).
+
+**Tests:** STAGE (no stage line: Interlayer "50%", the key of { iie 2 }, EXIF, the shot bit-exact against wf_sg_compose;
+the `_for` rows on the loaded chain film = the menu's, on a plain film knob rows greyed and Print "Scan", on a can Log +
+LUT rows, on plain log the menu's knob rows greyed and the browser's on; then Interlayer 100 % gives the key 0 and the
+rest as before), STAGE:bad (the bad stage line keeps Interlayer 50 %, so the bad negative half shows at once), CFG (a
+fresh save writes interlayer 2). STAGE:dark and RAWB:knobs start from a cfg stage line at 100 % (their baseline is the
+shipped table). tests/ui: fake_core.c has the 22 rows (it had 18 since the four rows: ASan SEGV in draw_info_column),
+the `_for` functions and `fake_set_film_grey`; ui_test 4c browses to a film that greys Interlayer: no step there, a step
+on the loaded film (shot b2s_rows_by_film). dev_check 1177/0 (pack 238/0), EOS M 1846/0, 5D2 1350/0, tests/ui PASS,
+gate PASS on both. Image: EOS M 721,184 -> 721,808 B, 5D2 675,120 -> 675,760 B.
+
+**Fix to 10.12 in the same commit:** tools/mk_wfstlog.py read WFSTAGE.DAT as version 1 only, so a PACKS=1 EOS M build
+after 102b0ce left WFSTLOG.DAT out (build.sh removes a pack whose tool fails; an old file in build/ hid it). It takes
+version 1 or 2 now: version 2 only appends the knob data, the index and blobs it reads are as before.
