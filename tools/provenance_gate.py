@@ -86,7 +86,10 @@ BRANCH = branch()
 # `main-staging` took darkroom c111cd9 and chain-log 8ddc4b4 in on 15 Nov 2026 (the owner: "merge thử bản mới nhất
 # film-stage vừa làm vào main-stagging có darkroom"), so it carries the same exception from 08fa8a7 on; its clean-room
 # state ends at 9775ddd, the commit before. `main` stays clean-room until the owner decides otherwise.
-NOT_CLEAN = BRANCH in ("film-stage", "grain-halation", "print-frame", "darkroom", "chain-log", "main-staging")
+# `paper-finish` (the Paper row, tools/mk_paper.py) is cut from main-staging 3b45114, so it carries the same exception
+# from its first commit on; the paper model itself is our own (physical paper behaviour and public data sheets).
+NOT_CLEAN = BRANCH in ("film-stage", "grain-halation", "print-frame", "darkroom", "chain-log", "main-staging",
+                       "paper-finish")
 DENY += list(BRANCH_EXCEPTIONS)                       # the derived generator's names are denied by default ...
 if NOT_CLEAN:                                         # ... and allowed only under the declared exception
     DENY = [w for w in DENY if w not in BRANCH_EXCEPTIONS]

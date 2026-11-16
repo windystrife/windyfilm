@@ -37,6 +37,10 @@ typedef char wf_ftabs_layout[(__builtin_offsetof(struct wf_ftabs, E) == 2048
 #define WF_FT_HS(h, s) ((int)(((unsigned)(h) & 15u) << 16 | ((unsigned)(s) & 15u) << 20))
 #define WF_FT_HOF(f)   ((int)((unsigned)(f) << 12) >> 28)
 #define WF_FT_SHOF(f)  ((int)((unsigned)(f) << 8) >> 28)
+/* WF_FT_PAPER(p): the Paper row (wf_loglut.h WF_PAPER_*), bits 24-25; Glossy (0) adds no bit, so a Glossy build is the
+ * build of before, bit for bit. The paper is the build's last step, after Highlights / Shadows (wf_film.c). */
+#define WF_FT_PAPER(p) ((int)(((unsigned)(p) & 3u) << 24))
+#define WF_FT_POF(f)   ((int)(((unsigned)(f) >> 24) & 3u))
 
 /* Highlights h / Shadows s on a neutral-axis curve N (the film set's N, the Log + LUT tables' N), in place:
  *   N'[y] = N[y] + round((h x^2 (255 - x) + s x (255 - x)^2) / 385341), x = N[y]

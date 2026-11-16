@@ -28,9 +28,16 @@
  *
  * Highlights / Shadows (WF_FT_HS, the browser rows and the ML menu, -5..+5): wf_hs_bend bends N last, after the Strong
  * pass. E and C keep the values relative to the unbent N, so every colour at a luma moves with its grey: Y' = N'[y] + E.
- * 0 / 0 = no flag bit, nothing bent: the set is bit-identical to a build without the setting. */
+ * 0 / 0 = no flag bit, nothing bent: the set is bit-identical to a build without the setting.
+ *
+ * Paper (WF_FT_PAPER, the Paper row; wf_loglut.h, docs/DESIGN.md 3.10): the build's last step, after Highlights /
+ * Shadows (a matte surface's flare is on top of whatever the print holds, so no row can print below its Dmax). Each
+ * node's output as the kernel gives it at its level (N[y_l] + E - 128, clamped; U', V') goes through wf_paper_ycc16;
+ * N goes through it with the neutral axis's own colour (the table at u = v = 128, per luma: 2 x 256 tetrahedral
+ * values); E is then taken against the new N. Glossy = no flag bit: the set is bit-identical to a build without it. */
 #include <stdint.h>
 #include "wf_film.h"
+#include "wf_loglut.h"                            /* wf_paper_ycc16 (the paper curves live in wf_loglut.c) */
 
 /* the shot set: worker task only. Allocated once by wf_film_shot_alloc (wf_task, module start: 96.5 KB kept out of
  * the module image); while it is missing the shot path leaves film frames untouched (wf_film_shot_ok). */
@@ -140,6 +147,41 @@ static void wf_levels(const uint32_t *T, int *ly, uint16_t *lvl)
     }
 }
 
+/* Paper p on a built set (wf_film_build, last): t's N is final (Strong, Highlights / Shadows), ly the level lumas, s the
+ * strength and mono as the build had them (for the neutral axis's colour) */
+static void wf_film_paper(struct wf_ftabs *t, const uint32_t *T, const int *ly, int s, int mono, int p)
+{
+    uint8_t Np[256];
+    for (int y = 0, q = 0; y < 256; y++) {
+        int u = wf_rnd16(wf_tet16(t, T, 0, y, 128, 128)), v = wf_rnd16(wf_tet16(t, T, 16, y, 128, 128));
+        if (s != 100 && !mono) {                  /* as the node's colour (D12 about 0) */
+            u = wf_d12(u, 0, s);
+            v = wf_d12(v, 0, s);
+        }
+        int Y = t->N[y] * 16;
+        u = wf_clampi(u, -128, 127) * 16;
+        v = wf_clampi(v, -128, 127) * 16;
+        wf_paper_ycc16(p, &Y, &u, &v);
+        q = wf_clampi((Y + 8) >> 4, q, 255);      /* kept non-decreasing */
+        Np[y] = (uint8_t)q;
+    }
+    for (int l = 0; l < WF_NL; l++) {
+        int nl = t->N[ly[l]], npl = Np[ly[l]];
+        for (int k = 0; k < 289; k++) {
+            int o = l * 289 + k;
+            uint32_t c = t->C[o];
+            int Y = wf_clampi(t->E[o] - 128 + nl, 0, 255) * 16;
+            int u = ((int)(c & 0xffff) - 128) * 16, v = ((int)(c >> 16) - 128) * 16;
+            wf_paper_ycc16(p, &Y, &u, &v);
+            int U = wf_clampi((u + 8) >> 4, -128, 127), V = wf_clampi((v + 8) >> 4, -128, 127);
+            t->C[o] = (uint32_t)(U + 128) | (uint32_t)(V + 128) << 16;
+            t->E[o] = (uint8_t)wf_clampi(wf_clampi((Y + 8) >> 4, 0, 255) - npl + 128, 0, 255);
+        }
+    }
+    for (int y = 0; y < 256; y++)
+        t->N[y] = Np[y];
+}
+
 #ifndef MODULE
 /* host builds (without -DMODULE): the level lumas of the set built last (one set at a time there) */
 static int wf_host_ly[WF_NL];
@@ -205,7 +247,9 @@ void wf_film_build(struct wf_ftabs *t, const uint32_t *T, int flags)
         for (int y = 1; y < 256; y++)
             if (t->N[y] < t->N[y - 1])
                 t->N[y] = t->N[y - 1];
-    wf_hs_bend(t->N, WF_FT_HOF(flags), WF_FT_SHOF(flags));   /* Highlights / Shadows: N only, last */
+    wf_hs_bend(t->N, WF_FT_HOF(flags), WF_FT_SHOF(flags));   /* Highlights / Shadows: N only */
+    if (WF_FT_POF(flags))                             /* Paper: the whole set, last */
+        wf_film_paper(t, T, ly, s, mono, WF_FT_POF(flags));
     __asm__ __volatile__("" ::: "memory");          /* tables complete before src says so */
     t->src = T;
 }

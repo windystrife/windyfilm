@@ -172,7 +172,17 @@ int main(int argc, char **argv)
     CHECK(fake_row_value(WF_ROW_LIGHT) == v0, "WHEEL_LEFT did not step back");
     key(MODULE_KEY_PRESS_DOWN);
     key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfui_host_focus() == WF_ROW_GRAIN, "DOWN x2 not on Grain");
+    /* Paper, right under Print stock (11-16): Glossy first, the ring steps it */
+    CHECK(wfui_host_focus() == WF_ROW_PAPER && WF_ROW_PAPER == WF_ROW_PRINT + 1 && !strcmp(wf_row_name(WF_ROW_PAPER), "Paper")
+          && !strcmp(wf_row_text(WF_ROW_PAPER), "Glossy"), "DOWN x2 not on Paper / Glossy (focus %d, '%s')",
+          wfui_host_focus(), wf_row_text(WF_ROW_PAPER));
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(!strcmp(wf_row_text(WF_ROW_PAPER), "Matte"), "WHEEL_RIGHT on Paper: Matte ('%s')", wf_row_text(WF_ROW_PAPER));
+    shot("b2s_paper");
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(!strcmp(wf_row_text(WF_ROW_PAPER), "Glossy"), "WHEEL_LEFT on Paper: Glossy again");
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_GRAIN, "DOWN x3 not on Grain");
     key(MODULE_KEY_WHEEL_DOWN);                                     /* 5D2 rear wheel */
     CHECK(fake_row_value(WF_ROW_GRAIN) == 3, "WHEEL_DOWN did not step Grain");
     key(MODULE_KEY_WHEEL_UP);
@@ -301,7 +311,7 @@ int main(int argc, char **argv)
     CHECK(wfui_host_group() == WF_GRP_STAGE, "chain can in group %d, not Film stage", wfui_host_group());
     shot("fs_chain");
     for (int i = 0; i < WF_ROW_HALO; i++) key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfui_host_focus() == WF_ROW_HALO && !strcmp(wf_row_name(WF_ROW_HALO), "Halation"), "DOWN x3 not on Halation");
+    CHECK(wfui_host_focus() == WF_ROW_HALO && !strcmp(wf_row_name(WF_ROW_HALO), "Halation"), "DOWN x4 not on Halation");
     shot("fs_rows");
     key(MODULE_KEY_PRESS_DOWN);
     key(MODULE_KEY_WHEEL_RIGHT);
@@ -554,8 +564,9 @@ int main(int argc, char **argv)
           "5D2 edit: LEFT did not step Light back, or changed the film");
     key(MODULE_KEY_PRESS_DOWN);
     key(MODULE_KEY_PRESS_DOWN);
+    key(MODULE_KEY_PRESS_DOWN);                                     /* past Paper (11-16) */
     key(MODULE_KEY_PRESS_RIGHT);
-    CHECK(wfui_host_focus() == WF_ROW_GRAIN && fake_row_value(WF_ROW_GRAIN) == 3, "5D2 edit: DOWN x2 + RIGHT: focus %d grain %d",
+    CHECK(wfui_host_focus() == WF_ROW_GRAIN && fake_row_value(WF_ROW_GRAIN) == 3, "5D2 edit: DOWN x3 + RIGHT: focus %d grain %d",
           wfui_host_focus(), fake_row_value(WF_ROW_GRAIN));
     shot("b2s_5d2_edit");
     key(MODULE_KEY_JOY_CENTER);

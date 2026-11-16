@@ -14,6 +14,7 @@
  *   incurve=srgb|film1|neutral   how Log + LUT reads the JPEG (film1 / neutral: only when the build has that curve)
  *   print=scan|cine|paper   light=auto|day|cloudy|tungsten   strength=subtle|normal|strong
  *   hl=<-5..5>  sh=<-5..5>   Highlights / Shadows (films and Log + LUT; 0 = the curve as it was)
+ *   paper=glossy|matte|warm|cool   the print's paper (films and Log + LUT, last in the tables; glossy = as before)
  *   grain=off|fine|normal|strong|evenfine|evennormal|evenstrong   halation=off|halation|spk|wrap
  *   bloom=off|low|normal|strong   gauge=16|35|65   mist=off|w8|w4|w2|w1|b8|b4|b2|b1
  *                    (an old file's halation=bloom / spkbloom reads as halation / spk + bloom=normal, its other halation
@@ -65,6 +66,7 @@ volatile int wf_lut_ei;                           /* 1/3 EV, WF_LL_EI_MIN..WF_LL
 volatile int wf_incurve;                          /* WF_INC_*: how Log + LUT reads the JPEG (wf_incurve_t) */
 volatile int wf_strength = 1;                     /* 30 / 100 / 125 % */
 volatile int wf_hl, wf_sh;                        /* Highlights / Shadows, WF_HS_MIN..WF_HS_MAX, 0 = off */
+volatile int wf_paper;                            /* Paper, WF_PAPER_* (wf_paper_t, wf_shot.c), 0 = Glossy */
 volatile int wf_sg_exp, wf_sg_push, wf_sg_comp, wf_sg_prn[3], wf_sg_iie = WF_SG_IIE_START;   /* film-stage knob rows */
 volatile int wf_sg_bl, wf_sg_pbl, wf_sg_nn, wf_sg_np;   /* Bleach bypass, Print bleach, Neutral neg / print 0..4 */
 volatile int wf_exif_off;
@@ -235,6 +237,7 @@ static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Tungst
 static const char *const wf_light_key[WF_NLIGHT] = { "auto", "day", "cloudy", "tungsten" };
 static const char *wf_strength_name[WF_NSTRENGTH] = { "30%", "100%", "125%" };
 static const char *const wf_strength_key[WF_NSTRENGTH] = { "subtle", "normal", "strong" };
+static const char *const wf_paper_key[WF_NPAPER] = { "glossy", "matte", "warm", "cool" };
 /* the chain's 16 print stocks by full name, p00..p15 = the plugin's UI order (tools/mk_genesis_films.py PRINT_NAMES;
  * PRINT_CHAIN maps each to its chain table: 2302 is the dump's print_14, the B&W table). Five pairs make the same table
  * (one dye-amount table each: 2383 = 2393, 5380 = 5381/72, 2395 = 5384/82, 5384/92 = 5385/93, 5385/62 = 5386); both
@@ -467,7 +470,7 @@ int wf_loaded(void)
 /* ------------------------------------------------------------------ rows (wf_api.h) */
 /* Grain / Halation: the last choice of each is the Genesis Pro 1.6.6 model (DESIGN 1a), the ones before it the module's
  * own Yedlin grain / per-film and 3-bounce halation; Bloom and Gauge (11-15) size and add to the same stages */
-static const char *const wf_rname[WF_NROWS] = { "Light", "Print stock", "Grain", "Halation", "Bloom", "Gauge", "Mist",
+static const char *const wf_rname[WF_NROWS] = { "Light", "Print stock", "Paper", "Grain", "Halation", "Bloom", "Gauge", "Mist",
                                                 "Strength", "Highlights", "Shadows", "Film LUT", "Film exp",
                                                 "Push / pull", "Exp comp", "Printer R", "Printer G", "Printer B",
                                                 "Interlayer", "Bleach bypass", "Print bleach", "Neutral neg",
@@ -513,6 +516,7 @@ const char *wf_row_text_for(int row, int id)
     switch (row) {
     case WF_ROW_LIGHT:    return wf_pick(wf_light_name, WF_NLIGHT, wf_light);
     case WF_ROW_PRINT:    return wf_print_name[wf_print_eff(k)];
+    case WF_ROW_PAPER:    return wf_paper_name(wf_paper_t());
     case WF_ROW_GRAIN:    return wf_pick(wf_grain_name, WF_GRAIN_MAX + 1, wf_grain);
     case WF_ROW_HALO:     return wf_pick(wf_halo_name, WF_HALO_MAX + 1, wf_halo);
     case WF_ROW_BLOOM:    return wf_pick(wf_bloom_name, WF_BLOOM_MAX + 1, wf_bloom);
@@ -582,6 +586,7 @@ static int wf_row_avail_at(int row, int k, const struct wf_look *lkp, int out)
             if (wf_print_ok(k, v))
                 return 1;
         return 0;
+    case WF_ROW_PAPER:    return lk.output == WF_OUT_FILM || lk.output == WF_OUT_LLUT;   /* a print: not flat Log */
     case WF_ROW_GRAIN:    return WF_GRAIN_CAN && post;
     case WF_ROW_HALO:
     case WF_ROW_BLOOM:    return WF_HALO_CAN && post && wf_aspect_has_halo(wf_aspect);   /* one stage, 3:2 */
@@ -673,6 +678,7 @@ int wf_row_step_for(int row, int delta, int id)
         wf_print = v;
         break;
     }
+    case WF_ROW_PAPER:    wf_paper = wf_wrap(wf_paper_t(), delta, WF_NPAPER); break;
     case WF_ROW_GRAIN:    wf_grain = wf_wrap(wf_grain, delta, WF_GRAIN_MAX + 1); break;
     case WF_ROW_HALO:     wf_halo = wf_wrap(wf_halo, delta, WF_HALO_MAX + 1); break;
     case WF_ROW_BLOOM:    wf_bloom = wf_wrap(wf_bloom, delta, WF_BLOOM_MAX + 1); break;
@@ -917,6 +923,8 @@ void wf_cfg_load(void)
             x = wf_cfg_int(&v, &ok);
             if (ok && x >= WF_HS_MIN && x <= WF_HS_MAX)
                 wf_sh = x;
+        } else if ((v = wf_cfg_val(l, "paper"))) {
+            wf_paper = wf_cfg_word(v, wf_paper_key, WF_NPAPER, WF_PAPER_GLOSSY);
         } else if ((v = wf_cfg_val(l, "grain"))) {
             wf_grain = wf_cfg_word(v, wf_grain_key, WF_GRAIN_MAX + 1, -1);
             if (wf_grain < 0) wf_grain = wf_cfg_word(v, wf_grain_old, WF_GRAIN_MAX + 1, WF_GRAIN_DEF);
@@ -1013,13 +1021,13 @@ static int wf_cfg_save(void)
     int lei = wf_lut_ei_t(), fl = wf_flut > 0 && wf_flut < WF_FLUT_N ? wf_flut : 0;
     int n = snprintf(b, sizeof b,
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
-                     "strength=%s\nhl=%d\nsh=%d\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\nexposure=%s\n"
-                     "exptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\nshoulder=%s\n",
+                     "strength=%s\nhl=%d\nsh=%d\npaper=%s\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\n"
+                     "exposure=%s\nexptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\nshoulder=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
                      wf_pick(wf_light_key, WF_NLIGHT, wf_light), wf_pick(wf_strength_key, WF_NSTRENGTH, wf_strength),
-                     wf_hl_t(), wf_sh_t(), wf_pick(wf_grain_key, WF_GRAIN_MAX + 1, wf_grain), wf_pick(wf_halo_key, WF_HALO_MAX + 1, wf_halo),
+                     wf_hl_t(), wf_sh_t(), wf_paper_key[wf_paper_t()], wf_pick(wf_grain_key, WF_GRAIN_MAX + 1, wf_grain), wf_pick(wf_halo_key, WF_HALO_MAX + 1, wf_halo),
                      wf_pick(wf_bloom_key, WF_BLOOM_MAX + 1, wf_bloom), wf_gauge_key[wf_gauge >= 0 && wf_gauge <= WF_GAUGE_MAX ? wf_gauge : WF_GAUGE_DEF],
                      wf_pick(wf_mist_key, WF_MIST_MAX + 1, wf_mist), wf_pick(wf_pv_key, 3, wf_pv_mode),
                      wf_pick(wf_exp_key, 2, wf_exp_mode), wf_exp_trim >= -16 && wf_exp_trim <= 16 ? (int)wf_exp_trim : 0,
@@ -1157,6 +1165,8 @@ const char *wf_exif_text(const struct wf_look *lk, int g, int h, int bl, int m, 
         n += snprintf(b + n, bn - n, " | Highlights %s", wf_hs_text(lk->hl));
     if (lk->sh && (lk->output == WF_OUT_FILM || lk->output == WF_OUT_LLUT) && n < bn)
         n += snprintf(b + n, bn - n, " | Shadows %s", wf_hs_text(lk->sh));
+    if (lk->paper && lk->paper < WF_NPAPER && (lk->output == WF_OUT_FILM || lk->output == WF_OUT_LLUT) && n < bn)
+        n += snprintf(b + n, bn - n, " | Paper %s", wf_paper_name(lk->paper));
     if (lk->light && lk->light < WF_NLIGHT && n < bn)
         n += snprintf(b + n, bn - n, " | Light %s", wf_light_name[lk->light]);
     if (g > 0 && g <= WF_GRAIN_MAX && n < bn)
@@ -1419,6 +1429,7 @@ static MENU_SELECT_FUNC(wf_inc_select)
 }
 static MENU_SELECT_FUNC(wf_light_select) { (void)priv; wf_row_step(WF_ROW_LIGHT, delta); }
 static MENU_SELECT_FUNC(wf_print_select) { (void)priv; wf_row_step(WF_ROW_PRINT, delta); }
+static MENU_SELECT_FUNC(wf_paper_select) { (void)priv; wf_row_step(WF_ROW_PAPER, delta); }
 static MENU_SELECT_FUNC(wf_grain_select) { (void)priv; wf_row_step(WF_ROW_GRAIN, delta); }
 static MENU_SELECT_FUNC(wf_halo_select) { (void)priv; wf_row_step(WF_ROW_HALO, delta); }
 static MENU_SELECT_FUNC(wf_bloom_select) { (void)priv; wf_row_step(WF_ROW_BLOOM, delta); }
@@ -1813,6 +1824,7 @@ static struct menu_entry wf_menu[] = {
               .help = "How Log + LUT reads the JPEG: sRGB, or a Canon style undone (Film 1, Neutral)." },
             WF_ROWE("Light", WF_ROW_LIGHT, wf_light_select, "White balance: Auto (yours), the stock's Day, Cloudy, Tungsten."),
             WF_ROWE("Print", WF_ROW_PRINT, wf_print_select, "Scan, cine print or paper print of the loaded film."),
+            WF_ROWE("Paper", WF_ROW_PAPER, wf_paper_select, "Glossy: deep black. Matte: softer black. Warm / Cool: base tint."),
             WF_ROWE("Grain", WF_ROW_GRAIN, wf_grain_select, "Grain: Fine / Normal / Strong follow the tone, Even ... does not."),
             WF_ROWE("Halation", WF_ROW_HALO, wf_halo_select, "Red-orange halo round highlights: Wide, Tight; Wrap: edge spill."),
             WF_ROWE("Bloom", WF_ROW_BLOOM, wf_bloom_select, "Soft glow in the light's own colour, apart from the halo (3:2)."),

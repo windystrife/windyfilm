@@ -870,6 +870,53 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
   - `tests/ui/dr_ui_test.c` 3b: the PRINT rows and the easel sketch.
   - The 5D2 has no Darkroom: `wf_print.o` and WFPRINT.DAT are EOS M only.
 
+### 3.10 Paper finish (owner 2026-11-16, both cameras and the Darkroom web core)
+
+One row, "Paper": Glossy (default) / Matte / Warm / Cool. It is the surface and the base the print is on, for every
+film look at its final stage (the films, the chain films, the CinePrint cans and Leica Vivid on Log + LUT, RAW develop
+B and the Darkroom); flat Log and Film LUT Off have no print, so the row is greyed there and does nothing.
+
+- **Clean room.** Our own model from physical paper behaviour and the orders of magnitude public paper data sheets
+  give (surface Dmax, base white, image tone); nothing from any other film module's code or tables.
+  `tools/mk_paper.py` holds the model and writes `src/wf_paper_tab.h` (`--check` = the header is what the model makes).
+- **Model.** Light L = the sRGB EOTF of the output code, display-relative (0 = the look's own black, a glossy Dmax; 1 =
+  its paper white). Glossy is the identity. Matte: the surface scatters its first-surface reflection over the whole
+  picture, `L' = s + (1 - s) L`, s = 0.0116 from Dmax 2.20 (glossy) -> 1.75 (matte); code 0 -> 27.9, 118 -> 120.8, 255
+  stays. The flare is white, so the shadows lose a little contrast and colour, a neutral stays neutral. Warm / Cool:
+  `L'_c = w_c L_c^k_c`, w the paper base (largest channel 1, so white never clips), k the image tone as a density
+  scale per channel (nil at white, grows with density), solved for CIELAB targets (D65): Warm base a* 0.6 b* +3.6
+  (white 255 / 250 / 244), deep tone (L 0.05) a* 1.2 b* +3.0; Cool base a* 0.6 b* -3.2 (white 247 / 249 / 255), deep
+  a* 0.2 b* -2.8. The header holds 7 curves (Matte one, Warm and Cool three each) at codes 0, 4, .., 256 as code x 16;
+  `wf_paper_ch` interpolates linearly (max error 0.133 code). `wf_paper_ycc16` takes a Y'CbCr x 16 value through
+  R'G'B' (BT.601 full range, the Q16 matrices of `wf_dev_trim`), the curves, and back.
+- **Where (all in the tables, last, after Highlights / Shadows; nothing per pixel).**
+  - Films: `wf_film_build` flag `WF_FT_PAPER(p)` (bits 24-25). Each node's output (`N[y_l] + E - 128`, U', V') goes
+    through the paper; N through it with the neutral axis's own colour (kept non-decreasing); E taken against the new
+    N. The flag's low byte is all `t->flags` keeps, and Glossy adds no bit: a Glossy set is the set of before, bit for
+    bit. The shot set's key and the preview key (`wf_pv_fkey` bits 24-25) carry the paper.
+  - Log + LUT: `wf_ll_paper` after the load and the Highlights / Shadows bend. The `.FRT` cache stays unpapered (the
+    paper goes on after the cache read or write). The poll's HS-only fast path (no card read) runs only when the paper
+    is Glossy now and before; any paper change reloads.
+  - RAW develop B and the Darkroom: `wf_dev_paper` on the develop table (every node's Y9 / Cb9 / Cr9) once per table
+    build, for the cube / Log + LUT tables and the chain films' log-pack table. The SRGB base develop carries no paper
+    (its film table does). The `.RBT` caches stay unpapered: their key is the look with paper 0, and the paper goes on
+    after the read; a papered cube table does not owe the cache a write. `rb_key` carries the paper (chain bit 25, DISP
+    bits 4-5, CUBE bits 24-25).
+- **State.** `wf_paper` (`wf_paper_t()` = it in range, else Glossy); `wf_look.paper` takes it on a film or Log + LUT; config
+  key `paper=glossy|matte|warm|cool` (after `sh=`; anything else reads as Glossy); EXIF / print comment `| Paper Matte`
+  and the log lines (`shot #n <title> .. paper Matte`, `yuv .. p1`, `lut <cube> .. paper Matte`, `rawb: paper Matte ..ms`,
+  `dark: .. paper Matte`) only when it is not Glossy.
+- **UI.** ML menu entry "Paper" after Print stock; browser row `WF_ROW_PAPER` after `WF_ROW_PRINT` (`WF_NROWS` 23),
+  wraps; its icon is a sheet with a lifted corner and two sheen lines (`tools/mk_wffont.py`). Host render: tests/ui
+  shot `b2s_paper`.
+- **Cost (memsim, ARM946E-S 200 MHz, `tools/paper_bench.sh`).** Film set +30 ms (+4.07 M instructions) on top of its
+  60 ms, once per look change; `wf_ll_paper` 56.5 ms once per Log + LUT load; `wf_dev_paper` 54.9 ms once per develop
+  table build (B, Darkroom). Per pixel: 0 (the shot kernels read the same tables). Glossy: 0.
+- **Checks.** Host mode PAPER (the model, Glossy FNV against the HS gold, every film kind on Matte / Warm / Cool, B&W
+  tone, rows / shot / log / EXIF / preview, Log + LUT with the unpapered .FRT and the fast path, flat Log / Off, cfg);
+  RAWB cases (Leica Vivid Warm on the cached .RBT, a chain film on Matte); CFG (the saved line); tests/ui (the row,
+  `b2s_paper`).
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`
@@ -880,7 +927,8 @@ Grain, Halation, Bloom, Mist, Strength, Highlights, Shadows, Film LUT (`WF_NROWS
 2026-11-15 (`film-stage`, merged into `print-frame`): Light, Print stock, Grain, Halation, Bloom, Gauge, Mist, Strength,
 Highlights, Shadows, Film LUT, then the film-stage knobs Film exp, Push / pull, Exp comp, Printer R, Printer G, Printer
 B, Interlayer (`WF_NROWS` 18; the knob rows are available only on a film-stage pair that `ML/DATA/WFSTAGE.DAT` carries,
-section 1a).
+section 1a). Since 2026-11-16: Bleach bypass, Print bleach, Neutral neg, Neutral print after Interlayer (`WF_NROWS` 22),
+then Paper after Print stock (`WF_NROWS` 23, section 3.10).
 
 ### 4.2 Catalogue
 

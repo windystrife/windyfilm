@@ -7,6 +7,10 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT và WFSTAGE.DAT) là dữ liệu dẫn xuất
 (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB19 (16/11 tối, nhánh paper-finish, từ main-staging RAWB17): thêm hàng Paper
+(giấy in: Glossy / Matte / Warm / Cool), xem mục 2 và bước 7b. Paper Glossy (mặc định)
+cho ảnh y hệt RAWB17.
+
 Đây là bản CHƯA từng chạy trên máy thật. Lần chạy đầu để kiểm tra; mọi lỗi đều
 được ghi vào ML/LOGS/WINDYFLM.LOG. Đã gồm các sửa từ lần chạy thật đầu tiên trên
 EOS M (14/11): log ghi nối tiếp và không mất dòng khi thẻ bận, module chỉ tạo /
@@ -76,9 +80,22 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
   16 mm" (không ghi khi 35 mm).
 - Hàng Highlights / Shadows: -5 .. +5, mặc định 0. Dương làm sáng vùng sáng /
   nâng vùng tối, âm làm tối. Áp cho phim và Log + LUT (cả lon Film LUT), không
-  áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 22 hàng (11 hàng cuối
+  áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 23 hàng (11 hàng cuối
   chỉ dùng với lon Film stage, mục 6; hàng không dùng được thì mờ): hiện 7, danh
   sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
+- Hàng Paper (16/11, ngay dưới Print stock): giấy của bản in, áp ở bước cuối cho mọi
+  look có bản in: phim, lon Film stage, Log + LUT và lon Film LUT, RAW develop B. Log
+  phẳng và Off thì hàng mờ.
+    Glossy  giấy bóng, mặc định: ảnh như trước, không đổi một bit nào.
+    Matte   giấy mờ: đen nâng lên (mã 0 thành khoảng 28), vùng tối bớt tương phản và
+            bớt màu một chút, vùng sáng giữ nguyên.
+    Warm    đế giấy màu kem (trắng thành 255 / 250 / 244) và tông nâu ấm ở vùng tối.
+    Cool    đế giấy trắng xanh (247 / 249 / 255) và tông đen xanh ở vùng tối.
+  Khác với Print stock "Paper" (mô hình in của phim): hai hàng dùng chung được. Đổi
+  giấy chỉ dựng lại bảng màu một lần (phim khoảng 30 ms, Log + LUT hay RAW develop
+  khoảng 55 ms, đo trên mô phỏng EOS M), không làm chậm lúc chụp. EXIF ghi "| Paper
+  Matte" (không ghi khi Glossy); cấu hình: paper=glossy|matte|warm|cool. Cũng có trong
+  menu ML.
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
   README_FILMLUT.txt), Off.
 - Lon Leica Vivid (nhóm Film LUT, cần ML/data/LEICAVSR.CUB): look "L Leica 2"
@@ -355,6 +372,24 @@ Sửa bằng bánh xe, hoặc nhấn joystick ("JOY Edit") rồi trái / phải.
    các hàng knob và dùng bảng mặc định: ghi lại lúc đó đang làm gì.
 10. Đổi nhanh nhiều hàng knob rồi chụp ngay: ghi lại tấm đầu có phải chờ không.
 11. Tắt máy bật lại: 11 hàng knob giữ giá trị đã đặt.
+Gửi: ML/LOGS/WINDYFLM.LOG, ML/SETTINGS/WINDYFLM.CFG và các JPG (kèm CR2 nếu chụp RAW+L).
+
+
+7b. HÀNG PAPER: CẦN THỬ (16/11)
+-------------------------------
+1. Phim thường (ví dụ Portra 400), cảnh có vùng đen sâu và tường / trời trắng, chân
+   máy: 4 tấm cùng cảnh, cùng phơi sáng, Paper Glossy / Matte / Warm / Cool. Matte:
+   đen thành xám than nhẹ, trắng giữ nguyên; Warm: trắng ngả kem; Cool: trắng ngả
+   xanh nhẹ. Log: "shot #n ... paper Matte"; EXIF "| Paper Matte".
+2. Một phim đen trắng (HP5 Plus): Warm thành nâu ấm, Cool thành xám xanh (rõ hơn
+   ảnh màu). Ghi lại nếu Warm / Cool thấy quá đậm hay quá nhạt.
+3. Log + LUT (một lon Windy ... hoặc Leica Vivid), Paper Matte: log "lut ... paper
+   Matte". Đổi Paper không đọc lại cube từ đầu (cache .FRT).
+4. Một lon Film stage (ví dụ G08 + 2383), Paper Matte rồi Warm.
+5. RAW develop On (RAW+L) với một lon Windy ..., Paper Warm: log "rawb: paper Warm
+   NNms": ghi lại số ms (mô phỏng EOS M: khoảng 55 ms mỗi lần dựng bảng).
+6. Log phẳng hoặc Off: hàng Paper mờ, không đổi được.
+7. Tắt máy bật lại: Paper giữ giá trị (WINDYFLM.CFG có dòng paper=...).
 Gửi: ML/LOGS/WINDYFLM.LOG, ML/SETTINGS/WINDYFLM.CFG và các JPG (kèm CR2 nếu chụp RAW+L).
 
 

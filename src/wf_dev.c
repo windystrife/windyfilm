@@ -779,6 +779,28 @@ void wf_dev_trim(struct wf_dev_tabs *t, int sat, int vib)
             }
 }
 
+void wf_dev_paper(struct wf_dev_tabs *t, int p)
+{
+    if (!t || p <= WF_PAPER_GLOSSY || p >= WF_NPAPER)
+        return;
+    for (int b = 0; b < WF_DEV_G; b++)
+        for (int g = 0; g < WF_DEV_G; g++)
+            for (int r = 0; r < WF_DEV_G; r++) {
+                uint32_t *nd = t->node + 2 * (r + WF_DEV_G * g + WF_DEV_BSTR * b);
+                /* half codes Y9 = 2 Y', Cb9 = 2 (Cb + 128), each stored + 1: x 8 = code x 16 */
+                int y = ((int)(nd[0] & 0xffff) - 1) * 8, u = ((int)(nd[0] >> 16) - 257) * 8, v = ((int)nd[1] - 257) * 8;
+                wf_paper_ycc16(p, &y, &u, &v);
+                y = (y + 4) >> 3;
+                u = ((u + 4) >> 3) + 256;
+                v = ((v + 4) >> 3) + 256;
+                y = y < 0 ? 0 : y > 510 ? 510 : y;
+                u = u < 0 ? 0 : u > 510 ? 510 : u;
+                v = v < 0 ? 0 : v > 510 ? 510 : v;
+                nd[0] = (uint32_t)(y + 1) | (uint32_t)(u + 1) << 16;
+                nd[1] = (uint32_t)(v + 1);
+            }
+}
+
 const char *wf_dev_pk_errstr(int rc)
 {
     switch (rc) {

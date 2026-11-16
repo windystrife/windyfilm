@@ -51,13 +51,14 @@ extern const int wf_nfilms;
 const struct wf_film *wf_film_by_id(int id);   /* 0 when unknown */
 
 /* ------------------------------------------------------------------ state the browser shows and changes (core) */
-enum { WF_ROW_LIGHT = 0, WF_ROW_PRINT, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_BLOOM, WF_ROW_GAUGE, WF_ROW_MIST,
+/* WF_ROW_PAPER (owner 11-16): the print's paper, Glossy / Matte / Warm / Cool, right under Print stock */
+enum { WF_ROW_LIGHT = 0, WF_ROW_PRINT, WF_ROW_PAPER, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_BLOOM, WF_ROW_GAUGE, WF_ROW_MIST,
        WF_ROW_STRENGTH, WF_ROW_HL, WF_ROW_SH, WF_ROW_FLUT,
        WF_ROW_SEXP, WF_ROW_SPUSH, WF_ROW_SCOMP, WF_ROW_SPR, WF_ROW_SPG, WF_ROW_SPB, WF_ROW_SIIE,   /* film-stage knobs */
        WF_ROW_SBL, WF_ROW_SPBL, WF_ROW_SNN, WF_ROW_SNP,   /* Bleach bypass, Print bleach, Neutral neg / print */
        WF_NROWS };
 
-const char *wf_row_name(int row);         /* "Light", "Print stock", "Grain", "Halation", "Bloom", "Gauge", "Mist",
+const char *wf_row_name(int row);         /* "Light", "Print stock", "Paper", "Grain", "Halation", "Bloom", "Gauge", "Mist",
                                              "Strength", "Highlights", "Shadows", "Film LUT", "Film exp", "Push / pull",
                                              "Exp comp", "Printer R", "Printer G", "Printer B", "Interlayer"; the last
                                              choice of Grain and of Halation is the Genesis Pro 1.6.6 model, the seven

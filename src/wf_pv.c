@@ -43,12 +43,12 @@ static int wf_pv_want = -1;                      /* wf_task: the last key handle
 static volatile int wf_pv_nomem;
 static uint32_t wf_pv_scr[WF_LV_ROW] __attribute__((aligned(32)));   /* display task only */
 
-/* the key of a film look: catalogue row, print variant (5 bits: 19 of them), strength, Highlights / Shadows (the table
- * and the build flags); a composed film-stage table (stk != 0) is mixed in, bit 30 set, never -1 or 0 */
+/* the key of a film look: catalogue row, print variant (5 bits: 19 of them), strength, Highlights / Shadows, Paper (the
+ * table and the build flags); a composed film-stage table (stk != 0) is mixed in, bit 30 set, never -1 or 0 */
 static int wf_pv_fkey(const struct wf_look *lk)
 {
     uint32_t k = (uint32_t)(lk->row + 1) | (uint32_t)lk->variant << 8 | (uint32_t)lk->strength << 13
-               | (uint32_t)(lk->hl & 15) << 16 | (uint32_t)(lk->sh & 15) << 20;
+               | (uint32_t)(lk->hl & 15) << 16 | (uint32_t)(lk->sh & 15) << 20 | (uint32_t)(lk->paper & 3) << 24;
     if (lk->stk)
         k = (((k * 2654435761u) ^ lk->stk) & 0x3fffffff) | 0x40000000;
     return (int)k;

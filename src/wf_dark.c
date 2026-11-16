@@ -1208,9 +1208,13 @@ static void dk_task(void)
                 snprintf(rs, sizeof rs, ", %s %s, written %dms", rp + 8, llb[got], get_ms_clock() - t1);
             else if (rbt)
                 snprintf(rs, sizeof rs, ", %s %s, not written (%s)", rp + 8, llb[got], wf_fe_name(wr));
-            wf_log("dark: tables %s c%d%s%s %dms%s",
+            int pap = cube ? lk.paper : 0;       /* the cube tables' paper after the .RBT (as B: the file is unpapered) */
+            if (pap)
+                wf_dev_paper(M.tabs, pap);
+            wf_log("dark: tables %s c%d%s%s %dms%s%s%s",
                    src == WF_DEV_SRGB ? "srgb" : src == WF_DEV_LOG ? "log" : src == WF_DEV_DISP ? "disp" : "cube",
-                   curve, cube ? " " : "", cube ? cube + 8 : "", t1 - t0, rs);
+                   curve, cube ? " " : "", cube ? cube + 8 : "", t1 - t0, rs, pap ? ", paper " : "",
+                   pap ? wf_paper_name(pap) : "");
         }
         if (rc != WF_LL_OK) {
             wf_log("dark: tables err %d %s", rc, wf_loglut_errstr(rc));
