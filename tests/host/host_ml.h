@@ -49,6 +49,10 @@ extern uint32_t h_srm_base;                      /* the first SRM chunk's cachea
 extern volatile int h_heap_free;                 /* GetFreeMemForAllocateMemory */
 extern volatile int h_arena_live;                /* blocks handed out and not freed */
 
+/* LiveView pause and the display (host_ml.c): h_lvp = PauseLiveView turns lv off, h_disp_pause_off = and the display,
+   h_disp_stuck = display_on / ResumeLiveView do not turn it on; h_disp_ons counts display_on calls */
+extern volatile int h_disp, h_disp_ons, h_lvp, h_disp_pause_off, h_disp_stuck;
+
 /* clocks: h_clock_add_ms shifts get_ms_clock / get_us_clock forward (time jumps without waiting) */
 extern volatile int h_clock_add_ms;
 

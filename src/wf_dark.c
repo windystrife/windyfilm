@@ -42,6 +42,8 @@ extern void PauseLiveView(void);
 extern int  ResumeLiveView(void);
 extern void powersave_prohibit(void);
 extern void powersave_permit(void);
+extern int  display_is_on(void);
+extern void display_on(void);                    /* ML: TurnOnDisplay from the GUI task (MLEV_TURN_ON_DISPLAY) */
 extern int  is_movie_mode(void);
 extern int  gui_menu_shown(void);
 extern uint8_t *bmp_vram(void);
@@ -659,6 +661,39 @@ static int dk_battery(void)
     int b = battery_level_bars;                  /* EOS M: bars only (ML lens.c: 0 low, 1 half, else full) */
     return b <= 0 ? 5 : b == 1 ? 30 : b == 2 ? 70 : 100;
 #endif
+}
+
+/* ------------------------------------------------------------------ the screen while the run lives
+ * The owner's RAWB18 EOS M (16 Nov): "the screen turns off while the Darkroom runs". The run pauses LiveView (Canon idle,
+ * its buffers free for the memory above). ML's PauseLiveView does not turn the display off itself (its own powersave
+ * calls display_off after it), and ML's idle countdown does not run while LiveView is paused (liveview_display_idle is 0
+ * then), but the EOS M's display went dark: Canon's, it seems, once LiveView stops (no viewfinder to switch to). So the
+ * display's state is logged around the pause and at the end, and the display is turned on again (ML's display_on, as its
+ * powersave wakes the screen) when it reads off: after the pause, before each frame and after the run. The UI draws the
+ * Darkroom into the bitmap (Canon's front buffer off), which stays on through the pause. Off and not back after
+ * DK_DISP_TRIES asks in a row: the run goes on dark (developing needs no screen) and says so once. */
+#define DK_DISP_WAIT 1000                        /* ms for TurnOnDisplay (ML's GUI task) to take */
+#define DK_DISP_TRIES 3
+static int dk_disp_ons, dk_disp_miss;            /* asks this run, asks in a row that did not take */
+static int dk_screen(const char *when)
+{
+    if (display_is_on()) {
+        dk_disp_miss = 0;
+        return 1;
+    }
+    if (dk_disp_miss >= DK_DISP_TRIES || ml_shutdown_requested || wf_unloading)
+        return 0;
+    int t0 = get_ms_clock();
+    display_on();
+    while (!display_is_on() && get_ms_clock() - t0 < DK_DISP_WAIT)
+        msleep(20);
+    int on = display_is_on();
+    dk_disp_ons++;
+    dk_disp_miss = on ? 0 : dk_disp_miss + 1;
+    if (dk_disp_ons <= 6 || !on)
+        wf_log("dark: display off %s: turned on again, display %d after %d ms%s", when, on, get_ms_clock() - t0,
+               dk_disp_miss >= DK_DISP_TRIES ? " (not asked again this run)" : "");
+    return on;
 }
 
 /* ------------------------------------------------------------------ memory
@@ -1356,10 +1391,18 @@ static void dk_task(void)
     wf_log("dark: roll %03d start, %d of %d to develop, look output %d, print frame %d info %d date %d", roll.num, dv.left,
            dv.total, lk.output, dk_pfr, dk_pin, dk_pdt);
     dk_look(&lk);
+    dk_disp_ons = dk_disp_miss = 0;
+    int d0 = display_is_on(), lv0 = lv;
     if (lv) {
         PauseLiveView();
         paused = 1;
+        int t_p = get_ms_clock();                /* Canon may turn the display off a moment after the pause */
+        while (display_is_on() && get_ms_clock() - t_p < 500)
+            msleep(20);
     }
+    wf_log("dark: screen at the start: display %d -> %d, LiveView %d -> %d%s", d0, display_is_on(), lv0, lv,
+           paused ? " (paused)" : "");
+    dk_screen("after the pause");
     powersave_prohibit();
     int src = wf_dark_src(lk.output, lk.flut), lgw = wf_rawb_logpk(&lk);
     dk_lgk = 0;
@@ -1443,6 +1486,9 @@ static void dk_task(void)
             end_why = "Battery low: charge, then develop the rest";
             break;
         }
+        char sw[12];
+        snprintf(sw, sizeof sw, "before F%02d", i + 1);
+        dk_screen(sw);
         dv.frame = i;
         dv.left = wf_roll_left(&roll);
         dk_t0 = get_ms_clock();
@@ -1476,8 +1522,13 @@ static void dk_task(void)
     }
     dk_free();
     powersave_permit();
+    int d1 = display_is_on();
     if (paused)
         ResumeLiveView();
+    dk_disp_miss = 0;                            /* the screen after the run: asked again whatever the run's asks did */
+    dk_screen("after the run");
+    wf_log("dark: screen at the end: display %d -> %d, LiveView %d%s, display turned on %d times", d1, display_is_on(), lv,
+           paused ? " (resumed)" : "", dk_disp_ons);
     int left = wf_roll_left(&roll);
     dv.frame = -1;
     dv.phase = WF_DP_NONE;

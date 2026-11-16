@@ -726,8 +726,32 @@ void NotifyBox(int timeout, const char *fmt, ...)
  * owner's EOS M layout, one 31,888 KB chunk); tools/dr_check.sh and tools/dr_dark_check.sh test the roll and the develop. */
 int image_review_time = 2, battery_level_bars = 3;
 void LoadCalendarFromRTC(void *tm) { memset(tm, 0, 9 * sizeof(int)); }
-void PauseLiveView(void) { }
-int  ResumeLiveView(void) { return 0; }
+/* LiveView pause and the display (the owner's RAWB18 EOS M: the screen went dark while the Darkroom ran). Off unless
+ * h_lvp: then PauseLiveView turns lv off (and the display too with h_disp_pause_off), ResumeLiveView turns both on;
+ * display_on turns the display on unless h_disp_stuck (then neither does) */
+volatile int h_disp = 1, h_disp_ons, h_lvp, h_disp_pause_off, h_disp_stuck;
+static int h_lv_paused;
+int  display_is_on(void) { return h_disp; }
+void display_on(void) { h_disp_ons++; if (!h_disp_stuck) h_disp = 1; }
+void PauseLiveView(void)
+{
+    if (!h_lvp || !lv)
+        return;
+    lv = 0;
+    h_lv_paused = 1;
+    if (h_disp_pause_off)
+        h_disp = 0;
+}
+int ResumeLiveView(void)
+{
+    if (!h_lv_paused)
+        return 0;
+    h_lv_paused = 0;
+    lv = 1;
+    if (!h_disp_stuck)
+        h_disp = 1;
+    return 1;
+}
 void powersave_prohibit(void) { }
 void powersave_permit(void) { }
 unsigned char *bmp_vram(void) { static unsigned char b[960 * 480]; return b; }

@@ -5753,7 +5753,9 @@ static void t_roll_dark(const char *cs)
     int ut = task_create("wf_ui", 0x1B, 0x2000, (void *)ui_task_stand_in, 0);
     chk(ut > 0 && !(ut & 1) && h_task_slots == 0, "the UI task takes the table's last slot (%x)", ut);
     log_mark();
-    int r0 = h_task_refused, ds = wf_dark_start();
+    h_lvp = 1;                                   /* the EOS M's pause: LiveView off, and the display with it (RAWB18) */
+    h_disp_pause_off = 1;
+    int on0 = h_disp_ons, r0 = h_task_refused, ds = wf_dark_start();
     chk(ds == 0 && !log_has("dark: no task") && h_task_refused == r0,
         "the Darkroom starts with the task table full (%d, %d task_create refused)", ds, h_task_refused - r0);
     chk(LOGW("dark: roll 001 start, 3 of 3 to develop", 5000), "the run goes ('%s')", log_line("dark: roll"));
@@ -5770,6 +5772,13 @@ static void t_roll_dark(const char *cs)
     }
     chk(WAIT(!wf_dark_busy(), 30000) && LOGW("dark: roll 001 end", 3000), "the run ends (host: no SRM, '%s')",
         log_line("dark: roll 001 end"));
+    chk(log_has("dark: screen at the start: display 1 -> 0, LiveView 1 -> 0 (paused)"),
+        "the screen: LiveView paused, the display went off ('%s')", log_line("dark: screen at the start"));
+    chk(strstr(log_line("dark: display off after the pause"), "turned on again, display 1 after ") && h_disp_ons == on0 + 1,
+        "the screen: turned on again after the pause ('%s', %d asks)", log_line("dark: display off"), h_disp_ons - on0);
+    chk(log_has("dark: screen at the end: display 1 -> 1, LiveView 1 (resumed), display turned on 1 times") && lv && h_disp,
+        "the screen: on at the end, LiveView back ('%s')", log_line("dark: screen at the end"));
+    h_lvp = h_disp_pause_off = 0;
     chk(WAIT(!wf_fx_hk && !wf_fx_gk && !wf_fx_mk && h_arena_live == 0, 20000), "after the run, the roll still in: the effects given back (%d)",
         h_arena_live);
     ui_hold = 0;
@@ -5964,7 +5973,13 @@ static void t_roll_mem(void)
     /* split: the camera's layout (one 31,888 KB chunk), shoot blocks up to 16 MB */
     h_srm_n = 1;
     chk(mem_roll(film, 2, dir, 504), "roll 002: the same 3 pairs again (%d)", wf_roll_now()->nshot);
+    h_lvp = h_disp_pause_off = 1;                /* the camera's pause: LiveView off, the display off with it (RAWB18) */
     mem_run("split", 2);
+    chk(log_has("dark: screen at the start: display 1 -> 0, LiveView 1 -> 0 (paused)")
+        && strstr(log_line("dark: display off after the pause"), "display 1 after ") && !log_has("dark: display off before")
+        && log_has("display turned on 1 times"), "split: the display turned on again after the pause, on for all 3 frames "
+        "('%s')", log_line("dark: screen at the end"));
+    h_lvp = h_disp_pause_off = 0;
     const char *ms = log_line("frame split at row ");
     int K = 0;
     const char *kp = strstr(ms, "frame split at row ");
@@ -5985,7 +6000,16 @@ static void t_roll_mem(void)
     h_shoot_max = 6 << 20;
     h_shoot_chunk = 640 << 10;
     chk(mem_roll(film, 3, dir, 507), "roll 003: 3 frames (%d)", wf_roll_now()->nshot);
+    h_lvp = h_disp_pause_off = h_disp_stuck = 1; /* and a display that does not come back: the run goes on dark */
     mem_run("chunks", 3);
+    chk(strstr(log_line("dark: display off after the pause"), "display 0 after ")
+        && strstr(log_line("dark: display off before F02"), "(not asked again this run)") && !log_has("display off before F03")
+        && strstr(log_line("dark: display off after the run"), "display 0 after ")
+        && log_has("dark: screen at the end: display 0 -> 0, LiveView 1 (resumed), display turned on 4 times"),
+        "chunks: a display that stays off: asked 3 times in a row, then not, once more after the run ('%s')",
+        log_line("dark: screen at the end"));
+    h_lvp = h_disp_pause_off = h_disp_stuck = 0;
+    h_disp = 1;
     chk(strstr(log_line("frame split at row "), "from shoot chunks (12 pieces") != 0, "chunks: the head in 12 pieces ('%s')",
         log_line("frame split at row "));
     chk(strstr(log_line("dark: roll 003 end"), "3 developed, 0 failed, 0 left") != 0, "chunks: 3 of 3 ('%s')",
