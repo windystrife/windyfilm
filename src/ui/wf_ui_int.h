@@ -91,9 +91,6 @@ int  wfc_status(void);                  /* 0 ok, else the reason (WFC_E_*) */
 const char *wfc_why(int st);            /* a WFC_E_* code in words ("ok", "not on the card", ...) */
 int  wfc_glow(const struct wf_film *f, uint8_t rgb[3]);   /* 1 = from the pack, 0 = group colour */
 void wfc_draw(const struct wf_film *f, int size, int x, int y, int bg);   /* pack image or the plain can */
-/* the pack image scaled by num / den (nearest; den <= 8), dim = 0..2: every 2nd / 3 of 4 pixels left out (a can further
-   back in the roll picker's carousel); the plain can when the pack has none */
-void wfc_draw_scaled(const struct wf_film *f, int size, int x, int y, int num, int den, int dim);
 int  wfc_pal_used(void);                /* can colours in use: the pack's, or the plain cans' (WFC_PLAIN_N) */
 int  wfc_again(void);                   /* 1 = the pack failed for a reason that may pass (card busy, memory) */
 enum { WFC_OK = 0, WFC_E_NOFILE, WFC_E_HEADER, WFC_E_SIZES, WFC_E_MEM, WFC_E_READ, WFC_E_BUSY };
@@ -110,17 +107,16 @@ void wfui_task_end(void);               /* give the screen and palette back, fre
 void wfui_render(void);                 /* draw the whole browser into the idle buffer */
 void wfui_render_anim(int t, int first);/* the load animation at t ms over it (first: dim the browser once) */
 
-/* ------------------------------------------------------------------ wf_dark_ui.c: Roll + Darkroom screens (DESIGN 3.6) */
-enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_ROLL, WFUI_SCR_DARK, WFUI_SCR_N };
+/* ------------------------------------------------------------------ wf_dark_ui.c: the Darkroom screen (DESIGN 3.6) */
+/* (owner 11-17: the Roll picker screen is gone; a roll is picked in the browser's Darkroom mode, DESIGN 3.12) */
+enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_DARK, WFUI_SCR_N };
 void wfdr_enter(int scr);               /* the screen becomes active: palette theme, its state */
 void wfdr_render(int scr, int now);     /* draw it into the idle buffer */
-enum { WFDR_STAY = 0, WFDR_CLOSE = 1, WFDR_LOADED = 2 };
-int  wfdr_key(int scr, int key);        /* WFDR_*: LOADED = a roll was loaded (wf_ui.c: the load animation, then close) */
-const struct wf_film *wfdr_loaded(int *nexp);   /* that roll's film and exposures */
+int  wfdr_key(int scr, int key);        /* 1 = close the UI */
 int  wfdr_tick(int scr, int now);       /* 1 = something moved (redraw now) */
 int  wfdr_dark(int scr);                /* 1 = the Darkroom's Screen Off has the display dark: no redraws (wf_dark.h) */
 void wfdr_leave(int scr);
-/* the Darkroom entry of the browser and the roll picker (owner 11-15, EOS M): PLAY opens the Darkroom while the roll has
+/* the Darkroom entry of the browser (owner 11-15, EOS M): PLAY opens the Darkroom while the roll has
    frames to develop. wfdr_dev_why: 0 = it can, else why not ("Load a roll first" / "No frames to develop");
    wfdr_dev_hint draws "[PLAY] Darkroom" at x (bright / dim by that), returns its end; wfdr_dev_hint_w its width */
 const char *wfdr_dev_why(void);

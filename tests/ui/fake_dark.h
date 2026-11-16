@@ -17,4 +17,6 @@ int  fake_nswap(void);                      /* wf_roll_req_swap calls that close
 void fake_set_date(int ymd);                /* wf_clock_ymd() (the Date row shows today in its format) */
 void fake_set_dark(int d);                  /* a Screen Off run: the display reads dark (wf_dark_dark) until a key */
 int  fake_nwake(void);                      /* keys that only woke it (wf_dark_wake = 1) */
+void fake_set_shelf(int on);                /* wf_roll_shelved() (a roll set aside by the mode chip) */
+void fake_set_rawb_can(int c);              /* wf_rawb_can(): RAW develop on this camera (wf_rawb in fake_dark.c) */
 #endif

@@ -24,12 +24,20 @@ int  wf_roll_req_load(int film, int exp);
 int  wf_roll_req_rewind(void);
 int  wf_roll_req_close(void);
 /* close the finished roll (FULL, or REWOUND with frames: they stay on the card, kept undeveloped) and load a new one in
-   one request (the roll picker's close-and-load question, owner 11-15); codes as wf_roll_req_load, -1 = no finished roll */
+   one request (the close-and-load question, owner 11-15; the browser's Darkroom mode since 11-17); codes as wf_roll_req_load, -1 = no finished roll */
 int  wf_roll_req_swap(int film, int exp);
 /* owner 11-15: no shot on a finished roll. 1 (FULL) / 2 (REWOUND with frames to develop) while wf_task holds Canon's
    shutter through ML's UI lock, 0 free (no roll, still shooting, closed, developing, movie mode, recording) */
 int  wf_roll_shutter_locked(void);
 int  wf_roll_hud(char *line, int n);             /* the HUD text ("ROLL 021  Windy 400  5/12"), 0 = no roll */
+/* one screen (owner 11-17): the browser's mode chip leaves Darkroom with a roll on the camera. Its frames are never lost:
+   a roll with frames is rewound first (the UI asks), then set aside ("shelved") for the Darkroom. A shelved roll (FULL or
+   REWOUND, or LOADED until wf_task has rewound it) keeps its frames and its film for PLAY -> Darkroom, but the camera
+   shoots in the chosen mode meanwhile: the shutter is free, the look is built, PLAY and image review are Canon's, no end
+   notice. New shots are not frames (wf_roll_seen counts only a LOADED roll). RAM only: cleared by a roll load / close /
+   close-and-load, when the roll is developed or closed, by wf_roll_shelve(0) (the chip back on Darkroom) and at boot. */
+int  wf_roll_shelve(int on);                     /* 0 = done, -1 = no roll on the camera (on = 1) */
+int  wf_roll_shelved(void);                      /* 1 = the roll on the camera is set aside */
 
 /* ------------------------------------------------------------------ darkroom (inside wf_task: no task of its own) */
 enum { WF_DR_IDLE = 0, WF_DR_RUN, WF_DR_STOPPING, WF_DR_STOPPED, WF_DR_DONE, WF_DR_FAIL, WF_DR_N };
@@ -101,9 +109,12 @@ int  wf_dark_dark(int now);                      /* the UI's tick on the Darkroo
                                                     Screen Off run is due dark; 1 = it reads dark (redraws can wait) */
 
 /* ------------------------------------------------------------------ UI */
-#define WF_UI_SCR_ROLL 1                         /* = WFUI_SCR_ROLL / WFUI_SCR_DARK of src/ui/wf_ui_int.h */
+/* wf_ui_open_scr (wf_ui.c): open the UI there, or switch an open UI to it. WF_UI_NEW_ROLL = the browser in Darkroom mode
+   on its Exposures row, the way to a new roll (the ML menu's Film roll, the end-of-roll notice's INFO; owner 11-17: the
+   old Roll picker screen is gone); WF_UI_SCR_DARK = the Darkroom screen; anything else = the browser */
+#define WF_UI_NEW_ROLL 1
 #define WF_UI_SCR_DARK 2
-void wf_ui_open_scr(int scr);                    /* open the UI on a screen (WF_UI_SCR_*), wf_ui.c */
+void wf_ui_open_scr(int scr);
 /* the HUD over LiveView (src/ui/wf_dark_ui.c; wf_task draws it while a roll is in the camera): wfdr_hud_fonts(1) loads
    the font pack once (0 frees it, 2 reads it again; 1 back = the read may pass later: card busy), wfdr_hud draws into ML's bitmap with ML's own colour indices; blink = the "wind on"
    cue. mode: FULL = roll + film chip, big counter, ladder (2.5 s); FADE = the same, dimmed and dithered (0.4 s);

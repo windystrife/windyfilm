@@ -547,16 +547,16 @@ gave the idea and the layout only. None of its code, bitmaps or fonts was opened
 Stocks keep their Windy names, and there are no brand logos.
 
 **Roll (shooting).**
-- **One roll at a time.** The roll picker (UI screen ROLL) has shelf tabs Colour / Slide / B&W / Cine / Stage / LUT
-  (Stage since 11-15: the film-stage chain films, PROCESS chip ECN-2, Double-X 5222 B&W; up to 64 films a shelf), a can
-  carousel, and 3 / 6 / 12 / 24 / 36 exposures (default 24). SET loads the roll and plays the same load animation as a film
-  load in the browser ("Loading the roll", the can, the film's chips and "12 EXP"), then the UI closes and LiveView
+- **One roll at a time.** Since 11-17 a roll is loaded from the WindyFilm browser in Darkroom mode (3.12): its
+  Exposures row (3 / 6 / 12 / 24 / 36, default 24) and SET on a film. Until then the roll picker (UI screen ROLL: shelf
+  tabs, a can carousel, the exposures) did it; the owner found the browser nicer and the picker is gone (its rules below
+  are the browser's now). SET loads the roll and plays the browser's load animation, then the UI closes and LiveView
   shows. A key skips the rest of the animation.
   - A roll with no frames yet is simply reloaded with the new film or count. A loaded roll with frames refuses a new
     load ("This roll has frames: PLAY develops it (Darkroom)").
   - **Close and load** (owner 11-15). A finished roll (full, or rewound with frames left) asks first: "Roll 021 has 12
     undeveloped frames. / Close it and load the new roll? / <film> x12 / (the RAW/JPG files stay on the card)", keys
-    "SET Close and load / MENU Cancel" (`roll_confirm`, a scrim over the picker). SET calls `wf_roll_req_swap`: wf_task
+    "SET Close and load / MENU Cancel" (the browser's `draw_swap` since 11-17). SET calls `wf_roll_req_swap`: wf_task
     closes the roll (its frames become K, `roll: 021 closed for a new roll, 12 frame(s) kept undeveloped`) and loads
     the new one at once, with the load animation. MENU cancels and other keys do nothing. There is no queue of rolls:
     the closed roll's frames are not developed later.
@@ -634,8 +634,8 @@ Stocks keep their Windy names, and there are no brand logos.
     0 and `redraw()` gives Canon's own LiveView marks back.
   - A key press (CBR_KEYPRESS: shutter, arrows, wheel, MENU, INFO, PLAY, ...) drops it at once and goes on to Canon / ML
     as before; SET / Q / joystick centre (EOS M LiveView sends SET as Q) is taken and opens the Darkroom screen
-    (`wf_ui_open_scr`, the same open as TRASH), and INFO is taken and opens the roll picker (a new roll, through the
-    close-and-load question). Only while the box is up.
+    (`wf_ui_open_scr`, the same open as TRASH), and INFO is taken and opens the browser in Darkroom mode on its
+    Exposures row (`WF_UI_NEW_ROLL`: a new roll, through the close-and-load question). Only while the box is up.
   - Never under the ML menu, the UI, PLAY, in movie mode or during a darkroom run (a run's own rewind gives none).
     The log says `roll: end notice full|rewound` each time it shows.
 - **Shutter lock** (owner 11-15: a finished roll takes no more shots). While the roll is FULL, or REWOUND with frames
@@ -661,10 +661,11 @@ Stocks keep their Windy names, and there are no brand logos.
 **Darkroom (developing).**
 - **Entry.** ML menu "Darkroom" opens the darkroom screen. SET starts. MENU stops, after a second MENU to confirm,
   and closes the screen when nothing runs.
-  - From the WindyFilm UI (owner 11-15, EOS M): "[PLAY] Darkroom" in the footer of the roll picker, and of the browser
-    while a roll is on the camera. It is lit when the roll has frames to develop and dim otherwise, with the reason in
+  - From the WindyFilm UI (owner 11-15, EOS M): "[PLAY] Darkroom" in the footer of the browser while a roll is on
+    the camera or the mode chip is on Darkroom (3.12). It is lit when the roll has frames to develop and dim otherwise, with the reason in
     the status pill ("No frames to develop", "Load a roll first"; `wfdr_dev_why`). PLAY opens the darkroom screen
-    when lit. With no roll on the camera the browser's PLAY still closes it, as before. The end-of-roll notice's SET
+    when lit. With no roll on the camera, in JPEG / RAW develop mode, the browser's PLAY still closes it, as before;
+    in Darkroom mode it says "Load a roll first". The end-of-roll notice's SET
     goes to the same screen.
   - Starting needs: not movie mode, a card, battery >= 30 %, and no B develop of a shot still running.
 - **Inside wf_task**, no task of its own (owner RAWB9: DryOS's table was full, `tasks 104 of 104`, the UI task on the
@@ -1000,6 +1001,105 @@ screen itself ("one UI"), at its top right.
 - **Not checked on the camera:** that Canon keeps the display off while LiveView is paused, and how the EOS M's own
   keys reach ML while it is dark (the first key may also be seen by Canon). The 5D2 has no Darkroom: stubs only.
 
+### 3.12 One screen: the browser's mode chip (owner 2026-11-17, branch `wf-onescreen`)
+
+The owner wants to switch shooting modes and see the result at once, with the Darkroom shot from the same screen: the
+WindyFilm browser picks the roll and its length too, and RAW develop and the JPEG path show there as well. The Roll
+picker screen is gone (owner 11-17: "the original WindyFilm UI looks nicer"): every way to a new roll opens the browser.
+- **Control** (`src/ui/wf_ui.c` `mode_chip`). At the browser's top right the MODE chip replaces the loaded-film chip:
+  an icon (JPEG = a picture with hills and a sun, RAW develop = filter squares, Darkroom = a film strip) and the mode's
+  name; with a roll in the camera it reads "Darkroom 5/24" (frames shot / exposures). It looks and works like the
+  Darkroom screen's Screen chip: UP from the first row (or DOWN from the last) focuses it, LEFT / RIGHT / the wheel /
+  SET step it. Messages (`say`) show in an amber chip to its left; "by WindyStrife" hides when there is no room.
+- **Modes.** JPEG = `wf_rawb` off, no roll; RAW develop = `wf_rawb` on, no roll; Darkroom = the Film roll flow. The
+  mode is read from live state each frame (`mode_now`): a roll on the camera that is not set aside = Darkroom (whatever
+  `wf_rawb` says: "both at once" stays reachable through the ML menu and the chip shows the main mode), else Darkroom
+  picked on the chip with no roll yet (`mode_dk`, UI only, not kept across a reboot), else `wf_rawb`. The ML menu's
+  entries stay and stay in step (the chip writes `wf_rawb`; the menu's changes show on the chip).
+- **Cameras.** Darkroom is EOS M only. RAW develop needs `wf_rawb_can()` (EOS M today). The chip shows only when a
+  mode besides JPEG exists: the 5D2 has no chip and its header is unchanged.
+- **Darkroom mode.** An "Exposures 3 / 6 / 12 / 24 / 36" row heads the rows (cassette icon, the chosen count in a pill;
+  default 24); with a roll that has frames it shows the roll's count, greyed, "on the roll" (LEFT / RIGHT say "The roll
+  in the camera keeps its count"). SET on a can loads a roll of it (`wf_roll_req_load`) by the Roll picker's rules: the
+  roll's own film picked again = the load animation, no load; a roll still shooting with frames keeps its film ("This
+  roll has frames: PLAY develops it (Darkroom)"); a finished roll (FULL / REWOUND with frames) brings the picker's
+  close-and-load question in the browser (`draw_swap`, SET yes = `wf_roll_req_swap`, MENU no). The load button reads
+  "SET Load roll", and the roll's film shows "On the roll". The PLAY hint stays ("PLAY Darkroom").
+- **Leaving Darkroom with a roll** (`mode_set`). Frames are never lost:
+  - LOADED with 0 frames: the roll is taken out (`wf_roll_req_close`), "Roll 021 taken out: no frame on it".
+  - LOADED with frames: a question in the browser (`draw_leave`): "Roll 021: 5 of 24 frames shot", "End the roll now
+    and shoot JPEG?", the frames go to the Darkroom (PLAY develops them with the roll's film, which stays loaded until
+    then), new shots are not on the roll. SET = End the roll now (`wf_roll_req_rewind`, today's rewind) and set it aside;
+    MENU = Keep the roll (still Darkroom). Nothing else answers it, and MENU there does not close the browser.
+  - FULL or REWOUND: no question, it is set aside at once ("Roll 021 waits for the Darkroom: PLAY develops it").
+  - Back on Darkroom (the chip), the roll set aside is the camera's roll again (`wf_roll_shelve(0)`).
+- **The shelf** (`src/wf_dark.c`, `wf_roll_shelve` / `wf_roll_shelved`). A roll set aside keeps its frames and its
+  film for PLAY -> Darkroom, but the camera shoots in the chosen mode: the shutter is not held (`roll_shutter`), the
+  look is built (`wf_look_use` no longer returns `WF_LU_NONE` for it), PLAY and image review are Canon's (no blind-roll
+  block), no HUD and no end notice. New shots are not frames (`wf_roll_seen` counts a LOADED roll only, and the rewind
+  is carried out before the next frame poll). The browser refuses another film while a set-aside roll has frames
+  ("Roll 021 waits for the Darkroom: its film stays until then"). RAM only: a roll load / close / close-and-load, the
+  roll developed or closed, the chip back on Darkroom and a reboot end it. Log lines `roll: 021 set aside: ...`,
+  `roll: 021 back from the shelf`, `roll: 021 off the shelf (close | a new roll)`.
+- **The way to a new roll** (owner 11-17, `wf_ui_open_scr(WF_UI_NEW_ROLL)`, `new_roll_view`). The ML menu's "Film
+  roll" and the end-of-roll notice's INFO open the browser in Darkroom mode (a roll set aside comes back from the shelf),
+  the roll's film under the cursor and the focus on the Exposures row. Asked while the browser is open (the ML menu),
+  it switches the open browser. A finished roll (FULL / REWOUND with frames) leaves the row to the next roll: it is not
+  greyed, it reads "next roll", and SET on a film asks to close the roll and load that count (above). The 5D2 opens the
+  browser with "Rolls come to this camera later (EOS M first)". `WF_UI_SCR_DARK` = the Darkroom screen, anything else =
+  the browser; the picker's code (`wf_dark_ui.c` roll section, `wf_cans.c` `wfc_draw_scaled`) and its UI checks went.
+- **PLAY.** In Darkroom mode, or with a roll on the camera, PLAY goes to the Darkroom screen when there are frames to
+  develop, else says why ("Load a roll first", "No frames to develop"); in JPEG / RAW develop mode with no roll it closes
+  the browser as before.
+- **Footer.** It follows the mode: "SET Load" / "SET Load roll"; chip focused "SET Next mode", "L/R Mode"; a question
+  "SET Yes  MENU No" (the PLAY hint hides then). The INFO key map adds "Up from the top row: mode chip: L / R".
+- **Departures from today's rewind**, for the owner: the rewound roll no longer holds the shutter or blocks PLAY while
+  it waits (that is what lets the new mode shoot), and its film stays loaded until the Darkroom. After a reboot the
+  shelf is gone: the roll is the camera's roll again (the chip shows Darkroom, the shutter is held as a finished roll);
+  leaving Darkroom again sets it aside without a question.
+- **Checks.** `tests/ui/ui_test.c` section 7 "one screen" (fake core `tests/ui/fake_dark.c`: shelf, `wf_rawb`,
+  `wf_rawb_can`): the chip's focus order, modes stepping and `wf_rawb` following, the Exposures row, a roll of 24 loaded
+  from the browser, the chip "Darkroom 5/24", a film refused while the roll shoots, the leave question (MENU keeps,
+  LEFT ignored, SET ends + sets aside), back to Darkroom, the close-and-load question, a finished roll set aside without
+  a question, an empty roll taken out, the 5D2 with no chip; shots `one_jpeg_chip`, `one_rawb`, `one_dark_noroll`,
+  `one_dark_roll`, `one_leave`, `one_left_rawb`, `one_swap`; the way to a new roll (a full roll of 24, INFO's request:
+  Darkroom mode, Exposures, the roll's film, "next roll", wheel to 12, SET on another film = close and load 12; the
+  request while open; the 5D2's message), shots `one_from_notice`, `one_light_autowb`. `tests/ui/dr_ui_test.c` now
+  drives the browser for what the picker did (shots `roll_new`, `roll_loaded_msg`, `dev_newroll_play`). `test.sh` ROLL:
+  INFO on the notice asks for screen 1 (`WF_UI_NEW_ROLL`). `test.sh` ROLL `t_roll_lock`: a full roll set aside frees
+  the shutter, builds the look, frees PLAY, a new shot is not a frame; back = held and `WF_LU_NONE` again; a close ends
+  the shelf (`wf_roll_shelve(1)` = -1 after); a new roll fills and holds as before.
+- **Not checked on the camera:** everything above (the chip, the questions, shooting JPEG / RAW develop with a roll set
+  aside, PLAY going to Canon's playback then, the Darkroom developing it afterwards, the new-roll entry from the ML menu
+  and the notice).
+
+### 3.13 Light Auto = Auto WB in the Darkroom (owner 2026-11-17, branch `wf-onescreen`)
+
+The owner: Light Auto should mean Auto WB; Day / Cloudy / Tungsten stay as they are; "not developing film, then the WB
+you set". Canon's WB setting is never changed for it.
+- **Darkroom** (`src/wf_dark.c` `dk_frame`). Every CR2 keeps two sets of WB levels in its MakerNote ColorData: the
+  as-shot ones (short 63..66, the WB set on the camera) and Canon's Auto WB of the scene (short 68..71; colour
+  temperatures at 67 and 72). Checked on the owner's 35 EOS M CR2s (ColorData 1312 entries, version 10): shot on
+  Daylight, the as-shot levels stay on Daylight and the Auto ones follow the scene (IMG_0208: as shot 1935 / 1024 / 1024
+  / 1792, Auto 2236 / 1024 / 1024 / 1502). `wf_cr2_parse` reads both (`wb`, `wb_auto`; Auto only for the 63 layout with
+  at least 73 entries, levels out of 1..16383 = none). With the roll's Light on Auto, `wf_dk_wb_pick` hands the Auto
+  levels to `wf_dk_scales`; Day / Cloudy / Tungsten keep the as-shot ones (the camera was set to them at the shot). A
+  CR2 without Auto levels develops as shot, logged once a run (`dark: IMG_0208: no Auto WB levels in the CR2 ...`). The
+  frame log's `wb` reads `auto`, `as-shot` or `daylight` (no levels at all).
+- **Shots** (JPEG path and RAW develop B) are unchanged: they keep the WB set on the camera. B develops from the raw in
+  memory at the shot, before Canon writes the CR2, and Canon's Auto levels are only in that file; the JPEG path works
+  on Canon's YUV, already balanced. Neither can rebalance to Auto inside our own processing today, and the camera's WB
+  is not touched to get it.
+- **Name.** The Light row reads "Auto WB" on the EOS M (browser, ML menu; help "Auto WB: Darkroom prints use Canon's
+  auto WB (shots: yours). Day, Cloudy, Tungsten."); the 5D2, with no Darkroom, keeps "Auto". The config key stays
+  `light=auto`. There is no Shade value (Light has Auto / Day / Cloudy / Tungsten).
+- **Checks.** `test.sh` LIGHT: the row's name on each camera. LIGHT:awb (EOS M): a synthetic CR2 head (ColorData 1312,
+  as shot on Daylight, Auto different) parses both sets; Light Auto picks Auto and the scales' R/G and B/G follow it;
+  Day / Cloudy / Tungsten keep as shot; bad Auto levels and the 582-entry layout fall back to as shot; the owner's
+  IMG_0208.CR2 gives the levels above. ROLL:mem: the real RAW+L pairs develop with `wb auto` (default Light Auto).
+- **Not checked:** the 5D2's CR2 layout (no 5D2 CR2 on disk; the 5D2 has no Darkroom), the prints' colour on the
+  camera.
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`
@@ -1083,7 +1183,7 @@ The layout, 720x480 (the ML bitmap):
 
 | area | content |
 |---|---|
-| header (0-33) | mark, "WindyFilm" argnor23, "by WindyStrife" 13 px, loaded chip 15 px |
+| header (0-33) | mark, "WindyFilm" argnor23, "by WindyStrife" 13 px, loaded chip 15 px (EOS M on `wf-onescreen`: the MODE chip and a message chip left of it, 3.12) |
 | big can | 160x226 at (45, 40), glow in the film's colour (16 palette rings, recoloured per film), floor shadow |
 | right column x 262 | name argnor28 at y 38; chips (kind / ISO / format) 13 px at y 72; SET Load button; description 15 px, 2 lines at y 96 / 113 |
 | rows | 18 rows since the film-stage merge (10 before), 7 shown from y 136 at 19 px pitch; the list scrolls with the focus (2 px scroll bar at x 712); focus bar in the accent colour, chevrons on the focused value; Strength as 5 bars |
@@ -1119,8 +1219,8 @@ The layout, 720x480 (the ML bitmap):
   frame 1, over the dimmed browser), then the browser closes. EOS M: the browser is open only in stills LV, so LiveView
   is back. 5D2: opened without LV, `force_liveview()` once the screen is Canon's again. A key skips the rest; a
   half-press closes without LiveView. The film already loaded picked again (a roll's own film too) plays the same
-  animation and closes, without a load; on the roll picker the loaded roll's own film and count do the same (a full or
-  rewound roll keeps its message). The errors keep the browser open with their message.
+  animation and closes, without a load; in Darkroom mode the loaded roll's own film and count do the same (a full or
+  rewound roll asks to close it and load). The errors keep the browser open with their message.
 - **Never a dead camera (owner 11-14, EOS M: sometimes neither the film menu nor the ML menu opened):** the browser
   takes every key, so a UI task that does not run left both menus dead. The film worker (prio 0x1C) develops a shot for
   seconds (RAW develop 35-45 s), and wf_task (0x1E) builds the grain tables for 2-19 s without sleeping; the owner's

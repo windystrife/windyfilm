@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include "../../src/wf_api.h"
 #include "../../src/wf_dark.h"
 #include "fake_dark.h"
 
@@ -15,6 +16,8 @@ static uint8_t wire_buf[WF_DR_NWIRE][WF_DR_TW * WF_DR_TH];
 volatile int wf_blind = 1;
 
 static int locked, nswap;
+static int fshelf, rawb_can = 1;
+volatile int wf_rawb;
 void fake_set_locked(int k) { locked = k; }
 int fake_nswap(void) { return nswap; }
 int wf_roll_shutter_locked(void) { return locked; }
@@ -29,6 +32,9 @@ void fake_dark_reset(void)
     for (int i = 0; i < WF_DR_NWIRE; i++) view.wire[i] = wire_buf[i];
     req_film = req_exp = nstart = nstop = 0;
     locked = nswap = 0;
+    fshelf = 0;
+    wf_rawb = 0;
+    rawb_can = 1;
     rgen++;
 }
 struct wf_roll *fake_roll(void) { rgen++; return &roll; }
@@ -133,3 +139,12 @@ int wf_dark_wake(int now)
     return 1;
 }
 int wf_dark_dark(int now) { (void)now; return frun() && wf_dk_scr == WF_DS_OFF && fdark; }
+
+/* ------------------------------------------------------------------ one screen (wf_dark.h: the roll set aside) */
+int wf_roll_shelve(int on) { if (on && !wf_roll_open(&roll)) return -1; fshelf = on ? 1 : 0; rgen++; return 0; }
+int wf_roll_shelved(void) { return fshelf && wf_roll_open(&roll); }
+void fake_set_shelf(int on) { fshelf = on; rgen++; }
+
+/* RAW develop B's menu toggle (wf_rawb.h; the core's wf_rawb.c is not in the harness) */
+int wf_rawb_can(void) { return rawb_can && wf_cam() != WF_CAM_5D2; }   /* as the real builds: EOS M only */
+void fake_set_rawb_can(int c) { rawb_can = c; }

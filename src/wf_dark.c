@@ -96,12 +96,28 @@ static volatile int dk_go;                        /* wf_dark_start asked: wf_tas
 static int nt_state = -1, nt_req, nt_t, nt_len, nt_mode = -1, nt_pt;   /* the end-of-roll notice (roll_notice) */
 static volatile int nt_up, nt_drop, nt_poke;
 static volatile int sh_k;                         /* the shutter held now (roll_shutter): 0 no, 1 full, 2 rewound */
+static volatile int shelf;                        /* the roll set aside (wf_roll_shelve, wf_dark.h): RAM only */
 
 const struct wf_roll *wf_roll_now(void) { return &roll; }
 uint32_t wf_roll_gen(void) { return roll_gen_n; }
 static void roll_changed(void) { roll_gen_n++; wf_gen_bump(); }
 int wf_roll_shooting(void) { return roll.state == WF_RS_LOADED; }
-int wf_roll_blocks_play(void) { return wf_blind && wf_roll_open(&roll) && !dk_running; }
+int wf_roll_shelved(void) { return shelf && wf_roll_open(&roll); }
+int wf_roll_blocks_play(void) { return wf_blind && wf_roll_open(&roll) && !wf_roll_shelved() && !dk_running; }
+
+/* any task (the UI's mode chip); wf_task's next poll applies it (shutter, look, notice) */
+int wf_roll_shelve(int on)
+{
+    if (on && !wf_roll_open(&roll))
+        return -1;
+    if (!on == !shelf)
+        return 0;
+    shelf = on ? 1 : 0;
+    wf_log("roll: %03d %s (%d/%d %s)", roll.num, on ? "set aside: the camera shoots in another mode, PLAY develops it"
+           : "back from the shelf", roll.nshot, roll.exp, wf_roll_state_name(roll.state));
+    roll_changed();
+    return 0;
+}
 int wf_dark_busy(void) { return dk_running; }
 
 /* what the look's tables (the shot LUT, halation / grain / mist) are built for (owner RAWB9, 11-15: each roll frame took
@@ -116,13 +132,14 @@ int wf_look_use(void)
 {
     if (dk_running)
         return WF_LU_DARK;
-    if (wf_roll_open(&roll) && !(WF_RAWB_CAN && wf_rawb))
+    if (wf_roll_open(&roll) && !wf_roll_shelved() && !(WF_RAWB_CAN && wf_rawb))   /* shelved: the chip's mode shoots */
         return WF_LU_NONE;
     return WF_LU_SHOTS;
 }
 
 /* GUI task (wf_main.c wf_keypress): a key while the end-of-roll notice is up drops it (wf_task clears it on its next
- * poll); what 1 (SET / Q) opens the Darkroom on top, 2 (INFO) the roll picker for a new roll. Never in the ML menu (the
+ * poll); what 1 (SET / Q) opens the Darkroom on top, 2 (INFO) the browser in Darkroom mode for a new roll (the
+ * Exposures row; owner 11-17: the old Roll picker screen is gone). Never in the ML menu (the
  * notice is not drawn there either). */
 int wf_roll_notice_key(int what)
 {
@@ -130,7 +147,7 @@ int wf_roll_notice_key(int what)
         return 0;
     nt_drop = 1;
     if (what)
-        wf_ui_open_scr(what == 1 ? WF_UI_SCR_DARK : WF_UI_SCR_ROLL);
+        wf_ui_open_scr(what == 1 ? WF_UI_SCR_DARK : WF_UI_NEW_ROLL);
     return 1;
 }
 
@@ -382,7 +399,8 @@ static void roll_notice(int want, int now)
 #define HUD_FADE_MS 400
 static void roll_hud(void)
 {
-    int want = wf_roll_open(&roll) && !dk_running && lv && !gui_menu_shown() && !wf_ui_is_open() && !is_play_mode();
+    int want = wf_roll_open(&roll) && !wf_roll_shelved() && !dk_running && lv && !gui_menu_shown() && !wf_ui_is_open()
+               && !is_play_mode();          /* a shelved roll (wf_roll_shelve): no HUD, no end notice */
     int now = get_ms_clock();
     if (wf_roll_open(&roll) && !hud_fonts_on && !wf_ui_is_open()) {
         hud_font_again = wfdr_hud_fonts(1) == 1;
@@ -443,8 +461,8 @@ extern void gui_uilock(int what);
 static void roll_shutter(int let_go)
 {
     int k = roll.state == WF_RS_FULL ? 1 : roll.state == WF_RS_REWOUND && wf_roll_left(&roll) > 0 ? 2 : 0;
-    if (!WF_DARK_CAN || let_go || dk_running || is_movie_mode() || __recording || __recording_custom)
-        k = 0;
+    if (!WF_DARK_CAN || let_go || dk_running || wf_roll_shelved() || is_movie_mode() || __recording || __recording_custom)
+        k = 0;                                   /* (shelved: the chip's other mode shoots, the frames wait) */
     if (!k == !sh_k) {
         sh_k = k;                                /* (full <-> rewound: the lock stays) */
         return;
@@ -464,7 +482,11 @@ static void roll_req(void)
     if (!k)
         return;
     const struct wf_film *f = wf_film_by_id(req_film);
-    if (k == 4) {                                /* the roll picker's close-and-load: the finished roll first */
+    if (k != 2 && shelf) {                       /* a load, close or close-and-load ends the shelf; a rewind keeps it */
+        shelf = 0;
+        wf_log("roll: %03d off the shelf (%s)", roll.num, k == 3 ? "close" : "a new roll");
+    }
+    if (k == 4) {                                /* the browser's close-and-load: the finished roll first */
         int left = wf_roll_left(&roll);
         if (wf_roll_close(&roll) == 0)
             wf_log("roll: %03d closed for a new roll, %d frame(s) kept undeveloped", roll.num, left);
@@ -516,6 +538,11 @@ void wf_roll_poll(void)
     int idle = wf_job_state() == 0 && !wf_shot_pending();
     if (idle)
         roll_req();
+    if (shelf && !wf_roll_open(&roll)) {         /* developed (done) or closed: nothing on the shelf any more */
+        shelf = 0;
+        wf_log("roll: %03d %s: off the shelf", roll.num, wf_roll_state_name(roll.state));
+        roll_changed();
+    }
     if (idle && roll.state == WF_RS_LOADED) {    /* new frames: the file number stable over two polls */
         int D = 0, F = 0;
         if (wf_card_nums(&D, &F) == 0) {
@@ -652,6 +679,7 @@ static struct wf_dk_thumb dk_th;
 static struct wf_dk_shot dk_cs;                  /* the CR2's own details (its head, read at load): the finishes' gaps */
 static int dk_pfr, dk_pin, dk_pdt;               /* this run's print finishes (wf_pr_* at its start, DESIGN 3.9) */
 static int dk_pf_said;                           /* WFPRINT.DAT missing / bad: said once a run */
+static int dk_wa_said;                           /* Light Auto on a CR2 without Auto WB levels: said once a run */
 #define DK_PF_PACK "ML/DATA/WFPRINT.DAT"
 /* the maker's wordmark + our model lettering (owner 11-16): ML/DATA/WFLOGO.DAT, made at card time by tools/mk_wflogo.py
    from the owner's own file (never in git); no file = the caption as text alone */
@@ -1540,7 +1568,14 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     wf_dev_levels(M.scr, &j, 16, 64, &lb, &lw);
     j.black = lb ? lb : 2048;
     j.white = lw ? lw : wf_dk_white(WF_DK_EOSM, dk_inf.iso);
-    int as = wf_dk_scales(WF_DK_EOSM, dk_inf.wb, j.black, j.white, dk_inf.iso, j.wb_q8);
+    const int *wbl;                              /* Light Auto: Canon's Auto WB of the shot (owner 11-17), else as shot */
+    int wk = wf_dk_wb_pick(dk_inf.wb, dk_inf.wb_auto, lk->light == WF_LIGHT_AUTO, &wbl);
+    if (wk == WF_DKWB_NOAUTO && !dk_wa_said) {
+        dk_wa_said = 1;
+        wf_log("dark: IMG_%04d: no Auto WB levels in the CR2 (ColorData %d): the as-shot WB (said once a run)",
+               roll.file[i], dk_inf.cd_count);
+    }
+    int as = wf_dk_scales(WF_DK_EOSM, wbl, j.black, j.white, dk_inf.iso, j.wb_q8);
     j.roll = src != WF_DEV_LOG;
     j.hue = dk_lgk ? wf_rb_hue : WF_DEV_HUE_A;   /* chain films (B's switch, wf_rawb.h); cans + sRGB base develop: A */
     j.ms = get_ms_clock;
@@ -1629,7 +1664,8 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     dv.print_ready = 2;
     wf_log("dark: F%02d IMG_%04d iso %d: load %d expose %d fix %d dry %d ms, %d KB, wb %s, trim %d, black %d white %d%s, "
            "shoulder %s %dms, look %s", i + 1, roll.file[i], dk_inf.iso, dk_t[0], dk_t[1], dk_t[2], dk_t[3],
-           (int)(wr.n >> 10), as ? "as-shot" : "daylight", wf_dk_trim10(WF_DK_EOSM, dk_inf.iso), j.black, j.white,
+           (int)(wr.n >> 10), !as ? "daylight" : wk == WF_DKWB_AUTO ? "auto" : "as-shot", wf_dk_trim10(WF_DK_EOSM, dk_inf.iso),
+           j.black, j.white,
            lw ? "" : " (table)", st.roll ? wf_dev_hue_name(st.hue) : "-", st.ro_ms, wf_status_name(status));
     return DK_OK;
 }
@@ -1715,7 +1751,7 @@ static void dk_task(void)
     dk_pin = wf_pr_info > WF_PIN_OFF && wf_pr_info < WF_PIN_N ? wf_pr_info : WF_PIN_OFF;
     dk_pdt = wf_pr_date > WF_PDT_OFF && wf_pr_date < WF_PDT_N ? wf_pr_date : WF_PDT_OFF;
     dk_pjp = wf_pr_jpeg == WF_PJ_OVER ? WF_PJ_OVER : WF_PJ_KEEP;
-    dk_pf_said = dk_lg_said = 0;
+    dk_pf_said = dk_lg_said = dk_wa_said = 0;
     dk_lgn = 0;
     if (dk_pfr && (FIO_GetFileSize(DK_LG_PACK, &dk_lgn) != 0 || dk_lgn < 40))
         dk_lgn = 0;                              /* no WFLOGO.DAT: the caption as text alone */

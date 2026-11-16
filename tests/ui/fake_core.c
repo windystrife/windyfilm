@@ -22,7 +22,7 @@ static const char *const names[WF_NROWS] = { "Light", "Print stock", "Paper", "G
                                              "Exp comp", "Printer R", "Printer G", "Printer B", "Interlayer",
                                              "Bleach bypass", "Print bleach", "Neutral neg", "Neutral print" };
 static const char *const v_paper[] = { "Glossy", "Matte", "Warm", "Cool", 0 };
-static const char *const v_light[] = { "Auto", "Day", "Cloudy", "Tungsten", 0 };
+static const char *const v_light[] = { "Auto WB", "Day", "Cloudy", "Tungsten", 0 };   /* wf_menu.c (EOS M; the 5D2 "Auto") */
 static const char *const v_print[] = { "Scan", "Cine", "Paper", "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72",
                                        "5382", "5384/82", "5384/92", "5385/93", "5385/62", "5386", "5383", "3513D", "3523XD", 0 };
 static const char *const v_print_full[16] = {
@@ -105,6 +105,7 @@ const char *wf_row_text(int r)
 {
     static char b[8];
     if (r == WF_ROW_STRENGTH) { snprintf(b, sizeof(b), "%d%%", val[r] * 25); return b; }
+    if (r == WF_ROW_LIGHT && !val[r] && cam == WF_CAM_5D2) return "Auto";   /* no Darkroom there: the camera's WB */
     return r >= 0 && r < WF_NROWS ? vals[r][val[r]] : "";
 }
 

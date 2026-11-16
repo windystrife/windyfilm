@@ -3,7 +3,8 @@
  * (tests/host/wf_dark_test.c) runs exactly what the camera runs. wf_dark.c (the darkroom task) does the I/O around them.
  *
  *   wf_dk_white    the 14-bit white of an ISO when the shot's own raw shows no clip pile-up (wf_dev_levels)
- *   wf_dk_scales   the develop's channel scales (struct wf_dev_job wb_q8) from the CR2: Canon's as-shot WB levels
+ *   wf_dk_wb_pick  which of the CR2's WB levels the develop takes: Light Auto = Canon's Auto WB levels (owner 11-17)
+ *   wf_dk_scales   the develop's channel scales (struct wf_dev_job wb_q8) from the CR2: Canon's WB levels
  *                  (MakerNote ColorData) for the colour, the fixed scene scale + a per-ISO trim for the exposure
  *   wf_dk_app1     the Exif APP1 segment in the head of Canon's own JPEG of the shot (copied into the print)
  *   wf_dk_comment  that APP1's UserComment (0x9286) overwritten in place with "ASCII\0\0\0" + our line
@@ -17,8 +18,16 @@ enum { WF_DK_EOSM = 0, WF_DK_5D2 = 1 };
 
 int wf_dk_white(int cam, int iso);
 
-/* m: raw unit -> linear Q24, x 256 (wf_dev.h). wb = the CR2's RGGB as-shot levels (wf_cr2_info.wb, 0 = none: the
- * camera's daylight). Exposure: the raw's clip (white - black) at 0.18 x 2^(3.3 + trim) like wf_dev.c's default, trim
+/* the WB levels of a print (owner 11-17: "light = auto -> auto WB, Day / Cloudy / Shade / Tungsten as before"):
+ * want_auto (the run's Light is Auto) with the CR2's Auto levels (wf_cr2_info.wb_auto) there = Canon's Auto WB for the
+ * shot; else the as-shot levels (wf_cr2_info.wb), which hold Day / Cloudy / Tungsten (the Light row set the camera's WB
+ * to them at the shot) or, without a Light, the camera's own WB. *use = the levels for wf_dk_scales. Returns WF_DKWB_*:
+ * AUTO, ASSHOT, or NOAUTO (Auto asked, the CR2 has no Auto levels: as shot) */
+enum { WF_DKWB_ASSHOT = 0, WF_DKWB_AUTO, WF_DKWB_NOAUTO };
+int wf_dk_wb_pick(const int wb[4], const int wb_auto[4], int want_auto, const int **use);
+
+/* m: raw unit -> linear Q24, x 256 (wf_dev.h). wb = the CR2's RGGB levels (wf_dk_wb_pick: as shot or Auto; 0 = none:
+ * the camera's daylight). Exposure: the raw's clip (white - black) at 0.18 x 2^(3.3 + trim) like wf_dev.c's default, trim
  * from the ISO (wf_dk_trim10). Returns 1 = as-shot WB, 0 = daylight. */
 int wf_dk_scales(int cam, const int wb[4], int black, int white, int iso, int32_t m[3]);
 int wf_dk_trim10(int cam, int iso);              /* the exposure trim in 0.1 EV (+ = brighter) */

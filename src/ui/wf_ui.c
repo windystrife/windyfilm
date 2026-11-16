@@ -24,6 +24,7 @@
 #include "wf_ui_int.h"
 #include "wf_icons.h"
 #include "../wf_dark.h"
+#include "../wf_rawb.h"
 
 #define UI_PRIO         0x1B            /* above the film worker (0x1C), below ML's menu_task (0x1A) and Canon's GUI */
 #define UI_STACK        0x2000
@@ -129,17 +130,92 @@ static uint32_t drawn_gen;
 #define ROWS_VIS 7
 static int rtop;
 typedef char rows_vis_check[ROWS_VIS <= WF_NROWS && sizeof wf_icons / sizeof *wf_icons == WF_NROWS ? 1 : -1];
-static void focus_to(int f)
-{
-    focus = (f + WF_NROWS) % WF_NROWS;
-    if (focus < rtop) rtop = focus;
-    if (focus >= rtop + ROWS_VIS) rtop = focus - ROWS_VIS + 1;
-    dirty = 1;
-}
 static int glow_id;
 static const char *msg;
 static int msg_until;
 static int t_probe, t_force, t_heal;
+
+/* ------------------------------------------------------------------ the mode chip (owner 11-17: one screen)
+ * Top right of the browser, in place of the loaded film's chip (the film's own "Loaded" badge says that): how the camera
+ * shoots. JPEG = the film look on Canon's JPEG at once (RAW develop off, no roll); RAW develop = the slow look from
+ * Canon's RAW at the shot (wf_rawb on, no roll); Darkroom = a roll now, prints later (the Exposures row tops the rows and
+ * SET loads a roll of the film under the cursor: wf_roll_req_load, by the old Roll picker's rules). The mode is worked out
+ * from the camera each time, so the ML menu's RAW develop / Film roll stay in step with it: a roll on the
+ * camera (not set aside) = Darkroom; Darkroom picked here with no roll yet (mode_dk, kept between opens, never saved);
+ * else RAW develop as its menu says. RAW develop with a roll at once stays the ML menu's: the chip shows Darkroom then.
+ * Leaving Darkroom with a roll never loses a frame: one with frames asks first (End the roll now: rewound, the frames
+ * wait for the Darkroom / Keep the roll), a finished one is set aside at once (wf_roll_shelve, wf_dark.h), an empty
+ * one comes out. Focus: UP from the first row (or DOWN from the last) reaches the chip, LEFT / RIGHT / the wheel / SET
+ * step it, as the Darkroom's Screen chip. EOS M (RAW develop and rolls are EOS M only): the 5D2 keeps the film chip.
+ * The Roll picker screen is gone (owner 11-17: "the WindyFilm UI is nicer"): the ML menu's Film roll and the end-of-roll
+ * notice's INFO open this browser in Darkroom mode on the Exposures row (wf_ui_open_scr(WF_UI_NEW_ROLL), new_roll_view). */
+enum { M_JPEG = 0, M_RAW, M_DARK, M_N };
+static const char *const mode_name[M_N] = { "JPEG", "RAW develop", "Darkroom" };
+#define FOC_CHIP (-2)                           /* focus on the chip */
+#define FOC_EXP  (-1)                           /* focus on the Exposures row (Darkroom mode) */
+#define NEXP 5
+static const int exps[NEXP] = { 3, 6, 12, 24, 36 };
+static int mode_dk;                             /* Darkroom picked on the chip, no roll on the camera yet */
+static int exp_i = 3;                           /* the Exposures row: 24 */
+static int leave_to = -1;                       /* the leave-Darkroom question is up: the mode asked for */
+static const struct wf_film *sw_film;           /* the close-and-load question (a finished roll, SET on another film) */
+static int sw_exp;
+static char msgb[96];                           /* a say() text built here */
+
+static int mode_ok(int m)
+{
+    return m == M_JPEG || (m == M_RAW && wf_rawb_can()) || (m == M_DARK && wf_cam() != WF_CAM_5D2);
+}
+static int chip_on(void) { return mode_ok(M_RAW) || mode_ok(M_DARK); }
+static int roll_in(void) { const struct wf_roll *r = wf_roll_now(); return wf_roll_open(r) && !wf_roll_shelved(); }
+static int mode_now(void)
+{
+    if (mode_ok(M_DARK) && (roll_in() || mode_dk)) return M_DARK;
+    return mode_ok(M_RAW) && wf_rawb ? M_RAW : M_JPEG;
+}
+static inline int dkm(void) { return mode_now() == M_DARK; }
+/* a roll still shooting with frames keeps its count (the Exposures row shows it, greyed); a finished one (full, rewound)
+ * leaves the row to the next roll: SET on a can then asks to close it and load that count (the close-and-load question) */
+static int exp_locked(void)
+{
+    const struct wf_roll *r = wf_roll_now();
+    return roll_in() && r->state == WF_RS_LOADED && r->nshot > 0;
+}
+static int exp_now(void) { return exp_locked() ? wf_roll_now()->exp : exps[exp_i]; }
+
+/* positions UP / DOWN walk: [the chip] [Exposures] the WF_NROWS rows; lines (the list that scrolls): [Exposures] rows */
+static int nlines(void) { return WF_NROWS + dkm(); }
+static int line_of(int f) { return f == FOC_EXP ? 0 : f >= 0 ? f + dkm() : -1; }
+static int npos(void) { return nlines() + chip_on(); }
+static int pos_of(int f) { return f == FOC_CHIP ? 0 : line_of(f) + chip_on(); }
+static int foc_at(int p)
+{
+    if (chip_on() && !p--) return FOC_CHIP;
+    if (dkm() && !p--) return FOC_EXP;
+    return p;
+}
+/* the focus still valid (the mode may change under it: a roll loaded / closed by wf_task) and its line on screen */
+static void focus_fix(void)
+{
+    if ((focus == FOC_EXP && !dkm()) || (focus == FOC_CHIP && !chip_on()) || focus >= WF_NROWS || focus < FOC_CHIP)
+        focus = WF_ROW_LIGHT;
+    int l = line_of(focus), top_max = nlines() - ROWS_VIS;
+    if (l >= 0 && l < rtop) rtop = l;
+    if (l >= 0 && l >= rtop + ROWS_VIS) rtop = l - ROWS_VIS + 1;
+    if (rtop > top_max) rtop = top_max;
+    if (rtop < 0) rtop = 0;
+}
+static void focus_to(int f)
+{
+    focus = f;
+    focus_fix();
+    dirty = 1;
+}
+static void focus_move(int d)
+{
+    int n = npos();
+    focus_to(foc_at((pos_of(focus) + d + n * 2) % n));
+}
 
 static const char *const gname[WF_NGROUPS] = { "Colour", "Cine", "B&W", "Film LUT", "Film stage" };
 
@@ -241,13 +317,153 @@ static void anim_start(const struct wf_film *f, int nexp)
     dirty = 1;
 }
 
+/* why a film cannot load as a roll (the old Roll picker's words): a table not read yet is not "not on the card" (RAWB8) */
+static const char *roll_why(const struct wf_film *f)
+{
+    if (f->flags & WF_F_LUTCAN) return "LUT cube not on the card";
+    int fs = wf_films_state();
+    return fs == 0 ? "Starting: film tables not read yet" : fs == -1 ? "Worker not running: film tables cannot load"
+                   : "Film table not on the card";
+}
+
+/* Darkroom mode: SET on a can loads a roll of it with the Exposures row's count, by the old Roll picker's rules (moved
+ * here 11-17): the roll in the camera picked again = the animation, no load; a roll still shooting with frames keeps its
+ * film; a finished one asks to close it first (sw_film) */
+static void roll_load(const struct wf_film *f)
+{
+    const struct wf_roll *r = wf_roll_now();
+    int ne = exp_now();
+    if (r->state == WF_RS_LOADED && r->film == f->id && r->exp == ne)
+    {
+        wf_log("ui: roll %d picked again (%d/%d)", r->num, r->nshot, r->exp);
+        anim_start(f, ne);
+        return;
+    }
+    if (wf_roll_open(r) && r->nshot > 0)
+    {
+        if (r->state == WF_RS_LOADED) { say("This roll has frames: PLAY develops it (Darkroom)"); return; }
+        if (!wf_avail(f->id)) { say(roll_why(f)); return; }
+        sw_film = f;
+        sw_exp = exps[exp_i];
+        dirty = 1;
+        wf_log("ui: roll %d finished, close it for %d x%d?", r->num, f->id, sw_exp);
+        return;
+    }
+    if (!wf_avail(f->id)) { say(roll_why(f)); return; }
+    int rc = wf_roll_req_load(f->id, ne);
+    if (rc >= 0)
+    {
+        wf_log("ui: roll load %d x%d", f->id, ne);
+        anim_start(f, ne);
+        return;
+    }
+    say(rc == -3 ? "Busy, press SET again" : rc == -4 ? "Rolls come to this camera later (EOS M first)"
+        : "Cannot load this roll");
+}
+
+static void swap_answer(int yes)
+{
+    const struct wf_film *nf = sw_film;
+    int ne = sw_exp;
+    sw_film = 0;
+    dirty = 1;
+    if (!yes) { wf_log("ui: close-and-load dropped (MENU)"); return; }
+    int rc = wf_roll_req_swap(nf->id, ne);
+    if (rc >= 0)
+    {
+        wf_log("ui: roll closed for a new one, load %d x%d", nf->id, ne);
+        anim_start(nf, ne);
+        return;
+    }
+    say(rc == -3 ? "Busy, press SET again" : "Cannot load this roll");
+}
+
+static void mode_apply(int was, int m)
+{
+    mode_dk = m == M_DARK;
+    if (mode_ok(M_RAW)) wf_rawb = m == M_RAW;               /* the ML menu's RAW develop follows (off at boot) */
+    if (m == M_DARK && wf_roll_shelved()) wf_roll_shelve(0);   /* the roll set aside is the camera's roll again */
+    wf_log("ui: mode %s -> %s", mode_name[was], mode_name[m]);
+    focus_fix();
+    dirty = 1;
+}
+
+/* the chip asks for mode m */
+static void mode_set(int m)
+{
+    int cur = mode_now();
+    if (m == cur || !mode_ok(m)) return;
+    const struct wf_roll *r = wf_roll_now();
+    if (cur != M_DARK || !roll_in()) { mode_apply(cur, m); return; }
+    if (r->state == WF_RS_LOADED && r->nshot == 0)          /* nothing shot: the roll comes out */
+    {
+        int rc = wf_roll_req_close();
+        if (rc < 0) { say(rc == -3 ? "Busy, press again" : "Cannot take the roll out"); return; }
+        snprintf(msgb, sizeof msgb, "Roll %03d taken out: no frame on it", r->num);
+        mode_apply(cur, m);
+        say(msgb);
+        return;
+    }
+    if (r->state == WF_RS_LOADED)                           /* frames on it: ask (End the roll now / Keep the roll) */
+    {
+        leave_to = m;
+        dirty = 1;
+        wf_log("ui: roll %03d has %d frame(s): end it for %s?", r->num, r->nshot, mode_name[m]);
+        return;
+    }
+    wf_roll_shelve(1);                                      /* finished: its frames wait for the Darkroom */
+    snprintf(msgb, sizeof msgb, "Roll %03d waits for the Darkroom: PLAY develops it", r->num);
+    mode_apply(cur, m);
+    say(msgb);
+}
+
+static void mode_step(int d)
+{
+    int m = mode_now();
+    for (int k = 0; k < M_N; k++)
+    {
+        m = (m + (d < 0 ? M_N - 1 : 1)) % M_N;
+        if (mode_ok(m)) break;
+    }
+    mode_set(m);
+}
+
+static void leave_answer(int yes)
+{
+    int m = leave_to;
+    leave_to = -1;
+    dirty = 1;
+    if (!yes) { wf_log("ui: roll kept, still Darkroom"); return; }
+    const struct wf_roll *r = wf_roll_now();
+    int n = r->nshot, rc = wf_roll_req_rewind();
+    if (rc < 0) { say(rc == -3 ? "Busy, press SET again" : "Cannot end the roll"); return; }
+    wf_roll_shelve(1);
+    snprintf(msgb, sizeof msgb, "Roll %03d ended: %d frame%s wait for the Darkroom (PLAY)", r->num, n, n == 1 ? "" : "s");
+    mode_apply(M_DARK, m);
+    say(msgb);
+}
+
+static void exp_step(int d)
+{
+    if (exp_locked()) { say("The roll in the camera keeps its count"); return; }
+    exp_i = (exp_i + (d < 0 ? NEXP - 1 : 1)) % NEXP;
+    dirty = 1;
+}
+
 static void load_sel(void)
 {
     const struct wf_film *f = film_at(sel);
     if (!f) return;
+    if (dkm()) { roll_load(f); return; }
     if (wf_loaded() == f->id) { anim_start(f, 0); return; } /* picked again (a roll's own film too): the same animation,
                                                                then LiveView, without a load (owner 11-14) */
     const struct wf_roll *ro = wf_roll_now();
+    if (wf_roll_shelved() && ro->nshot > 0)                 /* set aside: the Darkroom prints it with its own film */
+    {
+        snprintf(msgb, sizeof msgb, "Roll %03d waits for the Darkroom: its film stays until then", ro->num);
+        say(msgb);
+        return;
+    }
     if (wf_roll_open(ro) && ro->nshot > 0) { say("A roll is in the camera: its film stays until the darkroom"); return; }
     int r = wf_load(f->id);
     if (r == WF_LOAD_OK)
@@ -271,6 +487,8 @@ static int row_film(void)
 
 static void step_row(int d)
 {
+    if (focus == FOC_CHIP) { mode_step(d); return; }
+    if (focus == FOC_EXP) { exp_step(d); return; }
     int id = row_film();
     if (!wf_row_avail_for(focus, id)) return;
     if (wf_row_step_for(focus, d, id)) dirty = 1;
@@ -295,35 +513,45 @@ static void act(int k)
     }
     if (scr != WFUI_SCR_BROWSER)
     {
-        int r = wfdr_key(scr, k), nexp = 0;
-        const struct wf_film *rf = r == WFDR_LOADED ? wfdr_loaded(&nexp) : 0;
-        if (rf) anim_start(rf, nexp);                       /* a roll: the same load animation, then LiveView */
-        else if (r) close_req = 1;
+        if (wfdr_key(scr, k)) close_req = 1;
         dirty = 1;
         return;
     }
+    if (leave_to >= 0 || sw_film)                           /* a question is up: SET yes, MENU no, nothing else */
+    {
+        int yes = k == MODULE_KEY_PRESS_SET || k == MODULE_KEY_JOY_CENTER;
+        if (yes || k == MODULE_KEY_MENU)
+        {
+            if (leave_to >= 0) leave_answer(yes);
+            else swap_answer(yes);
+        }
+        return;
+    }
+    focus_fix();
+    int chip = focus == FOC_CHIP;
     switch (k)
     {
-    case MODULE_KEY_PRESS_LEFT:   if (edit) step_row(-1); else select_film(sel - 1); break;
-    case MODULE_KEY_PRESS_RIGHT:  if (edit) step_row(1); else select_film(sel + 1); break;
-    case MODULE_KEY_PRESS_UP:     focus_to(focus - 1); break;
-    case MODULE_KEY_PRESS_DOWN:   focus_to(focus + 1); break;
+    case MODULE_KEY_PRESS_LEFT:   if (edit || chip) step_row(-1); else select_film(sel - 1); break;
+    case MODULE_KEY_PRESS_RIGHT:  if (edit || chip) step_row(1); else select_film(sel + 1); break;
+    case MODULE_KEY_PRESS_UP:     focus_move(-1); break;
+    case MODULE_KEY_PRESS_DOWN:   focus_move(1); break;
     case MODULE_KEY_WHEEL_LEFT:
     case MODULE_KEY_WHEEL_UP:     step_row(-1); break;
     case MODULE_KEY_WHEEL_RIGHT:
     case MODULE_KEY_WHEEL_DOWN:   step_row(1); break;
     case MODULE_KEY_JOY_CENTER:
         if (is5d2()) { edit = !edit; dirty = 1; break; }   /* 5D2: the joystick press edits the focused row */
-        load_sel();
+        if (chip) mode_step(1);
+        else load_sel();
         break;
-    case MODULE_KEY_PRESS_SET:    edit = 0; load_sel(); break;
+    case MODULE_KEY_PRESS_SET:    edit = 0; if (chip) mode_step(1); else load_sel(); break;
     case MODULE_KEY_Q:
     case MODULE_KEY_PICSTYLE:
     case MODULE_KEY_TOUCH_1_FINGER: edit = 0; next_group(); break;
     case MODULE_KEY_INFO:         info = !info; dirty = 1; break;
-    case MODULE_KEY_PLAY:                                   /* a roll on the camera: the Darkroom entry; no roll: */
-        if (!is5d2() && wf_roll_open(wf_roll_now())) { dev_key(); break; }   /* closes, as before */
-        close_req = 1;
+    case MODULE_KEY_PLAY:                                   /* a roll on the camera or Darkroom mode: the Darkroom */
+        if (!is5d2() && (wf_roll_open(wf_roll_now()) || dkm())) { dev_key(); break; }   /* entry (or why not); else */
+        close_req = 1;                                      /* it closes, as before */
         break;
     case MODULE_KEY_MENU:
     case MODULE_KEY_TRASH:
@@ -362,6 +590,70 @@ static const char *label_of(const struct wf_film *f)
     return f->shortname && *f->shortname ? f->shortname : f->code ? f->code : "";
 }
 
+/* "[KEY] word" pairs from x (y = the text's top); returns the end */
+static int hints(const char *const *k, int x, int y, int kc, int tc)
+{
+    for (; *k; k += 2)
+    {
+        int kw = ui_textw(F_13, k[0]) + 10;
+        wfg_rrect(x, y - 1, x + kw, y + 16, 4, -1, C_KEYO, 1);
+        ui_text(F_13, x + 5, y, k[0], kc);
+        x += kw + 5;
+        x += ui_text(F_13, x, y, k[1], tc) + 12;
+    }
+    return x;
+}
+
+/* the mode's icon, 18 x 13 at (x, y), our own drawing: JPEG a picture (hills, sun), RAW develop the sensor's colour
+ * filter squares, Darkroom a strip of film with its sprocket holes */
+static void mode_icon(int m, int x, int y, int c, int bg)
+{
+    if (m == M_DARK)
+    {
+        wfg_rrect(x, y, x + 17, y + 12, 2, c, -1, 0);
+        for (int i = 0; i < 4; i++)
+        {
+            wfg_rect(x + 2 + i * 4, y + 1, x + 3 + i * 4, y + 2, bg);
+            wfg_rect(x + 2 + i * 4, y + 10, x + 3 + i * 4, y + 11, bg);
+        }
+        wfg_rect(x + 3, y + 4, x + 7, y + 8, bg);
+        wfg_rect(x + 10, y + 4, x + 14, y + 8, bg);
+        return;
+    }
+    wfg_rrect(x, y, x + 17, y + 12, 2, -1, c, 1);
+    if (m == M_RAW)
+    {
+        for (int j = 0; j < 2; j++)
+            for (int i = 0; i < 3; i++)
+                wfg_rect(x + 3 + i * 4 + (j ? 2 : 0), y + 3 + j * 4, x + 5 + i * 4 + (j ? 2 : 0), y + 5 + j * 4, c);
+        return;
+    }
+    wfg_tri(x + 2, y + 10, x + 7, y + 4, x + 11, y + 10, c);
+    wfg_tri(x + 8, y + 10, x + 12, y + 6, x + 16, y + 10, c);
+    wfg_ellipse(x + 12, y + 2, x + 15, y + 5, c);
+}
+
+/* the mode chip, right-aligned at xr (the Darkroom screen's Screen chip, the same look and keys); returns its width */
+static int mode_chip(int xr, int foc)
+{
+    int m = mode_now();
+    const struct wf_roll *r = wf_roll_now();
+    char b[32];
+    const char *t = mode_name[m];
+    if (m == M_DARK && roll_in()) { snprintf(b, sizeof b, "Darkroom %d/%d", r->nshot, r->exp); t = b; }
+    int pad = foc ? 20 : 12, w = pad + 18 + 8 + ui_textw(F_13, t) + pad, x0 = xr - w, ix = x0 + pad;
+    int ic = foc ? C_AMBER : C_TXT2;
+    wfg_rrect(x0, 5, xr, 27, 11, foc ? C_AMBERD : C_CHIPF, foc ? C_AMBER : C_CHIPO, 1);
+    mode_icon(m, ix, 9, ic, foc ? C_AMBERD : C_CHIPF);
+    ui_text(F_13, ix + 26, 8, t, foc ? C_TXT : C_TXT2);
+    if (foc)
+    {
+        wfg_tri(xr - 13, 11, xr - 8, 16, xr - 13, 21, C_AMBER);
+        wfg_tri(x0 + 13, 11, x0 + 8, 16, x0 + 13, 21, C_AMBER);
+    }
+    return w;
+}
+
 /* ------------------------------------------------------------------ areas */
 static void draw_header(int now)
 {
@@ -373,9 +665,28 @@ static void draw_header(int now)
     }
     wfg_tri(18, 21, 25, 14, 32, 21, C_BGLAST);
     int x = 44 + ui_text(F_ML23, 44, 4, "WindyFilm", C_TXT);
+    const char *s, *st_s = wf_status();
+    if (chip_on())                                          /* EOS M: the mode chip; a message / status left of it */
+    {
+        int xr = WFUI_W - 12 - mode_chip(WFUI_W - 12, focus == FOC_CHIP && !info) - 10;
+        s = msg && now - msg_until < 0 ? msg : st_s && *st_s ? st_s : 0;
+        int tag = x + 8 + ui_textw(F_13, "by WindyStrife");
+        if (s)
+        {
+            int lw = ui_textw(F_13, s), lmax = xr - (x + 8) - 30;
+            if (lw > lmax) lw = lmax;
+            int x0 = xr - lw - 30;
+            wfg_rrect(x0, 7, xr, 27, 10, C_SEP, C_WARN, 1);
+            wfg_ellipse(x0 + 9, 13, x0 + 16, 20, C_WARN);
+            ui_text_clip(F_13, x0 + 22, 9, s, C_TXT, xr - 8);
+            if (x0 > tag + 10) ui_text(F_13, x + 8, 11, "by WindyStrife", C_TXT3);
+        }
+        else ui_text(F_13, x + 8, 11, "by WindyStrife", C_TXT3);
+        wfg_rect(12, 33, WFUI_W - 13, 33, C_LINE);
+        return;
+    }
     ui_text(F_13, x + 8, 11, "by WindyStrife", C_TXT3);
 
-    const char *s, *st_s = wf_status();
     const struct wf_film *lf = wf_film_by_id(wf_loaded());
     int fill = C_SEP, out = C_WARN, dot = C_WARN, tc = C_TXT;
     if (msg && now - msg_until < 0) s = msg;
@@ -393,13 +704,15 @@ static void draw_header(int now)
 /* SET Load button (or its Loaded / not-on-card state); returns its left edge */
 static int draw_load_button(const struct wf_film *f, int g)
 {
-    int A = acc(g);
-    if (wf_loaded() == f->id)
+    int A = acc(g), dk = dkm();
+    const struct wf_roll *r = wf_roll_now();
+    if (dk ? roll_in() && r->film == f->id : wf_loaded() == f->id)   /* Darkroom: the roll's film; else the loaded one */
     {
-        int bw = ui_textw(F_15, "Loaded") + 30;
+        const char *s = dk ? "On the roll" : "Loaded";
+        int bw = ui_textw(F_15, s) + 30;
         wfg_rrect(706 - bw, 70, 706, 90, 10, C_CHIPF, C_CHIPO, 1);
         wfg_ellipse(706 - bw + 9, 76, 706 - bw + 16, 83, C_GRN);
-        ui_text(F_15, 706 - bw + 21, 72, "Loaded", C_GRN);
+        ui_text(F_15, 706 - bw + 21, 72, s, C_GRN);
         return 706 - bw;
     }
     if (!wf_avail(f->id))
@@ -411,12 +724,51 @@ static int draw_load_button(const struct wf_film *f, int g)
         ui_text(F_15, 706 - bw + 10, 72, s, C_TXT3);
         return 706 - bw;
     }
+    const char *ls = dk ? "Load roll" : "Load";
     int wset = ui_textw(F_13, "SET");
-    int bw = wset + ui_textw(F_15, "Load") + 26;
+    int bw = wset + ui_textw(F_15, ls) + 26;
     wfg_rrect(706 - bw, 70, 706, 90, 10, A, -1, 0);
     ui_text(F_13, 706 - bw + 9, 73, "SET", C_BGLAST);
-    ui_text(F_15, 706 - bw + 17 + wset, 72, "Load", C_BGLAST);
+    ui_text(F_15, 706 - bw + 17 + wset, 72, ls, C_BGLAST);
     return 706 - bw;
+}
+
+/* the Exposures row (Darkroom mode, on top of the rows): 3 / 6 / 12 / 24 / 36, the count picked in a pill; greyed with
+ * the count of a roll in the camera still shooting with frames ("on the roll"); with a finished roll it is the next
+ * roll's ("next roll"). The icon: our own film cassette with its leader */
+static void draw_exp_line(int y, int A, int AD, int last)
+{
+    int foc = focus == FOC_EXP, lock = exp_locked(), cur = exp_now(), live = foc && !lock;
+    if (foc)
+    {
+        wfg_rrect(258, y - 1, 708, y + 18, 6, AD, -1, 1);
+        wfg_rrect(258, y - 1, 261, y + 18, 2, A, -1, 0);
+    }
+    int ic = lock ? C_TXT3 : foc ? A : C_TXT3;
+    wfg_rrect(271, y + 3, 280, y + 15, 2, -1, ic, 1);                 /* the cassette */
+    wfg_rect(274, y + 1, 277, y + 2, ic);                             /* its spool */
+    wfg_rrect(281, y + 5, 286, y + 13, 1, -1, ic, 1);                 /* the leader */
+    int nx = 294 + ui_text(F_15, 294, y, "Exposures", lock ? C_TXT3 : foc ? C_TXT : C_TXT2);
+    if (lock) ui_text(F_13, nx + 10, y + 2, "on the roll", C_TXT3);
+    else if (roll_in() && wf_roll_now()->nshot > 0) ui_text(F_13, nx + 10, y + 2, "next roll", foc ? C_TXT2 : C_TXT3);
+    int xr = live ? 684 : 700, xl = xr;
+    char b[8];
+    for (int k = NEXP - 1; k >= 0; k--)
+    {
+        snprintf(b, sizeof b, "%d", exps[k]);
+        int w = ui_textw(F_15, b), x = xr - w, on = exps[k] == cur;
+        if (on)
+            wfg_rrect(x - 6, y, x + w + 5, y + 17, 8, live ? A : -1, lock ? C_TXT3 : A, 1);
+        ui_text(F_15, x, y, b, on ? (live ? C_BGLAST : lock ? C_TXT2 : C_TXT) : lock ? C_BAROFF : C_TXT3);
+        xl = x - 6;
+        xr = x - 16;
+    }
+    if (live)
+    {
+        wfg_tri(694, y + 4, 699, y + 9, 694, y + 14, A);
+        wfg_tri(xl - 7, y + 4, xl - 12, y + 9, xl - 7, y + 14, A);
+    }
+    if (!foc && !last) wfg_rect(294, y + 18, 700, y + 18, C_SEP);
 }
 
 static void draw_info_column(const struct wf_film *f, int g)
@@ -432,9 +784,11 @@ static void draw_info_column(const struct wf_film *f, int g)
     if (f->line1) ui_text_clip(F_15, 264, 96, f->line1, C_TXT2, 712);
     if (f->line2) ui_text_clip(F_15, 264, 113, f->line2, C_TXT2, 712);
 
-    for (int r = rtop; r < rtop + ROWS_VIS && r < WF_NROWS; r++)
+    int dk = dkm(), nl = WF_NROWS + dk;
+    for (int li = rtop; li < rtop + ROWS_VIS && li < nl; li++)
     {
-        int y = 136 + (r - rtop) * 19;
+        int y = 136 + (li - rtop) * 19, r = li - dk;
+        if (r < 0) { draw_exp_line(y, A, AD, li == rtop + ROWS_VIS - 1); continue; }
         int foc = r == focus, av = wf_row_avail_for(r, f->id);
         if (foc)
         {
@@ -467,12 +821,12 @@ static void draw_info_column(const struct wf_film *f, int g)
             wfg_tri(694, y + 4, 699, y + 9, 694, y + 14, A);
             wfg_tri(xl - 7, y + 4, xl - 12, y + 9, xl - 7, y + 14, A);
         }
-        if (!foc && r != rtop + ROWS_VIS - 1) wfg_rect(294, y + 18, 700, y + 18, C_SEP);
+        if (!foc && li != rtop + ROWS_VIS - 1) wfg_rect(294, y + 18, 700, y + 18, C_SEP);
     }
-    if (WF_NROWS > ROWS_VIS)                                /* scroll bar: where the 7 shown rows sit among all */
+    if (nl > ROWS_VIS)                                      /* scroll bar: where the 7 shown rows sit among all */
     {
         int y0 = 136, h = ROWS_VIS * 19 - 1;
-        int t0 = y0 + h * rtop / WF_NROWS, t1 = y0 + h * (rtop + ROWS_VIS) / WF_NROWS - 1;
+        int t0 = y0 + h * rtop / nl, t1 = y0 + h * (rtop + ROWS_VIS) / nl - 1;
         wfg_rect(712, y0, 713, y0 + h - 1, C_SEP);
         wfg_rect(712, t0, 713, t1, C_TXT3);
     }
@@ -556,18 +910,62 @@ static void draw_footer(void)
                                          "JOY", "Edit", "PICT", "Group", "INFO", "Info", "MENU", "Exit", 0 };
     static const char *const k_5d2e[] = { "L/R", "Value", "DIAL", "Value", "UP/DN", "Row", "JOY", "Done",
                                           "SET", "Load", "MENU", "Exit", 0 };
-    const char *const *k = !is5d2() ? k_eosm : edit ? k_5d2e : k_5d2;
-    int x = 14;
-    for (; *k; k += 2)
-    {
-        int kw = ui_textw(F_13, k[0]) + 10;
-        wfg_rrect(x, 454, x + kw, 471, 4, -1, C_KEYO, 1);
-        ui_text(F_13, x + 5, 455, k[0], C_TXT2);
-        x += kw + 5;
-        x += ui_text(F_13, x, 455, k[1], C_TXT3) + 12;
-    }
-    if (!is5d2() && wf_roll_open(wf_roll_now()))           /* owner 11-15: "[PLAY] Darkroom" while a roll is on the */
+    static const char *const k_dark[] = { "SET", "Load roll", "L/R", "Film", "UP/DN", "Row", "RING", "Value",   /* the */
+                                          "TAP", "Group", "INFO", "Info", "MENU", "Exit", 0 };                /* mode */
+    static const char *const k_chip[] = { "SET", "Next mode", "L/R", "Mode", "UP/DN", "Row", "TAP", "Group",  /* chip */
+                                          "INFO", "Info", "MENU", "Exit", 0 };
+    static const char *const k_darkp[] = { "SET", "Load roll", "L/R", "Film", "UP/DN", "Row", "RING", "Value",
+                                           "TAP", "Group", "MENU", "Exit", 0 };   /* room for "[PLAY] Darkroom" */
+    static const char *const k_ask[] = { "SET", "Yes", "MENU", "No", 0 };
+    int ask = leave_to >= 0 || sw_film, play = !is5d2() && !ask && wf_roll_open(wf_roll_now());
+    const char *const *k = ask ? k_ask : is5d2() ? (edit ? k_5d2e : k_5d2)
+                         : focus == FOC_CHIP ? k_chip : dkm() ? (play ? k_darkp : k_dark) : k_eosm;
+    hints(k, 14, 455, C_TXT2, C_TXT3);
+    if (play)                                               /* owner 11-15: "[PLAY] Darkroom" while a roll is on the */
         wfdr_dev_hint(706 - wfdr_dev_hint_w(), 455);         /* camera, dim without frames (no roll: as before) */
+}
+
+/* the leave-Darkroom question (owner 11-17: never a frame lost) over the dimmed browser */
+static void draw_leave(void)
+{
+    const struct wf_roll *r = wf_roll_now();
+    const struct wf_film *rf = wf_film_by_id(r->film);
+    int x0 = 96, x1 = 624, y0 = 120, y1 = 344, cx = 360, mw = x1 - x0 - 40, n = r->nshot;
+    char a[64], b[96];
+    wfg_scrim(x0, y0, x1, y1);
+    wfg_rrect(x0, y0, x1, y1, 12, C_BGLAST, C_WARN, 2);
+    snprintf(a, sizeof a, "Roll %03d: %d of %d frames shot", r->num, n, r->exp);
+    text_c(F_ML23, cx, y0 + 20, a, C_TXT, mw);
+    snprintf(b, sizeof b, "End the roll now and shoot %s?", mode_name[leave_to >= 0 ? leave_to : M_JPEG]);
+    text_c(F_15, cx, y0 + 64, b, C_TXT, mw);
+    snprintf(b, sizeof b, "The %d frame%s shot go%s to the Darkroom: PLAY develops %s", n, n == 1 ? "" : "s",
+             n == 1 ? "es" : "", n == 1 ? "it" : "them");
+    text_c(F_15, cx, y0 + 92, b, C_AMBER, mw);
+    snprintf(b, sizeof b, "with %s, which stays loaded until then.", rf ? rf->name : "the roll's film");
+    text_c(F_13, cx, y0 + 124, b, C_TXT2, mw);
+    text_c(F_13, cx, y0 + 142, "New shots are not on the roll.", C_TXT2, mw);
+    static const char *const k[] = { "SET", "End the roll now", "MENU", "Keep the roll", 0 };
+    int w = hints(k, 2000, y1 - 40, C_TXT, C_TXT2) - 2000 - 12;
+    hints(k, cx - w / 2, y1 - 40, C_TXT, C_TXT2);
+}
+
+/* the close-and-load question (a finished roll, SET on another film in Darkroom mode; moved here from the old Roll picker) */
+static void draw_swap(void)
+{
+    const struct wf_roll *r = wf_roll_now();
+    int x0 = 100, x1 = 620, y0 = 128, y1 = 352, cx = 360, mw = x1 - x0 - 40, left = wf_roll_left(r);
+    char a[64], b[64];
+    wfg_scrim(x0, y0, x1, y1);
+    wfg_rrect(x0, y0, x1, y1, 12, C_BGLAST, C_WARN, 2);
+    snprintf(a, sizeof a, "Roll %03d has %d undeveloped frame%s.", r->num, left, left == 1 ? "" : "s");
+    text_c(F_ML23, cx, y0 + 22, a, C_TXT, mw);
+    text_c(F_15, cx, y0 + 66, "Close it and load the new roll?", C_TXT, mw);
+    snprintf(b, sizeof b, "%s  x%d", sw_film->name, sw_exp);
+    text_c(F_15, cx, y0 + 92, b, C_AMBER, mw);
+    text_c(F_13, cx, y0 + 128, "(the RAW/JPG files stay on the card)", C_TXT2, mw);
+    static const char *const k[] = { "SET", "Close and load", "MENU", "Cancel", 0 };
+    int w = hints(k, 2000, y1 - 40, C_TXT, C_TXT2) - 2000 - 12;
+    hints(k, cx - w / 2, y1 - 40, C_TXT, C_TXT2);
 }
 
 /* INFO: the film's details and the key map of this camera, over a dimmed browser */
@@ -576,7 +974,7 @@ static void draw_info(const struct wf_film *f, int g)
     static const char *const h_eosm[] = { "Left / Right", "previous / next film", "Up / Down", "choose a row",
         "Rear ring", "change the row", "SET", "load the film", "1-finger tap", "next group",
         "INFO", "this page", "PLAY", "Darkroom (a roll on)", "MENU, 2-finger tap", "close", "Half-shutter",
-        "close, shoot", 0 };
+        "close, shoot", "Up from the top row", "mode chip: L / R", 0 };
     static const char *const h_5d2[] = { "Joystick left / right", "previous / next film", "Joystick up / down",
         "choose a row", "Main or rear dial", "change the row", "Joystick press", "edit row: L / R",
         "SET", "load the film", "Pict.Style", "next group", "INFO", "this page", "MENU, TRASH", "close",
@@ -716,6 +1114,8 @@ void wfui_render(void)
     draw_strip(g);
     draw_footer();
     if (info) draw_info(f, g);
+    if (leave_to >= 0) draw_leave();
+    else if (sw_film) draw_swap();
 }
 
 /* the load animation at t ms (own design, own can art): a panel over the dimmed browser; the film's leader winds out of
@@ -781,6 +1181,23 @@ void wfui_render_anim(int t, int first)
     wfg_rrect(bx0, by - 1, bx0 + (bx1 - bx0) * e / 1024, by + 5, 3, done ? C_GRN : A, -1, 0);
 }
 
+/* the way to a new roll (wf_ui_open_scr WF_UI_NEW_ROLL: the ML menu's Film roll, the end-of-roll notice's INFO; owner
+ * 11-17, the old Roll picker is gone): Darkroom mode (a roll set aside is the camera's roll again), the focus on the
+ * Exposures row, the roll's film under the cursor. The 5D2 (no rolls) gets the plain browser and says why */
+static volatile int nr_req;
+static void new_roll_view(void)
+{
+    nr_req = 0;
+    if (!mode_ok(M_DARK)) { say("Rolls come to this camera later (EOS M first)"); return; }
+    int cur = mode_now();
+    if (cur != M_DARK) mode_apply(cur, M_DARK);
+    const struct wf_roll *r = wf_roll_now();
+    int i = wf_roll_open(r) ? index_of_id(r->film) : -1;
+    if (i >= 0) select_film(i);
+    focus_to(FOC_EXP);
+    wf_log("ui: a new roll: Darkroom mode, Exposures %d", exp_now());
+}
+
 /* ------------------------------------------------------------------ the UI task */
 void wfui_task_begin(void)
 {
@@ -812,6 +1229,14 @@ void wfui_task_begin(void)
     info = 0;
     msg = 0;
     glow_id = -1;
+    leave_to = -1;
+    sw_film = 0;
+    {
+        const struct wf_roll *r = wf_roll_now();
+        for (int k = 0; k < NEXP; k++)                      /* the roll on the camera's count, else the last one */
+            if (wf_roll_open(r) && exps[k] == r->exp) exp_i = k;
+    }
+    if (nr_req) new_roll_view();                            /* opened for a new roll */
 
     rd_until = get_ms_clock() + PACK_WAIT_MS;
     rd_tries = 0;
@@ -942,6 +1367,7 @@ int wfui_task_tick(void)
             dirty = 1;
         }
     }
+    if (nr_req && scr == WFUI_SCR_BROWSER) { new_roll_view(); dirty = 1; }   /* asked for while open */
     if (scr != WFUI_SCR_BROWSER && wfdr_tick(scr, now)) dirty = 1;
     if ((dirty || now - t_heal >= HEAL_MS) && !wfdr_dark(scr))   /* Screen Off: nothing drawn while dark */
     {
@@ -1043,6 +1469,12 @@ int wfui_host_scr(void) { return scr; }
 const char *wfui_host_msg(void) { return msg && get_ms_clock() - msg_until < 0 ? msg : ""; }
 int wfui_host_edit(void) { return edit; }
 int wfui_host_phase(void) { return phase; }
+int wfui_host_mode(void) { return mode_now(); }         /* 0 JPEG, 1 RAW develop, 2 Darkroom */
+int wfui_host_leave(void) { return leave_to; }
+int wfui_host_swap(void) { return sw_film != 0; }
+int wfui_host_exp(void) { return exp_now(); }
+int wfui_host_chip(void) { return chip_on(); }
+int wfui_host_nr(void) { return nr_req; }
 void wfui_host_beat(int ph, int ago_ms) { phase = ph; hb = get_ms_clock() - ago_ms; }   /* a UI task held up for ago_ms */
 #endif
 
@@ -1178,17 +1610,19 @@ void wf_ui_close(void)
 
 int wf_ui_is_open(void) { return st != ST_CLOSED; }
 
-/* the Roll picker / Darkroom (wf_dark.h): opens the UI on that screen, or switches an open UI to it */
+/* wf_dark.h: WF_UI_SCR_DARK opens the UI on the Darkroom screen (or switches an open UI to it), WF_UI_NEW_ROLL the browser
+ * in Darkroom mode for a new roll (new_roll_view), anything else the browser */
 void wf_ui_open_scr(int s)
 {
-    if (s < 0 || s >= WFUI_SCR_N) s = WFUI_SCR_BROWSER;
+    if (s == WF_UI_NEW_ROLL) nr_req = 1;
+    s = s == WF_UI_SCR_DARK ? WFUI_SCR_DARK : WFUI_SCR_BROWSER;
     if (st == ST_OPEN)
     {
         scr_req = s;                                        /* the UI task makes the switch on its next tick */
         return;
     }
     if (st == ST_CLOSED) scr = s;
-    wf_ui_open();
+    if (wf_ui_open() < 0) nr_req = 0;                       /* not opened: no stale request for the next open */
 }
 
 unsigned int wf_ui_key(unsigned int key)
@@ -1225,9 +1659,10 @@ unsigned int wf_ui_key(unsigned int key)
     {
         int w = kq_w, nw = (w + 1) % KQ_N;
         if (nw != kq_r) { kq[w] = key; kq_w = nw; }
-        if (key == MODULE_KEY_MENU && scr == WFUI_SCR_BROWSER)
+        if (key == MODULE_KEY_MENU && scr == WFUI_SCR_BROWSER && leave_to < 0 && !sw_film)
             close_req = 1;                                  /* EOS M 2-finger tap: the ML menu opens in 3 s (the Roll /
-                                                               Darkroom screens decide on MENU themselves) */
+                                                               Darkroom screens and the browser's questions decide on
+                                                               MENU themselves: there it is "no") */
         return 0;
     }
     }

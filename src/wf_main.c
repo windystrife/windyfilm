@@ -386,7 +386,7 @@ static unsigned int wf_keypress(unsigned int key)
         break;
     case MODULE_KEY_INFO:
         if (wf_roll_notice_key(2))
-            return 0;                            /* INFO: the roll picker, for a new roll */
+            return 0;                            /* INFO: the browser in Darkroom mode, for a new roll */
         break;
     case MODULE_KEY_PRESS_HALFSHUTTER: case MODULE_KEY_PRESS_FULLSHUTTER: case MODULE_KEY_REC:
     case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:

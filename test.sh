@@ -37,6 +37,7 @@ ALL="$ALL MIST:levels"                             # owner 11-15: every Mist lev
 ALL="$ALL STAGE:dark"                              # 11-15: the Darkroom's stage of a chain film, knob rows set, vs the camera's shot
 ALL="$ALL STAGE:v1"                                # 11-16: a version 1 stage pack (no knob data): the last four knob rows hidden
 ALL="$ALL ROLL:mem"                               # 11-16: RAWB17 "no memory": the camera's one SRM chunk, the frame split, real RAW+L pairs
+ALL="$ALL LIGHT:awb"                              # 11-17: Light Auto = Canon's Auto WB in the Darkroom (CR2 ColorData)
 ALL="$ALL ROLL:jpeg"                              # 11-16: Camera JPEG Overwrite + the logo on real RAW+L pairs
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)

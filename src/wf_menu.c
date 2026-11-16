@@ -233,7 +233,15 @@ static const char *wf_print_name[WF_NPRINTS] = { "Scan", "Cine", "Paper",
     "5386", "5383", "3513D", "3523XD" };
 static const char *const wf_print_key[WF_NPRINTS] = { "scan", "cine", "paper",
     "p00", "p01", "p02", "p03", "p04", "p05", "p06", "p07", "p08", "p09", "p10", "p11", "p12", "p13", "p14", "p15" };
-static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Tungsten" };
+#ifdef WF_BUILD_5D2
+static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Tungsten" };   /* no Darkroom: the camera's WB */
+#define WF_LIGHT_HELP "White balance: Auto (yours), the stock's Day, Cloudy, Tungsten."
+#else
+/* owner 11-17: Light Auto = Auto WB. The Darkroom prints with Canon's Auto WB levels of each CR2 (wf_dark.c); a shot
+   (JPEG, RAW develop) keeps the camera's own WB, never changed: Canon's Auto levels are only in the CR2 written after it */
+static const char *wf_light_name[WF_NLIGHT] = { "Auto WB", "Day", "Cloudy", "Tungsten" };
+#define WF_LIGHT_HELP "Auto WB: Darkroom prints use Canon's auto WB (shots: yours). Day, Cloudy, Tungsten."
+#endif
 static const char *const wf_light_key[WF_NLIGHT] = { "auto", "day", "cloudy", "tungsten" };
 static const char *wf_strength_name[WF_NSTRENGTH] = { "30%", "100%", "125%" };
 static const char *const wf_strength_key[WF_NSTRENGTH] = { "subtle", "normal", "strong" };
@@ -1742,7 +1750,7 @@ const char *wf_dcim_dir(void) { return get_dcim_dir(); }
 const char *wf_file_prefix(void) { return get_file_prefix(); }
 
 static const char *const wf_rs_text[WF_RS_N] = { "No roll", "Loaded", "Full", "Rewound", "Developed" };
-static MENU_SELECT_FUNC(wf_roll_select) { (void)priv; (void)delta; wf_ui_open_scr(WF_UI_SCR_ROLL); gui_stop_menu(); }
+static MENU_SELECT_FUNC(wf_roll_select) { (void)priv; (void)delta; wf_ui_open_scr(WF_UI_NEW_ROLL); gui_stop_menu(); }
 static MENU_UPDATE_FUNC(wf_roll_update)
 {
     const struct wf_roll *r = wf_roll_now();
@@ -1809,7 +1817,7 @@ static struct menu_entry wf_menu[] = {
             { .name = "Open film browser", .select = wf_open_select, .icon_type = IT_ACTION,
               .help = "The film strip: pick a film or Film LUT can, Light, Print, effects." },
             { .name = "Film roll", .select = wf_roll_select, .update = wf_roll_update, .icon_type = IT_ACTION,
-              .help = "Load a roll: one film, 3 / 6 / 12 / 24 / 36 RAW+L frames, developed later in the Darkroom." },
+              .help = "WindyFilm in Darkroom mode: Exposures 3-36, SET on a film loads a roll (developed later)." },
             { .name = "Blind roll", .priv = (void *)&wf_blind, .max = 1, .select = wf_blind_select,
               .help = "On: no image review and no PLAY while a roll is in the camera." },
             { .name = "Darkroom", .select = wf_dark_select, .update = wf_dark_update, .icon_type = IT_ACTION,
@@ -1844,7 +1852,7 @@ static struct menu_entry wf_menu[] = {
             { .name = "Input curve", .priv = (void *)&wf_incurve, .max = WF_INC_N - 1, .choices = wf_inc_name,
               .select = wf_inc_select, .update = wf_inc_update,
               .help = "How Log + LUT reads the JPEG: sRGB, or a Canon style undone (Film 1, Neutral)." },
-            WF_ROWE("Light", WF_ROW_LIGHT, wf_light_select, "White balance: Auto (yours), the stock's Day, Cloudy, Tungsten."),
+            WF_ROWE("Light", WF_ROW_LIGHT, wf_light_select, WF_LIGHT_HELP),
             WF_ROWE("Print", WF_ROW_PRINT, wf_print_select, "Scan, cine print or paper print of the loaded film."),
             WF_ROWE("Paper", WF_ROW_PAPER, wf_paper_select, "Glossy: deep black. Matte: softer black. Warm / Cool: base tint."),
             WF_ROWE("Grain", WF_ROW_GRAIN, wf_grain_select, "Grain: Fine / Normal / Strong follow the tone, Even ... does not."),

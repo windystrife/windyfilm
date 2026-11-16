@@ -91,9 +91,9 @@ BRANCH = branch()
 # main-staging 3b45114, so they carry the same exception from their first commit on; `rawb20` merges both.
 # `dr-logo` (the print's logo from the owner's card-time pack, Camera JPEG Overwrite) is cut from rawb20 6cdcb76: the
 # same exception from its first commit on. `dk-screen` (the Darkroom's Screen Off) is cut from dr-logo bdaed37:
-# the same.
+# the same. `wf-onescreen` (the browser's mode chip, one screen) is cut from dk-screen d0c2545: the same.
 NOT_CLEAN = BRANCH in ("film-stage", "grain-halation", "print-frame", "darkroom", "chain-log", "main-staging",
-                       "dark-nomem", "paper-finish", "rawb20", "dr-logo", "dk-screen")
+                       "dark-nomem", "paper-finish", "rawb20", "dr-logo", "dk-screen", "wf-onescreen")
 DENY += list(BRANCH_EXCEPTIONS)                       # the derived generator's names are denied by default ...
 if NOT_CLEAN:                                         # ... and allowed only under the declared exception
     DENY = [w for w in DENY if w not in BRANCH_EXCEPTIONS]

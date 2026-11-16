@@ -1,5 +1,7 @@
-/* dr_ui_test.c - host harness for the Roll + Darkroom screens (src/ui/wf_dark_ui.c, docs/DESIGN.md 3.6): scripted
- * keys against the fake core + fake roll / darkroom (fake_dark.c), checks of what the keys must reach, screenshots.
+/* dr_ui_test.c - host harness for the Darkroom screen, the roll's HUD and end notice (src/ui/wf_dark_ui.c, docs/DESIGN.md
+ * 3.6) and the way to a roll in the browser's Darkroom mode (src/ui/wf_ui.c, DESIGN 3.12; owner 11-17: the Roll picker
+ * screen is gone): scripted keys against the fake core + fake roll / darkroom (fake_dark.c), checks of what the keys must
+ * reach, screenshots.
  *
  *   dr_ui_test OUTDIR CARD_DIR RBF_DIR THUMB_DIR
  * CARD_DIR holds ML/DATA/WFFONTS.DAT + WFCANS.DAT; THUMB_DIR print_<k>.l8 (288 x 192 luma) and wire_<k>.l8 (72 x 48)
@@ -10,20 +12,21 @@
 #include "fake_core.h"
 #include "fake_dark.h"
 
-int wfdr_host_tab(void);
-int wfdr_host_exp(void);
-int wfdr_host_sel_id(void);
 int wfui_host_anim(void);
 int wfui_host_scr(void);
 const char *wfui_host_msg(void);
 void wfui_host_beat(int ph, int ago_ms);
+int wfui_host_sel_id(void);
+int wfui_host_focus(void);
+int wfui_host_mode(void);
+int wfui_host_exp(void);
+int wfui_host_swap(void);
+int wfui_host_nr(void);
 const char *wfdr_host_msg(void);
-int wfdr_host_confirm(void);
 int wfdr_host_pfoc(void);
-const char *wfdr_host_tab_name(void);
-const char *wfdr_host_process(void);
-int wfdr_host_shelf_n(int t);
-int wfdr_host_nshelves(void);
+int wfdr_host_stop_ask(void);
+#define FOC_EXP (-1)                                        /* wf_ui.c: the focus on the Exposures row */
+#define M_DARK  2                                           /* wfui_host_mode: Darkroom */
 
 static const char *outdir;
 static int fails, closed;
@@ -50,7 +53,7 @@ static void shot(const char *name)
     printf("shot %s\n", p);
 }
 
-static void open_scr(int s)
+static void open_scr(int s)                                 /* s: WF_UI_* of wf_dark.h (0 = the browser) */
 {
     closed = 0;
     wf_ui_open_scr(s);
@@ -151,86 +154,24 @@ int main(int argc, char **argv)
     fake_reset();
     fake_set_card(argv[2]);
     fake_dark_reset();
-    int colour = first_of(WF_GRP_COLOUR, 0), slide = first_of(WF_GRP_COLOUR, 1), bw = first_of(WF_GRP_BW, 0);
+    int colour = first_of(WF_GRP_COLOUR, 0), bw = first_of(WF_GRP_BW, 0);
     CHECK(colour && bw, "catalogue without colour / B&W films");
 
-    /* 0. shelves (11-15): every ready film sits on a shelf (none dropped by the 64 per shelf), the film-stage chain
-     * films on their own STAGE shelf with an ECN-2 chip (Double-X 5222 B&W), no longer on COLOUR with C-41 */
-    {
-        int nready = 0, nstage = 0, nshelf = 0, dx = 0, cine_neg = 0, worst = 0;
-        for (int i = 0; i < wf_nfilms; i++)
-        {
-            const struct wf_film *f = &wf_films[i];
-            if (!(f->flags & WF_F_READY)) continue;
-            nready++;
-            if (f->group != WF_GRP_STAGE) continue;
-            nstage++;
-            if (f->shortname && !strcmp(f->shortname + (strlen(f->shortname) > 3 ? strlen(f->shortname) - 3 : 0), "B&W"))
-                dx = f->id;
-            else if (!cine_neg) cine_neg = f->id;
-        }
-        fake_set_loaded(colour);
-        open_scr(WFUI_SCR_ROLL);                            /* the shelves are built on the first entry */
-        for (int t = 0; t < wfdr_host_nshelves(); t++)
-        {
-            nshelf += wfdr_host_shelf_n(t);
-            if (wfdr_host_shelf_n(t) > worst) worst = wfdr_host_shelf_n(t);
-        }
-        CHECK(nshelf == nready, "%d of %d ready films on a shelf", nshelf, nready);
-        CHECK(worst <= 64, "a shelf holds %d films (64 at most)", worst);
-        CHECK(!strcmp(wfdr_host_tab_name(), "COLOUR") && !strcmp(wfdr_host_process(), "C-41"),
-              "colour film on %s / %s", wfdr_host_tab_name(), wfdr_host_process());
-        close_ui();
-        CHECK(nstage > 0, "catalogue without film-stage films");
-        if (cine_neg)
-        {
-            fake_set_loaded(cine_neg);
-            open_scr(WFUI_SCR_ROLL);
-            CHECK(wfdr_host_sel_id() == cine_neg, "picker not on the chain film %d (%d)", cine_neg, wfdr_host_sel_id());
-            CHECK(!strcmp(wfdr_host_tab_name(), "STAGE"), "chain film %d on %s", cine_neg, wfdr_host_tab_name());
-            CHECK(!strcmp(wfdr_host_process(), "ECN-2"), "chain film chip %s", wfdr_host_process());
-            int st = wfdr_host_tab();
-            for (int t = 0; t < wfdr_host_nshelves(); t++)
-                if (t == st) CHECK(wfdr_host_shelf_n(t) == nstage, "STAGE shelf %d of %d", wfdr_host_shelf_n(t), nstage);
-            shot("roll_stage");
-            key(MODULE_KEY_TOUCH_1_FINGER);                 /* STAGE -> the next shelf, all the way round back */
-            CHECK(wfdr_host_tab() != st, "TAP stayed on STAGE");
-            for (int k = 0; k < wfdr_host_nshelves() && wfdr_host_tab() != st; k++) key(MODULE_KEY_TOUCH_1_FINGER);
-            CHECK(wfdr_host_tab() == st && wfdr_host_sel_id() == cine_neg, "TAP round trip lost the STAGE shelf");
-            close_ui();
-        }
-        if (dx)
-        {
-            fake_set_loaded(dx);
-            open_scr(WFUI_SCR_ROLL);
-            CHECK(!strcmp(wfdr_host_tab_name(), "STAGE") && !strcmp(wfdr_host_process(), "B&W"),
-                  "Double-X on %s / %s", wfdr_host_tab_name(), wfdr_host_process());
-            shot("roll_stage_bw");
-            close_ui();
-        }
-        printf("shelves: %d ready films, %d on STAGE (Double-X %d)\n", nready, nstage, dx);
-    }
-
-    /* 1. roll picker, no roll: Colour shelf, the loaded film in the centre */
+    /* 1. a new roll (owner 11-17: the Roll picker screen is gone): the ML menu's Film roll opens the browser in Darkroom
+     * mode on the Exposures row, the loaded film under the cursor; the wheel steps the count, SET loads the roll */
     fake_set_loaded(colour);
-    open_scr(WFUI_SCR_ROLL);
-    CHECK(wfdr_host_sel_id() == colour, "picker does not start on the loaded film");
+    open_scr(WF_UI_NEW_ROLL);
+    CHECK(wfui_host_scr() == WFUI_SCR_BROWSER && wfui_host_mode() == M_DARK && wfui_host_focus() == FOC_EXP
+          && !wfui_host_nr(), "Film roll: screen %d mode %d focus %d (want the browser, Darkroom, Exposures)",
+          wfui_host_scr(), wfui_host_mode(), wfui_host_focus());
+    CHECK(wfui_host_sel_id() == colour, "the browser does not start on the loaded film (%d)", wfui_host_sel_id());
+    shot("roll_new");
+    int e0 = wfui_host_exp();
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wfui_host_exp() != e0, "the wheel did not change the exposures (%d)", e0);
     key(MODULE_KEY_PRESS_RIGHT);
     key(MODULE_KEY_PRESS_RIGHT);
-    key(MODULE_KEY_PRESS_RIGHT);
-    shot("roll_colour");
-    int e0 = wfdr_host_exp();
-    key(MODULE_KEY_PRESS_UP);
-    CHECK(wfdr_host_exp() != e0, "UP did not change the exposures");
-    key(MODULE_KEY_Q);
-    if (slide) CHECK(wfdr_host_tab() == 1, "Q did not go to SLIDE (%d)", wfdr_host_tab());
-    key(MODULE_KEY_PRESS_RIGHT);
-    shot("roll_slide");
-    key(MODULE_KEY_TOUCH_1_FINGER);
-    key(MODULE_KEY_PRESS_RIGHT);
-    key(MODULE_KEY_PRESS_RIGHT);
-    shot("roll_bw");
-    int want = wfdr_host_sel_id(), we = wfdr_host_exp();
+    int want = wfui_host_sel_id(), we = wfui_host_exp();
     key(MODULE_KEY_PRESS_SET);
     CHECK(fake_req_film() == want && fake_req_exp() == we, "SET did not load the roll (%d %d)", fake_req_film(), fake_req_exp());
     CHECK(wf_roll_now()->state == WF_RS_LOADED, "roll not loaded");
@@ -246,19 +187,21 @@ int main(int argc, char **argv)
     CHECK(!wf_ui_is_open() && host_palette_is_canon() && host_live_allocs() == 0, "after the roll's animation: open %d, "
           "palette %d, %ld allocations", wf_ui_is_open(), host_palette_is_canon(), host_live_allocs());
 
-    /* 2. picker with a roll on the camera, 5 of 12 shot: SET says develop first */
+    /* 2. a roll on the camera, 5 of 12 shot: SET on another film says develop first */
     roll_of(bw, 12, 5, WF_RS_LOADED);
-    open_scr(WFUI_SCR_ROLL);
-    CHECK(wfdr_host_sel_id() == bw, "picker does not start on the roll's film");
+    open_scr(WF_UI_NEW_ROLL);
+    CHECK(wfui_host_sel_id() == bw && wfui_host_exp() == 12, "the browser not on the roll's film / count (%d x%d)",
+          wfui_host_sel_id(), wfui_host_exp());
     key(MODULE_KEY_PRESS_RIGHT);
     int before = fake_req_film();
     key(MODULE_KEY_PRESS_SET);
-    CHECK(fake_req_film() == before, "a roll with frames was replaced");
+    CHECK(fake_req_film() == before && strstr(wfui_host_msg(), "PLAY"), "a roll with frames was replaced ('%s')",
+          wfui_host_msg());
     shot("roll_loaded_msg");
     /* .. the roll's own film and count picked again (owner 11-14): the load animation, then LiveView, no new load */
     key(MODULE_KEY_PRESS_LEFT);
-    CHECK(wfdr_host_sel_id() == bw && wfdr_host_exp() == 12, "LEFT not back on the roll's film (%d x%d)",
-          wfdr_host_sel_id(), wfdr_host_exp());
+    CHECK(wfui_host_sel_id() == bw && wfui_host_exp() == 12, "LEFT not back on the roll's film (%d x%d)",
+          wfui_host_sel_id(), wfui_host_exp());
     key(MODULE_KEY_PRESS_SET);
     CHECK(wfui_host_anim() && !closed && fake_req_film() == before && wf_roll_now()->nshot == 5
           && wf_roll_now()->state == WF_RS_LOADED, "the roll picked again: anim %d, request %d, %d frames",
@@ -268,20 +211,21 @@ int main(int argc, char **argv)
     wfui_task_end();
     CHECK(!wf_ui_is_open() && host_live_allocs() == 0, "after the roll picked again: open %d, %ld allocations",
           wf_ui_is_open(), host_live_allocs());
-    /* .. a full roll's own film: the message stays (it takes no frame) */
+    /* .. a full roll's own film: the close-and-load question (it takes no frame, owner 11-15) */
     roll_of(bw, 12, 12, WF_RS_FULL);
-    open_scr(WFUI_SCR_ROLL);
+    open_scr(WF_UI_NEW_ROLL);
     key(MODULE_KEY_PRESS_SET);
-    CHECK(!wfui_host_anim() && !closed && wfdr_host_confirm(), "a full roll picked again: anim %d, question %d (want "
-          "the close-and-load question, owner 11-15)", wfui_host_anim(), wfdr_host_confirm());
+    CHECK(!wfui_host_anim() && !closed && wfui_host_swap(), "a full roll picked again: anim %d, question %d (want "
+          "the close-and-load question, owner 11-15)", wfui_host_anim(), wfui_host_swap());
     key(MODULE_KEY_MENU);                                    /* no: the roll stays */
+    CHECK(!wfui_host_swap() && !closed, "MENU on the question: question %d, closed %d", wfui_host_swap(), closed);
     close_ui();
 
     /* 3. darkroom: ready */
     roll_of(bw, 12, 12, WF_RS_FULL);
     fake_view()->state = WF_DR_IDLE;
     fake_view()->battery = 76;
-    open_scr(WFUI_SCR_DARK);
+    open_scr(WF_UI_SCR_DARK);
     shot("dark_ready");
     /* 3b. the print finishes (owner 11-15, DESIGN 3.9): Frame / Info / Date rows; UP / DOWN pick, LEFT / RIGHT / wheel */
     CHECK(wfdr_host_pfoc() == 0 && wf_pr_frame == 0 && wf_pr_info == 1 && wf_pr_date == 0, "finishes not at their "
@@ -365,9 +309,9 @@ int main(int argc, char **argv)
     tick(2);
     CHECK(wfdr_dark(WFUI_SCR_DARK), "Screen Off run, display dark: the UI still draws");
     key(MODULE_KEY_MENU);
-    CHECK(fake_nwake() == 1 && !wfdr_dark(WFUI_SCR_DARK) && !wfdr_host_confirm() && fake_nstop() == 0 && !closed,
+    CHECK(fake_nwake() == 1 && !wfdr_dark(WFUI_SCR_DARK) && !wfdr_host_stop_ask() && fake_nstop() == 0 && !closed,
           "MENU on the dark screen: woken %d, dark %d, confirm %d, stop %d (want a wake only)", fake_nwake(),
-          wfdr_dark(WFUI_SCR_DARK), wfdr_host_confirm(), fake_nstop());
+          wfdr_dark(WFUI_SCR_DARK), wfdr_host_stop_ask(), fake_nstop());
     shot("dark_run_screen_off_wake");
     fake_set_dark(1);
     key(MODULE_KEY_PRESS_RIGHT);
@@ -447,7 +391,7 @@ int main(int argc, char **argv)
     long a0 = host_live_allocs();
     CHECK(a0 > 0, "HUD fonts: no pack held");
     roll_of(bw, 12, 5, WF_RS_LOADED);
-    open_scr(WFUI_SCR_ROLL);
+    open_scr(WF_UI_NEW_ROLL);
     key(MODULE_KEY_MENU);
     tick(2);
     CHECK(closed, "MENU did not close (shared pack)");
@@ -464,7 +408,7 @@ int main(int argc, char **argv)
     wfdr_hud_fonts(1);
     a0 = host_live_allocs();
     host_menu(1, -1, 1);
-    open_scr(WFUI_SCR_BROWSER);
+    open_scr(0);
     CHECK(closed, "an open under the ML menu did not end");
     wfui_task_end();
     host_menu(0, -1, 0);
@@ -511,9 +455,19 @@ int main(int argc, char **argv)
 
     /* 14. owner 11-15: the Darkroom from inside the UI (PLAY, EOS M), the close-and-load question, the notice while the
      * shutter is held, rolls of 3 */
-    /* .. browser, no roll: as before (no entry, PLAY closes it) */
+    /* .. browser in JPEG mode, no roll: as before (no entry, PLAY closes it). Darkroom mode is kept from the opens above
+     * (the mode chip, owner 11-17): UP past Exposures to the chip, RIGHT = JPEG (no Exposures row), DOWN back to Light */
     fake_dark_reset();
-    open_scr(WFUI_SCR_BROWSER);
+    open_scr(0);
+    if (wfui_host_mode() == M_DARK)
+    {
+        key(MODULE_KEY_PRESS_UP);
+        key(MODULE_KEY_PRESS_UP);
+        key(MODULE_KEY_PRESS_RIGHT);
+        key(MODULE_KEY_PRESS_DOWN);
+    }
+    CHECK(wfui_host_mode() == 0 && wfui_host_focus() == WF_ROW_LIGHT, "JPEG mode on Light (mode %d, focus %d)",
+          wfui_host_mode(), wfui_host_focus());
     shot("dev_browser_noroll");
     key(MODULE_KEY_PLAY);
     tick(2);
@@ -523,7 +477,7 @@ int main(int argc, char **argv)
           wf_ui_is_open(), host_live_allocs());
     /* .. a loaded roll without a frame: the entry dim, PLAY says "No frames to develop" and stays */
     roll_of(bw, 12, 0, WF_RS_LOADED);
-    open_scr(WFUI_SCR_BROWSER);
+    open_scr(0);
     shot("dev_browser_dim");
     key(MODULE_KEY_PLAY);
     CHECK(wfui_host_scr() == WFUI_SCR_BROWSER && !closed && !strcmp(wfui_host_msg(), "No frames to develop"),
@@ -532,7 +486,7 @@ int main(int argc, char **argv)
     close_ui();
     /* .. 5 frames: bright, PLAY opens the Darkroom */
     roll_of(bw, 12, 5, WF_RS_LOADED);
-    open_scr(WFUI_SCR_BROWSER);
+    open_scr(0);
     shot("dev_browser_on");
     key(MODULE_KEY_PLAY);
     tick(2);
@@ -540,47 +494,43 @@ int main(int argc, char **argv)
           wfui_host_scr());
     shot("dev_browser_to_dark");
     close_ui();
-    /* .. the roll picker: bright with frames (PLAY into the Darkroom), dim without (PLAY says why) */
+    /* .. Darkroom mode (the way to a new roll): PLAY into the Darkroom with frames; no roll: PLAY says why, it stays */
     roll_of(bw, 12, 5, WF_RS_LOADED);
-    open_scr(WFUI_SCR_ROLL);
-    shot("dev_roll_on");
+    open_scr(WF_UI_NEW_ROLL);
     key(MODULE_KEY_PLAY);
     tick(2);
-    CHECK(wfui_host_scr() == WFUI_SCR_DARK && !closed, "roll picker PLAY, 5 frames: screen %d", wfui_host_scr());
+    CHECK(wfui_host_scr() == WFUI_SCR_DARK && !closed, "Darkroom mode PLAY, 5 frames: screen %d", wfui_host_scr());
     close_ui();
     fake_dark_reset();
-    open_scr(WFUI_SCR_ROLL);
+    open_scr(WF_UI_NEW_ROLL);
     key(MODULE_KEY_PLAY);
-    CHECK(wfui_host_scr() == WFUI_SCR_ROLL && !closed && !strcmp(wfdr_host_msg(), "Load a roll first"),
-          "roll picker PLAY, no roll: '%s' (screen %d)", wfdr_host_msg(), wfui_host_scr());
-    shot("dev_roll_dim_play");
-    /* .. rolls of 3 and 6 (owner 11-15): DOWN / UP reach them */
-    for (int i = 0; i < 5 && wfdr_host_exp() != 3; i++) key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfdr_host_exp() == 3, "DOWN does not reach 3 exposures (%d)", wfdr_host_exp());
-    shot("roll_exp3");
-    key(MODULE_KEY_PRESS_UP);
-    CHECK(wfdr_host_exp() == 6, "UP from 3: %d (want 6)", wfdr_host_exp());
-    key(MODULE_KEY_PRESS_DOWN);
-    key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfdr_host_exp() == 36, "DOWN from 3 wraps to 36: %d", wfdr_host_exp());
+    CHECK(wfui_host_scr() == WFUI_SCR_BROWSER && !closed && !strcmp(wfui_host_msg(), "Load a roll first"),
+          "Darkroom mode PLAY, no roll: '%s' (screen %d, closed %d)", wfui_host_msg(), wfui_host_scr(), closed);
+    shot("dev_newroll_play");
+    /* .. rolls of 3 and 6 (owner 11-15): the wheel reaches them on the Exposures row */
+    for (int i = 0; i < 5 && wfui_host_exp() != 3; i++) key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wfui_host_exp() == 3, "the wheel does not reach 3 exposures (%d)", wfui_host_exp());
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wfui_host_exp() == 6, "the wheel up from 3: %d (want 6)", wfui_host_exp());
+    key(MODULE_KEY_WHEEL_LEFT);
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wfui_host_exp() == 36, "the wheel down from 3 wraps to 36: %d", wfui_host_exp());
     close_ui();
     /* .. a full roll: SET on a film asks; MENU keeps the roll, SET closes it and loads the new one */
     roll_of(bw, 12, 12, WF_RS_FULL);
-    open_scr(WFUI_SCR_ROLL);
+    open_scr(WF_UI_NEW_ROLL);
     key(MODULE_KEY_PRESS_RIGHT);
-    int nfilm = wfdr_host_sel_id();
+    int nfilm = wfui_host_sel_id();
     key(MODULE_KEY_PRESS_SET);
-    CHECK(wfdr_host_confirm() && !closed && wf_roll_now()->state == WF_RS_FULL, "SET on a full roll: no question (%d)",
-          wfdr_host_confirm());
-    shot("roll_swap_ask");
+    CHECK(wfui_host_swap() && !closed && wf_roll_now()->state == WF_RS_FULL, "SET on a full roll: no question (%d)",
+          wfui_host_swap());
     key(MODULE_KEY_PRESS_LEFT);
-    CHECK(wfdr_host_confirm() && wfdr_host_sel_id() == nfilm, "a key other than SET / MENU moved the picker under the question");
+    CHECK(wfui_host_swap() && wfui_host_sel_id() == nfilm, "a key other than SET / MENU moved the browser under the question");
     key(MODULE_KEY_MENU);
-    CHECK(!wfdr_host_confirm() && !closed && wf_roll_now()->state == WF_RS_FULL && fake_nswap() == 0,
-          "MENU: the question gone, the roll kept, the picker open (closed %d, swaps %d)", closed, fake_nswap());
-    shot("roll_swap_cancel");
+    CHECK(!wfui_host_swap() && !closed && wf_roll_now()->state == WF_RS_FULL && fake_nswap() == 0,
+          "MENU: the question gone, the roll kept, the browser open (closed %d, swaps %d)", closed, fake_nswap());
     key(MODULE_KEY_PRESS_SET);
-    CHECK(wfdr_host_confirm(), "SET again: the question again");
+    CHECK(wfui_host_swap(), "SET again: the question again");
     key(MODULE_KEY_PRESS_SET);
     CHECK(fake_nswap() == 1 && wf_roll_now()->state == WF_RS_LOADED && fake_req_film() == nfilm && wfui_host_anim(),
           "SET: closed and loaded (%d swaps, film %d want %d, anim %d)", fake_nswap(), fake_req_film(), nfilm,
@@ -592,19 +542,11 @@ int main(int argc, char **argv)
           host_live_allocs());
     /* .. rewound with frames to develop: the same question */
     roll_of(colour, 36, 7, WF_RS_REWOUND);
-    open_scr(WFUI_SCR_ROLL);
+    open_scr(WF_UI_NEW_ROLL);
     key(MODULE_KEY_PRESS_SET);
-    CHECK(wfdr_host_confirm(), "SET on a rewound roll: no question");
-    shot("roll_swap_ask_rewound");
+    CHECK(wfui_host_swap(), "SET on a rewound roll: no question");
     key(MODULE_KEY_MENU);
-    CHECK(!wfdr_host_confirm() && !closed, "MENU on the question closed the UI");
-    close_ui();
-    /* .. a roll still shooting, with frames: no question, the message says PLAY */
-    roll_of(bw, 12, 5, WF_RS_LOADED);
-    open_scr(WFUI_SCR_ROLL);
-    key(MODULE_KEY_PRESS_RIGHT);
-    key(MODULE_KEY_PRESS_SET);
-    CHECK(!wfdr_host_confirm() && strstr(wfdr_host_msg(), "PLAY"), "a loaded roll with frames: '%s'", wfdr_host_msg());
+    CHECK(!wfui_host_swap() && !closed, "MENU on the question closed the UI");
     close_ui();
     /* .. the notice while the shutter is held (wf_dark.c locks it on a finished roll): inside its box, clear of the HUD */
     roll_of(bw, 12, 12, WF_RS_FULL);
@@ -633,7 +575,7 @@ int main(int argc, char **argv)
     fake_view()->nwire = 0;
     fake_view()->print_ready = 0;
     int ns0 = fake_nstart();
-    open_scr(WFUI_SCR_DARK);
+    open_scr(WF_UI_SCR_DARK);
     key(MODULE_KEY_PRESS_SET);
     CHECK(fake_nstart() == ns0 + 1 && !closed, "RAWB10: SET in the Darkroom asks for the run (%d)", fake_nstart() - ns0);
     v = fake_view();
@@ -648,7 +590,7 @@ int main(int argc, char **argv)
     v->state = WF_DR_IDLE; v->phase = WF_DP_NONE; v->frame = -1; v->gen++;
     close_ui();
     closed = 0;
-    wf_ui_open_scr(WFUI_SCR_DARK);                 /* the UI task created, still in its open */
+    wf_ui_open_scr(WF_UI_SCR_DARK);                /* the UI task created, still in its open */
     wfui_host_beat(5, 7256);                       /* PH_CANS, held up 7.3 s (RAWB9 192.8 s) */
     CHECK(wf_ui_key(MODULE_KEY_PRESS_SET) == 0, "RAWB10: opening, 7.3 s in the cans read: SET still the UI's");
     wfui_host_beat(5, 10500);
@@ -656,7 +598,7 @@ int main(int argc, char **argv)
     wfui_task_begin();                             /* the close asked for: it ends without taking the screen */
     wfui_task_end();
     closed = 0;
-    wf_ui_open_scr(WFUI_SCR_DARK);
+    wf_ui_open_scr(WF_UI_SCR_DARK);
     wfui_host_beat(3, 2300);                       /* PH_LIST: not a card read, the old 2 s limit */
     CHECK(wf_ui_key(MODULE_KEY_PRESS_SET) == 1, "RAWB10: opening, 2.3 s outside a pack read: the key goes on (2 s)");
     wfui_task_begin();

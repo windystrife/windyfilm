@@ -71,8 +71,15 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
   nạp rồi hoặc lỗi thì giao diện vẫn mở như cũ, kèm dòng báo.
 - Nếu giao diện không lên được ngay (ví dụ máy đang xử lý ảnh vừa chụp), sau
   2 giây các phím lại về Canon / menu ML: chạm 2 ngón vẫn mở menu ML.
-- Hàng Light: Auto (giữ WB của bạn), Day (WB theo phim), Cloudy, Tungsten.
-  WB của bạn được trả lại khi về Auto hoặc khi tắt module.
+- Hàng Light: Auto WB, Day (WB theo phim), Cloudy, Tungsten. Auto WB (17/11): lúc chụp
+  giữ WB của bạn (không đổi WB của máy); Darkroom in bằng Auto WB của Canon ghi trong
+  từng CR2 (HUONGDAN_DARKROOM_EOSM.txt bước x). WB của bạn được trả lại khi về Auto WB
+  hoặc khi tắt module.
+- (17/11, nhánh wf-onescreen) Chip chế độ ở góc trên phải browser: JPEG / RAW develop /
+  Darkroom (có cuộn: "Darkroom 5/24"). Bấm lên từ hàng đầu (hoặc xuống từ hàng cuối) để
+  tới chip; trái / phải / bánh xe / SET đổi chế độ. Darkroom thêm hàng Exposures, SET
+  trên lon là nạp cuộn (HUONGDAN_DARKROOM_EOSM.txt mục 2). Rời Darkroom khi cuộn đã có
+  kiểu: máy hỏi "End the roll now" (SET) hay "Keep the roll" (MENU).
 - Hàng Print stock (trước gọi là Print): Scan / Cine print / Paper với phim có mô
   hình in; với lon Film stage là 15 print stock (mục 6).
 - Hàng Grain: Off / Fine / Normal / Strong (độ hạt đổi theo độ sáng của vùng ảnh) và
@@ -161,7 +168,7 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
    (dòng "stage ok" là của Film stage, xem mục 7).
 2. Chụp một ảnh mỗi chế độ: phim (Print Scan / Cine / Paper), Log, Log + LUT,
    một lon Film LUT. Mỗi ảnh có dòng "yuv NN ..." trong log.
-3. Light Day / Cloudy / Tungsten rồi về Auto: WB trở lại như cũ.
+3. Light Day / Cloudy / Tungsten rồi về Auto WB: WB trở lại như cũ.
 4. Các phím của trình chọn phim; màu giao diện khi LiveView ở phía sau.
 5. EXIF (UserComment) của ảnh có dòng "WindyFilm: ...".
 6. Picture Style Film 1 (User Def. 1, Contrast -2), Log + LUT, Input curve
@@ -321,7 +328,7 @@ Phim chuỗi (chain film): mỗi lon là một phim âm bản điện ảnh (ví
 hàng Print stock. Mỗi cặp âm bản x print có bảng màu 17^3 riêng trong WFFILMS.DAT.
 - ISO và nhiệt độ màu trên header là của âm bản thật: 33 phim T (tungsten) 3200 K,
   11 phim D (daylight) 5200 K, Double-X 5222 EI 250. Light Day với phim T đặt 3200 K:
-  ảnh ngoài trời ngả xanh như phim tungsten không kính lọc. Light Auto giữ WB của
+  ảnh ngoài trời ngả xanh như phim tungsten không kính lọc. Light Auto WB giữ WB của
   bạn (giống gắn kính lọc 85).
 
 Hàng Print stock: 15 print:

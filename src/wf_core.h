@@ -122,7 +122,7 @@ int  wf_dark_busy(void);                          /* a darkroom run lives (RAW d
 int  wf_roll_blocks_play(void);                   /* blind roll: PLAY is eaten */
 int  wf_roll_notice_key(int what);                /* GUI task, a key: drops the end-of-roll notice if it is up (wf_task
                                                      clears it); what 1 (SET / Q) also opens the Darkroom, 2 (INFO) the
-                                                     roll picker for a new roll. 1 = it was up */
+                                                     browser in Darkroom mode for a new roll. 1 = it was up */
 int  wf_roll_shutter_key(void);                   /* GUI task, a half / full shutter press: 1 = eaten (the shutter is held
                                                      on a finished roll; the end notice shows at once) */
 #define WF_KEY_PLAY 24                            /* ML module.h MODULE_KEY_PLAY */                           /* wf_menu.c: ML lens_info.job_state (Canon busy with a shot when != 0) */

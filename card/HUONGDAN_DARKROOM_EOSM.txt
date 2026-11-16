@@ -42,24 +42,33 @@ bộ code Darkroom là code mới của WindyFilm (không dùng code Film Roll).
 
 2. NẠP CUỘN PHIM
 ----------------
-Menu ML: Shoot > WindyFilm > "Film roll" -> màn hình chọn cuộn:
-- Q (hoặc chạm 1 ngón): đổi kệ Colour / Slide / B&W / Cine / Stage / LUT. Kệ Stage có
-  44 lon Film stage (G00..G44, âm bản điện ảnh x print stock, README mục 6), chip
-  PROCESS ECN-2 (Double-X 5222: B&W).
-- Trái / phải hoặc xoay bánh xe: chọn hộp phim.
-- Lên / xuống (hoặc INFO): 3 / 6 / 12 / 24 / 36 kiểu (mặc định 24; 3 và 6 để thử nhanh).
-- SET: nạp cuộn: chạy hoạt ảnh nạp phim giống lúc nạp phim trong browser ("Loading the
-  roll" -> "Roll loaded"), rồi tự đóng và về LiveView. MENU: thoát.
-- PLAY: vào thẳng Darkroom (chân màn hình có "[PLAY] Darkroom"). Chữ sáng khi cuộn có
+(17/11) Màn hình chọn cuộn cũ đã bỏ: cuộn được nạp ngay trong browser WindyFilm, ở chế
+độ Darkroom (chip chế độ ở góc trên phải, README mục 2).
+- Vào: menu ML Shoot > WindyFilm > "Film roll", hoặc INFO lúc bảng END OF ROLL đang
+  hiện: browser mở ở chế độ Darkroom, con trỏ ở hàng Exposures, đứng trên phim của
+  cuộn. Mở browser như thường thì bấm lên tới chip góc trên phải, trái / phải chọn
+  Darkroom.
+- Chạm 1 ngón: đổi nhóm Colour / Cine / B&W / Film LUT / Film stage. Nhóm Film stage có
+  44 lon (G00..G44, âm bản điện ảnh x print stock, README mục 6).
+- Trái / phải: chọn hộp phim.
+- Hàng Exposures, xoay bánh xe: 3 / 6 / 12 / 24 / 36 kiểu (mặc định 24; 3 và 6 để thử
+  nhanh).
+- SET: nạp cuộn: chạy hoạt ảnh nạp phim ("Loading the roll" -> "Roll loaded"), rồi tự
+  đóng và về LiveView. MENU: thoát.
+- PLAY: vào thẳng Darkroom (chân màn hình có "PLAY Darkroom"). Chữ sáng khi cuộn có
   kiểu để tráng; mờ khi chưa có cuộn ("Load a roll first") hoặc chưa chụp kiểu nào
-  ("No frames to develop"). Trong browser phim cũng vậy, khi đang có cuộn trong máy
-  (không có cuộn thì PLAY đóng browser như cũ).
+  ("No frames to develop"). Ở chế độ JPEG / RAW develop, không có cuộn, PLAY đóng
+  browser như cũ.
 - Cuộn đang chụp dở mà đã có kiểu: không nạp cuộn khác được ("This roll has frames:
-  PLAY develops it").
-- Cuộn đã hết (hoặc đã tua lại) mà chưa tráng, chọn phim mới rồi SET: máy hỏi
-  "Roll 001 has 12 undeveloped frames. Close it and load the new roll? (the RAW/JPG
-  files stay on the card)". SET: đóng cuộn cũ (các kiểu chưa tráng bị bỏ, file RAW /
-  JPG vẫn còn trên thẻ) và nạp cuộn mới. MENU: huỷ. Không có hàng chờ nhiều cuộn.
+  PLAY develops it"); hàng Exposures mờ, ghi "on the roll".
+- Cuộn đã hết (hoặc đã tua lại) mà chưa tráng: hàng Exposures ghi "next roll" (số kiểu
+  của cuộn sau). Chọn phim rồi SET: máy hỏi "Roll 001 has 12 undeveloped frames. Close
+  it and load the new roll? (the RAW/JPG files stay on the card)". SET: đóng cuộn cũ
+  (các kiểu chưa tráng bị bỏ, file RAW / JPG vẫn còn trên thẻ) và nạp cuộn mới. MENU:
+  huỷ. Không có hàng chờ nhiều cuộn.
+- Chip sang JPEG / RAW develop khi cuộn đã có kiểu: máy hỏi "End the roll now" (SET:
+  cuộn tua lại, để riêng chờ Darkroom, máy chụp tiếp ở chế độ đã chọn) hay "Keep the
+  roll" (MENU). Cuộn chưa có kiểu thì được lấy ra luôn.
 
 Mục "Blind roll" (mặc định On): khi có cuộn trong máy thì tắt xem lại ảnh sau khi
 chụp và khoá nút PLAY. Muốn xem ảnh như thường thì đặt Off.
@@ -92,8 +101,8 @@ không có CR2 thì không được đếm.
   lại (thoát menu, thoát xem ảnh), sau mỗi tấm chụp, khi đếm thêm kiểu, và khi đổi cuộn.
 - Đủ số kiểu: giữa màn hình hiện bảng lớn "END OF ROLL" (12/12, tên phim, số cuộn,
   "Roll finished: develop it in the Darkroom, or load a new roll") khoảng 5 giây hoặc
-  tới khi bấm một nút. Lúc bảng đang hiện: SET mở thẳng Darkroom, INFO mở màn hình
-  chọn cuộn (cuộn mới). Bảng hiện lại 2,5 giây mỗi lần LiveView quay lại, cho tới khi
+  tới khi bấm một nút. Lúc bảng đang hiện: SET mở thẳng Darkroom, INFO mở browser ở
+  chế độ Darkroom, hàng Exposures (cuộn mới). Bảng hiện lại 2,5 giây mỗi lần LiveView quay lại, cho tới khi
   tráng hoặc Close roll. Bộ đếm đỏ "END OF ROLL".
 - KHOÁ CHỤP: cuộn hết (hoặc tua lại còn kiểu chưa tráng) thì nút chụp bị khoá (khoá
   UI của ML, như lúc ML chống ERR70). Bấm nửa cò / chụp trên LiveView: bảng END OF ROLL
@@ -235,13 +244,14 @@ h. HUD: sau khi nạp cuộn, thông tin phim hiện khoảng 2,5 s rồi mờ �
    Vào menu ML rồi thoát ra: thông tin hiện lại. Chụp 1 tấm: hiện lại.
 i. Bảng hết cuộn: ở b. (tấm thứ 12) phải hiện bảng lớn "END OF ROLL" khoảng 5 s.
    Bấm MENU hoặc phím mũi tên: bảng tắt ngay. Vào menu ML rồi thoát: bảng hiện lại
-   2,5 s. Lúc bảng đang hiện bấm SET: mở Darkroom; bấm INFO: mở màn hình chọn cuộn
-   (ghi lại nếu INFO không có tác dụng trên LiveView). Ở e. "End roll now": bảng
+   2,5 s. Lúc bảng đang hiện bấm SET: mở Darkroom; bấm INFO: mở browser ở chế độ
+   Darkroom, hàng Exposures ghi "next roll" (ghi lại nếu INFO không có tác dụng trên
+   LiveView). Ở e. "End roll now": bảng
    "ROLL REWOUND".
 j. Vào Darkroom, SET bắt đầu tráng: log có "roll: shutter free". Tráng xong chụp được
    như thường.
-k. Cuộn hết, vào chọn cuộn, chọn phim khác, SET: phải hiện câu hỏi "Close it and load
-   the new roll?". MENU: huỷ, cuộn cũ còn nguyên. Lần nữa bấm SET: cuộn mới nạp, nút
+k. Cuộn hết, vào "Film roll" (browser, chế độ Darkroom), chọn phim khác, SET: phải hiện
+   câu hỏi "Close it and load the new roll?". MENU: huỷ, cuộn cũ còn nguyên. Lần nữa bấm SET: cuộn mới nạp, nút
    chụp mở lại, log có "closed for a new roll".
 l. Chế độ quay phim khi cuộn đã hết: quay được bình thường (không khoá).
 m. (15/11) Nạp cuộn 6 kiểu, RAW develop Off: chụp 3 tấm liên tiếp nhanh. Mỗi tấm phải chụp
@@ -251,8 +261,8 @@ n. (15/11) "End roll now", vào Darkroom, SET: phải hiện "Mixing the chemist
    cả 3 kiểu. Log KHÔNG được có "dark: no task"; phải có "dark: roll ... start" và
    "dark: look ready". Ghi lại thời gian mỗi kiểu (đồng hồ ngoài) và bản in có màu phim.
 o. (15/11) Tắt máy bật lại khi đang có cuộn: cuộn (ROLL 00n, bộ đếm) phải hiện ngay khi
-   LiveView lên, không phải chờ. Mở màn hình chọn cuộn ngay sau khi bật: không bị đóng
-   ("no beat" trong log là lỗi cần báo).
+   LiveView lên, không phải chờ. Mở "Film roll" (browser) ngay sau khi bật: không bị
+   đóng ("no beat" trong log là lỗi cần báo).
 p. (15/11) Sau "New roll" / nạp cuộn mới: chụp ngay được, không "busy".
 q. (15/11) Viền + ngày: trong Darkroom đặt Frame White, Info On + roll, Date 'YY MM DD
    rồi tráng một cuộn ngắn (3 kiểu, có 1 tấm dọc). Bản in phải có viền trắng, 3 dòng
@@ -271,8 +281,8 @@ s. (15/11) Cuộn Film stage có knob. Thẻ phải có ML/DATA/WFSTAGE.DAT; log
       | Gauge 16 mm".
    2. Bật RAW develop On (để ảnh so cũng đi từ CR2). Chụp lại cảnh đó 1 tấm: chờ
       "RAW develop n%" xong. Đây là ảnh so tốt nhất: cùng CR2-develop như Darkroom.
-   3. Màn hình chọn cuộn: mở ra đã ở kệ Stage, trên G08 (phim đang nạp); 3 kiểu,
-      SET. Giữ nguyên RAW develop On và mọi hàng ở bước 1. Chụp 3 tấm cùng cảnh (bộ
+   3. "Film roll": browser mở ở chế độ Darkroom, trên G08 (phim đang nạp); hàng
+      Exposures 3 kiểu, SET. Giữ nguyên RAW develop On và mọi hàng ở bước 1. Chụp 3 tấm cùng cảnh (bộ
       đếm lên sau khoảng 30 s mỗi tấm, như mục g.).
    4. Vào Darkroom, SET (KHÔNG đổi hàng nào trước đó). Log phải có:
         stage G08 v4 composed NNms k...   (hoặc không có, nếu bảng đã dựng sẵn từ lúc chụp)
@@ -306,6 +316,12 @@ w. (16/11, RAWB22) Screen Off: chọn nút góc trên phải = Screen Off, trán
    không phím nào được thì thử nửa nút chụp), màn hình có tự sáng lại giữa chừng không,
    thời gian tráng và % pin trước / sau so với một cuộn Screen On. Xong thì đặt lại Screen
    On nếu muốn.
+x. (17/11) Light Auto WB: WB của máy (menu Canon) đặt Daylight, hàng Light = Auto WB,
+   cuộn 3 kiểu chụp trong nhà dưới đèn vàng. Tráng: bản in phải cân màu như Auto WB của
+   Canon (không vàng như JPG Daylight trong DCIM); log mỗi kiểu có "wb auto". Rồi Light
+   = Day, cuộn 3 kiểu cùng cảnh: bản in theo WB lúc chụp ("wb as-shot"). WB trong menu
+   Canon không bị đổi vì Light Auto WB. Ghi lại nếu bản in Auto WB lệch màu so với ảnh
+   chụp thử bằng AWB của Canon.
 
 
 6. GỬI LẠI

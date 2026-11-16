@@ -56,6 +56,8 @@ struct wf_cr2_info {
     uint32_t et_n, et_d;                /* EXIF ExposureTime (0x829A) et_n / et_d s, 0 0 = not given */
     uint32_t fn_n, fn_d;                /* EXIF FNumber (0x829D) fn_n / fn_d, 0 0 = not given */
     int      wb[4];                     /* Canon's as-shot RGGB levels from ColorData (MakerNote 0x4001), 0 = none */
+    int      wb_auto[4];                /* Canon's Auto WB RGGB levels (WB_RGGBLevelsAuto) of the shot, whatever WB it
+                                           was taken with: ColorData 3 and later only (EOS M: 1312 entries), 0 = none */
     int      cd_count;                  /* ColorData entries (its version), 0 = none */
     int      orient;                    /* EXIF orientation 1..8 of IFD0, 0 = not given */
     uint32_t strip_off, strip_len;      /* the raw: lossless JPEG in IFD3 */

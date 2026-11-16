@@ -90,7 +90,7 @@ int wf_cr2_parse(const uint8_t *head, uint32_t nhead, uint32_t fsize, struct wf_
     uint32_t ifd0 = r32(&r, 4), rawifd = r32(&r, 12);
 
     /* EXIF: ISO, MakerNote -> ColorData (as-shot WB at short 63 for ColorData4 and later; 25 / 34 / 71 for the 582 /
-       653 / 5120 entry versions), as tools/cr2_dec.c */
+       653 / 5120 entry versions), as tools/cr2_dec.c; Auto WB at short 68 (ColorData 3 and later) */
     uint32_t e = ifd_tag(&r, ifd0, 0x8769);
     if (e) {
         uint32_t exif = r32(&r, e + 8);
@@ -116,6 +116,21 @@ int wf_cr2_parse(const uint8_t *head, uint32_t nhead, uint32_t fsize, struct wf_
                 int idx = cnt == 582 ? 25 : cnt == 653 ? 34 : cnt == 5120 ? 71 : 63;
                 inf->cd_count = (int)cnt;
                 for (int c = 0; c < 4; c++) inf->wb[c] = (int)r16(&r, off + 2 * (idx + c));
+                /* the Auto WB levels (owner 11-17, Light Auto = Auto WB in the Darkroom): 5 shorts after the as-shot
+                   ones in ColorData 3 and later (as shot 63, its colour temperature 67, auto 68, the auto colour
+                   temperature 72; checked on the owner's EOS M CR2s, 1312 entries, version 10: the auto levels and
+                   temperature follow the scene while the as-shot ones stay on the set WB). Older layouts are not read;
+                   levels out of range = none */
+                if (idx == 63 && cnt >= 73) {
+                    int ok = 1;
+                    for (int c = 0; c < 4; c++) {
+                        inf->wb_auto[c] = (int)r16(&r, off + 2 * (68 + c));
+                        if (inf->wb_auto[c] <= 0 || inf->wb_auto[c] >= 16384)
+                            ok = 0;
+                    }
+                    if (!ok)
+                        for (int c = 0; c < 4; c++) inf->wb_auto[c] = 0;
+                }
             }
         }
     }

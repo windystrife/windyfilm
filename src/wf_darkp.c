@@ -57,6 +57,13 @@ int wf_dk_ev8(int iso, uint32_t et_n, uint32_t et_d, uint32_t fn_n, uint32_t fn_
     return (q + 16) >> 5;                        /* Q8 -> x 8, rounded (an arithmetic shift for EV < 0) */
 }
 
+int wf_dk_wb_pick(const int wb[4], const int wb_auto[4], int want_auto, const int **use)
+{
+    int ok = want_auto && wb_auto && wb_auto[0] > 0 && wb_auto[1] > 0 && wb_auto[2] > 0 && wb_auto[3] > 0;
+    *use = ok ? wb_auto : wb;
+    return ok ? WF_DKWB_AUTO : want_auto ? WF_DKWB_NOAUTO : WF_DKWB_ASSHOT;
+}
+
 int wf_dk_scales(int cam, const int wb[4], int black, int white, int iso, int32_t m[3])
 {
     static const int32_t day[2][3] = { { 9892, 4096, 5590 }, { 10542, 4096, 5683 } };   /* = wf_dev.c wf_dev_day */

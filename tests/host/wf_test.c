@@ -94,6 +94,7 @@
 #include "wf_dark.h"
 #include "wf_dev.h"
 #include "wf_darkp.h"
+#include "wf_cr2.h"
 /* this build's input curve decode tables (generated header, static copies for the checks) */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-const-variable"
@@ -2743,6 +2744,13 @@ static void t_light(void)
     mod_init(1);
     usleep(300000);
     chk(h_kelvin_n == 0 && h_nchanges == 0, "Light Auto: white balance untouched");
+#ifdef WF_BUILD_5D2
+    chk(!strcmp(wf_row_text(WF_ROW_LIGHT), "Auto"), "5D2 Light: '%s' (no Darkroom: Auto, the camera's WB)",
+        wf_row_text(WF_ROW_LIGHT));
+#else
+    chk(!strcmp(wf_row_text(WF_ROW_LIGHT), "Auto WB"), "EOS M Light: '%s' (the Darkroom prints with Canon's Auto WB)",
+        wf_row_text(WF_ROW_LIGHT));
+#endif
     int day = wf_films[kd].kelvin, cloudy = (day * 5 / 4 + 50) / 100 * 100;
     wf_row_step(WF_ROW_LIGHT, 1);
     chk(WAIT(h_kelvin_last == day, 3000) && h_li_get("wb_mode") == 9 && !strcmp(wf_row_text(WF_ROW_LIGHT), "Day"),
@@ -2781,6 +2789,107 @@ static void t_light(void)
     int r1 = 0;
     for (int i = 0; i < h_nchanges && i < 256; i++) r1 |= h_change_prop[i] == 0x80050018u && h_change_val[i] == 0;
     chk(r1 && h_gm_last == 1 && h_ba_last == -2, "unload: the user's WB back");
+}
+
+/* ------------------------------------------------------------------ LIGHT:awb */
+/* Light Auto = Auto WB (owner 11-17): the Darkroom develops a CR2 with Canon's Auto WB levels of the shot (ColorData
+ * short 68..71), whatever WB was set on the camera (the as-shot levels, 63..66); Day / Cloudy / Tungsten keep the as-shot
+ * ones (the camera was set to them at the shot); a CR2 without Auto levels: as shot. The camera's WB is never touched. */
+#ifndef WF_BUILD_5D2
+/* a CR2 head (little endian) down to ColorData: IFD0 -> EXIF (0x8769) -> MakerNote (0x927C) -> ColorData (0x4001, cnt
+ * shorts at 96), no raw IFD (the parse returns "no raw strip" after the WB fields). Returns the size */
+static uint32_t awb_head(uint8_t *b, uint32_t cnt, const int *as, const int *au)
+{
+    uint32_t n = 96 + 2 * cnt;
+    memset(b, 0, n);
+    #define W16(o, v) do { b[o] = (uint8_t)(v); b[(o) + 1] = (uint8_t)((v) >> 8); } while (0)
+    #define W32(o, v) do { W16(o, (v) & 0xFFFF); W16((o) + 2, (uint32_t)(v) >> 16); } while (0)
+    b[0] = b[1] = 'I'; W16(2, 42); W32(4, 16); b[8] = 'C'; b[9] = 'R'; b[10] = 2;
+    W16(16, 1); W16(18, 0x8769); W16(20, 4); W32(22, 1); W32(26, 40);            /* IFD0: the EXIF IFD at 40 */
+    W16(40, 1); W16(42, 0x927C); W16(44, 7); W32(46, 2); W32(50, 64);           /* EXIF: the MakerNote at 64 */
+    W16(64, 1); W16(66, 0x4001); W16(68, 3); W32(70, cnt); W32(74, 96);          /* MakerNote: ColorData at 96 */
+    W16(96, 10);                                                                 /* ColorData version (the EOS M: 10) */
+    int idx = cnt == 582 ? 25 : 63;
+    for (int c = 0; c < 4; c++) {
+        W16(96 + 2 * (idx + c), as[c]);
+        if (au && idx == 63) W16(96 + 2 * (68 + c), au[c]);
+    }
+    if (idx == 63) { W16(96 + 2 * 67, 5200); W16(96 + 2 * 72, 4300); }           /* the colour temperatures */
+    #undef W16
+    #undef W32
+    return n;
+}
+/* the scales' red / blue to green (Q12) = 2 R / (G1 + G2), 2 B / (G1 + G2) of the levels used */
+static int awb_ratio_ok(const int32_t *m, const int *lv)
+{
+    int32_t r0 = (int32_t)(((uint32_t)lv[0] << 13) / (uint32_t)(lv[1] + lv[2]));
+    int32_t r2 = (int32_t)(((uint32_t)lv[3] << 13) / (uint32_t)(lv[1] + lv[2]));
+    int32_t q0 = (int32_t)(((int64_t)m[0] << 12) / m[1]), q2 = (int32_t)(((int64_t)m[2] << 12) / m[1]);
+    return q0 >= r0 - 2 && q0 <= r0 + 2 && q2 >= r2 - 2 && q2 <= r2 + 2;
+}
+#endif
+static void t_light_awb(void)
+{
+#ifdef WF_BUILD_5D2
+    chk(1, "5D2: no Darkroom, no CR2 develop: Light Auto stays the camera's WB (the name: LIGHT)");
+#else
+    static uint8_t b[96 + 2 * 1312];
+    static const int as[4] = { 1935, 1024, 1024, 1792 };     /* IMG_0208 (Day09): shot on Daylight */
+    static const int au[4] = { 2236, 1024, 1024, 1502 };     /* .. Canon's Auto WB of the same scene */
+    struct wf_cr2_info inf;
+    uint32_t n = awb_head(b, 1312, as, au);
+    int rc = wf_cr2_parse(b, n, n, &inf);
+    chk(rc == WF_CR2_E_NOSTRIP && inf.cd_count == 1312 && !memcmp(inf.wb, as, sizeof as) && !memcmp(inf.wb_auto, au, sizeof au),
+        "ColorData 1312: as shot %d %d %d %d, auto %d %d %d %d (rc %d)", inf.wb[0], inf.wb[1], inf.wb[2], inf.wb[3],
+        inf.wb_auto[0], inf.wb_auto[1], inf.wb_auto[2], inf.wb_auto[3], rc);
+    const int *use = 0;
+    int32_t m[3];
+    int wk = wf_dk_wb_pick(inf.wb, inf.wb_auto, 1, &use);
+    int ok = wf_dk_scales(WF_DK_EOSM, use, 2048, 15000, 100, m);
+    chk(wk == WF_DKWB_AUTO && use == inf.wb_auto && ok && awb_ratio_ok(m, au), "Light Auto on a Daylight shot: the Auto "
+        "levels (pick %d, R/G %d B/G %d Q12)", wk, (int)(((int64_t)m[0] << 12) / m[1]), (int)(((int64_t)m[2] << 12) / m[1]));
+    for (int L = 1; L < 4; L++) {                             /* Day, Cloudy, Tungsten: the camera was set to them */
+        wk = wf_dk_wb_pick(inf.wb, inf.wb_auto, 0, &use);
+        ok = wf_dk_scales(WF_DK_EOSM, use, 2048, 15000, 100, m);
+        chk(wk == WF_DKWB_ASSHOT && use == inf.wb && ok && awb_ratio_ok(m, as), "Light %d: as shot (pick %d)", L, wk);
+    }
+    static const int bad[4] = { 2236, 0, 1024, 1502 };        /* a level out of range: no Auto levels */
+    n = awb_head(b, 1312, as, bad);
+    rc = wf_cr2_parse(b, n, n, &inf);
+    wk = wf_dk_wb_pick(inf.wb, inf.wb_auto, 1, &use);
+    chk(!inf.wb_auto[0] && !inf.wb_auto[3] && wk == WF_DKWB_NOAUTO && use == inf.wb, "bad Auto levels: none, as shot "
+        "(pick %d)", wk);
+    n = awb_head(b, 582, as, 0);                              /* an older layout (582 entries): not read */
+    rc = wf_cr2_parse(b, n, n, &inf);
+    wk = wf_dk_wb_pick(inf.wb, inf.wb_auto, 1, &use);
+    chk(inf.cd_count == 582 && !memcmp(inf.wb, as, sizeof as) && !inf.wb_auto[0] && wk == WF_DKWB_NOAUTO && use == inf.wb,
+        "ColorData 582: as shot only, Light Auto falls back to it (pick %d)", wk);
+    wk = wf_dk_wb_pick(as, 0, 1, &use);
+    chk(wk == WF_DKWB_NOAUTO && use == as, "no Auto levels at all: as shot");
+
+    /* the owner's CR2 (Day09, shot on Daylight): the head as the Darkroom reads it */
+    const char *dir = getenv("WF_DARK_CR2");
+    if (!dir)
+        dir = "/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM";
+    char t[300];
+    snprintf(t, sizeof t, "%s/IMG_0208.CR2", dir);
+    FILE *f = fopen(t, "rb");
+    if (!f) {
+        chk(1, "SKIPPED: no IMG_0208.CR2 in %s (WF_DARK_CR2)", dir);
+        return;
+    }
+    static uint8_t h[256 << 10];
+    fseek(f, 0, SEEK_END);
+    long fs = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    size_t got = fread(h, 1, sizeof h, f);
+    fclose(f);
+    rc = wf_cr2_parse(h, (uint32_t)got, (uint32_t)fs, &inf);
+    wk = wf_dk_wb_pick(inf.wb, inf.wb_auto, 1, &use);
+    chk(rc == WF_CR2_OK && !memcmp(inf.wb, as, sizeof as) && !memcmp(inf.wb_auto, au, sizeof au) && wk == WF_DKWB_AUTO,
+        "IMG_0208: as shot %d %d %d %d, auto %d %d %d %d, Light Auto picks the auto ones (rc %d)", inf.wb[0], inf.wb[1],
+        inf.wb[2], inf.wb[3], inf.wb_auto[0], inf.wb_auto[1], inf.wb_auto[2], inf.wb_auto[3], rc);
+#endif
 }
 
 /* ------------------------------------------------------------------ PRINT */
@@ -5706,6 +5815,28 @@ static void t_roll_lock(void)
         "the new roll: the shutter free, the half-shutter passes");
     chk(roll_shoot(404, 6) && wf_roll_now()->state == WF_RS_FULL && WAIT(icu_uilock & 1, 3000),
         "6 frames: full, held again (%d/6)", wf_roll_now()->nshot);
+    /* one screen (owner 11-17): the browser's mode chip sets the full roll aside for JPEG: the shutter free, the look
+       built for shots, PLAY Canon's, its 6 frames kept; a new file is no frame; back on Darkroom it is held again; a
+       close takes it off the shelf */
+    log_mark();
+    chk(wf_roll_shelve(1) == 0 && wf_roll_shelved() && LOGW("roll: 002 set aside", 3000) && LOGW("roll: shutter free", 3000)
+        && !(icu_uilock & 1) && wf_look_use() == WF_LU_SHOTS && !wf_roll_blocks_play() && cbr_key(H_KEY_HALFSHUTTER) == 1,
+        "set aside: the shutter free (lock %x), the look for shots (%d), PLAY free", icu_uilock, wf_look_use());
+    put_file("DCIM/100CANON/IMG_0410.CR2", "II*", 3);
+    h_set_file_number(410);
+    usleep(1500000);
+    chk(wf_roll_now()->nshot == 6 && wf_roll_left(wf_roll_now()) == 6 && wf_roll_now()->state == WF_RS_FULL,
+        "a shot while set aside: not a frame (%d/6, %d left)", wf_roll_now()->nshot, wf_roll_left(wf_roll_now()));
+    log_mark();
+    chk(wf_roll_shelve(0) == 0 && !wf_roll_shelved() && LOGW("roll: 002 back from the shelf", 3000)
+        && LOGW("roll: shutter blocked (full)", 3000) && (icu_uilock & 1) && wf_look_use() == WF_LU_NONE,
+        "back on Darkroom: held again (lock %x), nothing of the look (%d)", icu_uilock, wf_look_use());
+    chk(wf_roll_shelve(1) == 0 && wf_roll_req_close() == 0 && WAIT(!wf_roll_open(wf_roll_now()), 5000)
+        && LOGW("roll: 002 off the shelf (close)", 3000) && !wf_roll_shelved() && wf_roll_shelve(1) == -1,
+        "closed while set aside: off the shelf, nothing left to set aside");
+    chk(wf_roll_req_load(film, 3) == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && roll_shoot(411, 3)
+        && wf_roll_now()->state == WF_RS_FULL && WAIT(icu_uilock & 1, 3000), "a roll of 3 again: full, held (%d/3)",
+        wf_roll_now()->nshot);
     log_mark();
     mod_deinit();
     chk(log_has("roll: shutter free") && !(icu_uilock & 1), "unload: the shutter free (lock %x)", icu_uilock);
@@ -6012,6 +6143,8 @@ static void t_roll_mem(void)
         && !log_has("frame split"), "full: the frame in one block ('%s')", log_line("dark: memory raw"));
     chk(strstr(log_line("dark: roll 001 end"), "3 developed, 0 failed, 0 left") != 0, "full: 3 of 3 ('%s')",
         log_line("dark: roll 001 end"));
+    chk(strstr(log_line("dark: F01 IMG_"), ", wb auto,") && strstr(log_line("dark: F03 IMG_"), ", wb auto,")
+        && !log_has("no Auto WB levels"), "full: Light Auto = Canon's Auto WB of each CR2 ('%s')", log_line("dark: F01 IMG_"));
     chk(strstr(log_line("dark: look ready"), "halation + bloom normal") && strstr(log_line("dark: look ready"), ", mist")
         && !strstr(log_line("dark: look ready"), " -"), "full: the look's effects in ('%s')", log_line("dark: look ready"));
     char *ref[3] = { 0, 0, 0 };
@@ -6408,7 +6541,7 @@ static void t_roll(const char *cs)
     chk(LOGW("roll: end notice full", 3000), "LiveView back on a full roll: the notice again");
     log_mark();
     chk(cbr_key(H_KEY_INFO) == 0 && LOGW("browser: not in this build (screen 1)", 2000),
-        "INFO while the notice is up: taken, the roll picker is asked for (a new roll)");
+        "INFO while the notice is up: taken, the browser in Darkroom mode is asked for (a new roll)");
     usleep(300000);
     log_mark();
     chk(cbr_key(H_KEY_HALFSHUTTER) == 0 && cbr_key(H_KEY_FULLSHUTTER) == 0 && LOGW("roll: end notice full", 3000),
@@ -7316,6 +7449,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "EXPSIM")) t_expsim();
     else if (!strcmp(mode, "CFG")) t_cfg();
     else if (!strcmp(mode, "PACK")) t_pack(cs, argc > 3 ? argv[3] : 0);
+    else if (!strcmp(mode, "LIGHT") && !strcmp(cs, "awb")) t_light_awb();
     else if (!strcmp(mode, "LIGHT")) t_light();
     /* test.sh passes "PRINT:chain" as MODE PRINT, CASE chain (until 11-15 that ran t_print a second time) */
     else if (!strcmp(mode, "PRINT") && !strcmp(cs, "chain")) t_print_chain();
