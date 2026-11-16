@@ -35,6 +35,7 @@ ALL="$ALL ROLL:dark ROLL:boot"                     # RAWB9: roll frames without 
 ALL="$ALL FX:bloom"                                # RAWB11: Bloom on its own row (halation alone, bloom alone, the old config)
 ALL="$ALL MIST:levels"                             # owner 11-15: every Mist level, the combo with Bloom + Halation, the long shot line
 ALL="$ALL STAGE:dark"                              # 11-15: the Darkroom's stage of a chain film, knob rows set, vs the camera's shot
+ALL="$ALL STAGE:v1"                                # 11-16: a version 1 stage pack (no knob data): the last four knob rows hidden
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
 B=${OUT:-$R/build/$cam}

@@ -79,7 +79,7 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
   16 mm" (không ghi khi 35 mm).
 - Hàng Highlights / Shadows: -5 .. +5, mặc định 0. Dương làm sáng vùng sáng /
   nâng vùng tối, âm làm tối. Áp cho phim và Log + LUT (cả lon Film LUT), không
-  áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 18 hàng (7 hàng cuối
+  áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 22 hàng (11 hàng cuối
   chỉ dùng với lon Film stage, mục 6; hàng không dùng được thì mờ): hiện 7, danh
   sách tự cuộn theo hàng đang chọn (thanh cuộn nhỏ bên phải).
 - Output khác: Log (5 đường cong), Log + LUT (cube trong ML/data, xem
@@ -209,14 +209,16 @@ Bật:
   Phần giảm màu làm một lần lúc dựng bảng, nên dòng "rawb: tables log pack" dài
   thêm khoảng 20 ms; shoulder=a và shoulder=d không có nó.
 - Hàng knob trên RAW (16/11): đổi bất kỳ hàng knob nào của lon Film stage (Film
-  exp, Push, Exp comp, Printer R / G / B, Interlayer) thì lon vẫn đi RAW. Máy dựng
+  exp, Push, Exp comp, Printer R / G / B, Interlayer, và 4 hàng mới Bleach bypass,
+  Print bleach, Neutral neg, Neutral print) thì lon vẫn đi RAW. Máy dựng
   bảng log mới từ hai nửa trong WFSTAGE.DAT cộng phần chênh của bảng gốc (cần
   ML/DATA/WFSTLOG.DAT của chính thẻ này; file của thẻ cũ không dùng được), khoảng
   nửa giây tính toán cộng đọc thẻ khoảng 1,1 MB, mỗi lần đổi knob (không phải mỗi
   tấm). Với Film exp / Push, phần chênh được đọc ở nút đã dời theo độ phơi, nên vai
   sáng dời theo. Log:
-    rawb: tables knobs G08 v4 k... exp 3 prn 0 0 0 interlayer 100 c1 NNms (...)
-  (exp = độ phơi còn lại sau Exp comp, đơn vị 1/3 stop; prn = Printer R G B).
+    rawb: tables knobs G08 v4 k... exp 3 prn 0 0 0 interlayer 100 bleach 0 0 neutral 0 0 c1 NNms (...)
+  (exp = độ phơi còn lại sau Exp comp, đơn vị 1/3 stop; prn = Printer R G B; bleach =
+  Bleach bypass, Print bleach; neutral = Neutral neg, Neutral print, đơn vị %).
   Ghi lại NN. Mọi knob mặc định vẫn dùng đúng bảng gốc như trên.
 - Còn tạm thời: Strength và Highlights / Shadows chưa có trên RAW. Một trong hai
   hàng đó khác mặc định thì lon Film stage đi đường 8-bit như trước: develop RAW ra
@@ -260,13 +262,19 @@ Cần thử và gửi lại:
    "on the 8-bit chain (strength)", chụp 1 tấm. Thêm 1 tấm G09 (Double-X, chỉ 2302).
 6b. (16/11) Hàng knob trên RAW: G08, Print stock 2383, Strength 100 %, RAW develop
    On. Đặt Interlayer 50 %: log phải có "rawb: tables knobs G08 v4 ... interlayer 50
-   c1 NNms", ghi lại NN; chụp 1 tấm. Rồi Interlayer 0 % (nhạt hơn), chụp cùng cảnh.
+   bleach 0 0 neutral 0 0 c1 NNms", ghi lại NN; chụp 1 tấm. Rồi Interlayer 0 % (nhạt hơn), chụp cùng cảnh.
    Rồi Interlayer 100 % và Film exp +1 (3 nấc): log "tables knobs ... exp 3 ...",
    ghi NN, chụp cùng cảnh. Rồi Exp comp On: dòng "tables log pack" quay lại (Exp comp
    bù hết độ phơi). Rồi Exp comp Off, Film exp về 0, Printer R -6 và B +6: log
    "prn -6 0 6", chụp cùng cảnh (ấm hơn: bớt đèn đỏ, thêm đèn xanh khi in thì ảnh
    ngả đỏ - vàng; chiều ngược lại R +6 B -6 ra ảnh ngả cyan). Cuối cùng đưa mọi
    knob về mặc định: dòng "tables log pack" quay lại.
+6c. (16/11) 4 hàng mới trên RAW: G08, 2383, RAW develop On, mọi knob mặc định. Bleach
+   bypass 100 %: log "rawb: tables knobs ... bleach 100 0 neutral 0 0 c1 NNms", ghi NN,
+   chụp 1 tấm. Về 0 %, Print bleach 100 %: "bleach 0 100", chụp cùng cảnh (tối và nhạt
+   hơn). Về 0 %, Neutral neg 100 % và Neutral print 100 %: "neutral 100 100", chụp cùng
+   cảnh. Với mỗi tấm chụp thêm 1 tấm RAW develop Off cùng knob để so 8-bit / RAW. Cuối
+   cùng mọi knob về mặc định: dòng "tables log pack" quay lại.
 Gửi: ML/LOGS/WINDYFLM.LOG và các cặp CR2 + JPG của những tấm đó (cả tấm Off).
 Mỗi tấm có các dòng "rawb: ..." trong log: bộ đệm RAW đã chọn, điểm khớp,
 mức đen / trắng và thời gian từng bước.
@@ -320,7 +328,7 @@ Hàng Print stock: 15 print:
 - Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights / Shadows dùng như phim
   thường (mục 2).
 
-7 hàng cuối (hàng knob) chỉnh chính chuỗi âm bản -> print. Chỉ dùng được khi: lon
+11 hàng cuối (hàng knob) chỉnh chính chuỗi âm bản -> print. Chỉ dùng được khi: lon
 Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ thì hàng mờ.
     Film exp ....... -2 .. +2 stop, bước 1/3, mặc định 0. Phơi sáng âm bản: dương =
                      phơi dư (ảnh sáng hơn), âm = phơi thiếu (tối hơn).
@@ -335,8 +343,23 @@ Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ t
     Interlayer ..... 0 .. 200 %, bước 25 %, mặc định 100 % (= của chuỗi). Hiệu ứng
                      giữa các lớp màu: thấp = màu nhạt và lẫn hơn, cao = màu tách và
                      đậm hơn.
-- Để mặc định hết (0 / 0 / Off / 0 0 0 / 100 %) thì máy dùng bảng có sẵn trong
-  WFFILMS.DAT như mọi phim, không đọc WFSTAGE.DAT.
+    (16/11, 4 hàng mới, cả bốn 0 .. 100 %, bước 25 %, mặc định 0 % = tắt)
+    Bleach bypass .. bỏ tẩy bạc ở âm bản: bạc giữ lại cộng vào cả ba lớp màu, ảnh
+                     nhạt màu và tương phản khác đi.
+    Print bleach ... bỏ tẩy bạc ở bản in: chỗ in đậm tối thêm, ảnh tối và nhạt màu
+                     hơn (kiểu bleach bypass trên print).
+                     Hai hàng bleach: 100 % = 1/16 tham số của chuỗi. Chuỗi cho tới 1,0
+                     nhưng ở 0,25 xám giữa đã gần trắng (Bleach bypass) hoặc gần đen
+                     (Print bleach). Ở 100 % trên 2 lon x 16 ảnh: Bleach bypass sáng hơn
+                     rõ (L* 55 -> 68) và bớt màu 18 %, Print bleach tối hơn (L* 55 -> 43)
+                     và bớt màu 22 %. Muốn giữ độ sáng thì bù bằng Film exp / Printer.
+    Neutral neg .... đường cong R và B của âm bản kéo về đường cong G: ảnh trung tính
+                     hơn, bớt lệch màu theo độ sáng.
+    Neutral print .. như trên, cho đường cong của print.
+  4 hàng này cần WFSTAGE.DAT của thẻ 16/11 trở đi (bản 2, có thêm 520 B dữ liệu knob);
+  WFSTAGE.DAT của thẻ cũ vẫn chạy 7 hàng kia, 4 hàng mới mờ.
+- Để mặc định hết (0 / 0 / Off / 0 0 0 / 100 % / 0 0 0 0) thì máy dùng bảng có sẵn
+  trong WFFILMS.DAT như mọi phim, không đọc WFSTAGE.DAT.
 - Đổi một hàng knob (hoặc đổi phim / print khi knob khác mặc định): máy dựng bảng mới
   từ WFSTAGE.DAT. Không đọc cả file 21,3 MB: lúc bật máy chỉ đọc mục lục (khoảng
   20 KB); mỗi lần dựng đọc khoảng 650 KB của đúng cặp đó (nửa âm bản 435 KB, rồi
@@ -344,21 +367,24 @@ Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ t
   20 ms trên EOS M. Log: "stage G08 v4 composed NNms k..." (bảng dựng từ knob) hoặc
   "pack G08 v4 loaded NNms" (bảng có sẵn). G08 = mã lon, v4 = print (v3 = 2302, v4 =
   2383 .. v18 = 3523XD).
-- Cấu hình ghi dòng "stage=fexp,push,comp,r,g,b,iie". EXIF thêm "| Film exp +1",
-  "| Push 1/3", "| Exp comp", "| Printer R+6 G0 B0", "| Interlayer 50%" khi khác mặc định.
+- Cấu hình ghi dòng "stage=fexp,push,comp,r,g,b,iie,bleach,printbleach,neutralneg,
+  neutralprint" (11 số; dòng 7 số của thẻ cũ vẫn đọc được, 4 hàng mới = 0). EXIF thêm
+  "| Film exp +1", "| Push 1/3", "| Exp comp", "| Printer R+6 G0 B0", "| Interlayer 50%",
+  "| Bleach bypass 50%", "| Print bleach 25%", "| Neutral neg 100%", "| Neutral print 50%"
+  khi khác mặc định.
 - Darkroom (cuộn phim) dùng cùng bảng và cùng các hàng: xem HUONGDAN_DARKROOM_EOSM.txt.
 
 
 7. FILM STAGE: LẦN CHẠY ĐẦU
 ---------------------------
-1. Thẻ phải có ML/DATA/WFSTAGE.DAT (21 323 868 B; md5 trong MD5SUMS.txt). Bật máy,
+1. Thẻ phải có ML/DATA/WFSTAGE.DAT (21 324 388 B từ thẻ 16/11; md5 trong MD5SUMS.txt). Bật máy,
    WINDYFLM.LOG phải có:
      pack ok: 692 tables, index NNms, catalog 97 films
      stage ok: 643 of 643 pairs match the pack (44 negatives, 15 prints), index NNms
    Ghi lại hai số "index NNms" (thời gian đọc mục lục). Nếu thay vào đó là
    "stage ML/DATA/WFSTAGE.DAT missing (-1): film-stage knob rows hidden" thì thẻ thiếu
    file; "... bad (-N) ..." là file hỏng hoặc khác bản: chép lại và kiểm MD5SUMS.txt.
-   Thiếu file thì lon Film stage vẫn chụp được, chỉ mất 7 hàng knob.
+   Thiếu file thì lon Film stage vẫn chụp được, chỉ mất 11 hàng knob.
 2. Nhóm Film stage: lon có màu hãng, header đúng phim (ví dụ G08 Vision3 5219 500T:
    ISO 500, 3200 K). Nạp G08, để Print stock mặc định: hàng hiện "Kodak Vision Color
    2383". Chụp 1 tấm: ảnh màu. Log "pack G08 v4 loaded NNms".
@@ -376,13 +402,21 @@ Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ t
 6. Film exp +1, Exp comp On: Film exp và Push / pull mờ đi, ảnh như bước 2; EXIF có
    "| Exp comp".
 7. Exp comp Off, Film exp 0, Interlayer 0 % rồi 200 %: màu nhạt rồi đậm hơn.
+7b. (16/11) Interlayer về 100 %. 4 hàng mới phải sáng (không mờ). Mỗi hàng chụp 1 tấm
+   cùng cảnh với bước 2, rồi đưa hàng đó về 0 % trước hàng sau:
+   - Bleach bypass 100 %: sáng hơn và nhạt màu hơn tấm bước 2 (đo trên máy tính:
+     L* 55 -> 68, bớt màu 18 %). EXIF "| Bleach bypass 100%".
+   - Print bleach 100 %: tối hơn và nhạt màu hơn tấm bước 2. EXIF "| Print bleach 100%".
+   - Neutral neg 100 %, rồi Neutral print 100 %: màu trung tính hơn, đổi ít (có lon gần
+     như không đổi).
+   Mỗi lần đổi có một dòng "stage G08 v4 composed NNms k..." mới: ghi lại NN.
 8. Grain Normal, Halation Wide, Gauge 16 mm: hạt to hơn, quầng rộng hơn so với 35 mm;
    65 mm: mịn hơn, quầng hẹp hơn. EXIF "| Gauge 16 mm".
 9. Bộ nhớ: lặp bước 4 với LiveView đang bật, và một lần với RAW develop On. Nếu log có
    "stage: no memory for a half (N B) in 3000ms: film-stage knobs dropped" thì máy bỏ
    các hàng knob và dùng bảng mặc định: ghi lại lúc đó đang làm gì.
 10. Đổi nhanh nhiều hàng knob rồi chụp ngay: ghi lại tấm đầu có phải chờ không.
-11. Tắt máy bật lại: 7 hàng knob giữ giá trị đã đặt.
+11. Tắt máy bật lại: 11 hàng knob giữ giá trị đã đặt.
 Gửi: ML/LOGS/WINDYFLM.LOG, ML/SETTINGS/WINDYFLM.CFG và các JPG (kèm CR2 nếu chụp RAW+L).
 
 
@@ -391,7 +425,7 @@ Gửi: ML/LOGS/WINDYFLM.LOG, ML/SETTINGS/WINDYFLM.CFG và các JPG (kèm CR2 n�
 ML/modules/windyflm.mo    module
 ML/data/WFFILMS.DAT       bảng màu các phim (Scan / Cine / Paper, và 643 cặp Film stage)
 ML/data/WFSTAGE.DAT       hai nửa âm bản / print của 643 cặp Film stage (21,3 MB),
-                          cho 7 hàng knob (mục 6); thiếu thì các hàng đó mờ.
+                          cho 11 hàng knob (mục 6); thiếu thì các hàng đó mờ.
                           Dữ liệu dẫn xuất, chỉ dùng riêng
 ML/data/WFLOG.DAT         bảng log S-Log3 của 643 cặp Film stage cho RAW develop
                           (92,5 MB, 428 bảng khác nhau, mục 5); thiếu thì lon Film

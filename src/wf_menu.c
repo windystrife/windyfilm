@@ -22,9 +22,11 @@
  *   blind=on|off     Roll + Darkroom: no image review / PLAY while a roll is in the camera (docs/DESIGN.md 3.6)
  *   frame=off|white|black|whitewide|blackwide   info=off|on|roll   date=off|ymd|dmy|mdy   the Darkroom's print finishes
  *                    (docs/DESIGN.md 3.9: a frame with the shot's details under the picture, a date stamp)
- *   stage=<film exp>,<push>,<exp comp>,<printer r>,<g>,<b>,<interlayer>   the film-stage knob rows (wf_stagek.h): thirds
- *                    of a stop -6..6 and -3..3, 0|1, printer points -12..12, interlayer 0..8 (x 25 %); a bad line keeps
- *                    the defaults 0,0,0,0,0,0,4
+ *   stage=<film exp>,<push>,<exp comp>,<printer r>,<g>,<b>,<interlayer>,<bleach>,<print bleach>,<neutral neg>,
+ *                    <neutral print>   the film-stage knob rows (wf_stagek.h): thirds of a stop -6..6 and -3..3, 0|1,
+ *                    printer points -12..12, interlayer 0..8 (x 25 %), the last four 0..4 (x 25 %); a line of the first
+ *                    seven alone (before those rows) reads the last four as 0; a bad line keeps the defaults
+ *                    0,0,0,0,0,0,4,0,0,0,0
  *   userwb=<mode>,<kelvin>,<gm>,<ba>   the user's white balance while Light holds it (restored on Auto / unload, also
  *                    after a power cycle in between) */
 #include <dryos.h>
@@ -64,6 +66,7 @@ volatile int wf_incurve;                          /* WF_INC_*: how Log + LUT rea
 volatile int wf_strength = 1;                     /* 30 / 100 / 125 % */
 volatile int wf_hl, wf_sh;                        /* Highlights / Shadows, WF_HS_MIN..WF_HS_MAX, 0 = off */
 volatile int wf_sg_exp, wf_sg_push, wf_sg_comp, wf_sg_prn[3], wf_sg_iie = WF_SG_IIE_DEF;   /* film-stage knob rows */
+volatile int wf_sg_bl, wf_sg_pbl, wf_sg_nn, wf_sg_np;   /* Bleach bypass, Print bleach, Neutral neg / print 0..4 */
 volatile int wf_exif_off;
 volatile int wf_cfg_dirty;
 static volatile int wf_cfg_t;
@@ -92,7 +95,8 @@ typedef char wf_hs_check[sizeof wf_hs_name / sizeof *wf_hs_name == 11 && WF_HS_M
 const char *wf_hs_text(int v) { return wf_hs_name[wf_hs_in(v) - WF_HS_MIN]; }
 
 /* film-stage knob rows (film-stage pairs with ML/DATA/WFSTAGE.DAT): Film exp and Push / pull in thirds of a stop (both
- * the same exposure shift in this chain), Exp comp, Printer R / G / B points, Interlayer x 25 % */
+ * the same exposure shift in this chain), Exp comp, Printer R / G / B points, Interlayer x 25 %; Bleach bypass, Print
+ * bleach, Neutral neg / print x 25 % (a pack with knob data only, else read as 0) */
 static int wf_sg_in(int v, int lo, int hi, int def) { return v >= lo && v <= hi ? v : def; }
 void wf_sg_knobs_now(struct wf_sg_knobs *k)
 {
@@ -102,6 +106,11 @@ void wf_sg_knobs_now(struct wf_sg_knobs *k)
     for (int c = 0; c < 3; c++)
         k->prn[c] = wf_sg_in(wf_sg_prn[c], -WF_SG_PRN_MAX, WF_SG_PRN_MAX, 0);
     k->iie = wf_sg_in(wf_sg_iie, 0, WF_SG_IIE_MAX, WF_SG_IIE_DEF);
+    int kd = wf_sg_kdata() != 0;
+    k->bleach = kd ? wf_sg_in(wf_sg_bl, 0, WF_SG_AMT_MAX, 0) : 0;
+    k->pbleach = kd ? wf_sg_in(wf_sg_pbl, 0, WF_SG_AMT_MAX, 0) : 0;
+    k->nneg = kd ? wf_sg_in(wf_sg_nn, 0, WF_SG_AMT_MAX, 0) : 0;
+    k->nprn = kd ? wf_sg_in(wf_sg_np, 0, WF_SG_AMT_MAX, 0) : 0;
 }
 static const char *const wf_sg_exp_name[2 * WF_SG_FEXP_MAX + 1] = { "-2", "-1.7", "-1.3", "-1", "-0.7", "-0.3", "0",
                                                                     "+0.3", "+0.7", "+1", "+1.3", "+1.7", "+2" };
@@ -112,11 +121,18 @@ static const char *const wf_sg_prn_name[2 * WF_SG_PRN_MAX + 1] = { "-12", "-11",
                                                                    "+6", "+7", "+8", "+9", "+10", "+11", "+12" };
 static const char *const wf_sg_iie_name[WF_SG_IIE_MAX + 1] = { "0%", "25%", "50%", "75%", "100%", "125%", "150%", "175%",
                                                                "200%" };
-typedef char wf_sg_check[WF_SG_FEXP_MAX == 6 && WF_SG_PUSH_MAX == 3 && WF_SG_PRN_MAX == 12 && WF_SG_IIE_MAX == 8 ? 1 : -1];
+static const char *const wf_sg_amt_name[WF_SG_AMT_MAX + 1] = { "0%", "25%", "50%", "75%", "100%" };
+typedef char wf_sg_check[WF_SG_FEXP_MAX == 6 && WF_SG_PUSH_MAX == 3 && WF_SG_PRN_MAX == 12 && WF_SG_IIE_MAX == 8
+                         && WF_SG_AMT_MAX == 4 ? 1 : -1];
 static const char *wf_sg_exp_text(int v) { return wf_sg_exp_name[wf_sg_in(v, -6, 6, 0) + 6]; }
 static const char *wf_sg_push_text(int v) { return wf_sg_push_name[wf_sg_in(v, -3, 3, 0) + 3]; }
 static const char *wf_sg_prn_text(int v) { return wf_sg_prn_name[wf_sg_in(v, -12, 12, 0) + 12]; }
 static const char *wf_sg_iie_text(int v) { return wf_sg_iie_name[wf_sg_in(v, 0, 8, WF_SG_IIE_DEF)]; }
+static const char *wf_sg_amt_text(int v) { return wf_sg_amt_name[wf_sg_in(v, 0, WF_SG_AMT_MAX, 0)]; }
+static volatile int *wf_sg_amt_var(int row)
+{
+    return row == WF_ROW_SBL ? &wf_sg_bl : row == WF_ROW_SPBL ? &wf_sg_pbl : row == WF_ROW_SNN ? &wf_sg_nn : &wf_sg_np;
+}
 /* one step, no wrap: 1 = changed */
 static int wf_sg_bump(volatile int *p, int lo, int hi, int def, int delta)
 {
@@ -454,7 +470,8 @@ int wf_loaded(void)
 static const char *const wf_rname[WF_NROWS] = { "Light", "Print stock", "Grain", "Halation", "Bloom", "Gauge", "Mist",
                                                 "Strength", "Highlights", "Shadows", "Film LUT", "Film exp",
                                                 "Push / pull", "Exp comp", "Printer R", "Printer G", "Printer B",
-                                                "Interlayer" };
+                                                "Interlayer", "Bleach bypass", "Print bleach", "Neutral neg",
+                                                "Neutral print" };
 
 const char *wf_row_name(int row) { return row >= 0 && row < WF_NROWS ? wf_rname[row] : ""; }
 
@@ -508,6 +525,10 @@ const char *wf_row_text(int row)
     case WF_ROW_SPG:
     case WF_ROW_SPB:      return wf_sg_prn_text(wf_sg_prn[row - WF_ROW_SPR]);
     case WF_ROW_SIIE:     return wf_sg_iie_text(wf_sg_iie);
+    case WF_ROW_SBL:
+    case WF_ROW_SPBL:
+    case WF_ROW_SNN:
+    case WF_ROW_SNP:      return wf_sg_amt_text(*wf_sg_amt_var(row));
     }
     return "";
 }
@@ -554,6 +575,10 @@ int wf_row_avail(int row)
     case WF_ROW_SPG:
     case WF_ROW_SPB:
     case WF_ROW_SIIE:     return lk.output == WF_OUT_FILM && wf_sg_has(lk.row, lk.variant);
+    case WF_ROW_SBL:
+    case WF_ROW_SPBL:
+    case WF_ROW_SNN:
+    case WF_ROW_SNP:      return lk.output == WF_OUT_FILM && wf_sg_has(lk.row, lk.variant) && wf_sg_kdata();
     }
     return 0;
 }
@@ -668,6 +693,13 @@ int wf_row_step(int row, int delta)
         break;
     case WF_ROW_SIIE:
         if (!wf_sg_bump(&wf_sg_iie, 0, WF_SG_IIE_MAX, WF_SG_IIE_DEF, delta))
+            return 0;
+        break;
+    case WF_ROW_SBL:
+    case WF_ROW_SPBL:
+    case WF_ROW_SNN:
+    case WF_ROW_SNP:
+        if (!wf_sg_bump(wf_sg_amt_var(row), 0, WF_SG_AMT_MAX, 0, delta))
             return 0;
         break;
     default:
@@ -893,22 +925,31 @@ void wf_cfg_load(void)
         } else if ((v = wf_cfg_val(l, "date"))) {
             wf_pr_date = wf_cfg_word(v, wf_pdt_key, WF_PDT_N, WF_PDT_OFF);
         } else if ((v = wf_cfg_val(l, "stage"))) {
-            int q[7] = { 0 }, okq = 1;
-            for (int i = 0; i < 7 && okq; i++) {
+            int q[11] = { 0 }, okq = 1, nq = 0;            /* 7 values (before the last four rows) or 11 */
+            for (int i = 0; i < 11 && okq; i++) {
                 if (i && *v++ != ',')
                     okq = 0;
                 else {
                     const char *v0 = v;
                     q[i] = wf_cfg_int(&v, &ok);
-                    okq = v > v0 && v[-1] >= '0' && v[-1] <= '9' && (i < 6 ? *v == ',' : ok);   /* digits, a comma */
+                    okq = v > v0 && v[-1] >= '0' && v[-1] <= '9';
+                    nq = i + 1;
+                    if (okq && *v != ',') {               /* digits, then a comma or the line's end */
+                        okq = ok;
+                        break;
+                    }
                 }
             }
+            okq = okq && (nq == 7 || nq == 11) && *v != ',';
+            for (int i = 7; i < 11 && okq; i++)
+                okq = q[i] >= 0 && q[i] <= WF_SG_AMT_MAX;
             if (okq && q[0] >= -WF_SG_FEXP_MAX && q[0] <= WF_SG_FEXP_MAX && q[1] >= -WF_SG_PUSH_MAX
                 && q[1] <= WF_SG_PUSH_MAX && (q[2] == 0 || q[2] == 1) && q[3] >= -WF_SG_PRN_MAX && q[3] <= WF_SG_PRN_MAX
                 && q[4] >= -WF_SG_PRN_MAX && q[4] <= WF_SG_PRN_MAX && q[5] >= -WF_SG_PRN_MAX && q[5] <= WF_SG_PRN_MAX
                 && q[6] >= 0 && q[6] <= WF_SG_IIE_MAX) {
                 wf_sg_exp = q[0]; wf_sg_push = q[1]; wf_sg_comp = q[2];
                 wf_sg_prn[0] = q[3]; wf_sg_prn[1] = q[4]; wf_sg_prn[2] = q[5]; wf_sg_iie = q[6];
+                wf_sg_bl = q[7]; wf_sg_pbl = q[8]; wf_sg_nn = q[9]; wf_sg_np = q[10];
             }
         } else if ((v = wf_cfg_val(l, "shoulder"))) {
             wf_rb_hue = wf_cfg_word(v, wf_hue_key, WF_DEV_HUE_N, WF_DEV_HUE_I);
@@ -963,8 +1004,10 @@ static int wf_cfg_save(void)
     struct wf_sg_knobs sk;
     wf_sg_knobs_now(&sk);
     if (n > 0 && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, "stage=%d,%d,%d,%d,%d,%d,%d\n", sk.fexp, sk.push, sk.comp, sk.prn[0], sk.prn[1],
-                      sk.prn[2], sk.iie);
+        n += snprintf(b + n, sizeof b - n, "stage=%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", sk.fexp, sk.push, sk.comp,
+                      sk.prn[0], sk.prn[1], sk.prn[2], sk.iie, wf_sg_in(wf_sg_bl, 0, WF_SG_AMT_MAX, 0),
+                      wf_sg_in(wf_sg_pbl, 0, WF_SG_AMT_MAX, 0), wf_sg_in(wf_sg_nn, 0, WF_SG_AMT_MAX, 0),
+                      wf_sg_in(wf_sg_np, 0, WF_SG_AMT_MAX, 0));   /* the rows as set, a pack without knob data too */
     if (wf_wb_saved && n > 0 && n < (int)sizeof b)
         n += snprintf(b + n, sizeof b - n, "userwb=%d,%d,%d,%d\n", wf_wb_mode, wf_wb_kelvin, wf_wb_gm, wf_wb_ba);
     if (n <= 0 || n >= (int)sizeof b)
@@ -1069,6 +1112,14 @@ const char *wf_exif_text(const struct wf_look *lk, int g, int h, int bl, int m, 
                               wf_sg_prn_text(lk->sprn[1]), wf_sg_prn_text(lk->sprn[2]));
             if (lk->siie != WF_SG_IIE_DEF && n < bn)
                 n += snprintf(b + n, bn - n, " | Interlayer %s", wf_sg_iie_text(lk->siie));
+            if (lk->sbl && n < bn)
+                n += snprintf(b + n, bn - n, " | Bleach bypass %s", wf_sg_amt_text(lk->sbl));
+            if (lk->spbl && n < bn)
+                n += snprintf(b + n, bn - n, " | Print bleach %s", wf_sg_amt_text(lk->spbl));
+            if (lk->snn && n < bn)
+                n += snprintf(b + n, bn - n, " | Neutral neg %s", wf_sg_amt_text(lk->snn));
+            if (lk->snp && n < bn)
+                n += snprintf(b + n, bn - n, " | Neutral print %s", wf_sg_amt_text(lk->snp));
         }
     }
     if (lk->output == WF_OUT_LLUT && lk->row >= 0 && n < bn)
@@ -1362,6 +1413,10 @@ static MENU_SELECT_FUNC(wf_spr_select) { (void)priv; wf_row_step(WF_ROW_SPR, del
 static MENU_SELECT_FUNC(wf_spg_select) { (void)priv; wf_row_step(WF_ROW_SPG, delta); }
 static MENU_SELECT_FUNC(wf_spb_select) { (void)priv; wf_row_step(WF_ROW_SPB, delta); }
 static MENU_SELECT_FUNC(wf_siie_select) { (void)priv; wf_row_step(WF_ROW_SIIE, delta); }
+static MENU_SELECT_FUNC(wf_sbl_select) { (void)priv; wf_row_step(WF_ROW_SBL, delta); }
+static MENU_SELECT_FUNC(wf_spbl_select) { (void)priv; wf_row_step(WF_ROW_SPBL, delta); }
+static MENU_SELECT_FUNC(wf_snn_select) { (void)priv; wf_row_step(WF_ROW_SNN, delta); }
+static MENU_SELECT_FUNC(wf_snp_select) { (void)priv; wf_row_step(WF_ROW_SNP, delta); }
 static MENU_SELECT_FUNC(wf_pv_select)
 {
     (void)priv;
@@ -1749,6 +1804,10 @@ static struct menu_entry wf_menu[] = {
             WF_ROWE("Printer G", WF_ROW_SPG, wf_spg_select, "Film-stage films: printer light G, +-12 points (0.025 logE)."),
             WF_ROWE("Printer B", WF_ROW_SPB, wf_spb_select, "Film-stage films: printer light B, +-12 points (0.025 logE)."),
             WF_ROWE("Interlayer", WF_ROW_SIIE, wf_siie_select, "Film-stage films: interlayer effect, 0..200 percent (100 default)."),
+            WF_ROWE("Bleach bypass", WF_ROW_SBL, wf_sbl_select, "Film-stage films: silver left in the negative, 0..100 percent."),
+            WF_ROWE("Print bleach", WF_ROW_SPBL, wf_spbl_select, "Film-stage films: silver left in the print, 0..100 percent."),
+            WF_ROWE("Neutral neg", WF_ROW_SNN, wf_snn_select, "Film-stage films: negative R, B curves toward green's, 0..100 percent."),
+            WF_ROWE("Neutral print", WF_ROW_SNP, wf_snp_select, "Film-stage films: print R, B curves toward green's, 0..100 percent."),
             { .name = "LiveView preview", .priv = (void *)&wf_pv_mode, .max = WF_PV_FAST, .choices = wf_pv_name,
               .select = wf_pv_select, .update = wf_pv_update, .help = "The look in LiveView. Needs Overlay > Global Draw." },
             { .name = "Preview exposure", .select = wf_exp_select, .update = wf_exp_update,

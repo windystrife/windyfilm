@@ -76,6 +76,7 @@ struct wf_look {
     uint32_t stk;                                 /* film-stage knob key (wf_sg_key): 0 = the pack's table, else composed */
     int8_t   sexp, spush, sprn[3];                /* the knob rows the composed table used (stk != 0), for EXIF */
     uint8_t  scomp, siie;
+    uint8_t  sbl, spbl, snn, snp;                 /* Bleach bypass, Print bleach, Neutral neg / print 0..4 (x 25 %) */
     int      post;                               /* effect post code (above) */
     int      ftflags;                             /* wf_film_build flags of the film (WF_FT_*) incl. strength */
 };
@@ -153,6 +154,8 @@ const uint32_t *wf_ws_table(int row, int variant, uint32_t stk);   /* preview (w
                                                      (row, variant) made for stage knob key stk (0 = the pack's), else 0 */
 int  wf_sg_state(void);                           /* ML/DATA/WFSTAGE.DAT: 0 not read, 1 read, < 0 missing / bad */
 int  wf_sg_has(int row, int variant);             /* the stage pack has this film-stage pair (its knob rows work) */
+const struct wf_sg_kd *wf_sg_kdata(void);        /* the stage pack's knob data (version 2), 0 = none: the last four
+                                                    knob rows hidden and read as 0 */
 void wf_sg_knobs_now(struct wf_sg_knobs *k);      /* the knob rows as they stand (wf_menu.c), in range */
 /* the RAW develop's knob tables (wf_rawb.c, wf_task): the halves WFSTAGE.DAT gives pair (row, variant), their blob
  * indices and checksums (1; 0 = no usable pair), and one half (0 negative, 1 print) read into mem (sizeof struct wf_sg_neg
@@ -188,6 +191,7 @@ extern volatile int wf_out, wf_film_id, wf_print, wf_light, wf_curve, wf_flut, w
 extern volatile int wf_incurve;
 extern volatile int wf_hl, wf_sh;                 /* Highlights / Shadows, WF_HS_MIN..WF_HS_MAX (wf_film.h) */
 extern volatile int wf_sg_exp, wf_sg_push, wf_sg_comp, wf_sg_prn[3], wf_sg_iie;   /* film-stage knob rows (wf_stagek.h) */
+extern volatile int wf_sg_bl, wf_sg_pbl, wf_sg_nn, wf_sg_np;   /* Bleach bypass, Print bleach, Neutral neg / print 0..4 */
 extern volatile int wf_cfg_dirty;
 void wf_menu_init(void);                          /* module init: config read, menu added */
 void wf_menu_deinit(void);                        /* unload: WB back, menu removed */

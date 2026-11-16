@@ -630,9 +630,10 @@ static int dk_logpk(const struct wf_look *lk, struct wf_dev_tabs *t, void *scr)
     if (dk_lgk && lk->stk) {
         struct wf_sg_knobs kk;
         wf_sg_unkey(lk->stk, &kk);
-        wf_log("dark: tables knobs %s v%d k%x exp %d prn %d %d %d interlayer %d c%d %dms (sum %x)",
-               wf_films[lk->row].code, lk->variant, (unsigned)lk->stk, kk.fexp, kk.prn[0], kk.prn[1], kk.prn[2],
-               kk.iie * 25, pi.curve, ms, (unsigned)pi.sum);
+        wf_log("dark: tables knobs %s v%d k%x exp %d prn %d %d %d interlayer %d bleach %d %d neutral %d %d c%d %dms "
+               "(sum %x)", wf_films[lk->row].code, lk->variant, (unsigned)lk->stk, kk.fexp, kk.prn[0], kk.prn[1],
+               kk.prn[2], kk.iie * 25, kk.bleach * 25, kk.pbleach * 25, kk.nneg * 25, kk.nprn * 25, pi.curve, ms,
+               (unsigned)pi.sum);
     } else if (dk_lgk)
         wf_log("dark: tables log pack %s v%d c%d %dms (offset %d, %d entries, sum %x)", wf_films[lk->row].code,
                lk->variant, pi.curve, ms, (int)pi.off, pi.count, (unsigned)pi.sum);

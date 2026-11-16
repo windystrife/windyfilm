@@ -887,3 +887,80 @@ give the default key and the shipped table's frame bit for bit; strength 30 % wi
 halves -> "packs of another build". `mk_wfstlog.py` self-test: v2 header, monotone rows, offset 0 = identity, brighter
 offsets read higher nodes. `mk_wfstage logknob ... FEXP PUSH COMP PRNR PRNG PRNB IIE` writes the module's knob table as
 a .L33 (sheets).
+
+### 10.12 Four more knob rows: Bleach bypass, Print bleach, Neutral neg, Neutral print (chain-log, 2026-11-16)
+
+The owner asked for the chain's four remaining look controls as rows, on the 8-bit path and on RAW. They go after
+Interlayer, 0..100 % in 25 % steps, default 0 (the chain's default), greyed without knob data (a version 1 WFSTAGE.DAT,
+or none). Default knobs still take the shipped tables (key 0), so shoulder=a stays RAWB15 bit for bit, and every other
+knob set composes exactly as before (host: the same RAW samples as HEAD's composer on G03 v4 / G38 v18 over 5 sets of
+Interlayer, offset and printer, -9..+7 thirds, R -12..+12).
+
+**What the chain does** (fr_glook_film.c, all four held at 0 until now) and how the composer reaches it with data only:
+- *Neutral neg / Neutral print* (`neutral_tonescale`, `neutral_density`, curve3): R's and B's curve move toward G's at the
+  same input. A1 / B1 share one 257-point axis per half, so the composer blends its own rows: d += (A1[G](x) - d) x
+  step / 4 (B1 the same). No data, and A2 / B2 need no wider grid (measured below: the plan's widening was not needed).
+- *Bleach bypass* (`bleach`, after the interlayer, before auto-balance and printer): pd_c += amount x (pd_R + pd_G +
+  pd_B). A2's base holds the auto-balance (measured at printer 0), so the composer adds amount x (sum of the A2 values -
+  bs) to every channel; bs = the auto-balance summed (Q16 208404 = 3 x 1.06), measured from the chain's trace at
+  bleach 100 % and 50 % on all 46 negatives (`mk_wfstage kd`).
+- *Print bleach* (`print_bleach`): linear light x 10^(-amount x the sum of the print densities), before the gamut map
+  (scale-invariant) and the encode (a power), so one gain on B2's raw output: g(s), s = amount x the sum of B1's three
+  outputs, a 257-entry Q16 table over s = 0..16 measured at display white and checked at grey (`mk_wfstage kd`: one gain
+  within 40 Q16 units). Applied before the pinned ends.
+- **Amount scale.** The chain takes 0..1 for both bleach amounts, but 0.25 already takes mid grey from L* 55 to 85
+  (Bleach bypass) or to 21 (Print bleach) on 2 chain films x 16 frames. The rows use amount = step / 64
+  (`WF_SG_BL_SHIFT` 6): 100 % = 1/16, L* 55 -> 68 / 43, C* -18 / -22 %, close to linear in the steps. The neutral rows
+  blend 0..1.
+
+**Knob data** `struct wf_sg_kd` (bs, g[257], pad: 520 B) at the end of **WFSTAGE.DAT version 2**: header u16 version 2,
+u32 at 56 = its offset (the end of the print blobs), u32 at 60 = its FNV-1a, the size includes it. The negative / print
+blobs are byte-equal to version 1's (21,323,868 B -> 21,324,388 B, bytes 64..end of v1 equal), so WFSTLOG.DAT's per-half
+FNVs stay valid. `mk_wfstage.py` caches the data in films/tables/.stage/kd.bin (new file; FORCE=1 re-measures). The
+module reads version 1 or 2; a version 1 pack hides the four rows and composes them as 0 (the cfg keeps their values).
+
+**Key** (32-bit, default 0): key = 1 + 2 x idx, idx mixed radix over offset (19) x printer R / G / B (25 each) x
+interlayer (9) x the four rows (5 each) < 1,669,921,875. wf_sg_unkey divides by constants (multiply-high: wf_stagek.o
+imports nothing). Keys are not stored: the cfg and roll files hold the row values.
+
+**RAW** (B and the Darkroom): the same passes over the log grid. The residual (shipped .L33 - default composition) gets
+a weight per node, `gn` from wf_sg_prn_pass_rgb = the Print bleach gain (it scales the print's output, so it scales the
+composition's error) x (4 - Bleach bypass step) / 4. Bleach bypass moves the knee (100 %: 16.87 -> 14.18 nodes on
+G03P01) and the residual sits at the old knee: read at the node it put that knee 0.63 node late; faded out, the RAW
+table at 100 % is the composition alone (as the 8-bit table always is). `wf_sg_res_w` says when the weight is needed;
+wf_rawb.c allocates gn (33 x 33 u16) only then.
+
+**Accuracy** (`mk_wfstage check`, 8-bit vs the chain at the 4913 nodes, 5 pairs; `logcheck`, RAW vs the chain at the
+35,937 log nodes, 5 pairs):
+- 8-bit: Bleach bypass 50 / 100 % max 7.8 codes, mean <= 0.28; Print bleach 50 / 100 % max 7.0, mean <= 0.42; Neutral
+  neg / print / both 100 % max 16.4 (G03P01 neutral print, V at a saturated node), mean <= 0.41; the four mixed max 11.3,
+  mean <= 0.39. The other knobs measure max 4..14, mean 0.3..0.4 the same way.
+- RAW module: Bleach bypass mean <= 0.135, max 13.1; Print bleach mean <= 0.085, max 12.2 (the residual takes 0.13 ->
+  0.06); Neutral mean <= 0.135, max 13.8; the four mixed (Film exp +1, Bleach 50, Print 75, Neutral 100 / 25) mean
+  <= 0.194, max 15.5 (R at gamut-edge nodes, the composition's own miss there).
+- Knee (lg_knee) chain / module: Bleach 100 % 14.18 / 14.13, 14.06 / 14.06, 14.30 / 14.27, 13.98 / 13.98, 13.98 / 13.98;
+  Print bleach, Neutral, mixed within 0.03 node. **The one knee miss: G03P01 (Vision3 5207 / 2383) Bleach bypass 50 %
+  (offset 0, printer 0, Interlayer 100 %): chain 15.29, composed 15.26, module 15.45** (half the residual left).
+- `dat` (v2) over the 643 entries: default composition vs shipped mean of means 0.268 as before; the knob data matches
+  `kd`; Print bleach 100 % darkens grey (>= 10 of 13 nodes) in every entry.
+
+**Cost** (memsim ARM946E-S, G03 v4, per RAW knob table: negative passes / residual / fill): the new rows at 0 226 / 123 /
+119 ms (HEAD 220 / 124 / 118); Bleach 100 % 235 / 123 / 114; Print bleach 100 % 226 / 123 / 153; Neutral both 100 %
+240 / 123 / 142; mixed with Film exp +1 242 / 123 / 200 (565 ms, HEAD's Film exp +1 alone 505). The 8-bit composition
+(4913 nodes) 37..43 ms. The node functions come twice (`wf_sg_nnode0` / `wf_sg_pnode0` with the four rows at 0, the
+code of before; `...k` with them): one copy cost 8 % of every pass. Code (text + data) against milestone 3: wf_stagek
++2,376 B (1,208 of it the second copies), wf_shot +368, wf_rawb +307, wf_dark +147; whole image EOS M 715,408 -> 721,184 B (5D2 675,120 B).
+
+**UI / cfg / EXIF:** rows "Bleach bypass", "Print bleach", "Neutral neg", "Neutral print" (texts "0%".."100%", 4 new
+browser icons from tools/mk_wffont.py: 22 rows), `stage=` 7 or 11 values (any other count, a trailing comma or a value
+out of range: the line is ignored), saved with 11; EXIF " | Bleach bypass 50%", " | Print bleach 25%", " | Neutral neg
+100%", " | Neutral print 50%" when not 0. Logs: `rawb: tables knobs ... interlayer <%> bleach <%> <%> neutral <%> <%>
+c<curve> ...` and the Darkroom's `dark: tables knobs ...` the same.
+
+**Tests:** wf_test STAGE (the eleven rows on a version 2 pack, Bleach bypass 25 / 100 %, Print bleach 100 %, Neutral neg
+100 % + Neutral print 50 % + Print bleach 25 %: each bit-exact against wf_sg_compose on the synthetic halves, key, EXIF,
+cfg 11 values), STAGE:missing (cfg 7 / 11 values read, 8 / 12 values and out of range ignored), STAGE:v1 (a version 1
+pack: seven rows, the four greyed, Film exp +1's key with the cfg's four nonzero, the cfg keeps them), RAWB:knobs (Bleach
+50 %, Print bleach 75 %, Neutral neg 100 %, Neutral print 25 %, then + Film exp +1: bit-exact against the test's
+reference with the weighted residual; back to the shipped table). dev_check 1177/0 (pack 238/0), EOS M 1840/0, 5D2 1344/0, gate
+PASS on both.

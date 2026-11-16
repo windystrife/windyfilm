@@ -8,16 +8,19 @@ then stay hidden).
 One entry per (film, print variant) of films/catalog.py whose table is a chain pair: films/tables/G<nn>P<pp>.T17 (the
 chain rows; <pp> is the label slot, its halves the chain print tools/mk_genesis_films.py PRINT_CHAIN names) and the four
 stage films of tools/mk_genesis_films.py (GX500T ...).
-  header 64 B  "WFSG", u16 version 1, u16 entries, u16 negatives, u16 prints, u16 33, u16 33, u16 257, u16 1021,
+  header 64 B  "WFSG", u16 version 2, u16 entries, u16 negatives, u16 prints, u16 33, u16 33, u16 257, u16 1021,
                u32 negative blob bytes, u32 print blob bytes, u32 index offset 64, u32 negative checksums offset,
                u32 print checksums offset, u32 negatives offset, u32 prints offset,
-               u32 FNV-1a of index + both checksum lists, u32 file size, u32 0, u32 0
+               u32 FNV-1a of index + both checksum lists, u32 file size, u32 knob data offset, u32 FNV-1a of the knob
+               data (version 1, before the rows Bleach bypass / Print bleach / Neutral neg / Neutral print: no knob
+               data, the last two u32 0; the module reads both and hides those four rows for a version 1 pack)
   index  28 B  u8 id, u8 variant (catalog.PRINTS order), u8 negative blob, u8 print blob, char code[8] (the table
                code, NUL padded), s32 fitted exposure (Q16 stops), s32 black (Q16), u32 2^32 / (white - black),
                u32 FNV-1a of the shipped .T17 (the module takes the entry only when WFFILMS.DAT holds that very table,
                so the knobs never compose against a pack made from another chain build)
   checksums    u32 FNV-1a per negative blob, then per print blob
   blobs        struct wf_sg_neg (434,856 B) each, then struct wf_sg_prn (217,192 B) each
+  knob data    struct wf_sg_kd (520 B, tools/mk_wfstage.c kd: measured on the chain, one set for every pair), last
 Entries are sorted by id, then variant. The module takes an entry only when id and code match its catalogue.
 Identical halves are stored once and their entries share the blob number (the module reads a blob by its number, so
 nothing changes there): the chain's own dye tables are byte-identical for five print pairs (2383 = 2393, 2395 =
@@ -38,6 +41,7 @@ import mk_genesis_films as G
 NA, NB, N1, NX = 33, 33, 257, 1021
 NEG_BYTES = 24 + 2 * (NX + 1) + 2 * 3 * N1 + 2 + 12 * NA ** 3
 PRN_BYTES = 24 + 2 * 3 * N1 + 2 + 6 * NB ** 3 + 2
+KD_BYTES = 4 + 2 * N1 + 2
 CACHE = os.path.join(REPO, "films", "tables", ".stage")
 BUILD = os.path.join("/tmp", "mk_wfstage_build")
 TOOL = os.path.join(BUILD, "mk_wfstage")
@@ -138,6 +142,11 @@ def main():
     if FORCE or not os.path.exists(pairs_path):
         run([TOOL, "pairs", pairs_path], "mk_wfstage pairs")
     pr = struct.unpack("<%di" % (46 * 16 * 3), open(pairs_path, "rb").read())
+    kd_path = os.path.join(CACHE, "kd.bin")
+    if FORCE or not os.path.exists(kd_path):
+        run([TOOL, "kd", kd_path], "mk_wfstage kd")
+    kd = open(kd_path, "rb").read()
+    assert len(kd) == KD_BYTES, kd_path
     print("WFSTAGE: %d catalogue pairs, %d negatives, %d prints" % (len(ents), len(negs), len(prns)))
 
     # a pair whose print white sits (almost) on its black has no usable span to pin: it keeps its shipped table only
@@ -169,12 +178,13 @@ def main():
     do = po + len(ptab)
     do = (do + 3) & ~3
     pd = do + NEG_BYTES * len(nb)
-    size = pd + PRN_BYTES * len(pb)
-    hdr = b"WFSG" + struct.pack("<HHHHHHHHIIIIIIIIIII", 1, len(ents), len(nb), len(pb), NA, NB, N1, NX, NEG_BYTES,
-                                PRN_BYTES, io, no, po, do, pd, fnv(idx + ntab + ptab), size, 0, 0)
+    ko = pd + PRN_BYTES * len(pb)
+    size = ko + KD_BYTES
+    hdr = b"WFSG" + struct.pack("<HHHHHHHHIIIIIIIIIII", 2, len(ents), len(nb), len(pb), NA, NB, N1, NX, NEG_BYTES,
+                                PRN_BYTES, io, no, po, do, pd, fnv(idx + ntab + ptab), size, ko, fnv(kd))
     assert len(hdr) == 64
     blob = hdr + idx + ntab + ptab
-    blob += b"\0" * (do - len(blob)) + b"".join(nb) + b"".join(pb)
+    blob += b"\0" * (do - len(blob)) + b"".join(nb) + b"".join(pb) + kd
     assert len(blob) == size
     open(out, "wb").write(blob)
     selftest(out, ents)
@@ -195,9 +205,10 @@ def main():
 def selftest(path, ents):
     b = open(path, "rb").read()
     f = struct.unpack_from("<4sHHHHHHHHIIIIIIIIIII", b, 0)
-    magic, ver, n, nn, np_, na, nb, n1, nx, negb, prnb, io, no, po, do, pd, ck, size, z0, z1 = f
-    assert magic == b"WFSG" and ver == 1 and n == len(ents) and (na, nb, n1, nx) == (NA, NB, N1, NX)
-    assert (negb, prnb, io) == (NEG_BYTES, PRN_BYTES, 64) and size == len(b) and z0 == z1 == 0
+    magic, ver, n, nn, np_, na, nb, n1, nx, negb, prnb, io, no, po, do, pd, ck, size, ko, kf = f
+    assert magic == b"WFSG" and ver == 2 and n == len(ents) and (na, nb, n1, nx) == (NA, NB, N1, NX)
+    assert (negb, prnb, io) == (NEG_BYTES, PRN_BYTES, 64) and size == len(b)
+    assert ko == pd + np_ * prnb and size == ko + KD_BYTES and kf == fnv(b[ko:]), "knob data"
     assert no == io + 28 * n and po == no + 4 * nn and do >= po + 4 * np_ and do % 4 == 0 and pd == do + nn * negb
     assert ck == fnv(b[io:po + 4 * np_]), "index checksum"
     for k in range(nn):
@@ -210,7 +221,7 @@ def selftest(path, ents):
         assert (i, v) not in seen and ni < nn and pi < np_ and inv > 0 and tf == fnv(open(ents[k][5], "rb").read())
         seen.add((i, v))
         assert (i, v, code.rstrip(b"\0").decode()) == ents[k][:3], k
-    print("self-test: %d entries, index + %d + %d blob checksums match" % (n, nn, np_))
+    print("self-test: %d entries, index + %d + %d blob checksums + the knob data match" % (n, nn, np_))
 
 
 if __name__ == "__main__":
