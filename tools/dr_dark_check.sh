@@ -11,8 +11,8 @@
 # border, the Exif size and orientation) and kept as out/fin_<pair>_<tag>.JPG + a quarter-size PNG as shown.
 #
 #   bash tools/dr_dark_check.sh [DIR] [N]     the first N pairs of DIR (default Day09 EOS M, all)
-# Env: W (default /root/ml/wf_dr_dark), KEEP=1 keeps the prints, FIN=0 skips the finishes. The photos and every output
-# stay in W: never commit them.
+# Env: W (default /root/ml/wf_dr_dark), KEEP=1 keeps the prints, FIN=0 skips the finishes, LOGO_SVG = the wordmark of
+# the logo runs (default tests/host/logo_test.svg). The photos and every output stay in W: never commit them.
 set -e
 R=$(cd "$(dirname "$0")/.." && pwd)
 S=$R/src
@@ -124,11 +124,11 @@ done
 # the print finishes: TAG FRAME INFO DATE on pairs of the set (WF_PFR_* / WF_PIN_* / WF_PDT_*)
 if [ "${FIN:-1}" = 1 ]; then
   LOOK="WindyFilm: Portra 400 | Print Cine | Strength 100% | Grain Normal | Halation Film | Bloom Low | Mist 1/8"
-  fin() {   # fin PAIR TAG FRAME INFO DATE [ROLL]
+  fin() {   # fin PAIR TAG FRAME INFO DATE [ROLL|-] [LOGO|-] [MODEL]
     local b=$1 tag=$2 c="$D/$1.CR2" j="$D/$1.JPG"
     [ -f "$c" ] && [ -f "$j" ] || { echo "fin $b: not in $D"; return; }
-    ( cd $W && qemu-arm-static $W/wf_dark_test finish "$c" "$j" $W/out $tag $3 $4 $5 $W/WFPRINT.DAT "$LOOK" "${6:--}" ) \
-      > $W/out/fin_${b}_$tag.log 2>&1 || true
+    ( cd $W && qemu-arm-static $W/wf_dark_test finish "$c" "$j" $W/out $tag $3 $4 $5 $W/WFPRINT.DAT "$LOOK" "${6:--}" \
+        "${7:--}" "${8:--}" ) > $W/out/fin_${b}_$tag.log 2>&1 || true
     grep -E "^(finish|FAIL)" $W/out/fin_${b}_$tag.log | sed "s#$D/##; s#$W/out/##; s/^/fin $b $tag: /"
     tally $W/out/fin_${b}_$tag.log
     [ -f $W/out/${b}_$tag.JPG ] || { TF=$((TF + 1)); return; }
@@ -136,7 +136,8 @@ if [ "${FIN:-1}" = 1 ]; then
     mv $W/out/${b}_$tag.JPG $W/out/fin_${b}_$tag.JPG
     djpeg -outfile /dev/null $W/out/fin_${b}_$tag.JPG || { echo "djpeg fin_${b}_$tag: FAIL"; TF=$((TF + 1)); }
     if $PY $R/tools/dr_fin_check.py $W/out/fin_${b}_$tag.JPG $W/out/fin_${b}_off.JPG "$j" $(awk '/^canvas/ {print $2, $3, $4, $5, $6}' \
-         $W/out/fin_${b}_$tag.log) $3 $5 $W/out/fin_${b}_$tag.png; then TP=$((TP + 1)); else TF=$((TF + 1)); fi
+         $W/out/fin_${b}_$tag.log) $3 $5 $W/out/fin_${b}_$tag.png $([ "${7:--}" = - ] || echo logo); then TP=$((TP + 1))
+    else TF=$((TF + 1)); fi
   }
   for b in IMG_0208 IMG_0206 IMG_0212; do                   # landscape, Orientation 6, Orientation 8
     [ -f "$D/$b.CR2" ] || continue
@@ -159,6 +160,15 @@ if [ "${FIN:-1}" = 1 ]; then
   fin IMG_0206 white_info 1 1 0
   fin IMG_0212 date 0 1 1
   fin IMG_0212 white_info_date 1 2 1 "ROLL 021 $(printf '\x7f') 07/24"
+  # the logo (owner 11-16): a pack from LOGO_SVG (default our own test shape keyed "Canon"; the owner's wordmark only from
+  # the private folder, never committed); two previews with the 5D2's name (its darkroom is not there yet)
+  $PY $R/tools/mk_wflogo.py "${LOGO_SVG:-$R/tests/host/logo_test.svg}" $W/WFLOGO.DAT --maker Canon > /dev/null
+  fin IMG_0208 logo_white_info 1 2 2 "ROLL 021 $(printf '\x7f') 07/24" $W/WFLOGO.DAT
+  fin IMG_0208 logo_blackw_info 4 1 0 - $W/WFLOGO.DAT
+  fin IMG_0206 logo_white_info 1 1 1 - $W/WFLOGO.DAT
+  fin IMG_0212 logo_black 2 0 0 - $W/WFLOGO.DAT
+  fin IMG_0208 logo5d2_white_info 1 2 0 "ROLL 021 $(printf '\x7f') 07/24" $W/WFLOGO.DAT "Canon EOS 5D Mark II"
+  fin IMG_0208 logo5d2_black_info 2 1 2 - $W/WFLOGO.DAT "Canon EOS 5D Mark II"
   rm -f $W/out/*.dev.uyvy $W/out/*_*.print.l8 $W/out/*_*.wire.l8
 fi
 

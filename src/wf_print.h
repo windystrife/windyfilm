@@ -19,11 +19,22 @@
  *   wf_pf_band_rows   the next encoder band: the picture's own rows when there is no frame (today's bytes), else
  *                     composed into a row buffer (wf_pf_rows)
  *   wf_pf_stamp       the date in orange seven-segment digits with a glow, drawn into the picture (procedural)
- *   wf_pf_line1 / 2, wf_pf_date   caption and date text from struct wf_dk_shot (wf_darkp.h: Exif / CR2 tags) */
+ *   wf_pf_line1 / 2, wf_pf_date   caption and date text from struct wf_dk_shot (wf_darkp.h: Exif / CR2 tags)
+ *   wf_pf_logo        the logo pack ML/DATA/WFLOGO.DAT (owner 11-16; tools/mk_wflogo.py at card time from the owner's
+ *                     private wordmark SVG): the maker's wordmark and our lettering of the model, placed in the frame band
+ *                     (wf_pf_logo_place), scaled into coverage maps (wf_pf_logo_maps) that wf_pf_rows draws in colour */
 #ifndef WF_PRINT_H
 #define WF_PRINT_H
 #include <stdint.h>
 #include "wf_darkp.h"
+
+/* ------------------------------------------------------------------ logo inks */
+struct wf_pf_ink {                               /* a coverage map drawn over the canvas rows in one colour */
+    int x, y, w, h;                              /* its rect in the stored canvas */
+    const uint8_t *map;                          /* w x h coverage 0..255, stored orientation */
+    int Y, U, V;                                 /* the colour (U / V signed, as in the UYVY words) */
+};
+#define WF_PF_NINK 2
 
 /* settings (menu / config / Darkroom rows) */
 enum { WF_PFR_OFF = 0, WF_PFR_WHITE, WF_PFR_BLACK, WF_PFR_WHITE_W, WF_PFR_BLACK_W, WF_PFR_N };   /* Frame */
@@ -44,6 +55,8 @@ struct wf_pf_lay {
     int bd, bb;                                  /* border (sides, top) and bottom band, as shown */
     int tx, ty, tw, th;                          /* the caption band in the stored canvas (tw = 0: none) */
     uint8_t bg, fg1, fg2;                        /* Y of the frame, caption line 1, lines 2 / 3 and the roll */
+    struct wf_pf_ink ink[WF_PF_NINK];            /* the logo (wf_pf_logo_maps), drawn by wf_pf_rows; nink 0 = none */
+    int nink;
 };
 /* 0 = the canvas is the picture (frame Off); 1 = a frame */
 int wf_pf_layout(struct wf_pf_lay *L, int frame, int info, int iw, int ih, int orient);
@@ -68,6 +81,8 @@ struct wf_pf_cap {
     const char *l2;                              /* line 2: focal length, f-number, shutter, ISO */
     const char *l3[8]; int n3;                   /* line 3: the film, then print / grain / halation / bloom / mist */
     const char *roll;                            /* right of line 1: "ROLL 021 . 07/24", 0 = none */
+    int rsv;                                     /* px kept free right of lines 1 and 2 (the logo, wf_pf_logo_place) */
+    int roll3;                                   /* 1 = the roll right of line 3 instead (the logo is right of line 1) */
 };
 uint32_t wf_pf_band_bytes(const struct wf_pf_lay *L);   /* tw x th (0: no caption) */
 /* the band (luma, tw x th, stored orientation). Items that do not fit the picture's width are left out from the end
@@ -115,5 +130,33 @@ uint32_t wf_pf_stamp_bytes(int iw, int ih, const char *txt);   /* the glow map i
 int wf_pf_stamp(uint32_t *img, int ipitch, int iw, int ih, int orient, const char *txt, uint8_t *map, uint32_t mapn);
 int wf_pf_stamp_fn(wf_pf_rowfn *row, void *ctx, int iw, int ih, int orient, const char *txt, uint8_t *map,
                    uint32_t mapn);
+
+/* ------------------------------------------------------------------ logo (owner 11-16, DESIGN 3.9)
+ * ML/DATA/WFLOGO.DAT: the maker's wordmark (its key = the maker, e.g. "Canon") and our lettering per Exif Model (key =
+ * the model, e.g. "Canon EOS M" -> "EOS M"), 8-bit coverage up to 2048 x 1024 px (format: tools/mk_wflogo.py). Drawn
+ * only with a frame and only on a shot whose Model starts with the maker; white frames: the wordmark in the maker's red, the
+ * lettering in line 1's tone; black frames: both light (the camera body's print). With the caption: the wordmark right of
+ * line 1, from line 1's cap line down, the lettering under it at lines 2 / 3's cap height on line 2's baseline, the roll
+ * moves to line 3 and line 1 drops the model (the lettering names it). Without: both side by side, centred in the bottom
+ * border. No pack, a bad pack or another maker: the frame as before. */
+#define WF_PF_LOGO_MAXB (384 * 1024)             /* the biggest pack the darkroom reads */
+struct wf_pf_img { const uint8_t *a; int w, h, top, base; };   /* coverage w x h; the cap line's and the baseline's rows */
+struct wf_pf_logo {
+    struct wf_pf_img wm, lt;                     /* wm.a = 0: no logo for this shot; lt.a = 0: no lettering of its model */
+    const char *maker;                           /* the wordmark's key (in the pack) */
+};
+/* 0 = a good pack (g->wm.a = 0 when the shot's model is not the maker's), -1 = a bad pack */
+int wf_pf_logo(struct wf_pf_logo *g, const uint8_t *b, uint32_t n, const char *model);
+/* line 1 with a logo: the model left out when the lettering names it, else the maker's word cut from it (t: the caption's
+   text, c built from it by wf_pf_caption) */
+void wf_pf_cap_logo(struct wf_pf_txt *t, struct wf_pf_cap *c, const struct wf_pf_logo *g);
+/* where the logo goes on canvas L (a frame): the inks' shown rects in P, c->rsv / c->roll3 for the caption (F: the print
+   fonts, 0 = no caption). Returns the bytes wf_pf_logo_maps needs, 0 = no logo (no frame, no room, beyond the scaling) */
+struct wf_pf_lpos { int n, u[WF_PF_NINK], v[WF_PF_NINK], w[WF_PF_NINK], h[WF_PF_NINK]; const struct wf_pf_img *src[WF_PF_NINK]; };
+uint32_t wf_pf_logo_place(const struct wf_pf_lay *L, const struct wf_pf_font *F, const struct wf_pf_logo *g,
+                          struct wf_pf_cap *c, struct wf_pf_lpos *P);
+/* the coverage maps (area-resampled, turned to the stored orientation) into mem (n >= what wf_pf_logo_place returned):
+   L->ink / L->nink set. 0 = done, -1 = no room */
+int wf_pf_logo_maps(struct wf_pf_lay *L, const struct wf_pf_lpos *P, uint8_t *mem, uint32_t n);
 
 #endif

@@ -56,6 +56,31 @@ void wf_dk_shot_gaps(struct wf_dk_shot *s, const struct wf_dk_shot *c);
    that cannot hold the value is left). 0 = both set, -1 = not (no Exif IFD, a tag missing or too small) */
 int wf_dk_dims(uint8_t *app1, uint32_t len, int w, int h);
 
+/* the Exif thumbnail (IFD1 JPEGInterchangeFormat 0x0201 / Length 0x0202) of the APP1 (from its marker, len bytes):
+   *off = where its bytes start in app1, *room = what a new one may take there: to the APP1's end when only zeros (or at
+   most 3 bytes) follow it (Canon's sits at the APP1's end, 16..20 KB), else its own length. 0 = found */
+int wf_dk_xthumb_slot(const uint8_t *app1, uint32_t len, uint32_t *off, uint32_t *room);
+/* jpg (n bytes, a JPEG; an APP0 after its SOI is dropped) into that slot, IFD1's length set, the rest of the slot zeroed.
+   0 = done, -1 = no slot / does not fit / not a JPEG (the APP1 is left as it was) */
+int wf_dk_xthumb_put(uint8_t *app1, uint32_t len, const uint8_t *jpg, uint32_t n);
+
+/* the Exif thumbnail's picture (owner 11-16: Canon's playback and index show the print, not the camera's JPEG): the
+   canvas (cw x ch as stored) fitted into WF_DK_XW x WF_DK_XH with black bars like Canon's thumbnail, box means gathered
+   from every 2nd row of the encoder's bands as they come (Y per pixel, U / V per word). out: WF_DK_XW / 2 x WF_DK_XH
+   UYVY words, filled black by _begin and row by row by _rows. */
+#define WF_DK_XW 160
+#define WF_DK_XH 120
+#define WF_DK_XBYTES (WF_DK_XW * WF_DK_XH * 2)
+struct wf_dk_xth {
+    int cw, ch, tw, th, ox, oy;                  /* canvas; the picture's size and place in the thumbnail */
+    int row, y1, n;                              /* thumbnail row being summed, the canvas row it ends at, rows summed */
+    uint16_t xb[WF_DK_XW + 1];                   /* the canvas word each thumbnail column starts at */
+    int32_t sy[WF_DK_XW], su[WF_DK_XW], sv[WF_DK_XW];
+};
+void wf_dk_xth_begin(struct wf_dk_xth *t, int cw, int ch, uint32_t *out);
+void wf_dk_xth_rows(struct wf_dk_xth *t, const uint32_t *rows, int pitch, int y, int n, uint32_t *out);
+int  wf_dk_xth_done(const struct wf_dk_xth *t);   /* 1 = every row of the picture written */
+
 #define WF_DK_PW 288                             /* = WF_DR_PW / PH / TW / TH (wf_dark.h) */
 #define WF_DK_PH 192
 #define WF_DK_TW 72

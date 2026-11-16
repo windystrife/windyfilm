@@ -89,8 +89,10 @@ BRANCH = branch()
 # `dark-nomem` (the darkroom's frame in pieces when the EOS M has one SRM chunk) and `paper-finish` (the Paper row,
 # tools/mk_paper.py; the paper model is our own: physical paper behaviour and public data sheets) are cut from
 # main-staging 3b45114, so they carry the same exception from their first commit on; `rawb20` merges both.
+# `dr-logo` (the print's logo from the owner's card-time pack, Camera JPEG Overwrite) is cut from rawb20 6cdcb76: the
+# same exception from its first commit on.
 NOT_CLEAN = BRANCH in ("film-stage", "grain-halation", "print-frame", "darkroom", "chain-log", "main-staging",
-                       "dark-nomem", "paper-finish", "rawb20")
+                       "dark-nomem", "paper-finish", "rawb20", "dr-logo")
 DENY += list(BRANCH_EXCEPTIONS)                       # the derived generator's names are denied by default ...
 if NOT_CLEAN:                                         # ... and allowed only under the declared exception
     DENY = [w for w in DENY if w not in BRANCH_EXCEPTIONS]

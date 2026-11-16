@@ -87,18 +87,19 @@ int wf_dark_eta_s(const struct wf_dark_view *v)
 int wf_clock_hm(void) { return clock_hm; }
 
 /* ------------------------------------------------------------------ print finishes (wf_menu.c's rows, DESIGN 3.9) */
-volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date;
+volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg;
 static int clock_ymd = 20261115;
 void fake_set_date(int ymd) { clock_ymd = ymd; }
 int wf_clock_ymd(void) { return clock_ymd; }
 static const char *const pfr_name[5] = { "Off", "White", "Black", "White wide", "Black wide" };
 static const char *const pin_name[3] = { "Off", "On", "On + roll" };
-const char *wf_popt_name(int k) { static const char *const n[WF_PO_N] = { "Frame", "Info", "Date" }; return k >= 0 && k < WF_PO_N ? n[k] : ""; }
+const char *wf_popt_name(int k) { static const char *const n[WF_PO_N] = { "Frame", "Info", "Date", "Camera JPEG" }; return k >= 0 && k < WF_PO_N ? n[k] : ""; }
 int wf_popt_avail(int k) { return k != WF_PO_INFO || (wf_pr_frame > 0 && wf_pr_frame < 5); }
 void wf_popt_step(int k, int d)
 {
-    static const int n[WF_PO_N] = { 5, 3, 4 };
-    volatile int *v = k == WF_PO_FRAME ? &wf_pr_frame : k == WF_PO_INFO ? &wf_pr_info : &wf_pr_date;
+    static const int n[WF_PO_N] = { 5, 3, 4, 2 };
+    volatile int *v = k == WF_PO_FRAME ? &wf_pr_frame : k == WF_PO_INFO ? &wf_pr_info : k == WF_PO_JPEG ? &wf_pr_jpeg
+                                                                                              : &wf_pr_date;
     if (k < 0 || k >= WF_PO_N || !d) return;
     *v = (*v + (d > 0 ? 1 : n[k] - 1)) % n[k];
 }
@@ -106,6 +107,7 @@ const char *wf_popt_text(int k, char *b, int n)
 {
     if (k == WF_PO_FRAME) return pfr_name[wf_pr_frame % 5];
     if (k == WF_PO_INFO) return pin_name[wf_pr_info % 3];
+    if (k == WF_PO_JPEG) return wf_pr_jpeg ? "Overwrite" : "Keep";
     int y = clock_ymd / 10000 % 100, m = clock_ymd / 100 % 100, d = clock_ymd % 100;
     switch (wf_pr_date) {
     case 1: snprintf(b, n, "'%02d %02d %02d", y, m, d); return b;

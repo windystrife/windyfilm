@@ -692,12 +692,12 @@ static const char *phase_text(int ph)
     return "";
 }
 
-/* the print finishes (owner 11-15, DESIGN 3.9): three rows in the browser's style while no run lives; UP / DOWN pick one,
- * LEFT / RIGHT / the wheel change it (wf_menu.c keeps them and saves the config) */
+/* the print finishes (owner 11-15, DESIGN 3.9; Camera JPEG 11-16): four rows in the browser's style while no run lives;
+ * UP / DOWN pick one, LEFT / RIGHT / the wheel change it (wf_menu.c keeps them and saves the config) */
 #define DR_RX0 384
 #define DR_RX1 696
 #define DR_RY  208
-#define DR_RH  27
+#define DR_RH  25
 
 static void dr_prows(void)
 {

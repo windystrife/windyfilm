@@ -11,10 +11,13 @@
  *     Canon's own frame, for the per-ISO trim table: "trim ISO n: fit vs scene scale +x.xx EV, WB R/G .. B/G ..".
  *   wf_dark_test units     wf_darkp.c on synthetic input (APP1 walk, comment, scales, thumbnails) and wf_print.c (the
  *                          print finishes, DESIGN 3.9: canvas layouts, the shot's Exif details, caption text, the date,
- *                          the font pack WFPRINT.DAT when it is in the work dir, the date stamp, plain-path identity)
- *   wf_dark_test finish CR2 JPG OUTDIR TAG FRAME INFO DATE PACK|- LOOK ROLL|-
+ *                          the font pack WFPRINT.DAT when it is in the work dir, the date stamp, plain-path identity),
+ *                          the logo (pack, caption line 1, placement, colours, orientations) and the Exif thumbnail
+ *   wf_dark_test finish CR2 JPG OUTDIR TAG FRAME INFO DATE PACK|- LOOK ROLL|- [LOGO|- [MODEL]]
  *     the frame's print as the darkroom makes it with the print finishes (wf_dark.c dk_finish): FRAME / INFO / DATE =
- *     WF_PFR_* / WF_PIN_* / WF_PDT_*, LOOK = the comment text line 3 comes from, ROLL = the roll text right of line 1.
+ *     WF_PFR_* / WF_PIN_* / WF_PDT_*, LOOK = the comment text line 3 comes from, ROLL = the roll text right of line 1,
+ *     LOGO = a WFLOGO.DAT (tools/mk_wflogo.py), MODEL = another camera's name for the caption and the logo (a preview).
+ *     Every print gets its Exif thumbnail as the darkroom's (wf_dark.c dk_xthumb).
  *     OUTDIR/<name>_<TAG>.JPG; the log line "canvas CW CH IX IY ORIENT" for tools/dr_dark_check.sh. All Off = the frame
  *     mode's print byte for byte.
  *   wf_dark_test devset LIST OUTDIR   several CR2s through several develop tables (sRGB / cube / display cube), full-size
@@ -458,6 +461,264 @@ static void punits(void)
     }
 }
 
+/* ------------------------------------------------------------------ the logo (owner 11-16) and the Exif thumbnail */
+static uint32_t fnv32(const uint8_t *p, uint32_t n)
+{
+    uint32_t h = 2166136261u;
+    while (n--) h = (h ^ *p++) * 16777619u;
+    return h;
+}
+/* a logo pack in tools/mk_wflogo.py's format: a 200 x 40 wordmark keyed maker (its letters 4..36, a full box x 10..189),
+   and when model != 0 a 120 x 24 lettering keyed model (letters 2..20, box x 5..114). Returns its size. */
+static uint32_t mk_logo(uint8_t *b, const char *maker, const char *model)
+{
+    int ni = model ? 2 : 1;
+    uint32_t off = 16 + ni * 24, o = off;
+    static const int dim[2][6] = { { 200, 40, 4, 36, 10, 190 }, { 120, 24, 2, 20, 5, 115 } };
+    memset(b, 0, 16 + 48 + 200 * 40 + 120 * 24 + 64);
+    for (int k = 0; k < ni; k++) {
+        const int *d = dim[k];
+        uint8_t *e = b + 16 + k * 24;
+        e[0] = (uint8_t)k;
+        e[1] = 8;
+        put16(e + 2, d[0]); put16(e + 4, d[1]); put16(e + 6, d[2]); put16(e + 8, d[3]);
+        put32(e + 12, o);
+        for (int y = d[2]; y < d[3]; y++)
+            memset(b + o + y * d[0] + d[4], 255, d[5] - d[4]);
+        o += d[0] * d[1];
+    }
+    for (int k = 0; k < ni; k++) {
+        const char *key = k ? model : maker;
+        put32(b + 16 + k * 24 + 16, o);
+        memcpy(b + o, key, strlen(key) + 1);
+        o += strlen(key) + 1;
+    }
+    memcpy(b, "WFLG", 4);
+    put16(b + 4, 1);
+    put16(b + 6, ni);
+    put32(b + 8, o);
+    put32(b + 12, fnv32(b + 16, o - 16));
+    return o;
+}
+/* an APP1 with IFD0 (Orientation) and IFD1 (JPEGInterchangeFormat / Length): a 100-byte "thumbnail" at tn, then pad
+   bytes (tail: the last one set). Returns the APP1's length */
+static uint32_t mk_xapp1(uint8_t *a, uint32_t tn, uint32_t pad, int tail)
+{
+    uint32_t n = 10 + tn + 100 + pad;
+    memset(a, 0, n);
+    a[0] = 0xFF; a[1] = 0xE1; a[2] = (uint8_t)((n - 2) >> 8); a[3] = (uint8_t)(n - 2);
+    memcpy(a + 4, "Exif\0\0", 6);
+    uint8_t *t = a + 10;
+    memcpy(t, "II", 2); put16(t + 2, 42); put32(t + 4, 8);
+    put16(t + 8, 1);                                         /* IFD0: Orientation 1, next = IFD1 at 26 */
+    put16(t + 10, 0x0112); put16(t + 12, 3); put32(t + 14, 1); put16(t + 18, 1);
+    put32(t + 22, 26);
+    put16(t + 26, 2);                                        /* IFD1 */
+    put16(t + 28, 0x0201); put16(t + 30, 4); put32(t + 32, 1); put32(t + 36, tn);
+    put16(t + 40, 0x0202); put16(t + 42, 4); put32(t + 44, 1); put32(t + 48, 100);
+    put32(t + 52, 0);
+    t[tn] = 0xFF; t[tn + 1] = 0xD8;
+    for (int i = 2; i < 98; i++) t[tn + i] = (uint8_t)(0x40 + i);
+    t[tn + 98] = 0xFF; t[tn + 99] = 0xD9;
+    if (tail && pad) t[tn + 100 + pad - 1] = 0x55;
+    return n;
+}
+/* the canvas pixel (shown position u, v) of L as stored: Y, U, V of the rows wf_pf_band_rows gives */
+static void pix_at(const struct wf_pf_lay *L, const uint32_t *img, const uint8_t *band, uint32_t *rb, int x, int y,
+                   int *Y, int *U, int *V)
+{
+    const uint32_t *rows;
+    int pitch, y0 = y & ~15;
+    wf_pf_band_rows(L, y0, img, L->iw * 2, band, rb, &rows, &pitch);
+    uint32_t q = rows[(y - y0) * (pitch / 4) + x / 2];
+    *Y = (int)((q >> (x & 1 ? 24 : 8)) & 0xFF);
+    *U = (int8_t)(q & 0xFF);
+    *V = (int8_t)((q >> 16) & 0xFF);
+}
+
+static void lunits(void)
+{
+    /* the pack: parsed for a Canon model with its lettering, a Canon model without one, refused for another maker /
+       no model (no logo, still 0), refused when changed, short or not a pack */
+    static uint8_t pk[16 + 48 + 200 * 40 + 120 * 24 + 64];
+    uint32_t n = mk_logo(pk, "Canon", "Canon EOS M");
+    struct wf_pf_logo g;
+    CHECK(wf_pf_logo(&g, pk, n, "Canon EOS M") == 0 && g.wm.a && g.lt.a && g.wm.w == 200 && g.lt.h == 24
+          && !strcmp(g.maker, "Canon"), "logo pack: EOS M wordmark + lettering");
+    CHECK(wf_pf_logo(&g, pk, n, "Canon EOS 6D") == 0 && g.wm.a && !g.lt.a, "logo pack: another Canon, no lettering");
+    CHECK(wf_pf_logo(&g, pk, n, "NIKON Z 6") == 0 && !g.wm.a && !g.lt.a, "logo pack: another maker, no logo");
+    CHECK(wf_pf_logo(&g, pk, n, "Canonet") == 0 && !g.wm.a, "logo pack: 'Canonet' is not Canon's");
+    CHECK(wf_pf_logo(&g, pk, n, 0) == 0 && !g.wm.a, "logo pack: no model, no logo");
+    pk[n / 2] ^= 1;
+    CHECK(wf_pf_logo(&g, pk, n, "Canon EOS M") == -1, "logo pack: a changed byte is refused");
+    pk[n / 2] ^= 1;
+    CHECK(wf_pf_logo(&g, pk, n - 1, "Canon EOS M") == -1 && wf_pf_logo(&g, pk, 20, "Canon EOS M") == -1,
+          "logo pack: a short pack is refused");
+    pk[0] = 'X';
+    CHECK(wf_pf_logo(&g, pk, n, "Canon EOS M") == -1, "logo pack: not a pack");
+    pk[0] = 'W';
+
+    /* the caption's line 1: the lettering names the model (dropped), else the wordmark names the maker ("EOS 6D") */
+    struct wf_dk_shot s;
+    static struct wf_pf_txt tx;
+    struct wf_pf_cap c;
+    memset(&s, 0, sizeof s);
+    strcpy(s.model, "Canon EOS M");
+    strcpy(s.lens, "EF-M22mm f/2 STM");
+    wf_pf_logo(&g, pk, n, s.model);
+    wf_pf_caption(&s, 0, 0, &tx, &c);
+    wf_pf_cap_logo(&tx, &c, &g);
+    CHECK(c.n1 == 1 && !strcmp(c.l1[0], "EF-M22mm f/2 STM"), "cap_logo with lettering: n1 %d '%s'", c.n1, c.l1[0]);
+    strcpy(s.model, "Canon EOS 6D");
+    wf_pf_logo(&g, pk, n, s.model);
+    wf_pf_caption(&s, 0, 0, &tx, &c);
+    wf_pf_cap_logo(&tx, &c, &g);
+    CHECK(c.n1 == 2 && !strcmp(c.l1[0], "EOS 6D"), "cap_logo without lettering: '%s'", c.l1[0]);
+
+    /* the bottom border (no caption): wordmark + lettering side by side, centred, inside the border, in every orientation;
+       the stored rects mirror each other (o1 / o3, o6 / o8); the colours: light on black, Canon's red on white */
+    int W = 1296, H = 864;                                   /* a quarter of the EOS M frame */
+    uint32_t *img = grey(W, H);
+    static uint32_t rb[2048 * 16];
+    static const int ors[4] = { 1, 3, 6, 8 };
+    struct wf_pf_ink K[4][2];
+    wf_pf_logo(&g, pk, n, "Canon EOS M");
+    for (int fk = 0; fk < 2; fk++)
+        for (int k = 0; k < 4; k++) {
+            struct wf_pf_lay L;
+            struct wf_pf_lpos P;
+            memset(&c, 0, sizeof c);
+            wf_pf_layout(&L, fk ? WF_PFR_WHITE_W : WF_PFR_BLACK_W, WF_PIN_OFF, W, H, ors[k]);
+            uint32_t need = wf_pf_logo_place(&L, 0, &g, &c, &P);
+            uint8_t *mem = malloc(need + 4);
+            int ok = P.n == 2 && need > 0 && wf_pf_logo_maps(&L, &P, mem, need) == 0 && L.nink == 2 && !c.rsv;
+            int dw0 = L.dw - 2 * L.bd, top = L.bd + (L.dh - L.bd - L.bb);
+            ok = ok && P.v[0] >= top && P.v[0] + P.h[0] <= L.dh && P.v[1] >= top && P.v[1] + P.h[1] <= L.dh
+                 && abs((P.u[0] - L.bd) - (L.bd + dw0 - P.u[1] - P.w[1])) <= 1 && P.u[0] + P.w[0] < P.u[1];
+            for (int i = 0; i < 2 && ok; i++) {
+                K[k][i] = L.ink[i];
+                ok = L.ink[i].x >= 0 && L.ink[i].y >= 0 && L.ink[i].x + L.ink[i].w <= L.cw && L.ink[i].y + L.ink[i].h <= L.ch;
+            }
+            CHECK(ok, "border logo %s o%d: n %d need %u, wm %d,%d %dx%d, lt %d,%d %dx%d", fk ? "white" : "black", ors[k], P.n,
+                  need, P.u[0], P.v[0], P.w[0], P.h[0], P.u[1], P.v[1], P.w[1], P.h[1]);
+            /* the wordmark's middle: full cover = the ink's colour, the lettering's = the frame's caption grey */
+            int Y, U, V, mx = L.ink[0].x + L.ink[0].w / 2, my = L.ink[0].y + L.ink[0].h / 2;
+            pix_at(&L, img, 0, rb, mx & ~1, my, &Y, &U, &V);
+            CHECK(fk ? Y == 76 && U == -24 && V == 82 : Y == 228 && U == 0 && V == 0, "border logo %s o%d: wordmark Y %d U %d V %d",
+                  fk ? "white" : "black", ors[k], Y, U, V);
+            pix_at(&L, img, 0, rb, (L.ink[1].x + L.ink[1].w / 2) & ~1, L.ink[1].y + L.ink[1].h / 2, &Y, &U, &V);
+            CHECK(Y == L.fg1 && U == 0 && V == 0, "border logo o%d: lettering Y %d (want %d)", ors[k], Y, L.fg1);
+            /* outside the inks: the frame as before */
+            pix_at(&L, img, 0, rb, 0, L.ch - 2, &Y, &U, &V);
+            CHECK(Y == L.bg, "border logo o%d: frame corner Y %d", ors[k], Y);
+            free(mem);
+        }
+    {
+        struct wf_pf_lay L;
+        wf_pf_layout(&L, WF_PFR_WHITE_W, WF_PIN_OFF, W, H, 1);
+        CHECK(K[1][0].x == L.cw - K[0][0].x - K[0][0].w && K[1][0].y == L.ch - K[0][0].y - K[0][0].h
+              && K[1][0].w == K[0][0].w && K[2][0].w == K[3][0].w && K[2][0].h == K[0][0].w
+              && K[3][0].x == L.cw - K[2][0].x - K[2][0].w && K[3][0].y == L.ch - K[2][0].y - K[2][0].h,
+              "border logo: the stored rects mirror (o1 %d,%d o3 %d,%d o6 %d,%d o8 %d,%d)", K[0][0].x, K[0][0].y,
+              K[1][0].x, K[1][0].y, K[2][0].x, K[2][0].y, K[3][0].x, K[3][0].y);
+    }
+    /* another maker's shot: nothing placed, the caption untouched */
+    {
+        struct wf_pf_lay L;
+        struct wf_pf_lpos P;
+        wf_pf_logo(&g, pk, n, "NIKON Z 6");
+        wf_pf_layout(&L, WF_PFR_WHITE, WF_PIN_OFF, W, H, 1);
+        memset(&c, 0, sizeof c);
+        CHECK(wf_pf_logo_place(&L, 0, &g, &c, &P) == 0 && P.n == 0 && !c.rsv && !c.roll3, "another maker: no logo");
+    }
+    /* the caption band with the fonts: right of line 1-2, the roll moved to line 3, line 1 / 2 kept short of it */
+    uint32_t pn = 0;
+    uint8_t *fp = slurp("WFPRINT.DAT", WF_PF_MAXB + 1, &pn);
+    struct wf_pf_font F[WF_PF_NFONT];
+    if (fp && pn && wf_pf_fonts(F, fp, pn) == 0) {
+        wf_pf_logo(&g, pk, n, "Canon EOS M");
+        for (int k = 0; k < 4; k++) {
+            struct wf_pf_lay L;
+            struct wf_pf_lpos P;
+            wf_pf_layout(&L, WF_PFR_WHITE, WF_PIN_ROLL, 5184, 3456, ors[k]);
+            memset(&s, 0, sizeof s);
+            strcpy(s.model, "Canon EOS M");
+            strcpy(s.lens, "EF-M15-45mm f/3.5-6.3 IS STM");
+            wf_pf_caption(&s, "WindyFilm: Portra 400 | Print Cine | Grain Normal", "ROLL 021 \x7f 07/24", &tx, &c);
+            uint32_t need = wf_pf_logo_place(&L, F, &g, &c, &P);
+            int dw0 = L.dw - 2 * L.bd;
+            CHECK(P.n == 2 && need > 0 && need < 64 * 1024 && c.rsv > P.w[0] && c.roll3 == 1
+                  && P.u[0] + P.w[0] == L.bd + dw0 && P.u[1] + P.w[1] == L.bd + dw0 && P.w[1] <= P.w[0]
+                  && P.v[0] >= L.bd + (L.dh - L.bd - L.bb) && P.v[1] > P.v[0],
+                  "caption logo o%d: n %d need %u rsv %d, wm %d,%d %dx%d, lt %d,%d %dx%d", ors[k], P.n, need, c.rsv, P.u[0],
+                  P.v[0], P.w[0], P.h[0], P.u[1], P.v[1], P.w[1], P.h[1]);
+            wf_pf_cap_logo(&tx, &c, &g);
+            uint8_t *band = malloc(wf_pf_band_bytes(&L));
+            char dr[200];
+            wf_pf_band(&L, F, &c, band, dr, sizeof dr);
+            CHECK(!strncmp(dr, "EF-M15-45mm", 11) && strstr(dr, " + ROLL 021"), "caption logo o%d: drawn '%s'", ors[k], dr);
+            free(band);
+        }
+    } else
+        printf("units: no WFPRINT.DAT here, the caption logo checks skipped\n");
+    free(fp);
+    free(img);
+
+    /* the Exif thumbnail's slot: to the APP1's end when only zeros follow (Canon's), else its own length */
+    static uint8_t a[16384], a0[16384];
+    uint32_t al = mk_xapp1(a, 64, 3000, 0), off = 0, room = 0;
+    CHECK(wf_dk_xthumb_slot(a, al, &off, &room) == 0 && off == 10 + 64 && room == 3100, "slot: off %u room %u", off, room);
+    al = mk_xapp1(a, 64, 3000, 1);
+    CHECK(wf_dk_xthumb_slot(a, al, &off, &room) == 0 && room == 100, "slot with a byte after it: room %u", room);
+    al = mk_xapp1(a, 64, 2, 1);
+    CHECK(wf_dk_xthumb_slot(a, al, &off, &room) == 0 && room == 102, "slot with 2 bytes after it: room %u", room);
+    /* a thumbnail of ours into it: our JFIF APP0 dropped, IFD1's length set, the rest zero; too big = left as it was */
+    al = mk_xapp1(a, 64, 12000, 0);
+    uint32_t *tp = malloc(WF_DK_XBYTES);
+    for (int i = 0; i < WF_DK_XW / 2 * WF_DK_XH; i++)
+        tp[i] = 0x00800080u | (uint32_t)(i & 63) << 8 | (uint32_t)(i & 63) << 24;
+    static uint8_t jb[64 * 1024], ob[8192];
+    sk.b = jb; sk.n = 0; sk.cap = sizeof jb;
+    uint8_t *e = malloc(wf_jpe_bytes());
+    int rc = wf_jpe_begin((struct wf_jpe *)e, WF_DK_XW, WF_DK_XH, 50, 0, 0, ob, sizeof ob, out2, &sk);
+    if (!rc) rc = wf_jpe_rows((struct wf_jpe *)e, tp, WF_DK_XW * 2, WF_DK_XH);
+    if (!rc) rc = wf_jpe_end((struct wf_jpe *)e);
+    uint32_t app0 = jb[2] == 0xFF && jb[3] == 0xE0 ? 2u + (jb[4] << 8 | jb[5]) : 0;
+    CHECK(rc == 0 && app0 > 0 && sk.n - app0 < 12100, "thumbnail jpeg %u B (APP0 %u)", sk.n, app0);
+    rc = wf_dk_xthumb_put(a, al, jb, sk.n);
+    uint32_t m = sk.n - app0, zero = 1;
+    for (uint32_t i = 10 + 64 + m; i < al; i++)
+        zero &= a[i] == 0;
+    CHECK(rc == 0 && a[74] == 0xFF && a[75] == 0xD8 && !memcmp(a + 76, jb + 2 + app0, m - 2) && rdv(a + 10 + 48, 4, 1) == m
+          && zero, "put: %d, %u B at 74, IFD1 length %u", rc, m, rdv(a + 10 + 48, 4, 1));
+    al = mk_xapp1(a, 64, 100, 0);
+    memcpy(a0, a, al);
+    CHECK(wf_dk_xthumb_put(a, al, jb, sk.n) == -1 && !memcmp(a, a0, al), "put too big: refused, the APP1 as it was");
+    CHECK(wf_dk_xthumb_put(a, al, jb + 1, sk.n - 1) == -1, "put: not a JPEG");
+    free(e);
+
+    /* the thumbnail's picture: a flat canvas fitted with black bars (wide: top / bottom, tall: left / right), every row
+       fed in the encoder's 16-row bands */
+    static const int cs[2][2] = { { 5184, 3456 }, { 2000, 3008 } };
+    for (int k = 0; k < 2; k++) {
+        int cw = cs[k][0], ch = cs[k][1];
+        uint32_t *row = malloc((size_t)cw * 2 * 16);
+        for (int i = 0; i < cw / 2 * 16; i++)
+            row[i] = 0x0Au | 200u << 8 | (uint32_t)(uint8_t)-20 << 16 | 200u << 24;
+        static struct wf_dk_xth xt;
+        wf_dk_xth_begin(&xt, cw, ch, tp);
+        for (int y = 0; y < ch; y += 16)
+            wf_dk_xth_rows(&xt, row, cw * 2, y, ch - y < 16 ? ch - y : 16, tp);
+        uint32_t mid = tp[(WF_DK_XH / 2) * (WF_DK_XW / 2) + WF_DK_XW / 4], c0 = tp[0];
+        uint32_t edge = k ? tp[(WF_DK_XH / 2) * (WF_DK_XW / 2)] : tp[WF_DK_XW / 4];
+        CHECK(wf_dk_xth_done(&xt) && mid == row[0] && c0 == 0 && edge == 0 && (k ? xt.th == WF_DK_XH && xt.tw < WF_DK_XW
+              : xt.tw == WF_DK_XW && xt.th < WF_DK_XH), "xth %dx%d: %dx%d at %d,%d, mid %08x edge %08x", cw, ch, xt.tw,
+              xt.th, xt.ox, xt.oy, mid, edge);
+        free(row);
+    }
+    free(tp);
+}
+
 /* ------------------------------------------------------------------ one frame */
 static uint8_t *slurp(const char *p, uint32_t max, uint32_t *n)
 {
@@ -481,12 +742,14 @@ static int out(void *ctx, const uint8_t *p, uint32_t n)
     return fwrite(p, 1, n, s->f) == n ? 0 : -1;
 }
 
-/* the print finishes of a finish run (0 = the frame mode) */
-struct fin { const char *tag, *pack, *look, *roll; int frame, info, date; };
+/* the print finishes of a finish run (0 = the frame mode); logo = a WFLOGO.DAT, model = the name the caption and the
+   logo take instead of the shot's (a preview of another camera's print) */
+struct fin { const char *tag, *pack, *look, *roll; int frame, info, date; const char *logo, *model; };
 
-/* wf_dark.c dk_finish on the host: the date stamp into frm, the canvas layout, the caption band, the APP1's size */
+/* wf_dark.c dk_finish on the host: the date stamp into frm, the canvas layout, the caption band, the logo's maps, the
+   APP1's size */
 static void finish(const struct fin *fn, const struct wf_dk_shot *cs, uint8_t *app1, uint32_t al, uint32_t *frm, int W,
-                   int H, struct wf_pf_lay *L, uint8_t **band, uint32_t **rowbuf)
+                   int H, struct wf_pf_lay *L, uint8_t **band, uint32_t **rowbuf, uint8_t **maps)
 {
     struct wf_dk_shot s;
     memset(&s, 0, sizeof s);
@@ -515,15 +778,53 @@ static void finish(const struct fin *fn, const struct wf_dk_shot *cs, uint8_t *a
     uint8_t *pk = L->tw && fn->pack ? slurp(fn->pack, WF_PF_MAXB + 1, &pn) : 0;
     int fok = pk && pn <= WF_PF_MAXB && wf_pf_fonts(F, pk, pn) == 0;
     CHECK(!L->tw || fok, "font pack %s", fn->pack ? fn->pack : "-");
+    if (fn->model)                                           /* a preview: another camera's name on this picture */
+        snprintf(s.model, sizeof s.model, "%s", fn->model);
+    struct wf_pf_logo g;                                     /* the logo pack (tools/mk_wflogo.py), as dk_finish reads it */
+    memset(&g, 0, sizeof g);
+    uint32_t ln = 0;
+    uint8_t *lk = fn->logo ? slurp(fn->logo, WF_PF_LOGO_MAXB + 1, &ln) : 0;
+    CHECK(!fn->logo || (lk && ln <= WF_PF_LOGO_MAXB && wf_pf_logo(&g, lk, ln, s.model) == 0), "logo pack %s",
+          fn->logo ? fn->logo : "-");
     struct wf_pf_txt tx;
     struct wf_pf_cap c;
+    struct wf_pf_lpos P;
     char dr[200];
     wf_pf_caption(&s, fn->look, fn->roll, &tx, &c);
+    uint32_t need = wf_pf_logo_place(L, fok ? F : 0, &g, &c, &P);
+    if (P.n)
+        wf_pf_cap_logo(&tx, &c, &g);
     wf_pf_band(L, fok ? F : 0, &c, *band, dr, sizeof dr);
+    if (P.n) {
+        *maps = malloc(need + 4);
+        CHECK(wf_pf_logo_maps(L, &P, *maps, need) == 0, "logo maps");
+        printf("finish: logo %s %dx%d at %d,%d%s%s, maps %u B\n", g.maker, P.w[0], P.h[0], P.u[0], P.v[0],
+               P.n > 1 ? " + lettering " : "", P.n > 1 ? s.model : "", need);
+    } else if (fn->logo)
+        printf("finish: logo pack read, no logo for '%s'\n", s.model);
     int dims = app1 ? wf_dk_dims(app1, al, L->cw, L->ch) : -1;
     CHECK(!app1 || dims == 0, "Exif pixel size not set");
     printf("finish: frame %d info %d o%d, caption \"%s\"\n", fn->frame, fn->info, orient, fok ? dr : "");
     free(pk);
+    free(lk);
+}
+
+/* the Exif thumbnail as wf_dark.c dk_xthumb makes it: xt's picture (gathered from the canvas's rows while they were
+   encoded) as a JPEG, quality down from 90 until it fits the APP1's slot. Returns the quality, 0 = it did not fit */
+static int xthumb(uint8_t *app1, uint32_t al, const struct wf_dk_xth *xt, const uint32_t *xb, uint32_t *n)
+{
+    static uint8_t jb[48 * 1024], ob[8192];
+    uint8_t *e = malloc(wf_jpe_bytes());
+    int q = 90, ok = 0;
+    for (; q >= 40 && !ok; q -= 10) {
+        sk.b = jb; sk.n = 0; sk.cap = sizeof jb;
+        ok = wf_dk_xth_done(xt) && wf_jpe_begin((struct wf_jpe *)e, WF_DK_XW, WF_DK_XH, q, 0, 0, ob, sizeof ob, out2, &sk) == 0
+             && wf_jpe_rows((struct wf_jpe *)e, xb, WF_DK_XW * 2, WF_DK_XH) == 0 && wf_jpe_end((struct wf_jpe *)e) == 0
+             && wf_dk_xthumb_put(app1, al, jb, sk.n) == 0;
+    }
+    free(e);
+    *n = sk.n;
+    return ok ? q + 10 : 0;
 }
 
 static void frame(const char *cr2, const char *jpg, const char *od, const char *juyvy, const struct fin *fn)
@@ -631,11 +932,11 @@ static void frame(const char *cr2, const char *jpg, const char *od, const char *
     }
     CHECK(app1 != 0, "no APP1 in %s", jpg ? jpg : "-");
     struct wf_pf_lay L;                                      /* the canvas (wf_dark.c dk_frame's DRY phase) */
-    uint8_t *band = 0;
+    uint8_t *band = 0, *maps = 0;
     uint32_t *rowbuf = 0;
     wf_pf_layout(&L, WF_PFR_OFF, 0, W, H, 1);
     if (fn && (fn->frame || fn->date))
-        finish(fn, &cs, app1, al, frm, W, H, &L, &band, &rowbuf);
+        finish(fn, &cs, app1, al, frm, W, H, &L, &band, &rowbuf, &maps);
     const char *b = strrchr(cr2, '/');
     b = b ? b + 1 : cr2;
     char p[600], name[64];
@@ -647,20 +948,36 @@ static void frame(const char *cr2, const char *jpg, const char *od, const char *
     struct sink s = { fopen(p, "wb"), 0 };
     CHECK(s.f != 0, "create %s", p);
     static uint8_t ob[64 * 1024];
+    static struct wf_dk_xth xt;                              /* the Exif thumbnail (wf_dark.c dk_encode) */
+    static uint32_t xb[WF_DK_XW / 2 * WF_DK_XH];
+    uint32_t xo = 0, xroom = 0, xn = 0;
+    int xth = app1 && wf_dk_xthumb_slot(app1, al, &xo, &xroom) == 0;
+    CHECK(!app1 || xth, "no Exif thumbnail slot in Canon's APP1");
+    if (xth)
+        wf_dk_xth_begin(&xt, L.cw, L.ch, xb);
     uint8_t *e = malloc(wf_jpe_bytes());
     rc = wf_jpe_begin((struct wf_jpe *)e, L.cw, L.ch, 95, app1, (int)al, ob, sizeof ob, out, &s);
     for (int y = 0; rc == 0 && y < L.ch; y += 16) {
         const uint32_t *rows;
         int pitch, n = wf_pf_band_rows(&L, y, frm, W * 2, band, rowbuf, &rows, &pitch);
         rc = wf_jpe_rows((struct wf_jpe *)e, rows, pitch, n);
+        if (xth)
+            wf_dk_xth_rows(&xt, rows, pitch, y, n, xb);
     }
     if (rc == 0) rc = wf_jpe_end((struct wf_jpe *)e);
+    int xq = xth && rc == 0 ? xthumb(app1, al, &xt, xb, &xn) : 0;
+    if (xq) {                                                /* the APP1 again, at offset 2 (after SOI) */
+        fseek(s.f, 2, SEEK_SET);
+        CHECK(fwrite(app1, 1, al, s.f) == al, "APP1 rewrite");
+    }
     fclose(s.f);
     CHECK(rc == 0, "encode %d", rc);
-    printf("print %s: %u bytes, APP1 %u bytes\n", p, s.n, al);
+    CHECK(!xth || xq, "Exif thumbnail did not fit its slot (%u B)", xroom);
+    printf("print %s: %u bytes, APP1 %u bytes, Exif thumbnail q%d %u B of %u\n", p, s.n, al, xq, xn, xroom);
     printf("canvas %d %d %d %d %d\n", L.cw, L.ch, L.ix, L.iy, L.orient);
     free(band);
     free(rowbuf);
+    free(maps);
     snprintf(p, sizeof p, "%s/%s.dev.uyvy", od, name);
     FILE *u = fopen(p, "wb");
     if (u) { fwrite(frm, 2, (size_t)W * H, u); fclose(u); }
@@ -835,17 +1152,19 @@ int main(int argc, char **argv)
     if (argc >= 2 && !strcmp(argv[1], "units")) {
         units();
         punits();
+        lunits();
     } else if (argc >= 5 && !strcmp(argv[1], "frame"))
         frame(argv[2], strcmp(argv[3], "-") ? argv[3] : 0, argv[4], argc > 5 ? argv[5] : 0, 0);
     else if (argc >= 12 && !strcmp(argv[1], "finish")) {
         struct fin fn = { argv[5], strcmp(argv[9], "-") ? argv[9] : 0, argv[10], strcmp(argv[11], "-") ? argv[11] : 0,
-                          atoi(argv[6]), atoi(argv[7]), atoi(argv[8]) };
+                          atoi(argv[6]), atoi(argv[7]), atoi(argv[8]),
+                          argc > 12 && strcmp(argv[12], "-") ? argv[12] : 0, argc > 13 && strcmp(argv[13], "-") ? argv[13] : 0 };
         frame(argv[2], strcmp(argv[3], "-") ? argv[3] : 0, argv[4], 0, &fn);
     } else if (argc >= 4 && !strcmp(argv[1], "devset"))
         devset(argv[2], argv[3]);
     else {
         fprintf(stderr, "usage: wf_dark_test units | frame CR2 JPG|- OUTDIR [JPEG.UYVY]\n"
-                        "       | finish CR2 JPG|- OUTDIR TAG FRAME INFO DATE PACK|- LOOK ROLL|-\n"
+                        "       | finish CR2 JPG|- OUTDIR TAG FRAME INFO DATE PACK|- LOOK ROLL|- [LOGO|- [MODEL]]\n"
                         "       | devset LIST OUTDIR\n");
         return 2;
     }

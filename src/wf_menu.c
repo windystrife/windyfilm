@@ -290,9 +290,11 @@ static const char *const wf_pfr_name[WF_PFR_N] = { "Off", "White", "Black", "Whi
 static const char *const wf_pin_key[WF_PIN_N] = { "off", "on", "roll" };
 static const char *const wf_pin_name[WF_PIN_N] = { "Off", "On", "On + roll" };
 static const char *const wf_pdt_key[WF_PDT_N] = { "off", "ymd", "dmy", "mdy" };
-static const char *const wf_popt_nm[WF_PO_N] = { "Frame", "Info", "Date" };
-static volatile int *const wf_popt_v[WF_PO_N] = { &wf_pr_frame, &wf_pr_info, &wf_pr_date };
-static const int wf_popt_n[WF_PO_N] = { WF_PFR_N, WF_PIN_N, WF_PDT_N };
+static const char *const wf_pj_key[WF_PJ_N] = { "keep", "overwrite" };
+static const char *const wf_pj_name[WF_PJ_N] = { "Keep", "Overwrite" };
+static const char *const wf_popt_nm[WF_PO_N] = { "Frame", "Info", "Date", "Camera JPEG" };
+static volatile int *const wf_popt_v[WF_PO_N] = { &wf_pr_frame, &wf_pr_info, &wf_pr_date, &wf_pr_jpeg };
+static const int wf_popt_n[WF_PO_N] = { WF_PFR_N, WF_PIN_N, WF_PDT_N, WF_PJ_N };
 
 const char *wf_popt_name(int k) { return k >= 0 && k < WF_PO_N ? wf_popt_nm[k] : ""; }
 int wf_popt_avail(int k) { return k != WF_PO_INFO || (wf_pr_frame > WF_PFR_OFF && wf_pr_frame < WF_PFR_N); }
@@ -313,6 +315,8 @@ const char *wf_popt_text(int k, char *b, int n)
         return wf_pick(wf_pfr_name, WF_PFR_N, v);
     if (k == WF_PO_INFO)
         return wf_pick(wf_pin_name, WF_PIN_N, v);
+    if (k == WF_PO_JPEG)
+        return wf_pick(wf_pj_name, WF_PJ_N, v);
     if (k != WF_PO_DATE || v <= WF_PDT_OFF || v >= WF_PDT_N)
         return "Off";
     int t = wf_clock_ymd(), y = t < 0 ? 26 : t / 10000 % 100, m = t < 0 ? 1 : t / 100 % 100, d = t < 0 ? 1 : t % 100;
@@ -957,6 +961,8 @@ void wf_cfg_load(void)
             wf_pr_info = wf_cfg_word(v, wf_pin_key, WF_PIN_N, WF_PIN_ON);
         } else if ((v = wf_cfg_val(l, "date"))) {
             wf_pr_date = wf_cfg_word(v, wf_pdt_key, WF_PDT_N, WF_PDT_OFF);
+        } else if ((v = wf_cfg_val(l, "jpeg"))) {
+            wf_pr_jpeg = wf_cfg_word(v, wf_pj_key, WF_PJ_N, WF_PJ_KEEP);
         } else if ((v = wf_cfg_val(l, "stage"))) {
             int q[11] = { 0 }, okq = 1, nq = 0;            /* 7 values (before the last four rows) or 11 */
             for (int i = 0; i < 11 && okq; i++) {
@@ -1022,7 +1028,7 @@ static int wf_cfg_save(void)
     int n = snprintf(b, sizeof b,
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
                      "strength=%s\nhl=%d\nsh=%d\npaper=%s\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\n"
-                     "exposure=%s\nexptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\nshoulder=%s\n",
+                     "exposure=%s\nexptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\njpeg=%s\nshoulder=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
@@ -1033,6 +1039,7 @@ static int wf_cfg_save(void)
                      wf_pick(wf_exp_key, 2, wf_exp_mode), wf_exp_trim >= -16 && wf_exp_trim <= 16 ? (int)wf_exp_trim : 0,
                      wf_exif_off ? "off" : "on", wf_blind ? "on" : "off", wf_pick(wf_pfr_key, WF_PFR_N, wf_pr_frame),
                      wf_pick(wf_pin_key, WF_PIN_N, wf_pr_info), wf_pick(wf_pdt_key, WF_PDT_N, wf_pr_date),
+                     wf_pick(wf_pj_key, WF_PJ_N, wf_pr_jpeg),
                      wf_pick(wf_hue_key, WF_DEV_HUE_N, wf_rb_hue));
     struct wf_sg_knobs sk;
     wf_sg_knobs_now(&sk);
@@ -1804,6 +1811,9 @@ static struct menu_entry wf_menu[] = {
             { .name = "Date stamp", .priv = (void *)(intptr_t)(WF_PO_DATE + 1), .select = wf_popt_select,
               .update = wf_popt_update, .icon_type = IT_DICE,
               .help = "Darkroom prints: the day of the shot in orange digits, like a film camera's date back." },
+            { .name = "Camera JPEG", .priv = (void *)(intptr_t)(WF_PO_JPEG + 1), .select = wf_popt_select,
+              .update = wf_popt_update, .icon_type = IT_DICE,
+              .help = "Overwrite: each print also replaces the shot's own JPEG in DCIM (the ROLLS copy stays)." },
             { .name = "End roll now", .select = wf_rewind_select, .icon_type = IT_ACTION,
               .help = "End the roll early: the Darkroom develops the frames shot so far." },
             { .name = "Close roll", .select = wf_close_select, .icon_type = IT_ACTION,

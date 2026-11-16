@@ -353,7 +353,7 @@ def icon_img(k):
     return im
 
 
-PICONS = ('Frame', 'Info', 'Date')               # the Darkroom's print rows (src/ui/wf_dark_ui.c)
+PICONS = ('Frame', 'Info', 'Date', 'Camera JPEG')               # the Darkroom's print rows (src/ui/wf_dark_ui.c)
 
 
 def picon_img(k):
@@ -374,6 +374,11 @@ def picon_img(k):
                 x0, y0, x1, y1 = {'a': (2, 2, 5, 2), 'b': (6, 3, 6, 6), 'c': (5, 9, 5, 12), 'd': (1, 13, 4, 13),
                                   'e': (0, 9, 0, 12), 'f': (1, 3, 1, 6), 'g': (1, 7, 5, 7)}[s]
                 d.line([ox + x0, y0, ox + x1, y1], fill=1)
+    elif k == 'Camera JPEG':                       # an arrow into a sheet: the print goes over the camera's file
+        d.rectangle([6, 1, 14, 14], outline=1)
+        d.line([0, 8, 10, 8], fill=1)
+        d.line([7, 5, 10, 8], fill=1)
+        d.line([7, 11, 10, 8], fill=1)
     return im
 
 
@@ -396,7 +401,7 @@ def write_icons(path):
            'static const uint8_t wf_icons[%d][32] = {' % len(ICONS)]
     for k in ICONS:
         out.append('    /* %-10s */ {%s},' % (k, ', '.join('0x%02x' % v for v in icon_rows(icon_img(k)))))
-    out += ['};', '/* the Darkroom\'s print rows (Frame, Info, Date), same format */',
+    out += ['};', '/* the Darkroom\'s print rows (%s), same format */' % ', '.join(PICONS),
             'static const uint8_t wf_picons[%d][32] = {' % len(PICONS)]
     for k in PICONS:
         out.append('    /* %-10s */ {%s},' % (k, ', '.join('0x%02x' % v for v in icon_rows(picon_img(k)))))

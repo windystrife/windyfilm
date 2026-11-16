@@ -37,10 +37,16 @@ ALL="$ALL MIST:levels"                             # owner 11-15: every Mist lev
 ALL="$ALL STAGE:dark"                              # 11-15: the Darkroom's stage of a chain film, knob rows set, vs the camera's shot
 ALL="$ALL STAGE:v1"                                # 11-16: a version 1 stage pack (no knob data): the last four knob rows hidden
 ALL="$ALL ROLL:mem"                               # 11-16: RAWB17 "no memory": the camera's one SRM chunk, the frame split, real RAW+L pairs
+ALL="$ALL ROLL:jpeg"                              # 11-16: Camera JPEG Overwrite + the logo on real RAW+L pairs
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
 B=${OUT:-$R/build/$cam}
 export WF_PRINT_DAT=${WF_PRINT_DAT:-$B/WFPRINT.DAT}   # ROLL:mem: the caption font pack (build.sh PACKS=1; none: no caption)
+# ROLL:jpeg: a logo pack from our own test shape (tests/host/logo_test.svg, keyed "Canon"), never the owner's
+export WF_LOGO_DAT=${WF_LOGO_DAT:-$B/WFLOGO_TEST.DAT}
+case " $MODES " in *" ROLL:jpeg "*)
+  [ -f "$WF_LOGO_DAT" ] || python3 -I -B $R/tools/mk_wflogo.py $R/tests/host/logo_test.svg "$WF_LOGO_DAT" --maker Canon > /dev/null ;;
+esac
 O=$B/obj
 G=$O/gen
 T=$B/test

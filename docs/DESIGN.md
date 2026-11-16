@@ -821,8 +821,8 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
   - `wf_pr_info` 0..2 = Off / On / On + roll; it needs a frame, so it is greyed while Frame is Off.
   - `wf_pr_date` 0..3 = Off / 'YY MM DD / DD MM 'YY / MM DD 'YY.
   - Config `frame=off|white|black|whitewide|blackwide`, `info=off|on|roll` (default on), `date=off|ymd|dmy|mdy`.
-  - ML menu "Print frame", "Print info", "Date stamp" under "Darkroom".
-  - Darkroom screen: a PRINT block of three rows. UP / DOWN pick a row; LEFT / RIGHT / the wheel change it; this works
+  - ML menu "Print frame", "Print info", "Date stamp" under "Darkroom" ("Camera JPEG", below, is the fourth).
+  - Darkroom screen: a PRINT block of three rows (four since RAWB21). UP / DOWN pick a row; LEFT / RIGHT / the wheel change it; this works
     while idle, stopped or failed, not during a run. The easel shows a sketch of the finished print while no print is
     on it. A run takes a snapshot of the three settings at start (`dark: roll .. print frame f info i date d`).
 - **Frame.**
@@ -835,8 +835,8 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
   - The canvas is made band by band while the encoder streams: the frame colour, the picture's own rows and the
     caption band (rendered once). There is no downscale and no second frame buffer.
   - The APP1 Exif PixelX / YDimension are rewritten to the canvas size (`wf_dk_dims`). The orientation is kept.
-  - White frame Y 255 with captions Y 30 / 118; black frame Y 12 with captions Y 236 / 150. Text only: no logos, no
-    maker trade dress.
+  - White frame Y 255 with captions Y 30 / 118; black frame Y 12 with captions Y 236 / 150. No logo from the repo:
+    the maker's wordmark comes only from the owner's card-time pack (Logo, below).
 - **Caption** (`wf_pf_caption`, from `wf_dk_shot`: the Exif of the print's APP1, gaps filled from the CR2's own tags).
   - Line 1: camera / lens (84 px, medium).
   - Line 2: focal length, f-number, shutter, ISO (62 px).
@@ -855,19 +855,71 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
   - The digit height is 3.6 % of the short side. The stamp sits at the bottom right of the picture as shown (all four
     orientations), inside the picture, frame or no frame.
   - The date comes from the APP1's DateTimeOriginal, else the CR2's. With no date the stamp is skipped and logged.
+- **Logo** (owner 2026-11-16, RAWB21). The camera maker's wordmark in a framed print, beside our own lettering of the
+  model.
+  - The wordmark is the maker's trademark. Its SVG stays in the owner's private folder
+    (`F:/MagicLatern/_windyfilm_docs/private/logo/`, out of git; `.gitignore` has `*wordmark*` and `*.DAT`).
+    `tools/mk_card.sh LOGO=<svg>` makes the pack `ML/DATA/WFLOGO.DAT` at card time with `tools/mk_wflogo.py` (own
+    format "WFLG" v1, in the tool's header, FNV-1a checked). Without the pack on the card the caption is text only,
+    as before. The repo's tests use our own test shape (`tests/host/logo_test.svg`), never the owner's file.
+  - Pack: image 0 = the wordmark rasterised from the SVG's paths (192 px tall, 8 x 8 supersampled coverage), keyed by
+    the maker ("Canon"); then one lettering per Exif Model ("EOS M", "EOS 5D MARK II", " MARK II" at 0.64 size), drawn
+    by the tool from our own monoline geometry. We do not trace the maker's model logotypes.
+  - Drawn only on a shot whose Exif Model starts with the maker's key. A model with no lettering in the pack keeps the
+    model name as text, without the maker's word ("EOS 6D").
+  - With a caption (Info On): the wordmark sits right-aligned in the caption, its top on line 1's cap line, its bottom
+    clear of line 2's caps; the lettering is under it on line 2's baseline, no wider than the wordmark. Line 1 drops
+    the model (the lettering names it); lines 1 / 2 end before the logo; "ROLL 021 · 07/24" moves to the right of line
+    3.
+  - Without a caption (Info Off): the wordmark (2/5 of the bottom border tall) and the lettering side by side,
+    centred in the bottom border.
+  - Colours: white frames the maker's red #BF1920 (Y 76, Cb -24, Cr +82); black frames the wordmark light (Y 228),
+    as on the camera body. The lettering takes the caption's line 1 tone.
+  - The maps are area-resampled (Q12 taps, at most 10x down) into scratch, then screened by the band code like the
+    caption. The 16-px grid and the picture's own blocks are unchanged (the logo is in the border only).
+- **Camera JPEG** (owner 2026-11-16, RAWB21): Keep (default) / Overwrite. Shoot RAW+L quickly; at the Darkroom the
+  print also replaces the shot's own JPEG in DCIM, so the camera's playback and a card reader show the print. The roll
+  copy in `ROLLS/ROLL00n/` is always written first.
+  - Config `jpeg=keep|overwrite`; ML menu "Camera JPEG" under "Darkroom"; the fourth PRINT row on the Darkroom screen
+    (icon: an arrow into a sheet). Snapshot at start: `... jpeg j logo nK` in the start line.
+  - Order per frame: roll print written, read back and checked; then `IMG_nnnn.WFT` in the same DCIM folder; read
+    back and checked; then renamed over `IMG_nnnn.JPG` (`wf_frename`). The CR2 is never touched. Any step failing
+    leaves the camera's JPEG (or, if only the rename failed after its removal, the print in the .WFT, logged).
+  - Check = FNV-1a of every byte outside the APP1 while writing, compared on read-back, plus the APP1 bytes compared.
+  - Frame Off: the .WFT is the roll print's bytes. Frame On: a second encode of the picture alone at Canon's
+    5184 x 3456 with the Exif size set back, so Canon's playback sees the size it made (a framed canvas could be
+    refused).
+  - Exif thumbnail (both the roll print and the DCIM file): Canon's 160 x 120 IFD1 JPEG is replaced by ours of the
+    print (`wf_dk_xthumb_*`, `src/wf_darkp.c`): the band rows are averaged into 160 x 120 while encoding, encoded at
+    q90 down to q40 until it fits the slot (the IFD1 JPEG to the APP1's end when only zeros follow), our JFIF APP0
+    dropped, the rest zero-filled; the APP1 is rewritten in place at offset 2. Too big at q40 = Canon's kept.
+  - Not checked on the camera yet: that Canon's playback opens an overwritten JPEG and shows its thumbnail (qemu has
+    no playback). The roll copy is the safe one.
 - **Memory.** Nothing new is allocated: the pack (<= 512 KB), the caption band (<= about 3.7 MB) and the row buffer
   (about 197 KB) use `M.raw`, which is free scratch in the DRY phase. The stamp's map (about 148 KB) uses `M.raw` too.
-  Fonts / text are static (about 1 KB BSS).
+  Fonts / text are static (about 1 KB BSS). The logo pack (<= 384 KB) is read beside the fonts in the 512 KB pack
+  area; its maps and resample tables (about 90..100 KB at 5184 x 3456) go after the row buffer, so the scratch asks
+  for 192 KB more only when a frame is on and WFLOGO.DAT is on the card. The Exif thumbnail's sums, JPEG and encoder
+  buffer use `M.in` (free in DRY).
 - **Text.** `dark: F07 frame white o1 5408x4144 (Exif size set), band .. KB, ..ms`,
-  `dark: F07 caption <line 1> | <line 2> | <line 3>`, `dark: F07 date stamp 06 03 '24 o1 ..ms`.
+  `dark: F07 caption <line 1> | <line 2> | <line 3>`, `dark: F07 date stamp 06 03 '24 o1 ..ms`,
+  `dark: F07 logo Canon 529x111 + lettering Canon EOS M, .. KB`, `dark: F07 print Exif thumbnail 160x120 q90 .. B`,
+  `dark: F07 camera JPEG IMG_0208.JPG overwritten: the picture 5184x3456, .. KB, ..ms` (or `the print` with Frame
+  Off); every refusal names the step and says "camera JPEG kept".
 - **Checks.**
   - `tests/host/wf_dark_test.c`: layouts for every frame / info / orientation, Exif parsing in both byte orders,
     caption and date text, the pack, band text, stamp place and colour, frame-Off identity. A `finish` mode prints
     one CR2 with given settings.
   - `tools/dr_dark_check.sh` (FIN=1): Off = plain print byte for byte on three frames, then samples checked by
     `tools/dr_fin_check.py`: canvas size, picture luma = plain, stamp at the bottom right as shown, frame corners,
-    Exif size and orientation.
-  - `tests/ui/dr_ui_test.c` 3b: the PRINT rows and the easel sketch.
+    Exif size and orientation; with the test logo pack the red (white frames) or light (black frames) pixels outside
+    the picture, caption and border placements, EOS M and 5D2 lettering. `tests/host/wf_dark_test.c` units: the pack
+    parser (bad magic / FNV / sizes, maker key), placement, maps, the thumbnail slot and put.
+  - `test.sh` ROLL:jpeg (real RAW+L pairs through the module under qemu): Keep leaves DCIM byte for byte; Overwrite
+    with Frame Off = the DCIM JPEG is the roll print's bytes; with a frame + logo = the DCIM JPEG is 5184 x 3456 with
+    the Exif size set back while the roll print is framed; no .WFT left, CR2s unchanged, a missing JPEG is logged and
+    skipped, both files carry our Exif thumbnail.
+  - `tests/ui/dr_ui_test.c` 3b: the PRINT rows (Camera JPEG the fourth) and the easel sketch.
   - The 5D2 has no Darkroom: `wf_print.o` and WFPRINT.DAT are EOS M only.
 
 ### 3.10 Paper finish (owner 2026-11-16, both cameras and the Darkroom web core)

@@ -127,14 +127,16 @@ không có CR2 thì không được đếm.
 - Pin thấp: tự dừng ("Battery low"). Sạc rồi vào Darkroom, SET để tráng nốt.
 - Không mở nắp thẻ, không tắt máy khi đang tráng.
 - Bản in nằm ở gốc thẻ: ROLLS/ROLL001/F01_0206.JPG (F01 = kiểu số 1, 0206 = số
-  IMG của Canon). DCIM không bị đụng tới: CR2 và JPG của Canon giữ nguyên.
+  IMG của Canon). DCIM không bị đụng tới: CR2 và JPG của Canon giữ nguyên (trừ khi
+  đặt Camera JPEG = Overwrite, xem "ĐÈ LÊN JPEG CỦA MÁY" bên dưới; CR2 thì không bao giờ).
 - Trong bản in, EXIF của Canon được giữ; UserComment ghi
   "WindyFilm Darkroom: <phim / look> | ROLL 001 F01".
 
 VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như cũ)
-- Trên màn hình Darkroom (lúc chưa tráng / đã dừng) có khối PRINT 3 dòng. Lên / xuống
-  để chọn dòng, trái / phải hoặc bánh xe để đổi giá trị. Cũng có trong menu ML:
-  "Print frame", "Print info", "Date stamp" ngay dưới "Darkroom". Máy nhớ trong cấu hình.
+- Trên màn hình Darkroom (lúc chưa tráng / đã dừng) có khối PRINT 4 dòng (dòng thứ 4
+  "Camera JPEG" có từ RAWB21). Lên / xuống để chọn dòng, trái / phải hoặc bánh xe để đổi
+  giá trị. Cũng có trong menu ML: "Print frame", "Print info", "Date stamp", "Camera
+  JPEG" ngay dưới "Darkroom". Máy nhớ trong cấu hình.
   - Frame: Off / White / Black / White wide / Black wide (viền trắng / đen, mỏng / dày).
   - Info: Off / On / On + roll. Dưới ảnh in 3 dòng chữ: máy / ống kính; tiêu cự, khẩu,
     tốc, ISO; tên phim + Print / Grain / Halation / Bloom / Mist. "On + roll" thêm
@@ -145,8 +147,36 @@ VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như
 - Ảnh dọc (xoay) được in đúng chiều: chữ nằm dưới ảnh, ngày ở góc dưới phải như khi xem.
 - Có viền thì bản in to hơn ảnh (ví dụ 5408x4144 với White + Info). Phần ảnh bên
   trong giữ nguyên từng điểm như bản in không viền.
-- Chỉ có chữ, không logo. Thiếu file ML/DATA/WFPRINT.DAT thì vẫn in viền nhưng không
-  có chữ (log ghi "WFPRINT.DAT missing").
+- Thiếu file ML/DATA/WFPRINT.DAT thì vẫn in viền nhưng không có chữ (log ghi
+  "WFPRINT.DAT missing").
+- (16/11, RAWB21) Logo: thẻ RAWB21 có ML/DATA/WFLOGO.DAT (chữ Canon thật, làm lúc chép
+  thẻ từ file SVG riêng của bạn, không nằm trong git). Có viền thì bản in có chữ Canon
+  màu đỏ (viền trắng) hoặc màu sáng (viền đen), kèm chữ "EOS M" do mình tự vẽ (máy 5D2:
+  "EOS 5D MARK II").
+  - Info On: logo nằm bên phải khối chữ, "EOS M" ngay dưới chữ Canon; dòng 1 bỏ tên
+    máy (logo đã ghi), "ROLL ... · 0n/03" chuyển xuống bên phải dòng 3.
+  - Info Off: logo và "EOS M" nằm giữa viền dưới.
+  - Frame Off: không có logo. Xoá WFLOGO.DAT khỏi thẻ: bản in chỉ có chữ như trước.
+  - Chỉ vẽ cho ảnh có EXIF máy Canon. Log: "dark: F01 logo Canon WxH + lettering
+    Canon EOS M, NN KB".
+
+ĐÈ LÊN JPEG CỦA MÁY (16/11, RAWB21; mặc định Keep = như cũ)
+- Dòng PRINT thứ 4 / menu "Camera JPEG": Keep / Overwrite. Overwrite: chụp nhanh RAW+L
+  lúc đầu, đến lúc tráng thì bản in đè lên chính file IMG_nnnn.JPG trong DCIM, để xem
+  lại trên máy / đầu đọc thẻ là thấy bản in. Bản in trong ROLLS/ROLL00n/ vẫn luôn có.
+- Thứ tự mỗi kiểu: ghi bản in vào ROLLS, đọc lại kiểm tra; ghi file tạm IMG_nnnn.WFT cạnh
+  JPG trong DCIM, đọc lại kiểm tra; rồi mới đổi tên đè lên IMG_nnnn.JPG. CR2 không bao
+  giờ bị đụng. Bước nào lỗi thì JPG của Canon giữ nguyên, log ghi rõ "camera JPEG kept".
+- Frame Off: file trong DCIM giống hệt bản in trong ROLLS. Có viền: file trong DCIM là
+  phần ẢNH (không viền, không chữ) đúng cỡ 5184x3456 như Canon, vì máy Canon có thể không
+  mở được ảnh khác cỡ; bản có viền nằm trong ROLLS.
+- Ảnh thu nhỏ trong EXIF (160x120, máy dùng khi xem lại / lưới ảnh) được thay bằng ảnh
+  của bản in, ở cả hai file.
+- Log mỗi kiểu: "dark: F01 camera JPEG IMG_0208.JPG overwritten: the print, NN KB" (hoặc
+  "the picture 5184x3456" khi có viền). Không có JPG (chụp chỉ RAW): "not there: not
+  overwritten".
+- CHƯA THỬ ĐƯỢC trên máy thật: máy Canon có mở và hiện ảnh thu nhỏ của file đã đè hay
+  không (giả lập không có phần xem lại của Canon). Lần đầu thử nên dùng cuộn ngắn.
 
 CUỘN PHIM FILM STAGE (15/11)
 - Cuộn nạp bằng lon Film stage được in bằng đúng bảng âm bản x print stock, cùng các
@@ -243,6 +273,17 @@ s. (15/11) Cuộn Film stage có knob. Thẻ phải có ML/DATA/WFSTAGE.DAT; log
       So thêm với tấm ở bước 1 (đi từ JPEG 8-bit của Canon): màu gần giống, bản in có
       nhiều chi tiết vùng sáng hơn; khác nhiều về màu thì ghi lại.
    6. Ghi lại thời gian mỗi kiểu (so với cuộn phim thường ở n.).
+t. (16/11, RAWB21) Logo: Frame White, Info On + roll, tráng cuộn 3 kiểu (có 1 tấm dọc).
+   Bản in: chữ Canon đỏ bên phải khối chữ, "EOS M" dưới nó, ROLL ở dòng 3. Đổi Frame
+   Black, Info Off, tráng lại: logo sáng màu, giữa viền dưới. Log có "dark: F01 logo
+   Canon ...". Ghi lại nếu logo đè lên chữ, lệch, hay quá to / quá nhỏ.
+u. (16/11, RAWB21) Camera JPEG = Overwrite, Frame Off, cuộn 3 kiểu RAW+L. Trước khi
+   tráng, xem lại 1 tấm trên máy (màu Canon). Tráng xong: bấm PLAY xem lại 3 tấm đó trên
+   máy: phải mở được, có màu phim, lưới ảnh nhỏ (thu nhỏ) cũng là bản in. Log có
+   "camera JPEG IMG_.... overwritten: the print". Trong DCIM không còn file .WFT.
+v. (16/11, RAWB21) Như u. nhưng Frame White + Info: PLAY trên máy phải mở được (ảnh
+   không viền, cỡ 5184x3456); bản có viền ở ROLLS. Máy báo lỗi / không mở được / ảnh thu
+   nhỏ sai thì chụp màn hình và ghi lại tấm nào. Xong thì đặt lại Camera JPEG = Keep.
 
 
 6. GỬI LẠI

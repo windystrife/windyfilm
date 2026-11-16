@@ -314,6 +314,143 @@ int wf_dk_comment(uint8_t *app1, uint32_t len, const char *txt)
     return 0;
 }
 
+/* ------------------------------------------------------------------ the Exif thumbnail */
+static void wf_dk_put32(uint8_t *p, uint32_t v, int le)
+{
+    for (int i = 0; i < 4; i++)
+        p[i] = (uint8_t)(v >> (le ? 8 * i : 24 - 8 * i));
+}
+
+/* IFD1's 0x0201 / 0x0202 entries (offsets in t) and values; 0 = not there */
+static int wf_dk_ifd1(const uint8_t *t, uint32_t tn, int *le, uint32_t *eo, uint32_t *el, uint32_t *off, uint32_t *n)
+{
+    uint32_t i0;
+    if ((*le = wf_dk_tiff(t, tn, &i0)) < 0 || i0 < 8 || i0 + 2 > tn)
+        return 0;
+    uint32_t c0 = wf_dk_u(t + i0, 2, *le), nx = i0 + 2 + c0 * 12;
+    if (c0 > 256 || nx + 4 > tn)
+        return 0;
+    uint32_t i1 = wf_dk_u(t + nx, 4, *le);
+    *eo = wf_dk_entry(t, tn, *le, i1, 0x0201);
+    *el = wf_dk_entry(t, tn, *le, i1, 0x0202);
+    if (!*eo || !*el)
+        return 0;
+    *off = wf_dk_u(t + *eo + 8, 4, *le);
+    *n = wf_dk_u(t + *el + 8, 4, *le);
+    return *off >= 8 && *off < tn && *n <= tn - *off;
+}
+
+int wf_dk_xthumb_slot(const uint8_t *app1, uint32_t len, uint32_t *off, uint32_t *room)
+{
+    if (len < 18)
+        return -1;
+    const uint8_t *t = app1 + 10;
+    uint32_t tn = len - 10, eo, el, o, n;
+    int le;
+    if (!wf_dk_ifd1(t, tn, &le, &eo, &el, &o, &n))
+        return -1;
+    uint32_t e = o + n, nz = 0;
+    for (uint32_t i = e; i < tn; i++)
+        nz += t[i] != 0;
+    *off = 10 + o;
+    *room = tn - e <= 3 || !nz ? tn - o : n;
+    return 0;
+}
+
+int wf_dk_xthumb_put(uint8_t *app1, uint32_t len, const uint8_t *jpg, uint32_t n)
+{
+    uint32_t off, room, eo, el, o, on;
+    int le;
+    if (n < 4 || jpg[0] != 0xFF || jpg[1] != 0xD8 || wf_dk_xthumb_slot(app1, len, &off, &room) != 0)
+        return -1;
+    uint32_t skip = 0;                           /* our encoder's JFIF APP0: not in an Exif thumbnail */
+    if (n >= 6 && jpg[2] == 0xFF && jpg[3] == 0xE0)
+        skip = 2 + ((uint32_t)jpg[4] << 8 | jpg[5]);
+    if (skip >= n - 2)
+        return -1;
+    uint32_t m = n - skip;
+    if (m > room)
+        return -1;
+    uint8_t *t = app1 + 10;
+    wf_dk_ifd1(t, len - 10, &le, &eo, &el, &o, &on);
+    uint8_t *d = app1 + off;
+    d[0] = 0xFF;
+    d[1] = 0xD8;
+    for (uint32_t i = 2; i < m; i++)
+        d[i] = jpg[skip + i];
+    for (uint32_t i = m; i < room; i++)
+        d[i] = 0;
+    wf_dk_put32(t + el + 8, m, le);
+    return 0;
+}
+
+void wf_dk_xth_begin(struct wf_dk_xth *t, int cw, int ch, uint32_t *out)
+{
+    t->cw = cw;
+    t->ch = ch;
+    if ((uint32_t)cw * WF_DK_XH >= (uint32_t)ch * WF_DK_XW) {   /* wide: bars top and bottom */
+        t->tw = WF_DK_XW;
+        t->th = (ch * WF_DK_XW + cw / 2) / cw;
+    } else {
+        t->th = WF_DK_XH;
+        t->tw = ((cw * WF_DK_XH + ch / 2) / ch) & ~1;
+    }
+    if (t->th < 1) t->th = 1;
+    if (t->tw < 2) t->tw = 2;
+    t->ox = ((WF_DK_XW - t->tw) / 2) & ~1;
+    t->oy = (WF_DK_XH - t->th) / 2;
+    for (int j = 0; j <= t->tw; j++)             /* whole words per column */
+        t->xb[j] = (uint16_t)((j * (cw >> 1)) / t->tw);
+    t->row = 0;
+    t->y1 = ch / t->th;
+    t->n = 0;
+    for (int j = 0; j < WF_DK_XW; j++)
+        t->sy[j] = t->su[j] = t->sv[j] = 0;
+    for (int i = 0; i < WF_DK_XW / 2 * WF_DK_XH; i++)
+        out[i] = 0;                              /* black: Y 0, U = V = 0 */
+}
+
+void wf_dk_xth_rows(struct wf_dk_xth *t, const uint32_t *rows, int pitch, int y, int n, uint32_t *out)
+{
+    for (int r = 0; r < n; r++, y++) {
+        if (t->row >= t->th)
+            return;
+        if (!(y & 1)) {
+            const uint32_t *wd = (const uint32_t *)((const uint8_t *)rows + r * pitch);
+            for (int j = 0; j < t->tw; j++) {
+                int32_t a = 0, u = 0, v = 0;
+                for (int x = t->xb[j]; x < t->xb[j + 1]; x++) {
+                    uint32_t q = wd[x];
+                    a += (int32_t)((q >> 8) & 0xFF) + (int32_t)(q >> 24);
+                    u += (int8_t)(q & 0xFF);
+                    v += (int8_t)((q >> 16) & 0xFF);
+                }
+                t->sy[j] += a;
+                t->su[j] += u;
+                t->sv[j] += v;
+            }
+            t->n++;
+        }
+        if (y + 1 >= t->y1) {                    /* the thumbnail row is complete */
+            uint32_t *o = out + (t->oy + t->row) * (WF_DK_XW / 2) + t->ox / 2;
+            for (int j = 0; j + 1 < t->tw; j += 2) {
+                int c0 = (t->xb[j + 1] - t->xb[j]) * t->n, c1 = (t->xb[j + 2] - t->xb[j + 1]) * t->n, cc = c0 + c1;
+                int y0 = c0 ? (t->sy[j] + c0) / (2 * c0) : 0, y1 = c1 ? (t->sy[j + 1] + c1) / (2 * c1) : 0;
+                int u = cc ? (t->su[j] + t->su[j + 1]) / cc : 0, v = cc ? (t->sv[j] + t->sv[j + 1]) / cc : 0;
+                o[j >> 1] = (uint32_t)(u & 0xFF) | (uint32_t)(y0 > 255 ? 255 : y0) << 8 | (uint32_t)(v & 0xFF) << 16
+                          | (uint32_t)(y1 > 255 ? 255 : y1) << 24;
+            }
+            for (int j = 0; j < t->tw; j++)
+                t->sy[j] = t->su[j] = t->sv[j] = 0;
+            t->n = 0;
+            t->row++;
+            t->y1 = (int)(((t->row + 1) * t->ch) / t->th);
+        }
+    }
+}
+
+int wf_dk_xth_done(const struct wf_dk_xth *t) { return t->row >= t->th; }
+
 /* ------------------------------------------------------------------ thumbnails */
 void wf_dk_thumb_begin(struct wf_dk_thumb *t, int w, int h)
 {

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- logo_test.svg: WindyStrife's own test shape for tools/mk_wflogo.py and the ROLL:jpeg / dr_dark_check logo runs
+     (test.sh packs it keyed "Canon" so the test shots get a logo). Not any maker's mark: three slanted bars and a ring. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 64">
+  <g transform="translate(4 2)">
+    <path d="M0 60 L18 0 L34 0 L16 60 Z"/>
+    <path d="M30 60 L48 0 L64 0 L46 60 Z"/>
+    <path d="M60 60 L78 0 L94 0 L76 60 Z"/>
+    <path d="M150 0 C183 0 200 14 200 30 C200 46 183 60 150 60 C117 60 100 46 100 30 C100 14 117 0 150 0 Z
+             M150 14 C129 14 118 21 118 30 C118 39 129 46 150 46 C171 46 182 39 182 30 C182 21 171 14 150 14 Z"/>
+    <path d="M214 0 H290 V14 H260 V60 H244 V14 H214 Z"/>
+  </g>
+</svg>

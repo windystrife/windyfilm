@@ -296,11 +296,20 @@ int main(int argc, char **argv)
     CHECK(wfdr_host_pfoc() == 2 && wf_pr_date == 1, "Date: focus %d value %d (want '26 11 15)", wfdr_host_pfoc(), wf_pr_date);
     CHECK(fake_nstart() == 0 && !closed, "the finish rows started or closed something");
     shot("dark_print_white_info_date");
+    key(MODULE_KEY_PRESS_DOWN);                              /* Camera JPEG (owner 11-16): Keep / Overwrite */
+    CHECK(wfdr_host_pfoc() == 3 && wf_pr_jpeg == 0, "DOWN from Date: focus %d jpeg %d (want Camera JPEG, Keep)",
+          wfdr_host_pfoc(), wf_pr_jpeg);
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wf_pr_jpeg == 1, "RIGHT on Camera JPEG: %d (want Overwrite)", wf_pr_jpeg);
+    shot("dark_print_jpeg_overwrite");
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wf_pr_jpeg == 0, "wheel left on Camera JPEG: %d (want Keep)", wf_pr_jpeg);
     key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfdr_host_pfoc() == 0, "DOWN from Date: focus %d (want Frame, wraps)", wfdr_host_pfoc());
+    CHECK(wfdr_host_pfoc() == 0, "DOWN from Camera JPEG: focus %d (want Frame, wraps)", wfdr_host_pfoc());
     key(MODULE_KEY_PRESS_LEFT);
     key(MODULE_KEY_PRESS_LEFT);
     CHECK(wf_pr_frame == 4, "LEFT LEFT from White: %d (want Black wide, wraps)", wf_pr_frame);
+    key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_WHEEL_LEFT);
     CHECK(wfdr_host_pfoc() == 2 && wf_pr_date == 0, "UP to Date, wheel left: focus %d date %d", wfdr_host_pfoc(), wf_pr_date);

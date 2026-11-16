@@ -1,6 +1,6 @@
 """dr_fin_check.py - one Darkroom print with the print finishes (docs/DESIGN.md 3.9), WindyStrife's own check.
 
-  python3 -I -B tools/dr_fin_check.py FIN.JPG PLAIN.JPG CANON.JPG CW CH IX IY ORIENT FRAME DATE OUT.PNG
+  python3 -I -B tools/dr_fin_check.py FIN.JPG PLAIN.JPG CANON.JPG CW CH IX IY ORIENT FRAME DATE OUT.PNG [logo]
 
 FIN.JPG: the print with the finishes (tests/host/wf_dark_test.c finish), PLAIN.JPG: the same frame without them, CANON.JPG:
 Canon's own JPEG of the shot; CW CH IX IY ORIENT: the canvas the test printed ("canvas" log line); FRAME / DATE: the
@@ -10,6 +10,8 @@ settings (WF_PFR_* / WF_PDT_*). Checks:
     the stamp: then the changed pixels sit at the bottom right of the picture as the viewer shows it
   - a frame: its corners are the frame colour (white >= 248, black <= 20)
   - the Exif PixelX / YDimension are CW / CH and the Orientation is Canon's
+  - logo (a WFLOGO.DAT on the run): a white frame holds the wordmark's red (Cr well over Cb) outside the picture, a
+    black frame its light pixels
 OUT.PNG: the print as the viewer shows it, a quarter of its size. Exit 0 = all good."""
 import sys
 import numpy as np
@@ -26,6 +28,7 @@ def main():
     fin, plain, canon = sys.argv[1:4]
     cw, ch, ix, iy, orient, frame, date = (int(v) for v in sys.argv[4:11])
     png = sys.argv[11]
+    logo = len(sys.argv) > 12 and sys.argv[12] == 'logo'
     bad = []
     im, yf = luma(fin)
     _, yp = luma(plain)
@@ -69,6 +72,17 @@ def main():
         if any((v < 248) if white else (v > 20) for v in mv):
             bad.append('frame corners Y %s' % mv)
         note += ', corners Y %s' % mv
+    if logo and frame and d is not None:
+        a = np.asarray(im.convert('YCbCr')).astype(np.int32)
+        out = np.ones(a.shape[:2], bool)
+        out[iy:iy + ph, ix:ix + pw] = False
+        nr = int((((a[:, :, 2] - a[:, :, 1]) > 60) & (a[:, :, 0] < 140) & out).sum())
+        nl = int(((a[:, :, 0] > 200) & out).sum())
+        if frame in (1, 3) and nr < 500:
+            bad.append('logo: %d red px outside the picture' % nr)
+        if frame in (2, 4) and nl < 500:
+            bad.append('logo: %d light px outside the picture' % nl)
+        note += ', logo %d red / %d light px' % (nr, nl)
     ex = im.getexif()
     ce = Image.open(canon).getexif()
     sub = ex.get_ifd(0x8769)

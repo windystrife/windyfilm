@@ -75,10 +75,13 @@ int  wf_dark_src(int output, int flut);          /* EOS M: the WF_DEV_* tables a
 
 /* print finishes (docs/DESIGN.md 3.9, src/wf_print.h): a frame with the shot's details under the picture, a date stamp.
    Settings of the menu / config / the Darkroom's rows (WF_PFR_*, WF_PIN_*, WF_PDT_* of wf_print.h; defaults Off, Info
-   On, Off): a run takes them at its start, so the prints of one run match. Frame Off and Date Off = today's print. */
-extern volatile int wf_pr_frame, wf_pr_info, wf_pr_date;
-enum { WF_PO_FRAME = 0, WF_PO_INFO, WF_PO_DATE, WF_PO_N };   /* the Darkroom's print rows (wf_menu.c) */
-const char *wf_popt_name(int k);                 /* "Frame", "Info", "Date" */
+   On, Off): a run takes them at its start, so the prints of one run match. Frame Off and Date Off = today's print.
+   wf_pr_jpeg (owner 11-16): WF_PJ_OVER = each print also replaces the shot's own JPEG in DCIM (after the roll copy is
+   written and read back; the CR2 is never touched), so Canon's playback shows the print; default WF_PJ_KEEP. */
+extern volatile int wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg;
+enum { WF_PJ_KEEP = 0, WF_PJ_OVER, WF_PJ_N };
+enum { WF_PO_FRAME = 0, WF_PO_INFO, WF_PO_DATE, WF_PO_JPEG, WF_PO_N };   /* the Darkroom's print rows (wf_menu.c) */
+const char *wf_popt_name(int k);                 /* "Frame", "Info", "Date", "Camera JPEG" */
 const char *wf_popt_text(int k, char *b, int n); /* the value as shown: "White wide", "On + roll", "'26 11 15" (today) */
 int  wf_popt_avail(int k);                       /* 0 = greyed: Info with the frame Off */
 void wf_popt_step(int k, int d);                 /* LEFT / RIGHT / wheel (wraps); the config is saved later */

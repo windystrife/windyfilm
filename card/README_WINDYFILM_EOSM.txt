@@ -7,6 +7,12 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
 dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB21 (16/11 đêm, nhánh dr-logo, từ rawb20 = RAWB20): Darkroom thêm logo Canon
+trên viền bản in (ML/data/WFLOGO.DAT) và hàng Camera JPEG (Keep / Overwrite: bản in đè
+lên JPG của máy trong DCIM, bản trong ROLLS vẫn giữ). Xem HUONGDAN_DARKROOM_EOSM.txt
+("VIỀN VÀ NGÀY", "ĐÈ LÊN JPEG CỦA MÁY", bước t. u. v.). Mặc định (Keep, không viền)
+cho bản in y hệt RAWB20.
+
 Thẻ RAWB19 (16/11 tối, nhánh paper-finish, từ main-staging RAWB17): thêm hàng Paper
 (giấy in: Glossy / Matte / Warm / Cool), xem mục 2 và bước 7b. Paper Glossy (mặc định)
 cho ảnh y hệt RAWB17.
@@ -486,6 +492,8 @@ ML/data/WFSTLOG.DAT       hàng Interlayer trên RAW develop (239 KB, mục 5): 
 ML/data/WFCANS.DAT        hình lon phim
 ML/data/WFFONTS.DAT       font chữ của giao diện (Ubuntu Sans, UBUNTU_FONT_LICENCE.txt)
 ML/data/WFPRINT.DAT       font chữ in dưới ảnh của Darkroom (viền + thông tin, Ubuntu Sans)
+ML/data/WFLOGO.DAT        logo Canon + chữ "EOS M" cho viền bản in Darkroom (làm lúc chép
+                          thẻ từ file SVG riêng, không nằm trong git); thiếu thì chỉ có chữ
 ML/data/*.CUB             cube Film LUT (README_FILMLUT.txt)
 ML/SETTINGS/WINDYFLM.CFG  cấu hình (module tự ghi)
 ML/LOGS/WINDYFLM.LOG      nhật ký, ghi nối tiếp qua các lần bật máy; mỗi lần

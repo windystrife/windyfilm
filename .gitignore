@@ -34,3 +34,6 @@ films/tables/fit.csv
 films/tables/.stage/
 # option (c), the RAW develop's chain tables (tools/mk_genesis_films.py log): 643 x 215 KB, card data
 films/tables/log/
+# owner 11-16: a maker's wordmark (Canon_wordmark.svg and the like) stays in the owner's private folder; only our own
+# test shape tests/host/logo_test.svg is tracked (*.DAT above keeps WFLOGO.DAT out)
+*wordmark*

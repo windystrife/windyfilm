@@ -62,6 +62,9 @@
  *   ROLL mem           owner RAWB17 (11-16): the camera's memory (one 31,888 KB SRM chunk, no 35 MB shoot block): the
  *                      "memory short" line; one-block vs split frame on three real RAW+L pairs, byte for byte after
  *                      APP1; the owner's look with the head from shoot chunks (pairs: WF_DARK_CR2, skipped without)
+ *   ROLL jpeg          owner 11-16: Camera JPEG Keep (our Exif thumbnail in the prints) / Overwrite (frame Off: the
+ *                      print's bytes; a frame: the picture at 5184 x 3456; a missing JPEG skipped), the CR2s untouched,
+ *                      no temp file left; the logo pack (WF_LOGO_DAT) drawn with the frame
  *   LOG [big]        the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
  *                      the refusal logged), ring full (lines counted), a short write (no line twice); big: a log over
  *                      512 KB becomes WINDYFLM.OLD at boot
@@ -90,6 +93,7 @@
 #include "wf_rawb.h"
 #include "wf_dark.h"
 #include "wf_dev.h"
+#include "wf_darkp.h"
 /* this build's input curve decode tables (generated header, static copies for the checks) */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-const-variable"
@@ -2480,7 +2484,8 @@ static void t_cfg(void)
     const char *code1 = wf_flut_code[1];
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
-            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\nshoulder=D\nuserwb=1,5600,2,-3\n", wf_films[fA].id, code1);
+            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=Overwrite\nshoulder=D\nuserwb=1,5600,2,-3\n", wf_films[fA].id,
+            code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
@@ -2494,8 +2499,8 @@ static void t_cfg(void)
         "exposure %d exptrim %d exif off %d", wf_exp_mode, wf_exp_trim, wf_exif_off);
     chk(wf_blind == 0, "blind=OFF read: Blind roll off (%d)", wf_blind);
     chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
-    chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2, "print finishes read: frame %d info %d date %d (want 4 2 2)",
-        wf_pr_frame, wf_pr_info, wf_pr_date);
+    chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_OVER,
+        "print finishes read: frame %d info %d date %d jpeg %d (want 4 2 2 1)", wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg);
     chk(WAIT(h_kelvin_last == 3200, 5000), "Light Tungsten applied at start (%dK)", h_kelvin_last);
     wf_row_step(WF_ROW_GRAIN, 1);
     h_clock_add_ms += 2000;
@@ -2506,7 +2511,8 @@ static void t_cfg(void)
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\npaper=glossy\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\n"
              "exposure=%s\n"
-             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\nshoulder=d\nstage=0,0,0,0,0,0,2,0,0,0,0\n"
+             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=overwrite\nshoulder=d\n"
+             "stage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
     free(b);
@@ -6077,10 +6083,200 @@ static void t_roll_mem(void)
 #endif
 }
 
+/* ROLL:jpeg - Camera JPEG Overwrite and the logo (owner 11-16) on the three real pairs, the whole run in the module
+ * (memory as ROLL:mem full: three SRM chunks side by side):
+ *   keep:  the default: each camera JPEG untouched, each print with our Exif thumbnail in Canon's slot (not Canon's);
+ *   copy:  frame Off, Overwrite: each IMG_nnnn.JPG = its roll print byte for byte, the CR2s untouched, no .WFT left;
+ *   frame: a white frame + info + roll + date and the logo pack on the card (WF_LOGO_DAT: test.sh makes it from our own
+ *          tests/host/logo_test.svg, keyed "Canon"), Overwrite: the logo lines; each IMG_nnnn.JPG a 5184 x 3456 JPEG of
+ *          the picture (Canon's size, our comment, our thumbnail); one JPEG gone before the run: that frame printed,
+ *          no JPEG made for it; the CR2s untouched, no .WFT left. */
+static int jp_same(const char *a, const char *b)  /* two files byte for byte */
+{
+    long na = 0, nb = 0;
+    char *x = get_file(a, &na), *y = get_file(b, &nb);
+    int ok = x && y && na == nb && na > 0 && !memcmp(x, y, (size_t)na);
+    free(x);
+    free(y);
+    return ok;
+}
+static int jp_cr2s(const char *dir, int from)    /* the three CR2s on the card = the pairs' own */
+{
+    int ok = 1;
+    for (int i = 0; i < 3; i++) {
+        char s[300], d[64];
+        snprintf(s, sizeof s, "%s/%s.CR2", dir, mem_pairs[i]);
+        snprintf(d, sizeof d, "DCIM/100CANON/IMG_%04d.CR2", from + i);
+        ok &= jp_same(s, d);
+    }
+    return ok;
+}
+static int jp_wft(int from)                      /* no IMG_nnnn.WFT left */
+{
+    int n = 0;
+    for (int i = 0; i < 3; i++) {
+        char d[64];
+        snprintf(d, sizeof d, "DCIM/100CANON/IMG_%04d.WFT", from + i);
+        n += access(d, F_OK) == 0;
+    }
+    return n;
+}
+/* the Exif thumbnail in a JPEG's APP1 (after SOI): 0 = none; *len its length */
+static const unsigned char *jp_thumb(const unsigned char *b, long n, uint32_t *len)
+{
+    long e = mem_after_app1(b, n);
+    if (e <= 2 || b[2] != 0xFF || b[3] != 0xE1)
+        return 0;
+    uint32_t off = 0, room = 0, al = (uint32_t)(e - 2);
+    if (wf_dk_xthumb_slot(b + 2, al, &off, &room) != 0)
+        return 0;
+    const unsigned char *t = b + 2 + 10;         /* its length: the segments to SOS, then the coded data to EOI */
+    uint32_t k = off - 10, i = k + 2, tn = al - 10;
+    *len = 0;
+    while (i + 4 <= tn && t[i] == 0xFF && t[i + 1] != 0xDA)
+        i += 2 + (uint32_t)(t[i + 2] << 8 | t[i + 3]);
+    if (i + 4 <= tn && t[i] == 0xFF)
+        i += 2 + (uint32_t)(t[i + 2] << 8 | t[i + 3]);
+    for (; i + 1 < tn; i++)
+        if (t[i] == 0xFF && t[i + 1] == 0xD9) {
+            *len = i + 2 - k;
+            break;
+        }
+    return b + 2 + off;
+}
+static void t_roll_jpeg(void)
+{
+#ifdef WF_BUILD_5D2
+    chk(1, "5D2: no darkroom");
+#else
+    const char *dir = getenv("WF_DARK_CR2");
+    char t[300];
+    if (!dir)
+        dir = "/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM";
+    snprintf(t, sizeof t, "%s/%s.CR2", dir, mem_pairs[2]);
+    if (access(t, R_OK) != 0) {
+        chk(1, "SKIPPED: no EOS M RAW+L pairs in %s (WF_DARK_CR2)", dir);
+        return;
+    }
+    std_pack();
+    const char *pd = getenv("WF_PRINT_DAT"), *ld = getenv("WF_LOGO_DAT");
+    int cap = pd && access(pd, R_OK) == 0 && mem_copy(pd, "ML/DATA/WFPRINT.DAT");
+    chk(cap, "WFPRINT.DAT on the card (WF_PRINT_DAT %s)", pd ? pd : "-");
+    const int film = wf_films[fC].id;
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nbloom=off\nmist=off\n", film);
+    wf_fx_retry_ms = 500;
+    h_set_folder_number(100);
+    h_set_file_number(500);
+    mod_init(1);
+    h_shoot_max = 16 << 20;
+    h_srm_n = 3;
+
+    /* keep: the default */
+    wf_pr_frame = 0;
+    wf_pr_info = 1;
+    wf_pr_date = 0;
+    chk(wf_pr_jpeg == WF_PJ_KEEP, "Camera JPEG: Keep by default (%d)", wf_pr_jpeg);
+    chk(mem_roll(film, 1, dir, 501), "roll 001: 3 real RAW+L frames shot (%d)", wf_roll_now()->nshot);
+    mem_run("keep", 1);
+    chk(strstr(log_line("dark: roll 001 start"), "jpeg 0 logo 0K") && strstr(log_line("dark: roll 001 end"),
+        "3 developed, 0 failed, 0 left"), "keep: 3 of 3, jpeg 0 ('%s')", log_line("dark: roll 001 end"));
+    for (int i = 0; i < 3; i++) {
+        char s[300], d[64];
+        long n = 0, nc = 0;
+        snprintf(s, sizeof s, "%s/%s.JPG", dir, mem_pairs[i]);
+        snprintf(d, sizeof d, "DCIM/100CANON/IMG_%04d.JPG", 501 + i);
+        char *b = mem_print(1, i, 501 + i, &n), *c = get_file(s, &nc);
+        uint32_t tl = 0, tc = 0;
+        const unsigned char *tp = b ? jp_thumb((unsigned char *)b, n, &tl) : 0;
+        const unsigned char *tq = c ? jp_thumb((unsigned char *)c, nc, &tc) : 0;
+        chk(jp_same(s, d), "keep: IMG_%04d.JPG untouched", 501 + i);
+        chk(tp && tq && tl > 1000 && tl < 20000 && (tl != tc || memcmp(tp, tq, tl)) && tp[0] == 0xFF && tp[1] == 0xD8
+            && tp[2] == 0xFF && tp[3] == 0xDB, "keep: F%02d print's Exif thumbnail ours (%u B, Canon's %u B)", i + 1, tl, tc);
+        free(b);
+        free(c);
+    }
+    chk(log_has("dark: F01 print Exif thumbnail 160x120 q"), "keep: '%s'", log_line("print Exif thumbnail"));
+    chk(jp_cr2s(dir, 501) && !jp_wft(501), "keep: CR2s untouched, no .WFT");
+
+    /* copy: frame Off, Overwrite */
+    wf_pr_jpeg = WF_PJ_OVER;
+    chk(mem_roll(film, 2, dir, 504), "roll 002: 3 frames (%d)", wf_roll_now()->nshot);
+    mem_run("copy", 2);
+    chk(strstr(log_line("dark: roll 002 start"), "jpeg 1") && strstr(log_line("dark: roll 002 end"),
+        "3 developed, 0 failed, 0 left"), "copy: 3 of 3 ('%s')", log_line("dark: roll 002 end"));
+    for (int i = 0; i < 3; i++) {
+        char d[64], p[64], e[80];
+        snprintf(d, sizeof d, "DCIM/100CANON/IMG_%04d.JPG", 504 + i);
+        snprintf(p, sizeof p, "ROLLS/ROLL002/F%02d_%04d.JPG", i + 1, 504 + i);
+        snprintf(e, sizeof e, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the print,", i + 1, 504 + i);
+        chk(jp_same(d, p) && log_has(e), "copy: IMG_%04d.JPG = its roll print byte for byte ('%s')", 504 + i, log_line(e));
+    }
+    chk(jp_cr2s(dir, 504) && !jp_wft(504), "copy: CR2s untouched, no .WFT");
+
+    /* frame: a white frame + details + the logo, Overwrite, one camera JPEG gone */
+    int lg = ld && access(ld, R_OK) == 0 && mem_copy(ld, "ML/DATA/WFLOGO.DAT");
+    chk(lg, "WFLOGO.DAT on the card (WF_LOGO_DAT %s)", ld ? ld : "-");
+    wf_pr_frame = 1;
+    wf_pr_info = 2;
+    wf_pr_date = 2;
+    chk(mem_roll(film, 3, dir, 507), "roll 003: 3 frames (%d)", wf_roll_now()->nshot);
+    remove("DCIM/100CANON/IMG_0509.JPG");
+    mem_run("frame", 3);
+    chk(strstr(log_line("dark: roll 003 end"), "3 developed, 0 failed, 0 left") != 0, "frame: 3 of 3 ('%s')",
+        log_line("dark: roll 003 end"));
+    chk(log_has("dark: F01 logo Canon ") && log_has("+ lettering Canon EOS M") && log_has("dark: F02 logo Canon "),
+        "frame: the logo drawn ('%s')", log_line("dark: F01 logo"));
+    chk(log_has("dark: F01 caption ") && strstr(log_line("dark: F01 caption"), "Canon EOS M") == 0,
+        "frame: line 1 without the model the lettering names ('%s')", log_line("dark: F01 caption"));
+    for (int i = 0; i < 2; i++) {
+        char d[64], e[80];
+        long n = 0;
+        snprintf(d, sizeof d, "DCIM/100CANON/IMG_%04d.JPG", 507 + i);
+        snprintf(e, sizeof e, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the picture 5184x3456", i + 1, 507 + i);
+        char *b = get_file(d, &n);
+        int w = 0, h = 0, eoi = b && n > 2 && (unsigned char)b[n - 2] == 0xFF && (unsigned char)b[n - 1] == 0xD9;
+        uint32_t tl = 0;
+        const unsigned char *tp = b ? jp_thumb((unsigned char *)b, n, &tl) : 0;
+        chk(b && eoi && mem_dims((unsigned char *)b, n, &w, &h) && w == 5184 && h == 3456 && log_has(e)
+            && memmem(b, (size_t)(n < 65536 ? n : 65536), "WindyFilm Darkroom", 18) && tp && tl > 1000,
+            "frame: IMG_%04d.JPG the picture %dx%d, our comment + thumbnail (%u B) ('%s')", 507 + i, w, h, tl, log_line(e));
+        free(b);
+    }
+    chk(log_has("dark: F03 camera JPEG IMG_0509.JPG not there: not overwritten") && access("DCIM/100CANON/IMG_0509.JPG",
+        F_OK) != 0, "frame: no JPEG for F03, none made ('%s')", log_line("dark: F03 camera JPEG"));
+    chk(jp_cr2s(dir, 507) && !jp_wft(507), "frame: CR2s untouched, no .WFT");
+    for (int i = 0; i < 3; i++) {                /* the prints framed; F03 without Canon's APP1 (no JPEG) */
+        long n = 0;
+        int w = 0, h = 0;
+        char *b = mem_print(3, i, 507 + i, &n);
+        int dims = b && n > 4 && (i < 2 ? mem_dims((unsigned char *)b, n, &w, &h) : 1);
+        for (long o = 2; i == 2 && b && o + 9 < n && !w; o++)
+            if ((unsigned char)b[o] == 0xFF && (unsigned char)b[o + 1] == 0xC0) {
+                h = (unsigned char)b[o + 5] << 8 | (unsigned char)b[o + 6];
+                w = (unsigned char)b[o + 7] << 8 | (unsigned char)b[o + 8];
+            }
+        chk(dims && w > 5184 && h > 3456, "frame: F%02d print %dx%d (framed)", i + 1, w, h);
+        free(b);
+    }
+    wf_pr_frame = 0;
+    wf_pr_info = 1;
+    wf_pr_date = 0;
+    wf_pr_jpeg = WF_PJ_KEEP;
+    remove("ML/DATA/WFLOGO.DAT");
+    h_srm_n = 0;
+    h_shoot_max = 0;
+    mod_deinit();
+#endif
+}
+
 static void t_roll(const char *cs)
 {
     if (!strcmp(cs, "mem")) {
         t_roll_mem();
+        return;
+    }
+    if (!strcmp(cs, "jpeg")) {
+        t_roll_jpeg();
         return;
     }
     if (!strcmp(cs, "save") || !strcmp(cs, "short") || !strcmp(cs, "back")) {

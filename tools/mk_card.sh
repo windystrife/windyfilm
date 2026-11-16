@@ -21,9 +21,13 @@
 # "C-Log2 <look> OSM.cube" (the pack's flatter 33^3 "OSM - Canon Log2" folder). All twelve must be there; each replaces a
 # same-named cube of the source card (the Film Roll cards hold the owner's "Tung EKTA P C-Log2" export as
 # EKTAP_C2.CUB: the owner chose the CinePrint one). The loader takes 2..65^3 under the same name, no code change.
+# LOGO (env, optional, owner 11-16): the camera maker's wordmark SVG from the owner's private folder (never the repo, never
+# committed): tools/mk_wflogo.py makes ML/DATA/WFLOGO.DAT from it here, at card time, with our own model lettering; the
+# Darkroom draws them in framed prints when the file is on the card. Without it the caption stays text only. EOS M only
+# (the 5D2 has no Darkroom: the file is left out there).
 # Run in WSL: bash tools/mk_card.sh EOSM <the EOS M ML card folder> /mnt/f/MagicLatern/EOSM_WindyFilm
 set -eu
-CUBES=${CUBES:-} CINEPRINT_C2=${CINEPRINT_C2:-}
+CUBES=${CUBES:-} CINEPRINT_C2=${CINEPRINT_C2:-} LOGO=${LOGO:-}
 CAM=$1 SRC=$2 DST=$3
 R=$(cd "$(dirname "$0")/.." && pwd)
 case $CAM in
@@ -39,6 +43,10 @@ for c in $CUBES; do
   case ${c##*/} in *.CUB) ;; *) echo "$c: a cube must be named <NAME>.CUB"; exit 2 ;; esac
   [ -s "$c" ] || { echo "$c missing"; exit 2; }
 done
+if [ -n "$LOGO" ]; then
+  [ -s "$LOGO" ] || { echo "LOGO=$LOGO missing"; exit 2; }
+  case $(realpath "$LOGO") in "$R"/*) echo "LOGO=$LOGO is in the repo: the wordmark stays out of it"; exit 2 ;; esac
+fi
 CPMAP=() CPSRC=()
 if [ -n "$CINEPRINT_C2" ]; then
   [ -d "$CINEPRINT_C2" ] || { echo "CINEPRINT_C2=$CINEPRINT_C2 is no folder"; exit 2; }
@@ -96,6 +104,13 @@ for i in "${!CPMAP[@]}"; do
   cp "$f" "$D/$n"
   echo "cube: $n <- ${f##*/} ($(grep -a -m1 '^LUT_3D_SIZE' "$f" | awk '{print $2}' | tr -dc 0-9)^3, $(md5sum < "$f" | cut -c1-32))"
 done
+if [ -n "$LOGO" ] && [ $CAM != EOSM ]; then                # only the EOS M has the Darkroom (as WFPRINT.DAT)
+  echo "logo: $CAM has no Darkroom: WFLOGO.DAT left out"
+elif [ -n "$LOGO" ]; then
+  for f in "$D"/WFLOGO.DAT; do [ -e "$f" ] && { echo "${f#$DST/} already on the source card: refusing to replace it"; exit 1; }; done
+  python3 -I -B "$R/tools/mk_wflogo.py" "$LOGO" "$D/WFLOGO.DAT" > /dev/null
+  echo "logo: WFLOGO.DAT ($(stat -c %s "$D/WFLOGO.DAT") B) from ${LOGO##*/}"
+fi
 cp "$R/card/README_WINDYFILM_$CAM.txt" "$DST/README_WINDYFILM.txt"
 for f in "$R"/card/HUONGDAN_*_$CAM.txt; do cp "$f" "$DST/"; done   # the owner's step lists (Vietnamese), when there are any
 cp "$R/card/README_FILMLUT.txt" "$R/card/CHANGELOG_FILMLUT.txt" "$R/licenses/SPEKTRAFILM_LICENSE.txt" \

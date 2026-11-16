@@ -229,6 +229,21 @@ static int pf_below(const struct wf_pf_font *f, int o)
     return rd16s(g + 4) + (int)rd16(g + 8) - f->asc;
 }
 
+/* the caption's three baselines in the shown canvas, and line 1's / lines 2-3's cap heights */
+struct pf_ln { int b1, b2, b3, cap1, cap2; };
+static void pf_lines(const struct wf_pf_lay *L, const struct wf_pf_font *F, struct pf_ln *n)
+{
+    int s = L->iw < L->ih ? L->iw : L->ih, dh0 = L->dh - L->bd - L->bb;
+    int g12 = pf_sc(110, s), g23 = pf_sc(100, s);
+    int cap = pf_above(&F[0], 'H'), desc = pf_below(&F[1], 'g');
+    int blk = cap + g12 + g23 + desc, pad = (L->bb - blk) / 2;
+    n->b1 = L->bd + dh0 + (pad > 0 ? pad : 0) + cap;
+    n->b2 = n->b1 + g12;
+    n->b3 = n->b2 + g23;
+    n->cap1 = cap;
+    n->cap2 = pf_above(&F[1], 'H');
+}
+
 void wf_pf_band(const struct wf_pf_lay *L, const struct wf_pf_font *F, const struct wf_pf_cap *c, uint8_t *band,
                 char *drawn, int dn)
 {
@@ -256,10 +271,9 @@ void wf_pf_band(const struct wf_pf_lay *L, const struct wf_pf_font *F, const str
     d.u1 = L->bd + dw0;
     d.v0 = L->bd + dh0;
     d.v1 = L->dh;
-    int g12 = pf_sc(110, s), g23 = pf_sc(100, s);
-    int cap = pf_above(&F[0], 'H'), desc = pf_below(&F[1], 'g');
-    int blk = cap + g12 + g23 + desc, pad = (L->bb - blk) / 2;
-    int b1 = d.v0 + (pad > 0 ? pad : 0) + cap, b2 = b1 + g12, b3 = b2 + g23;
+    struct pf_ln ln;
+    pf_lines(L, F, &ln);
+    int b1 = ln.b1, b2 = ln.b2, b3 = ln.b3, rsv = c->rsv > 0 && c->rsv < dw0 ? c->rsv : 0;
     char t1[160], t2[96], t3[256], tr[48];
     tr[0] = 0;
     int rw = 0;
@@ -268,14 +282,14 @@ void wf_pf_band(const struct wf_pf_lay *L, const struct wf_pf_font *F, const str
         pf_fit(&F[1], one, 1, "", dw0 / 2, tr, sizeof tr);
         rw = wf_pf_textw(&F[1], tr);
     }
-    int gap = pf_sc(64, s);
-    pf_fit(&F[0], c->l1, c->n1, "  /  ", dw0 - (rw ? rw + gap : 0), t1, sizeof t1);
+    int gap = pf_sc(64, s), r1 = rw && !c->roll3 ? rw + gap : 0, r3 = rw && c->roll3 ? rw + gap : 0;
+    pf_fit(&F[0], c->l1, c->n1, "  /  ", dw0 - r1 - rsv, t1, sizeof t1);
     const char *two[1] = { c->l2 };
-    pf_fit(&F[1], two, 1, "", dw0, t2, sizeof t2);
-    pf_fit(&F[1], c->l3, c->n3, "  " WF_PF_DOT "  ", dw0, t3, sizeof t3);
+    pf_fit(&F[1], two, 1, "", dw0 - rsv, t2, sizeof t2);
+    pf_fit(&F[1], c->l3, c->n3, "  " WF_PF_DOT "  ", dw0 - r3, t3, sizeof t3);
     pf_run(&F[0], t1, d.u0, b1, &d, L->fg1);
     if (rw)
-        pf_run(&F[1], tr, d.u1 - rw, b1, &d, L->fg2);
+        pf_run(&F[1], tr, d.u1 - rw, c->roll3 ? b3 : b1, &d, L->fg2);
     pf_run(&F[1], t2, d.u0, b2, &d, L->fg2);
     pf_run(&F[1], t3, d.u0, b3, &d, L->fg2);
     if (drawn && dn > 0) {
@@ -293,6 +307,32 @@ void wf_pf_band(const struct wf_pf_lay *L, const struct wf_pf_font *F, const str
 }
 
 /* ================================================================== rows */
+#define DIV255(v) (((v) + 1 + ((v) >> 8)) >> 8)  /* v / 255, exact for 0..65535 */
+
+/* ink k over canvas row y (o: its UYVY words, cw px): Y per pixel, U / V per pair by the pair's mean coverage */
+static void pf_ink_row(const struct wf_pf_ink *k, int y, uint32_t *o, int cw)
+{
+    if (!k->map || y < k->y || y >= k->y + k->h)
+        return;
+    const uint8_t *m = k->map + (y - k->y) * k->w;
+    int x0 = k->x & ~1, x1 = k->x + k->w;
+    if (x0 < 0) x0 = 0;
+    if (x1 > cw) x1 = cw;
+    for (int x = x0; x < x1; x += 2) {
+        int a0 = x >= k->x ? m[x - k->x] : 0, a1 = x + 1 < k->x + k->w && x + 1 >= k->x ? m[x + 1 - k->x] : 0;
+        if (!(a0 | a1))
+            continue;
+        uint32_t w = o[x >> 1];
+        int U = (int8_t)(w & 0xFF), Y0 = (int)(w >> 8) & 0xFF, V = (int8_t)((w >> 16) & 0xFF), Y1 = (int)(w >> 24);
+        int ac = (a0 + a1 + 1) >> 1;
+        Y0 += Y0 < k->Y ? (int)DIV255((k->Y - Y0) * a0) : -(int)DIV255((Y0 - k->Y) * a0);
+        Y1 += Y1 < k->Y ? (int)DIV255((k->Y - Y1) * a1) : -(int)DIV255((Y1 - k->Y) * a1);
+        U += U < k->U ? (int)DIV255((k->U - U) * ac) : -(int)DIV255((U - k->U) * ac);
+        V += V < k->V ? (int)DIV255((k->V - V) * ac) : -(int)DIV255((V - k->V) * ac);
+        o[x >> 1] = (uint32_t)(U & 0xFF) | (uint32_t)Y0 << 8 | (uint32_t)(V & 0xFF) << 16 | (uint32_t)Y1 << 24;
+    }
+}
+
 /* a picture in one block: row y = img + y * ipitch */
 struct pf_flat { uint8_t *img; int pitch; };
 static uint32_t *pf_flat_row(void *ctx, int y)
@@ -334,6 +374,8 @@ void wf_pf_rows_fn(const struct wf_pf_lay *L, int cy, int n, wf_pf_rowfn *row, v
             for (int x = 0; x < tw; x++)
                 o[tx + x] = (uint32_t)b[2 * x] << 8 | (uint32_t)b[2 * x + 1] << 24;
         }
+        for (int k = 0; k < L->nink; k++)
+            pf_ink_row(&L->ink[k], y, o, L->cw);
     }
 }
 
@@ -634,8 +676,6 @@ static int st_glyph(const struct st_geo *G, int ch, int x, int y)
     return best;
 }
 
-#define DIV255(v) (((v) + 1 + ((v) >> 8)) >> 8)  /* v / 255, exact for 0..65535 */
-
 /* the map: per pixel 0..255 = how much of the stamp's light lands there */
 static void st_map(const char *txt, int H, int pad, uint8_t *map, int mw, int mh)
 {
@@ -759,5 +799,272 @@ int wf_pf_stamp_fn(wf_pf_rowfn *rowf, void *ctx, int iw, int ih, int orient, con
             row[x >> 1] = (uint32_t)(Uo & 0xFF) | (uint32_t)yo[0] << 8 | (uint32_t)(Vo & 0xFF) << 16 | (uint32_t)yo[1] << 24;
         }
     }
+    return 0;
+}
+
+/* ================================================================== logo (wf_print.h, tools/mk_wflogo.py) */
+#define PF_RED_Y  76                             /* the maker's red #BF1920 in the print's Y'CbCr (the stamp's matrix) */
+#define PF_RED_U  (-24)
+#define PF_RED_V  82
+#define PF_LIGHT  228                            /* the wordmark on a black frame: light, as on the camera body */
+#define PF_LMAX   10                             /* a map is scaled down at most this much (pf_rs taps) */
+#define PF_RST    (PF_LMAX + 2)
+
+/* a NUL-terminated key at o inside the pack */
+static int pf_key(const uint8_t *b, uint32_t n, uint32_t o, const char **s)
+{
+    if (o < 16 || o >= n)
+        return -1;
+    for (uint32_t i = o; i < n; i++)
+        if (!b[i]) {
+            *s = (const char *)b + o;
+            return 0;
+        }
+    return -1;
+}
+
+static int pf_streq(const char *a, const char *b)
+{
+    while (*a && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+
+/* 1 = model is "<maker> ..." */
+static int pf_maker_of(const char *maker, const char *model)
+{
+    if (!maker || !model)
+        return 0;
+    while (*maker && *model == *maker) { maker++; model++; }
+    return !*maker && *model == ' ';
+}
+
+int wf_pf_logo(struct wf_pf_logo *g, const uint8_t *b, uint32_t n, const char *model)
+{
+    uint8_t *z = (uint8_t *)g;
+    for (unsigned i = 0; i < sizeof *g; i++)
+        z[i] = 0;
+    if (!b || n < 16 + 24 || b[0] != 'W' || b[1] != 'F' || b[2] != 'L' || b[3] != 'G' || rd16(b + 4) != 1)
+        return -1;
+    uint32_t ni = rd16(b + 6);
+    if (ni < 1 || ni > 64 || rd32(b + 8) != n || 16 + ni * 24 > n || pf_fnv(b + 16, n - 16) != rd32(b + 12))
+        return -1;
+    int haswm = 0;
+    for (uint32_t i = 0; i < ni; i++) {
+        const uint8_t *d = b + 16 + i * 24;
+        int w = (int)rd16(d + 2), h = (int)rd16(d + 4), top = (int)rd16(d + 6), base = (int)rd16(d + 8);
+        uint32_t off = rd32(d + 12), ko = rd32(d + 16);
+        const char *key = 0;
+        if (d[1] != 8 || w < 8 || h < 8 || w > 2048 || h > 1024 || top >= base || base > h || off < 16 + ni * 24
+            || off + (uint32_t)w * (uint32_t)h > n || (ko && pf_key(b, n, ko, &key)))
+            return -1;
+        struct wf_pf_img im = { b + off, w, h, top, base };
+        if (d[0] == 0 && !haswm) {
+            haswm = 1;
+            g->wm = im;
+            g->maker = key;
+        } else if (d[0] == 1 && key && model && pf_streq(key, model))
+            g->lt = im;
+    }
+    if (!haswm || !g->maker)
+        return -1;
+    if (!pf_maker_of(g->maker, model)) {         /* a shot of another maker (or no model known): no logo */
+        g->wm.a = 0;
+        g->lt.a = 0;
+    }
+    return 0;
+}
+
+void wf_pf_cap_logo(struct wf_pf_txt *t, struct wf_pf_cap *c, const struct wf_pf_logo *g)
+{
+    if (!g || !g->wm.a || !t->model[0] || !c->n1 || c->l1[0] != t->model)
+        return;
+    if (g->lt.a) {                               /* the lettering names the model */
+        for (int i = 1; i < c->n1; i++)
+            c->l1[i - 1] = c->l1[i];
+        c->n1--;
+        return;
+    }
+    if (!pf_maker_of(g->maker, t->model))
+        return;
+    int i = 0, j = 0;                            /* "Canon EOS 6D" -> "EOS 6D": the wordmark says the maker */
+    while (g->maker[i])
+        i++;
+    i++;
+    while ((t->model[j++] = t->model[i++]) != 0)
+        ;
+}
+
+/* a shown rect inside the canvas, at a scale the resampler can do (down only, at most PF_LMAX) */
+static int pf_lfit(const struct wf_pf_lay *L, const struct wf_pf_img *S, int u, int v, int w, int h)
+{
+    return w >= 4 && h >= 4 && u >= 0 && v >= 0 && u + w <= L->dw && v + h <= L->dh && S->w <= PF_LMAX * w
+        && S->h <= PF_LMAX * h && w <= S->w && h <= S->h;
+}
+
+struct pf_rs { int16_t s; uint8_t n, pad; int16_t w[PF_RST]; };   /* one axis of an area resample: taps from s, Q12 */
+
+uint32_t wf_pf_logo_place(const struct wf_pf_lay *L, const struct wf_pf_font *F, const struct wf_pf_logo *g,
+                          struct wf_pf_cap *c, struct wf_pf_lpos *P)
+{
+    uint8_t *z = (uint8_t *)P;
+    for (unsigned i = 0; i < sizeof *P; i++)
+        z[i] = 0;
+    if (!L->frame || !g || !g->wm.a)
+        return 0;
+    const struct wf_pf_img *W = &g->wm, *T = g->lt.a ? &g->lt : 0;
+    int ws = W->base - W->top, ls = T ? T->base - T->top : 1, s = L->iw < L->ih ? L->iw : L->ih;
+    int dw0 = L->dw - 2 * L->bd, dh0 = L->dh - L->bd - L->bb, hw, hl, wdw, wdh, ldw = 0, ldh = 0;
+    int cap = L->tw && F && c, rsv = 0;
+    if (cap) {                                   /* right of the caption: the wordmark over the lettering */
+        struct pf_ln ln;
+        pf_lines(L, F, &ln);
+        int vtop = ln.b1 - ln.cap1, ub = L->bd + dw0;
+        hw = ln.b2 - ln.cap2 - ln.cap2 * 2 / 5 - vtop;
+        hl = ln.cap2;
+        if (hw > ws) hw = ws;
+        if (hl > ls) hl = ls;
+        wdw = W->w * hw / ws;
+        wdh = W->h * hw / ws;
+        if (T) {
+            ldw = T->w * hl / ls;
+            if (ldw > wdw) {                     /* no wider than the wordmark */
+                hl = hl * wdw / ldw;
+                ldw = T->w * hl / ls;
+            }
+            ldh = T->h * hl / ls;
+            P->u[1] = ub - ldw;
+            P->v[1] = ln.b2 - T->base * hl / ls;
+        }
+        P->u[0] = ub - wdw;
+        P->v[0] = vtop - W->top * hw / ws;
+        rsv = (wdw > ldw ? wdw : ldw) + pf_sc(96, s);
+    } else {                                     /* side by side, centred in the bottom border */
+        hw = L->bb * 2 / 5;
+        if (hw > ws) hw = ws;
+        hl = T ? hw * 11 / 20 : 0;
+        if (hl > ls) hl = ls;
+        wdw = W->w * hw / ws;
+        wdh = W->h * hw / ws;
+        if (T) {
+            ldw = T->w * hl / ls;
+            ldh = T->h * hl / ls;
+        }
+        int gap = T ? hw * 3 / 5 : 0, u0 = L->bd + (dw0 - wdw - gap - ldw) / 2;
+        int vtop = L->bd + dh0 + (L->bb - hw) / 2;
+        P->u[0] = u0;
+        P->v[0] = vtop - W->top * hw / ws;
+        if (T) {
+            P->u[1] = u0 + wdw + gap;
+            P->v[1] = vtop + hw - T->base * hl / ls;
+        }
+    }
+    P->w[0] = wdw;
+    P->h[0] = wdh;
+    P->src[0] = W;
+    if (!pf_lfit(L, W, P->u[0], P->v[0], wdw, wdh))
+        return 0;
+    P->n = 1;
+    if (T && pf_lfit(L, T, P->u[1], P->v[1], ldw, ldh)) {
+        P->w[1] = ldw;
+        P->h[1] = ldh;
+        P->src[1] = T;
+        P->n = 2;
+    }
+    if (cap) {
+        c->rsv = rsv;
+        c->roll3 = 1;
+    }
+    uint32_t nb = 0, tb = 0;
+    for (int k = 0; k < P->n; k++) {
+        uint32_t t = (uint32_t)(P->w[k] + P->h[k]) * sizeof(struct pf_rs);
+        nb += ((uint32_t)P->w[k] * (uint32_t)P->h[k] + 3) & ~3u;
+        if (t > tb) tb = t;
+    }
+    return nb + tb;
+}
+
+/* t[i] for dst i of m covering src [i n / m, (i + 1) n / m) (1/256 px), weights summing to 4096 */
+static void pf_rs_axis(struct pf_rs *t, int n, int m)
+{
+    for (int i = 0; i < m; i++) {
+        int a = i * n * 256 / m, b = (i + 1) * n * 256 / m, s = a >> 8, e = (b + 255) >> 8, tot = b - a, sum = 0, big = 0;
+        if (e - s > PF_RST)
+            e = s + PF_RST;
+        t[i].s = (int16_t)s;
+        t[i].n = (uint8_t)(e - s);
+        for (int k = s; k < e; k++) {
+            int lo = a > k * 256 ? a : k * 256, hi = b < (k + 1) * 256 ? b : (k + 1) * 256;
+            int w = ((hi - lo) * 4096 + tot / 2) / tot;
+            t[i].w[k - s] = (int16_t)w;
+            sum += w;
+            if (w > t[i].w[big])
+                big = k - s;
+        }
+        t[i].w[big] = (int16_t)(t[i].w[big] + 4096 - sum);
+    }
+}
+
+int wf_pf_logo_maps(struct wf_pf_lay *L, const struct wf_pf_lpos *P, uint8_t *mem, uint32_t n)
+{
+    L->nink = 0;
+    uint32_t used = 0;
+    for (int k = 0; k < P->n; k++)
+        used += ((uint32_t)P->w[k] * (uint32_t)P->h[k] + 3) & ~3u;
+    struct pf_rs *tx = (struct pf_rs *)(mem + used);
+    for (int k = 0; k < P->n; k++)
+        if (used + (uint32_t)(P->w[k] + P->h[k]) * sizeof(struct pf_rs) > n || ((uintptr_t)mem & 3))
+            return -1;
+    int black = L->frame == WF_PFR_BLACK || L->frame == WF_PFR_BLACK_W;
+    uint8_t *map = mem;
+    for (int k = 0; k < P->n; k++) {
+        const struct wf_pf_img *S = P->src[k];
+        int w = P->w[k], h = P->h[k], u0 = P->u[k], v0 = P->v[k];
+        struct pf_rs *ty = tx + w;
+        pf_rs_axis(tx, S->w, w);
+        pf_rs_axis(ty, S->h, h);
+        struct wf_pf_ink *K = &L->ink[k];
+        int rot = L->orient == 6 || L->orient == 8, sw = rot ? h : w;   /* the map's stored width */
+        switch (L->orient) {                     /* the shown rect -> the stored rect (pf_map's forward map) */
+        case 3: K->x = L->cw - u0 - w; K->y = L->ch - v0 - h; break;
+        case 6: K->x = v0; K->y = L->ch - u0 - w; break;
+        case 8: K->x = L->cw - v0 - h; K->y = u0; break;
+        default: K->x = u0; K->y = v0; break;
+        }
+        K->w = sw;
+        K->h = rot ? w : h;
+        K->map = map;
+        if (k == 0) {
+            K->Y = black ? PF_LIGHT : PF_RED_Y;
+            K->U = black ? 0 : PF_RED_U;
+            K->V = black ? 0 : PF_RED_V;
+        } else {
+            K->Y = L->fg1;
+            K->U = K->V = 0;
+        }
+        for (int b = 0; b < h; b++) {
+            const struct pf_rs *ry = &ty[b];
+            for (int a = 0; a < w; a++) {
+                const struct pf_rs *rx = &tx[a];
+                int acc = 0;
+                for (int r = 0; r < ry->n; r++) {
+                    const uint8_t *sr = S->a + (ry->s + r) * S->w + rx->s;
+                    int rs = 0;
+                    for (int q = 0; q < rx->n; q++)
+                        rs += sr[q] * rx->w[q];
+                    acc += (rs >> 8) * ry->w[r];
+                }
+                int v = (acc + 32768) >> 16, xs, ys;
+                switch (L->orient) {
+                case 3: xs = w - 1 - a; ys = h - 1 - b; break;
+                case 6: xs = b; ys = w - 1 - a; break;
+                case 8: xs = h - 1 - b; ys = a; break;
+                default: xs = a; ys = b; break;
+                }
+                map[ys * sw + xs] = (uint8_t)(v > 255 ? 255 : v < 0 ? 0 : v);
+            }
+        }
+        map += ((uint32_t)w * (uint32_t)h + 3) & ~3u;
+    }
+    L->nink = P->n;
     return 0;
 }
