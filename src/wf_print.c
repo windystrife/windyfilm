@@ -293,8 +293,23 @@ void wf_pf_band(const struct wf_pf_lay *L, const struct wf_pf_font *F, const str
 }
 
 /* ================================================================== rows */
+/* a picture in one block: row y = img + y * ipitch */
+struct pf_flat { uint8_t *img; int pitch; };
+static uint32_t *pf_flat_row(void *ctx, int y)
+{
+    const struct pf_flat *f = ctx;
+    return (uint32_t *)(f->img + y * f->pitch);
+}
+
 void wf_pf_rows(const struct wf_pf_lay *L, int cy, int n, const uint32_t *img, int ipitch, const uint8_t *band,
                 uint32_t *out)
+{
+    struct pf_flat fl = { (uint8_t *)img, ipitch };
+    wf_pf_rows_fn(L, cy, n, pf_flat_row, &fl, band, out);
+}
+
+void wf_pf_rows_fn(const struct wf_pf_lay *L, int cy, int n, wf_pf_rowfn *row, void *ctx, const uint8_t *band,
+                   uint32_t *out)
 {
     int nw = L->cw >> 1, ix = L->ix >> 1, iw = L->iw >> 1, tx = L->tx >> 1, tw = L->tw >> 1;
     uint32_t bgw = (uint32_t)L->bg << 8 | (uint32_t)L->bg << 24;   /* U = V = 0: neutral */
@@ -303,7 +318,7 @@ void wf_pf_rows(const struct wf_pf_lay *L, int cy, int n, const uint32_t *img, i
         uint32_t *o = out + r * nw;
         int pic = y >= L->iy && y < L->iy + L->ih;
         if (pic) {
-            const uint32_t *s = (const uint32_t *)((const uint8_t *)img + (y - L->iy) * ipitch);
+            const uint32_t *s = row(ctx, y - L->iy);
             for (int x = 0; x < ix; x++)
                 o[x] = bgw;
             for (int x = 0; x < iw; x++)
@@ -325,13 +340,35 @@ void wf_pf_rows(const struct wf_pf_lay *L, int cy, int n, const uint32_t *img, i
 int wf_pf_band_rows(const struct wf_pf_lay *L, int cy, const uint32_t *img, int ipitch, const uint8_t *band,
                     uint32_t *rowbuf, const uint32_t **rows, int *pitch)
 {
+    struct pf_flat fl = { (uint8_t *)img, ipitch };
+    return wf_pf_band_rows_fn(L, cy, pf_flat_row, &fl, ipitch, band, rowbuf, rows, pitch);
+}
+
+int wf_pf_band_rows_fn(const struct wf_pf_lay *L, int cy, wf_pf_rowfn *row, void *ctx, int ipitch, const uint8_t *band,
+                       uint32_t *rowbuf, const uint32_t **rows, int *pitch)
+{
     int n = L->ch - cy < 16 ? L->ch - cy : 16;
     if (!L->frame) {
-        *rows = (const uint32_t *)((const uint8_t *)img + cy * ipitch);
-        *pitch = ipitch;
+        const uint32_t *r0 = row(ctx, cy);
+        if ((const uint8_t *)row(ctx, cy + n - 1) == (const uint8_t *)r0 + (n - 1) * ipitch) {
+            *rows = r0;                          /* one run: the picture's own rows, no copy (today's bytes) */
+            *pitch = ipitch;
+            return n;
+        }
+        if (!rowbuf)
+            return -1;
+        int nw = L->cw >> 1;                     /* across two pieces: the rows copied */
+        for (int r = 0; r < n; r++) {
+            const uint32_t *s = row(ctx, cy + r);
+            uint32_t *o = rowbuf + r * nw;
+            for (int x = 0; x < nw; x++)
+                o[x] = s[x];
+        }
+        *rows = rowbuf;
+        *pitch = L->cw * 2;
         return n;
     }
-    wf_pf_rows(L, cy, n, img, ipitch, band, rowbuf);
+    wf_pf_rows_fn(L, cy, n, row, ctx, band, rowbuf);
     *rows = rowbuf;
     *pitch = L->cw * 2;
     return n;
@@ -658,6 +695,13 @@ static void st_screen(int *r, int *g, int *b, int a)
 
 int wf_pf_stamp(uint32_t *img, int ipitch, int iw, int ih, int orient, const char *txt, uint8_t *map, uint32_t mapn)
 {
+    struct pf_flat fl = { (uint8_t *)img, ipitch };
+    return wf_pf_stamp_fn(pf_flat_row, &fl, iw, ih, orient, txt, map, mapn);
+}
+
+int wf_pf_stamp_fn(wf_pf_rowfn *rowf, void *ctx, int iw, int ih, int orient, const char *txt, uint8_t *map,
+                   uint32_t mapn)
+{
     int H, pad, w;
     st_geom(iw, ih, &H, &pad);
     if (H < 8 || !txt || (w = st_width(txt, H)) <= 0)
@@ -682,7 +726,7 @@ int wf_pf_stamp(uint32_t *img, int ipitch, int iw, int ih, int orient, const cha
     x0 &= ~1;
     if (x1 & 1) x1++;
     for (int y = y0; y < y1; y++) {
-        uint32_t *row = (uint32_t *)((uint8_t *)img + y * ipitch);
+        uint32_t *row = rowf(ctx, y);
         for (int x = x0; x < x1; x += 2) {
             int a2[2];
             for (int k = 0; k < 2; k++) {

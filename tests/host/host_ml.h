@@ -42,6 +42,10 @@ void h_set_folder_number(int n);
 
 /* memory: shoot memory / Canon heap from a low arena (bit 30 clear: CACHEABLE() is the identity) */
 extern volatile int h_shoot_fail;                /* shoot_malloc_suite_contig returns 0 */
+extern volatile int h_shoot_max;                 /* > 0: no shoot block bigger than this (shoot_malloc_suite: chunks of it) */
+extern volatile int h_shoot_chunk;               /* > 0: shoot_malloc_suite gives chunks of this size (a scattered pool) */
+extern volatile int h_srm_n;                     /* srm_malloc_suite: this many 31,888 KB chunks side by side (0 = none) */
+extern uint32_t h_srm_base;                      /* the first SRM chunk's cacheable address (once mapped) */
 extern volatile int h_heap_free;                 /* GetFreeMemForAllocateMemory */
 extern volatile int h_arena_live;                /* blocks handed out and not freed */
 

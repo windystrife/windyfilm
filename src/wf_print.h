@@ -84,6 +84,15 @@ void wf_pf_rows(const struct wf_pf_lay *L, int cy, int n, const uint32_t *img, i
    canvas is the picture (no copy), else rowbuf (cw * 2 * 16 bytes) composed by wf_pf_rows */
 int wf_pf_band_rows(const struct wf_pf_lay *L, int cy, const uint32_t *img, int ipitch, const uint8_t *band,
                     uint32_t *rowbuf, const uint32_t **rows, int *pitch);
+/* the same for a picture whose rows are not one block (the darkroom's frame in pieces, wf_frame.h struct wf_fseg): row(ctx,
+   y) = the picture's row y. _fn bands: the picture's own rows only when the 16 rows are one run of ipitch bytes, else
+   copied into rowbuf; -1 = they are not and rowbuf is 0. wf_pf_rows / wf_pf_band_rows / wf_pf_stamp are these with
+   img + y * ipitch (same bytes as before) */
+typedef uint32_t *wf_pf_rowfn(void *ctx, int y);
+void wf_pf_rows_fn(const struct wf_pf_lay *L, int cy, int n, wf_pf_rowfn *row, void *ctx, const uint8_t *band,
+                   uint32_t *out);
+int wf_pf_band_rows_fn(const struct wf_pf_lay *L, int cy, wf_pf_rowfn *row, void *ctx, int ipitch, const uint8_t *band,
+                       uint32_t *rowbuf, const uint32_t **rows, int *pitch);
 
 /* ------------------------------------------------------------------ text from the shot */
 int wf_pf_line1(const struct wf_dk_shot *s, char *model, int mn, char *lens, int ln);   /* items found (0..2) */
@@ -104,5 +113,7 @@ uint32_t wf_pf_stamp_bytes(int iw, int ih, const char *txt);   /* the glow map i
 /* txt ("'26 11 15": digits, ' and spaces) at the shown picture's bottom right, screened in orange over the picture
    (UYVY in place). map = scratch of wf_pf_stamp_bytes(). 0 = drawn, -1 = no room / bad text */
 int wf_pf_stamp(uint32_t *img, int ipitch, int iw, int ih, int orient, const char *txt, uint8_t *map, uint32_t mapn);
+int wf_pf_stamp_fn(wf_pf_rowfn *row, void *ctx, int iw, int ih, int orient, const char *txt, uint8_t *map,
+                   uint32_t mapn);
 
 #endif

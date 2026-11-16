@@ -983,29 +983,39 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
     wf_fx_st[0] = (fx & WF_FX_HAL) ? 1 : hk ? (!wf_aspect_has_halo(ga) ? 3 : 2) : 0;
     wf_fx_st[1] = (fx & WF_FX_GRN) ? 1 : gk ? 2 : 0;
     wf_fx_st[2] = (fx & WF_FX_MST) ? 1 : mk ? 2 : 0;
+    int y0 = f->y0, wpr = f->w / 2;
     if (!fx) {
-        if (fn != wf_nop_words)
-            wf_chunks(buf, nw, fn, arg);
+        if (fn != wf_nop_words) {
+            if (!f->nseg)
+                wf_chunks(buf, nw, fn, arg);
+            else                                 /* a darkroom frame in pieces (wf_frame.h): each piece's rows */
+                for (int s = 0; s < f->nseg; s++) {
+                    int r1 = s + 1 < f->nseg ? f->seg[s + 1].y : f->h;
+                    wf_chunks(f->seg[s].p, (r1 - f->seg[s].y) * wpr, fn, arg);
+                }
+        }
         return;
     }
     wf_fx_begin(k, fx, seed, f->devd ? f->dev_ev8 : WF_EV_LIVE);
     uint32_t th = 0, tg = 0, tm = 0, t, t2;
-    int y0 = f->y0, wpr = f->w / 2;
     if (fx & WF_FX_MST) {                        /* the mist's low-res light map: every 2nd row of this request */
         t = wf_us();
         for (int r = 0, o = 0; o < nw; r++, o += wpr)
-            if (!((y0 + r) & 1))
+            if (!((y0 + r) & 1)) {
+                const uint32_t *rp = f->nseg ? wf_frame_row(f, r) : buf + o;
                 for (int c = 0; c < wpr; c += WF_CHUNK) {
                     int m = wpr - c < WF_CHUNK ? wpr - c : WF_CHUNK;
-                    wf_copyw(wf_scr, buf + o + c, m);
+                    wf_copyw(wf_scr, rp + c, m);
                     wf_fx_mist_gather(wf_scr, m, 2 * c, y0 + r);
                 }
+            }
         wf_fx_mist_build(k);
         tm += wf_dt(t, wf_us());
     }
     for (int o = 0, x0 = 0, y = y0, m = 0; o < nw; o += m) {
         m = wf_seg(nw - o, x0, W);
-        wf_copyw(wf_scr, buf + o, m);
+        uint32_t *sp = f->nseg ? wf_frame_row(f, y - y0) + (x0 >> 1) : buf + o;   /* a segment never leaves its row */
+        wf_copyw(wf_scr, sp, m);
         if (fx & WF_FX_MST) {                    /* the diffusion filter first: halation then sees the misted light */
             t = wf_us();
             wf_fx_mist_apply(wf_scr, m, x0, y);
@@ -1024,7 +1034,7 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
                 tg += wf_dt(t, wf_us());
             }
         }
-        wf_copyw(buf + o, wf_scr, m);
+        wf_copyw(sp, wf_scr, m);
         if ((x0 += 2 * m) >= W) { x0 = 0; y++; }
     }
     if (fx & WF_FX_HAL) {
@@ -1033,7 +1043,8 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
         th += wf_dt(t, wf_us());
         for (int o = 0, x0 = 0, y = y0, m = 0; o < nw; o += m) {
             m = wf_seg(nw - o, x0, W);
-            wf_copyw(wf_scr, buf + o, m);
+            uint32_t *sp = f->nseg ? wf_frame_row(f, y - y0) + (x0 >> 1) : buf + o;
+            wf_copyw(wf_scr, sp, m);
             t = wf_us();
             wf_fx_apply(wf_scr, m, x0, y);
             t2 = wf_us();
@@ -1042,7 +1053,7 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
                 wf_fx_grain(wf_scr, m, x0, y);
                 tg += wf_dt(t2, wf_us());
             }
-            wf_copyw(buf + o, wf_scr, m);
+            wf_copyw(sp, wf_scr, m);
             if ((x0 += 2 * m) >= W) { x0 = 0; y++; }
         }
     }

@@ -50,7 +50,8 @@ extern void NotifyBox(int timeout, const char *fmt, ...);
 extern void LoadCalendarFromRTC(void *tm);
 extern void *srm_malloc_suite(int n);
 extern void  srm_free_suite(void *suite);
-extern void *shoot_malloc_suite_contig(size_t size);
+extern void *shoot_malloc_suite_contig(size_t size);   /* 0 = the biggest block there is */
+extern void *shoot_malloc_suite(size_t size);          /* chunks anywhere (ML exmem.c) */
 extern void  shoot_free_suite(void *suite);
 extern void *GetFirstChunkFromSuite(void *suite);
 extern void *GetNextMemoryChunk(void *suite, void *chunk);
@@ -660,15 +661,78 @@ static int dk_battery(void)
 #endif
 }
 
-/* ------------------------------------------------------------------ memory */
+/* ------------------------------------------------------------------ memory
+ * A frame needs the raw (DK_RAW_A: the CR2's sensor image, ML packed 14-bit, 31.1 MB) and the developed frame
+ * (DK_FRAME_N: 5184 x 3456 UYVY, 34.2 MB). The owner's EOS M on RAWB17 (16 Nov) gave ONE SRM chunk of 31,888 KB (ML
+ * gets two SRM buffers there and gives the first back to Canon) and no 35 MB block of shoot memory: "memory raw 6000064
+ * frame 0 (srm)", "no memory" on every try. So the frame may lie in pieces (wf_frame.h struct wf_fseg):
+ *   1. one block, as before: shoot memory (_contig), else SRM chunks after the raw;
+ *   2. split at row K: rows 0 .. K - 1 (the head, K x 10 KB) in another SRM chunk, else one block of shoot memory, else
+ *      the chunks of a shoot suite (whole rows each); rows K .. 3455 (the tail) over the first bytes of the raw. The
+ *      develop writes tail row y at raw + (y - K) * DK_FP once row y is made, and wf_dev.c's 5-row ring reads sensor rows
+ *      from DK_Y0 + y - 1 on for the rows after it: K (dk_split_rows) keeps those writes DK_SPLIT_M sensor rows behind
+ *      the reads (dk_split_ok, checked again per frame with the CR2's own pitch). The raw is spent after the develop;
+ *      the print finishes' scratch lies after the tail. The worker's look stage, the stamp and the encoder read the
+ *      rows through the pieces: the print is the same, byte for byte, as from one block (ROLL:mem in the host test).
+ * K = the least multiple of DK_BAND rows that does both: 384 rows (3.8 MB of head) with the finishes off, 704 (7.0 MB)
+ * with a frame, the caption and the date. A run that gets no memory logs what was short ("dark: memory short: ..."). */
+#define DK_FP       (DK_W * 2)                   /* frame pitch, bytes */
+#define DK_FRAME_N  ((uint32_t)DK_FP * DK_H)
+#define DK_RAW_A    (DK_RAW_N + 4096)             /* the raw's block */
+#define DK_RAW_P    9240                         /* the EOS M CR2's raw pitch (5280 px x 14 bit): K is set for it */
+#define DK_SPLIT_M  8                            /* sensor rows between the tail's last write and the next read */
 struct dk_mem {
-    void *srm, *shoot;                           /* suites */
-    uint8_t *raw, *frame;                        /* cacheable aliases */
+    void *srm, *shoot;                           /* suites (shoot: the whole frame, or the split's head) */
+    uint8_t *raw, *frame;                        /* cacheable aliases; frame = row 0 */
     uint8_t *dma, *in, *ob, *app1;
     struct wf_dev_tabs *tabs;
     void *scr;
+    int nseg, split;                             /* the frame's pieces (0 = one block), the first row over the raw */
+    struct wf_fseg seg[WF_FSEG_MAX];
+    uint8_t *fin;                                /* the print finishes' scratch (dk_finish): the raw's block after the */
+    uint32_t fin_n;                              /* tail, or the whole raw block with a one-block frame */
+    const char *head;                            /* where the split's head came from (log) */
 };
 static struct dk_mem M;
+
+/* row y of the frame (wf_pf_rowfn), one block or pieces */
+static uint32_t *dk_row(void *ctx, int y)
+{
+    (void)ctx;
+    if (!M.nseg)
+        return (uint32_t *)(M.frame + (uint32_t)y * DK_FP);
+    int k = M.nseg - 1;
+    while (k > 0 && y < M.seg[k].y)
+        k--;
+    return (uint32_t *)((uint8_t *)M.seg[k].p + (uint32_t)(y - M.seg[k].y) * DK_FP);
+}
+/* the end of the run of rows from y that lie in one piece */
+static int dk_row_end(int y)
+{
+    int e = DK_H;
+    for (int k = 0; k < M.nseg; k++)
+        if (M.seg[k].y > y && M.seg[k].y < e)
+            e = M.seg[k].y;
+    return e;
+}
+/* the tail written over the raw stays behind the develop's reads (raw pitch p), for every tail row */
+static int dk_split_ok(int K, int p)
+{
+    if (K <= 0 || K >= DK_H)
+        return 0;
+    for (int y = K; y < DK_H; y++)
+        if ((uint32_t)(y - K + 1) * DK_FP > (uint32_t)(DK_Y0 + y - 1 - DK_SPLIT_M) * (uint32_t)p)
+            return 0;
+    return 1;
+}
+/* the split row: the least multiple of DK_BAND whose tail and the finishes' scratch fit the raw's block, writes behind */
+static int dk_split_rows(uint32_t fin, int p)
+{
+    for (int K = DK_BAND; K < DK_H; K += DK_BAND)
+        if ((uint32_t)(DK_H - K) * DK_FP + fin <= DK_RAW_A && dk_split_ok(K, p))
+            return K;
+    return -1;
+}
 
 /* the first contiguous run of suite chunks of >= need bytes, skipping [skip, skip + skipn) */
 static uint8_t *dk_run(void *suite, uint32_t need, uint8_t *skip, uint32_t skipn)
@@ -716,7 +780,95 @@ static void dk_free(void)
     memset(&M, 0, sizeof M);
 }
 
-static int dk_alloc(int raw_n, int frame_n)
+/* the print finishes' scratch this run needs (dk_finish): the date stamp's glow map, or the font pack + the caption band +
+ * a 16-row buffer (the larger: the stamp is drawn first) */
+static uint32_t dk_fin_need(void)
+{
+    uint32_t n = 0;
+    if (dk_pdt)
+        n = 1u << 20;                            /* the stamp's map: about 0.2 MB at 5184 x 3456 (checked when drawn) */
+    for (int o = 1; dk_pfr && o <= 6; o += 5) {  /* orientation 1 (= 3) and 6 (= 8): the two canvas shapes */
+        struct wf_pf_lay L;
+        if (wf_pf_layout(&L, dk_pfr, dk_pin, DK_W, DK_H, o)) {
+            uint32_t k = WF_PF_MAXB + ((wf_pf_band_bytes(&L) + 3) & ~3u) + (uint32_t)L.cw * 2 * 16;
+            if (k > n)
+                n = k;
+        }
+    }
+    return (n + 31) & ~31u;
+}
+
+/* a split frame (memory note above): the head of K rows from another SRM chunk, one shoot block or a shoot suite's chunks,
+ * the tail over the raw. 0 = M.seg set */
+static int dk_split(uint32_t fin)
+{
+    int K = dk_split_rows(fin, DK_RAW_P), n = 0;
+    if (K <= 0)
+        return -1;
+    uint32_t hn = (uint32_t)K * DK_FP;
+    uint8_t *h = dk_run(M.srm, hn, M.raw, DK_RAW_A);
+    M.head = "srm";
+    if (!h && (M.shoot = shoot_malloc_suite_contig(hn)) != 0) {
+        h = dk_run(M.shoot, hn, 0, 0);
+        M.head = "shoot";
+        if (!h) {
+            shoot_free_suite(M.shoot);
+            M.shoot = 0;
+        }
+    }
+    if (h) {
+        M.seg[n].y = 0;
+        M.seg[n++].p = (uint32_t *)h;
+    } else {                                     /* shoot memory in chunks: whole rows of each, up to WF_FSEG_MAX - 1 */
+        M.shoot = shoot_malloc_suite(hn + (WF_FSEG_MAX - 1) * (DK_FP + 32));
+        M.head = "shoot chunks";
+        int y = 0;
+        for (void *c = M.shoot ? GetFirstChunkFromSuite(M.shoot) : 0; c && y < K && n < WF_FSEG_MAX - 1;
+             c = GetNextMemoryChunk(M.shoot, c)) {
+            uint32_t a = (uint32_t)WF_CACHEABLE(GetMemoryAddressOfMemoryChunk(c)), a32 = (a + 31) & ~31u;
+            uint32_t sz = (uint32_t)GetSizeOfMemoryChunk(c);
+            int rows = sz >= a32 - a + DK_FP ? (int)((sz - (a32 - a)) / DK_FP) : 0;
+            if (rows <= 0)
+                continue;
+            M.seg[n].y = y;
+            M.seg[n++].p = (uint32_t *)a32;
+            y += rows;
+        }
+        if (y < K) {
+            if (M.shoot)
+                shoot_free_suite(M.shoot);
+            M.shoot = 0;
+            return -1;
+        }
+    }
+    M.seg[n].y = K;                              /* the tail over the raw */
+    M.seg[n++].p = (uint32_t *)M.raw;
+    M.nseg = n;
+    M.split = K;
+    M.frame = (uint8_t *)M.seg[0].p;
+    M.fin = M.raw + (uint32_t)(DK_H - K) * DK_FP;
+    M.fin_n = DK_RAW_A - (uint32_t)(DK_H - K) * DK_FP;
+    return 0;
+}
+
+/* no memory: what was short, and the biggest shoot block there is now (taken and given back at once) */
+static void dk_short(uint32_t fin)
+{
+    int big = 0, K = dk_split_rows(fin, DK_RAW_P);
+    void *t = shoot_malloc_suite_contig(0);
+    if (t) {
+        void *c = GetFirstChunkFromSuite(t);
+        big = c ? GetSizeOfMemoryChunk(c) >> 10 : 0;
+        shoot_free_suite(t);
+    }
+    /* two lines: a log line holds 120 characters (wf_main.c WF_LOG_W) */
+    wf_log("dark: memory short: raw %d KB %s, frame %d KB in one block none", (int)(DK_RAW_A >> 10),
+           M.raw ? "ok" : M.srm ? "none in the srm chunks" : "no srm", (int)(DK_FRAME_N >> 10));
+    wf_log("dark: memory short: split head %d KB (rows 0-%d) none, finishes %d KB, biggest shoot block %d KB",
+           K > 0 ? (int)(((uint32_t)K * DK_FP) >> 10) : 0, K - 1, (int)(fin >> 10), big);
+}
+
+static int dk_alloc(void)
 {
     memset(&M, 0, sizeof M);
     M.dma = __mem_malloc(DK_RD, WF_MEM_DMA, "wf_dark.c", __LINE__);
@@ -729,23 +881,49 @@ static int dk_alloc(int raw_n, int frame_n)
         wf_log("dark: no memory for the buffers / tables");
         return -1;
     }
-    M.shoot = shoot_malloc_suite_contig((size_t)frame_n);
-    if (M.shoot) {
-        M.frame = dk_run(M.shoot, (uint32_t)frame_n, 0, 0);
-        if (!M.frame) {
-            shoot_free_suite(M.shoot);
-            M.shoot = 0;
+    uint32_t fin = dk_fin_need();
+    for (int pass = 0; pass < 2 && !M.raw; pass++) {
+        if (!pass && (M.shoot = shoot_malloc_suite_contig(DK_FRAME_N)) != 0) {   /* 1. the frame in one shoot block */
+            M.frame = dk_run(M.shoot, DK_FRAME_N, 0, 0);
+            if (!M.frame) {
+                shoot_free_suite(M.shoot);
+                M.shoot = 0;
+            }
         }
+        M.srm = srm_malloc_suite(0);
+        if (M.srm) {
+            dk_log_suite("srm", M.srm);
+            M.raw = dk_run(M.srm, DK_RAW_A, 0, 0);
+        }
+        if (!M.raw && M.shoot) {                 /* that block may hold what SRM needs: give it back, SRM once more */
+            wf_log("dark: no raw block in srm beside a frame block in shoot: frame given back");
+            if (M.srm)
+                srm_free_suite(M.srm);
+            shoot_free_suite(M.shoot);
+            M.srm = M.shoot = 0;
+            M.frame = 0;
+        } else
+            break;
     }
-    M.srm = srm_malloc_suite(0);
-    if (M.srm) {
-        dk_log_suite("srm", M.srm);
-        M.raw = dk_run(M.srm, (uint32_t)raw_n, 0, 0);
-        if (M.raw && !M.frame)
-            M.frame = dk_run(M.srm, (uint32_t)frame_n, M.raw, (uint32_t)raw_n);
+    if (M.raw && !M.frame)
+        M.frame = dk_run(M.srm, DK_FRAME_N, M.raw, DK_RAW_A);   /* SRM chunks in a row after the raw */
+    if (M.raw && M.frame) {
+        M.fin = M.raw;
+        M.fin_n = DK_RAW_A;
+        wf_log("dark: memory raw %x frame %x (%s)", (unsigned)M.raw, (unsigned)M.frame, M.shoot ? "shoot" : "srm");
+        return 0;
+    }
+    if (M.raw && dk_split(fin) == 0) {
+        wf_log("dark: memory raw %x frame split at row %d: head %d KB from %s (%d piece%s at %x)", (unsigned)M.raw,
+               M.split, (int)(((uint32_t)M.split * DK_FP) >> 10), M.head, M.nseg - 1, M.nseg > 2 ? "s" : "",
+               (unsigned)M.frame);
+        wf_log("dark: memory rows %d-%d over the raw, %d KB after them for the finishes (%d KB needed)", M.split, DK_H - 1,
+               (int)(M.fin_n >> 10), (int)(fin >> 10));
+        return 0;
     }
     wf_log("dark: memory raw %x frame %x (%s)", (unsigned)M.raw, (unsigned)M.frame, M.shoot ? "shoot" : "srm");
-    return M.raw && M.frame ? 0 : -1;
+    dk_short(fin);
+    return -1;
 }
 
 /* ------------------------------------------------------------------ card I/O through the DMA buffer */
@@ -821,7 +999,7 @@ static void dk_yield(void)
 /* ------------------------------------------------------------------ print finishes (DESIGN 3.9, wf_print.h) */
 static const char *const dk_pfr_name[WF_PFR_N] = { "off", "white", "black", "white wide", "black wide" };
 
-/* before the encode, in M.raw (the develop is done with the raw): the date stamp into the frame; with a frame its layout,
+/* before the encode, in M.fin (the raw's block: the develop is done with the raw): the date stamp into the frame; with a frame its layout,
  * the caption band (WFPRINT.DAT read into the scratch, the shot's details from Canon's APP1 and the CR2's for the gaps,
  * the look from the print's comment text) and a row buffer, and the APP1's pixel size. L->frame 0: the print as before. */
 static void dk_finish(int i, uint32_t ao, uint32_t al, const char *look, struct wf_pf_lay *L, uint8_t **band,
@@ -834,7 +1012,7 @@ static void dk_finish(int i, uint32_t ao, uint32_t al, const char *look, struct 
         wf_dk_shot(M.app1 + ao + 10, al - 10, &s);
     int orient = s.orient ? s.orient : 1;        /* the print turns by its own APP1 (none: shown as stored) */
     wf_dk_shot_gaps(&s, &dk_cs);
-    uint8_t *scr = M.raw;
+    uint8_t *scr = M.fin;
     char b[24];
     *band = 0;
     *rowbuf = 0;
@@ -842,9 +1020,10 @@ static void dk_finish(int i, uint32_t ao, uint32_t al, const char *look, struct 
         uint32_t need = 0;
         if (!wf_pf_date(&s, dk_pdt, b, sizeof b))
             wf_log("dark: F%02d no date in the shot (APP1, CR2): no date stamp", i + 1);
-        else if ((need = wf_pf_stamp_bytes(DK_W, DK_H, b)) == 0 || need > DK_RAW_N
-                 || wf_pf_stamp((uint32_t *)M.frame, DK_W * 2, DK_W, DK_H, orient, b, scr, need) != 0)
-            wf_log("dark: F%02d date stamp %s not drawn", i + 1, b);
+        else if ((need = wf_pf_stamp_bytes(DK_W, DK_H, b)) == 0 || need > M.fin_n
+                 || wf_pf_stamp_fn(dk_row, 0, DK_W, DK_H, orient, b, scr, need) != 0)
+            wf_log("dark: F%02d date stamp %s not drawn (map %d of %d KB)", i + 1, b, (int)(need >> 10),
+                   (int)(M.fin_n >> 10));
         else
             wf_log("dark: F%02d date stamp %s o%d %dms", i + 1, b, orient, get_ms_clock() - t0);
     }
@@ -852,7 +1031,7 @@ static void dk_finish(int i, uint32_t ao, uint32_t al, const char *look, struct 
         return;
     int t1 = get_ms_clock();
     uint32_t nb = (wf_pf_band_bytes(L) + 3) & ~3u, nr = (uint32_t)L->cw * 2 * 16;
-    if (WF_PF_MAXB + nb + nr > DK_RAW_N) {       /* cannot happen at 5184 x 3456 (about 4.5 MB of 32 MB) */
+    if (WF_PF_MAXB + nb + nr > M.fin_n) {        /* dk_fin_need sized it (about 4.5 MB) */
         wf_log("dark: F%02d frame needs %d KB of scratch: none", i + 1, (int)((WF_PF_MAXB + nb + nr) >> 10));
         wf_pf_layout(L, WF_PFR_OFF, 0, DK_W, DK_H, orient);
         return;
@@ -921,6 +1100,10 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     if (rc == 0 && (dk_inf.w < DK_X0 + DK_W || dk_inf.h < DK_Y0 + DK_H || DK_IN < wf_cr2_inbuf_min(&dk_inf)
                     || (uint32_t)dk_inf.pitch * (uint32_t)dk_inf.h > DK_RAW_N))
         rc = WF_CR2_E_SIZE;
+    if (rc == 0 && M.nseg && !dk_split_ok(M.split, dk_inf.pitch)) {   /* the tail would catch up with the raw's reads */
+        wf_log("dark: F%02d raw pitch %d: the frame split at row %d is not safe", i + 1, dk_inf.pitch, M.split);
+        rc = WF_CR2_E_SIZE;
+    }
     struct dk_rd rdc = { f };
     if (rc == 0 && FIO_SeekSkipFile(f, dk_inf.strip_off, 0) != (int64_t)dk_inf.strip_off)
         rc = WF_CR2_E_READ;
@@ -965,13 +1148,16 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     struct wf_dev_stat st;
     memset(&st, 0, sizeof st);
     if (wf_dev_prepare(M.scr, M.tabs, &j, &st) != 0) { dk_why = "prepare"; return DK_ERR; }
-    uint32_t *frm = (uint32_t *)M.frame;
     wf_dk_thumb_begin(&dk_th, DK_W, DK_H);
     dv.print_ready = 1;
-    for (int y = 0; y < DK_H; y += DK_BAND) {
+    for (int y = 0; y < DK_H; y += DK_BAND) {    /* rows in order: a split frame's tail goes over the raw behind the reads */
         int yb = y + DK_BAND < DK_H ? y + DK_BAND : DK_H;
-        wf_dev_rows(M.scr, y, yb, frm + y * (DK_W / 2), DK_W * 2);
-        wf_dk_thumb_rows(&dk_th, frm + y * (DK_W / 2), DK_W * 2, y, yb - y, dv_print);
+        for (int ya = y, ye; ya < yb; ya = ye) {  /* one piece at a time (the split is a multiple of DK_BAND: one call) */
+            ye = dk_row_end(ya) < yb ? dk_row_end(ya) : yb;
+            uint32_t *d = dk_row(0, ya);
+            wf_dev_rows(M.scr, ya, ye, d, DK_FP);
+            wf_dk_thumb_rows(&dk_th, d, DK_FP, ya, ye - ya, dv_print);
+        }
         dv.expose = yb * 1000 / DK_H;
         dv.prog = 250 + yb * 450 / DK_H;
         dv_bump();
@@ -992,8 +1178,10 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     fr.devd = dk_lgk ? 2 : 1;                    /* 2: a chain film's log table, the look stage adds the effects only */
     fr.w = fr.fw = DK_W;
     fr.h = fr.fh = DK_H;
-    fr.pitch = DK_W * 2;
-    fr.data = fr.dst = frm;
+    fr.pitch = DK_FP;
+    fr.data = fr.dst = M.frame;
+    fr.nseg = (uint8_t)M.nseg;                   /* a split frame: the worker reads its rows through the pieces */
+    fr.seg = M.nseg ? M.seg : 0;
     fr.dev_ev8 = wf_dk_ev8(dk_inf.iso, dk_inf.et_n, dk_inf.et_d, dk_inf.fn_n, dk_inf.fn_d);   /* the shot's EV, not the dials' now */
     int status = -1, tries = 0;
     for (;;) {
@@ -1028,6 +1216,9 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     wf_pf_layout(&L, WF_PFR_OFF, 0, DK_W, DK_H, 1);
     if (dk_pfr || dk_pdt)
         dk_finish(i, ao, al, t2, &L, &band, &rowbuf);
+    if (!rowbuf && M.nseg && M.fin_n >= (uint32_t)L.cw * 2 * 16)
+        rowbuf = (uint32_t *)M.fin;              /* a 16-row band across two pieces is copied here (a split at a multiple of
+                                                    16 rows never makes one without a frame) */
     struct wf_fe e = { 0, 0 };
     uint32_t osz = 0;
     if (FIO_GetFileSize(out, &osz) == 0 && wf_fremove(out, &e) != 0) {
@@ -1044,10 +1235,16 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     int stopped = 0;
     for (int y = 0; rc == WF_JPE_OK && y < L.ch; y += 16) {   /* no frame: the frame's own rows, as before */
         const uint32_t *rows;
-        int pitch, n = wf_pf_band_rows(&L, y, frm, DK_W * 2, band, rowbuf, &rows, &pitch), py = y - L.iy;
+        int pitch, n = wf_pf_band_rows_fn(&L, y, dk_row, 0, DK_FP, band, rowbuf, &rows, &pitch), py = y - L.iy;
+        if (n <= 0) {
+            rc = WF_JPE_E_ARG;
+            break;
+        }
         rc = wf_jpe_rows(je, rows, pitch, n);
-        if (py >= 0 && py < DK_H)                /* the thumbnails: the picture's rows (16-row aligned in the canvas) */
-            wf_dk_thumb_rows(&dk_th, frm + py * (DK_W / 2), DK_W * 2, py, n, dv_print);
+        for (int ya = py, ye; ya >= 0 && ya < DK_H && ya < py + n; ya = ye) {   /* the thumbnails: the picture's rows */
+            ye = dk_row_end(ya) < py + n ? dk_row_end(ya) : py + n;
+            wf_dk_thumb_rows(&dk_th, dk_row(0, ya), DK_FP, ya, ye - ya, dv_print);
+        }
         if (!(y & 255)) {
             dv.prog = 800 + y * 200 / L.ch;
             dv_bump();
@@ -1128,7 +1325,10 @@ static void dk_task(void)
     int t_run = get_ms_clock(), ndone = 0, nerr = 0, paused = 0, ms_sum = 0;
     dk_stopk = 0;
     const char *end_why = "";
-    if (roll.state == WF_RS_LOADED && roll.nshot > 0) {
+    int st0 = roll.state;
+    /* a full roll too (RAWB17 and before: a FULL roll stayed FULL, wf_roll_next_dev found nothing, "0 developed, 0 failed,
+       3 left" with no reason once the memory was there) */
+    if ((roll.state == WF_RS_LOADED && roll.nshot > 0) || roll.state == WF_RS_FULL) {
         wf_roll_rewind(&roll);
         roll_save();
     }
@@ -1165,7 +1365,7 @@ static void dk_task(void)
     dk_lgk = 0;
     if (!src) {
         end_why = "no look (output Off)";
-    } else if (dk_alloc((int)DK_RAW_N + 4096, DK_W * DK_H * 2) != 0) {
+    } else if (dk_alloc() != 0) {
         end_why = "no memory";
     } else if (lgw == WF_RLG_OK && dk_logpk(&lk, M.tabs, M.scr)) {
         src = WF_DEV_CUBE;                       /* the chain film's whole look is in these tables */
@@ -1229,8 +1429,14 @@ static void dk_task(void)
     }
     while (!end_why[0]) {
         int i = wf_roll_next_dev(&roll);
-        if (i < 0)
+        if (i < 0) {
+            if (wf_roll_left(&roll) > 0) {       /* frames left that the roll does not hand out: say why, not a blank end */
+                wf_log("dark: roll state %d (at start %d), %d left: no frame to develop", roll.state, st0,
+                       wf_roll_left(&roll));
+                end_why = "no frame to develop";
+            }
             break;
+        }
         int bat = dk_battery();
         dv.battery = bat;
         if (bat >= 0 && bat < DK_BAT_STOP) {

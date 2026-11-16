@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -255,23 +256,119 @@ static void h_arena_free(void *p)
         }
     pthread_mutex_unlock(&h_arena_mx);
 }
-struct h_suite { void *p; int size; };
+static uint32_t h_arena_largest(void)           /* the biggest free gap */
+{
+    uint32_t at = 0, big = 0;
+    pthread_mutex_lock(&h_arena_mx);
+    for (int i = 0; i < h_nblk; i++) {
+        if (h_blk[i].off - at > big)
+            big = h_blk[i].off - at;
+        at = h_blk[i].off + h_blk[i].size;
+    }
+    if (H_ARENA - at > big)
+        big = H_ARENA - at;
+    pthread_mutex_unlock(&h_arena_mx);
+    return big;
+}
+/* a suite = its first chunk; chunks in a list. arena: shoot memory (freed with the suite), else an SRM chunk */
+struct h_suite { void *p; int size; struct h_suite *next; int arena; };
+volatile int h_shoot_max, h_shoot_chunk, h_srm_n;
+uint32_t h_srm_base;
+static struct h_suite *h_chunk(void *p, int size, int arena)
+{
+    struct h_suite *s = malloc(sizeof *s);
+    s->p = p;
+    s->size = size;
+    s->next = 0;
+    s->arena = arena;
+    return s;
+}
 void *shoot_malloc_suite_contig(size_t n)
 {
     if (h_shoot_fail)
         return 0;
-    void *p = h_arena_alloc(n);
-    if (!p)
+    if (!n) {                                    /* ML: the biggest block there is */
+        n = h_arena_largest() & ~63u;
+        if (h_shoot_max && n > (size_t)h_shoot_max)
+            n = (size_t)h_shoot_max;
+        if (!n)
+            return 0;
+    }
+    if (h_shoot_max && n > (size_t)h_shoot_max)  /* the camera: no block that big */
         return 0;
-    struct h_suite *s = malloc(sizeof *s);
-    s->p = p;
-    s->size = (int)n;
-    return s;
+    void *p = h_arena_alloc(n);
+    return p ? h_chunk(p, (int)n, 1) : 0;
 }
-void shoot_free_suite(void *s) { if (s) { h_arena_free(((struct h_suite *)s)->p); free(s); } }
+void shoot_free_suite(void *s);
+/* ML shoot_malloc_suite(n): n bytes in chunks anywhere (here: blocks of h_shoot_chunk, else of at most h_shoot_max, else 8 MB) */
+void *shoot_malloc_suite(size_t n)
+{
+    if (h_shoot_fail || !n)
+        return 0;
+    struct h_suite *first = 0, **tail = &first;
+    size_t left = n, most = h_shoot_chunk ? (size_t)h_shoot_chunk : h_shoot_max ? (size_t)h_shoot_max : (size_t)8 << 20;
+    while (left) {
+        size_t k = left < most ? left : most;
+        void *p = h_arena_alloc(k);
+        if (!p) {
+            shoot_free_suite(first);
+            return 0;
+        }
+        *tail = h_chunk(p, (int)k, 1);
+        tail = &(*tail)->next;
+        left -= k;
+    }
+    return first;
+}
+void shoot_free_suite(void *s)
+{
+    for (struct h_suite *c = s, *nx; c; c = nx) {
+        nx = c->next;
+        if (c->arena)
+            h_arena_free(c->p);
+        free(c);
+    }
+}
 void *GetFirstChunkFromSuite(void *s) { return s; }
+void *GetNextMemoryChunk(void *s, void *c) { (void)s; return c ? ((struct h_suite *)c)->next : 0; }
 void *GetMemoryAddressOfMemoryChunk(void *c) { return ((struct h_suite *)c)->p; }
 int GetSizeOfMemoryChunk(void *c) { return ((struct h_suite *)c)->size; }
+/* SRM: h_srm_n chunks of the EOS M's SRM_BUFFER_SIZE (0x1F24000 = 31,888 KB) side by side, as the camera's uncached alias
+   (bit 30 set, like the owner's 0x46000064); the module reads them through CACHEABLE() = the mapping below bit 30.
+   0 chunks = none (every mode but ROLL:mem) */
+#define H_SRM_SZ 0x1F24000
+static uint8_t *h_srm_map;
+void *srm_malloc_suite(int n)
+{
+    (void)n;
+    if (h_srm_n <= 0)
+        return 0;
+    if (!h_srm_map) {
+        static const uint32_t hint[] = { 0x06000000, 0x10000000, 0x20000000, 0x28000000 };
+        size_t len = ((size_t)4 * H_SRM_SZ + 0x1000 + 0xFFF) & ~(size_t)0xFFF;
+        for (unsigned i = 0; i < sizeof hint / sizeof *hint && !h_srm_map; i++) {
+            void *p = mmap((void *)(uintptr_t)hint[i], len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (p == MAP_FAILED)
+                continue;
+            if ((uintptr_t)p & 0x40000000u || (uintptr_t)p + len > 0x40000000u) {
+                munmap(p, len);
+                continue;
+            }
+            h_srm_map = p;
+        }
+        if (!h_srm_map)
+            return 0;
+        h_srm_base = (uint32_t)(uintptr_t)h_srm_map + 0x64;   /* the camera's chunk starts 0x64 into its buffer */
+    }
+    struct h_suite *first = 0, **tail = &first;
+    for (int i = 0; i < h_srm_n && i < 4; i++) {
+        memset(h_srm_map + 0x64 + (size_t)i * H_SRM_SZ, 0xA5, H_SRM_SZ);   /* never zero, as the shoot arena */
+        *tail = h_chunk((void *)(uintptr_t)((h_srm_base + (uint32_t)i * H_SRM_SZ) | 0x40000000u), H_SRM_SZ, 0);
+        tail = &(*tail)->next;
+    }
+    return first;
+}
+void srm_free_suite(void *s) { shoot_free_suite(s); }
 void *__priv_AllocateMemory(size_t n) { return h_shoot_fail ? 0 : h_arena_alloc(n); }
 void __priv_FreeMemory(void *p) { h_arena_free(p); }
 int GetFreeMemForAllocateMemory(void) { return h_heap_free; }
@@ -625,12 +722,9 @@ void NotifyBox(int timeout, const char *fmt, ...)
 }
 
 /* ------------------------------------------------------------------ Roll + Darkroom (src/wf_dark.c, DESIGN 3.6)
- * Linked so the module links as on the camera; these modes never load a roll or start the darkroom (no SRM suite on the
- * host: srm_malloc_suite gives none). tools/dr_check.sh and tools/dr_dark_check.sh test the roll and the develop. */
+ * Linked so the module links as on the camera. srm_malloc_suite gives no chunk unless h_srm_n is set (ROLL:mem: the
+ * owner's EOS M layout, one 31,888 KB chunk); tools/dr_check.sh and tools/dr_dark_check.sh test the roll and the develop. */
 int image_review_time = 2, battery_level_bars = 3;
-void *GetNextMemoryChunk(void *s, void *c) { (void)s; (void)c; return 0; }
-void *srm_malloc_suite(int n) { (void)n; return 0; }
-void srm_free_suite(void *s) { (void)s; }
 void LoadCalendarFromRTC(void *tm) { memset(tm, 0, 9 * sizeof(int)); }
 void PauseLiveView(void) { }
 int  ResumeLiveView(void) { return 0; }
