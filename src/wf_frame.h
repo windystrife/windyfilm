@@ -23,6 +23,8 @@ enum { WF_PART_FULL = 0, WF_PART_TOP = 1, WF_PART_BOT = 2 };
 /* RAW develop on, but not for this shot (the camera layer's gate; fmt stays UYVY8, the worker logs it) */
 enum { WF_RBS_NONE = 0, WF_RBS_QUALITY, WF_RBS_ASPECT, WF_RBS_DRIVE, WF_RBS_NOADDR, WF_RBS_N };
 #define WF_RB_NCAND 4
+#define WF_FSEG_MAX 16                   /* pieces of a devd frame (struct wf_frame nseg): a split head from up to 15 shoot chunks */
+struct wf_fseg { int y; uint32_t *p; };  /* a piece: from row y of the request, at p */
 
 struct wf_frame {
     uint8_t  fmt;                 /* WF_FMT_* */
@@ -55,10 +57,25 @@ struct wf_frame {
     int      t_post;              /* get_ms_clock() when the hook posted the request */
     int      dev_ev8;             /* devd only: the CR2's own EV100 x 8 for the effects' highlight gain (wf_dk_ev8;
                                      WF_EV_BAD = the CR2 does not tell), never the camera's settings at develop time */
+    /* devd only: the frame in pieces (wf_dark.c, when no one block holds it: the owner's RAWB17 EOS M had one 31.9 MB
+       SRM chunk for a 35 MB frame). nseg > 0: rows seg[k].y .. seg[k + 1].y - 1 of this request at seg[k].p (pitch as
+       above), the last piece up to h; seg[0].y = 0 and data = seg[0].p. 0 = data holds every row (all other frames) */
+    uint8_t  nseg;
+    const struct wf_fseg *seg;
 };
 
 /* the frame's words for the UYVY8 path (pitch == 2 * w for every Canon L frame we hook) */
 static inline uint32_t *wf_frame_words(const struct wf_frame *f) { return (uint32_t *)f->data; }
 static inline int wf_frame_nwords(const struct wf_frame *f) { return f->h * (f->w / 2); }
+/* row r of the request (0 .. h - 1), pieces or not */
+static inline uint32_t *wf_frame_row(const struct wf_frame *f, int r)
+{
+    if (!f->nseg)
+        return (uint32_t *)((uint8_t *)f->data + (uint32_t)r * (uint32_t)f->pitch);
+    int k = f->nseg - 1;
+    while (k > 0 && r < f->seg[k].y)
+        k--;
+    return (uint32_t *)((uint8_t *)f->seg[k].p + (uint32_t)(r - f->seg[k].y) * (uint32_t)f->pitch);
+}
 
 #endif

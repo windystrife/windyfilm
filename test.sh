@@ -36,9 +36,11 @@ ALL="$ALL FX:bloom"                                # RAWB11: Bloom on its own ro
 ALL="$ALL MIST:levels"                             # owner 11-15: every Mist level, the combo with Bloom + Halation, the long shot line
 ALL="$ALL STAGE:dark"                              # 11-15: the Darkroom's stage of a chain film, knob rows set, vs the camera's shot
 ALL="$ALL STAGE:v1"                                # 11-16: a version 1 stage pack (no knob data): the last four knob rows hidden
+ALL="$ALL ROLL:mem"                               # 11-16: RAWB17 "no memory": the camera's one SRM chunk, the frame split, real RAW+L pairs
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
 B=${OUT:-$R/build/$cam}
+export WF_PRINT_DAT=${WF_PRINT_DAT:-$B/WFPRINT.DAT}   # ROLL:mem: the caption font pack (build.sh PACKS=1; none: no caption)
 O=$B/obj
 G=$O/gen
 T=$B/test

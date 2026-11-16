@@ -59,6 +59,9 @@
  *   ROLL dark / boot   RAWB9: a roll frame keeps Canon's JPEG (no look), nothing of the look is built while a roll is in,
  *                      the Darkroom starts with DryOS's task table full (the UI task on the last slot) and builds the
  *                      look for its run; boot: the roll file read first, no build
+ *   ROLL mem           owner RAWB17 (11-16): the camera's memory (one 31,888 KB SRM chunk, no 35 MB shoot block): the
+ *                      "memory short" line; one-block vs split frame on three real RAW+L pairs, byte for byte after
+ *                      APP1; the owner's look with the head from shoot chunks (pairs: WF_DARK_CR2, skipped without)
  *   LOG [big]        the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
  *                      the refusal logged), ring full (lines counted), a short write (no line twice); big: a log over
  *                      512 KB becomes WINDYFLM.OLD at boot
@@ -5750,7 +5753,9 @@ static void t_roll_dark(const char *cs)
     int ut = task_create("wf_ui", 0x1B, 0x2000, (void *)ui_task_stand_in, 0);
     chk(ut > 0 && !(ut & 1) && h_task_slots == 0, "the UI task takes the table's last slot (%x)", ut);
     log_mark();
-    int r0 = h_task_refused, ds = wf_dark_start();
+    h_lvp = 1;                                   /* the EOS M's pause: LiveView off, and the display with it (RAWB18) */
+    h_disp_pause_off = 1;
+    int on0 = h_disp_ons, r0 = h_task_refused, ds = wf_dark_start();
     chk(ds == 0 && !log_has("dark: no task") && h_task_refused == r0,
         "the Darkroom starts with the task table full (%d, %d task_create refused)", ds, h_task_refused - r0);
     chk(LOGW("dark: roll 001 start, 3 of 3 to develop", 5000), "the run goes ('%s')", log_line("dark: roll"));
@@ -5767,6 +5772,13 @@ static void t_roll_dark(const char *cs)
     }
     chk(WAIT(!wf_dark_busy(), 30000) && LOGW("dark: roll 001 end", 3000), "the run ends (host: no SRM, '%s')",
         log_line("dark: roll 001 end"));
+    chk(log_has("dark: screen at the start: display 1 -> 0, LiveView 1 -> 0 (paused)"),
+        "the screen: LiveView paused, the display went off ('%s')", log_line("dark: screen at the start"));
+    chk(strstr(log_line("dark: display off after the pause"), "turned on again, display 1 after ") && h_disp_ons == on0 + 1,
+        "the screen: turned on again after the pause ('%s', %d asks)", log_line("dark: display off"), h_disp_ons - on0);
+    chk(log_has("dark: screen at the end: display 1 -> 1, LiveView 1 (resumed), display turned on 1 times") && lv && h_disp,
+        "the screen: on at the end, LiveView back ('%s')", log_line("dark: screen at the end"));
+    h_lvp = h_disp_pause_off = 0;
     chk(WAIT(!wf_fx_hk && !wf_fx_gk && !wf_fx_mk && h_arena_live == 0, 20000), "after the run, the roll still in: the effects given back (%d)",
         h_arena_live);
     ui_hold = 0;
@@ -5775,8 +5787,261 @@ static void t_roll_dark(const char *cs)
     mod_deinit();
 #endif
 }
+/* ROLL:mem - the owner's RAWB17 EOS M (11-16): every Darkroom roll develop ended "no memory" ("dark: srm chunks
+ * 46000064+31888K", "dark: memory raw 6000064 frame 0 (srm)", "0 developed, 3 left"): ONE SRM chunk of 31,888 KB (the
+ * raw fits, 53 KB left) and no 35 MB block of shoot memory for the frame. Here srm_malloc_suite gives that layout
+ * (h_srm_n chunks side by side, the camera's uncached alias) and shoot memory has no block over h_shoot_max; three real
+ * EOS M RAW+L pairs (WF_DARK_CR2: a landscape and two portraits, Orientation 6 / 8; read only, never committed) through
+ * the whole run in the module, with the owner's print finishes (frame 1, info 1, date 2). Each roll is shot to its end
+ * (FULL, as the owner's): the run rewinds it (RAWB17 left a FULL roll FULL: "0 developed, 0 failed, 3 left", no reason).
+ *   short: no shoot memory at all: still "no memory", now with the "memory short" lines naming what was short;
+ *   full:  three SRM chunks side by side: the frame in one block after the raw (the old way), 3 prints;
+ *   split: the camera's one chunk, shoot blocks up to 16 MB: the frame split (head from shoot memory, tail over the
+ *          spent raw), each print = the one-block print byte for byte after Canon's APP1 (only our comment there names
+ *          the roll); grain off (its seed is per shot), halation + bloom + mist on;
+ *   chunks: no shoot block over 6 MB and the shoot suite in 640 KB chunks: the head in 12 pieces (bands and thumbnail
+ *          runs cross them), each print = the one-block print byte for byte;
+ *   owner: the owner's look (film table, halation + bloom, grain, mist), one chunk, shoot blocks up to 6 MB only: the
+ *          head from a shoot suite's chunks, 3 of 3 developed. */
+static int mem_copy(const char *src, const char *dst)
+{
+    FILE *a = fopen(src, "rb"), *b = a ? fopen(dst, "wb") : 0;
+    static char buf[1 << 16];
+    size_t k;
+    int ok = a && b;
+    while (ok && (k = fread(buf, 1, sizeof buf, a)) > 0)
+        ok = fwrite(buf, 1, k, b) == k;
+    if (a) fclose(a);
+    if (b) fclose(b);
+    return ok;
+}
+static const char *const mem_pairs[3] = { "IMG_0208", "IMG_0206", "IMG_0212" };   /* landscape, Orientation 6, 8 */
+static int mem_shoot(const char *dir, int from)
+{
+    int ok = 1;
+    for (int i = 0; i < 3 && ok; i++) {
+        char s[300], d[64];
+        int n0 = wf_roll_now()->nshot;
+        snprintf(s, sizeof s, "%s/%s.JPG", dir, mem_pairs[i]);
+        snprintf(d, sizeof d, "DCIM/100CANON/IMG_%04d.JPG", from + i);
+        ok = mem_copy(s, d);
+        snprintf(s, sizeof s, "%s/%s.CR2", dir, mem_pairs[i]);
+        snprintf(d, sizeof d, "DCIM/100CANON/IMG_%04d.CR2", from + i);
+        ok = ok && mem_copy(s, d);
+        h_set_file_number(from + i);
+        ok = ok && WAIT(wf_roll_now()->nshot == n0 + 1, 5000);
+    }
+    return ok;
+}
+static int mem_roll(int film, int num, const char *dir, int from)   /* a new roll of 3 with the three pairs */
+{
+    const struct wf_roll *r = wf_roll_now();
+    if (r->state != WF_RS_EMPTY && r->state != WF_RS_DONE && (wf_roll_req_close() != 0
+                                                             || !WAIT(wf_roll_now()->state == WF_RS_DONE, 5000)))
+        return 0;
+    return wf_roll_req_load(film, 3) == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->num == num, 5000)
+        && mem_shoot(dir, from) && wf_roll_now()->state == WF_RS_FULL;
+}
+static int mem_run(const char *what, int num)    /* one Darkroom run: 0 = it ended (lines after the mark) */
+{
+    char e[40];
+    snprintf(e, sizeof e, "dark: roll %03d end", num);
+    log_mark();
+    int ds = wf_dark_start();
+    chk(ds == 0 && LOGW("dark: roll ", 5000), "%s: the run starts (%d)", what, ds);
+    int ok = WAIT(log_has(e) && !wf_dark_busy(), 1500000);
+    chk(ok, "%s: the run ends ('%s')", what, log_line(e));
+    return ok ? 0 : -1;
+}
+static long mem_after_app1(const unsigned char *b, long n)   /* the first byte after the APP1 segment, 0 = none */
+{
+    long o = 2;
+    if (n < 4 || b[0] != 0xFF || b[1] != 0xD8)
+        return 0;
+    while (o + 4 <= n && b[o] == 0xFF && b[o + 1] != 0xDA) {
+        long len = (long)b[o + 2] << 8 | b[o + 3];
+        if (b[o + 1] == 0xE1)
+            return o + 2 + len;
+        o += 2 + len;
+    }
+    return 0;
+}
+static int mem_dims(const unsigned char *b, long n, int *w, int *h)   /* the print's SOF0 (after the APP1: its thumbnail has one) */
+{
+    for (long o = mem_after_app1(b, n); o > 0 && o + 9 < n; o++)
+        if (b[o] == 0xFF && b[o + 1] == 0xC0) {
+            *h = b[o + 5] << 8 | b[o + 6];
+            *w = b[o + 7] << 8 | b[o + 8];
+            return 1;
+        }
+    return 0;
+}
+static char *mem_print(int num, int i, int file, long *n)
+{
+    char p[64];
+    snprintf(p, sizeof p, "ROLLS/ROLL%03d/F%02d_%04d.JPG", num, i + 1, file);
+    return get_file(p, n);
+}
+static void mem_prints(const char *what, int num, int from, char **keep, long *keepn)
+{
+    for (int i = 0; i < 3; i++) {
+        long n = 0;
+        char *b = mem_print(num, i, from + i, &n);
+        int w = 0, h = 0, eoi = b && n > 2 && (unsigned char)b[n - 2] == 0xFF && (unsigned char)b[n - 1] == 0xD9;
+        int dims = b && mem_dims((unsigned char *)b, n, &w, &h);
+        chk(b && n > (1 << 20) && eoi && dims && w > 5184 && h > 3456 && mem_after_app1((unsigned char *)b, n) > 0,
+            "%s: F%02d print %ld KB, %dx%d (a frame round the 5184 x 3456 picture), APP1 + EOI", what, i + 1, n >> 10, w, h);
+        if (keep) {
+            keep[i] = b;
+            keepn[i] = n;
+        } else
+            free(b);
+    }
+}
+/* roll num's three prints = the one-block prints, byte for byte after Canon's APP1 (only our comment there names the roll) */
+static void mem_same(const char *what, int num, int from, char **ref, const long *refn)
+{
+    for (int i = 0; i < 3; i++) {
+        long n = 0;
+        char *b = mem_print(num, i, from + i, &n);
+        long a = b ? mem_after_app1((unsigned char *)b, n) : 0, ar = ref[i] ? mem_after_app1((unsigned char *)ref[i], refn[i]) : 0;
+        chk(b && ref[i] && a > 0 && ar > 0 && n - a == refn[i] - ar && !memcmp(b + a, ref[i] + ar, (size_t)(n - a)),
+            "%s: F%02d (%s) = the one-block print byte for byte after APP1 (%ld / %ld B)", what, i + 1, mem_pairs[i], n - a,
+            refn[i] - ar);
+        free(b);
+    }
+}
+static void t_roll_mem(void)
+{
+#ifdef WF_BUILD_5D2
+    chk(1, "5D2: no darkroom");
+#else
+    const char *dir = getenv("WF_DARK_CR2");
+    char t[300];
+    if (!dir)
+        dir = "/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM";
+    snprintf(t, sizeof t, "%s/%s.CR2", dir, mem_pairs[2]);
+    if (access(t, R_OK) != 0) {
+        chk(1, "SKIPPED: no EOS M RAW+L pairs in %s (WF_DARK_CR2)", dir);
+        return;
+    }
+    std_pack();
+    const char *pd = getenv("WF_PRINT_DAT");     /* the build's WFPRINT.DAT (test.sh): the caption's font pack, as on the card */
+    int cap = pd && access(pd, R_OK) == 0 && mem_copy(pd, "ML/DATA/WFPRINT.DAT");
+    chk(1, "%s", cap ? "WFPRINT.DAT on the card: prints with the caption" : "no WFPRINT.DAT (WF_PRINT_DAT): no caption");
+    const int film = wf_films[fC].id;
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=halation\nbloom=normal\nmist=w4\n", film);
+    wf_fx_retry_ms = 500;
+    h_set_folder_number(100);
+    h_set_file_number(500);
+    mod_init(1);
+    wf_pr_frame = 1;                             /* the owner's log: "print frame 1 info 1 date 2" */
+    wf_pr_info = 1;
+    wf_pr_date = 2;
+    chk(mem_roll(film, 1, dir, 501), "roll 001: 3 real RAW+L frames shot (%d)", wf_roll_now()->nshot);
+
+    /* short: no shoot memory, the camera's one SRM chunk */
+    h_srm_n = 1;
+    h_shoot_fail = 1;
+    mem_run("short", 1);
+    chk(log_has("dark: srm chunks ") && strstr(log_line("dark: srm chunks"), "+31888K"), "short: the camera's chunk ('%s')",
+        log_line("dark: srm chunks"));
+    snprintf(t, sizeof t, "dark: memory short: raw %d KB ok, frame %d KB in one block none",
+             (int)((9240u * 3528u + 4096u) >> 10), (int)((5184u * 2u * 3456u) >> 10));
+    chk(log_has(t) && strstr(log_line("memory short: split head "), "biggest shoot block 0 KB") != 0,
+        "short: the lines name what was short ('%s' / '%s')", log_line("memory short: raw"), log_line("memory short: split"));
+    chk(!log_has("no frame to develop"), "short: a full roll is rewound for the run");
+    chk(strstr(log_line("dark: roll 001 end"), "0 developed, 0 failed, 3 left") && strstr(log_line("dark: roll 001 end"),
+        ": no memory"), "short: no memory, nothing lost ('%s')", log_line("dark: roll 001 end"));
+    h_shoot_fail = 0;
+
+    /* full: three SRM chunks side by side, shoot blocks up to 16 MB: the frame in one block after the raw */
+    h_shoot_max = 16 << 20;
+    h_srm_n = 3;
+    usleep(800000);                              /* past wf_fx_retry_ms: the run builds the effects the short run could not */
+    mem_run("full", 1);
+    chk(log_has("dark: memory raw ") && strstr(log_line("dark: memory raw"), "(srm)")
+        && !log_has("frame split"), "full: the frame in one block ('%s')", log_line("dark: memory raw"));
+    chk(strstr(log_line("dark: roll 001 end"), "3 developed, 0 failed, 0 left") != 0, "full: 3 of 3 ('%s')",
+        log_line("dark: roll 001 end"));
+    chk(strstr(log_line("dark: look ready"), "halation + bloom normal") && strstr(log_line("dark: look ready"), ", mist")
+        && !strstr(log_line("dark: look ready"), " -"), "full: the look's effects in ('%s')", log_line("dark: look ready"));
+    char *ref[3] = { 0, 0, 0 };
+    long refn[3] = { 0, 0, 0 };
+    mem_prints("full", 1, 501, ref, refn);
+
+    /* split: the camera's layout (one 31,888 KB chunk), shoot blocks up to 16 MB */
+    h_srm_n = 1;
+    chk(mem_roll(film, 2, dir, 504), "roll 002: the same 3 pairs again (%d)", wf_roll_now()->nshot);
+    h_lvp = h_disp_pause_off = 1;                /* the camera's pause: LiveView off, the display off with it (RAWB18) */
+    mem_run("split", 2);
+    chk(log_has("dark: screen at the start: display 1 -> 0, LiveView 1 -> 0 (paused)")
+        && strstr(log_line("dark: display off after the pause"), "display 1 after ") && !log_has("dark: display off before")
+        && log_has("display turned on 1 times"), "split: the display turned on again after the pause, on for all 3 frames "
+        "('%s')", log_line("dark: screen at the end"));
+    h_lvp = h_disp_pause_off = 0;
+    const char *ms = log_line("frame split at row ");
+    int K = 0;
+    const char *kp = strstr(ms, "frame split at row ");
+    if (kp)
+        K = atoi(kp + 19);
+    chk(K > 0 && K % 64 == 0 && K <= 1024 && strstr(ms, "from shoot (1 piece"), "split: the head of %d rows from one shoot "
+        "block ('%s')", K, ms);
+    chk(strstr(log_line("dark: roll 002 end"), "3 developed, 0 failed, 0 left") != 0, "split: 3 of 3 ('%s')",
+        log_line("dark: roll 002 end"));
+    chk(log_has("date stamp ") && !log_has("not drawn") && log_has("dark: F01 frame white"), "split: frame + date stamp drawn");
+    chk(!cap || (log_has("dark: F01 caption ") && log_has("dark: F03 caption ") && !log_has("scratch: none")),
+        "split: the caption drawn (WFPRINT.DAT read into the scratch after the tail: '%s')", log_line("dark: F01 caption"));
+    mem_same("split", 2, 504, ref, refn);
+
+    /* chunks: no shoot block for the head (6 MB at most: halation's 5.7 MB fits, a 7 MB head does not) and the shoot
+       suite scattered in 640 KB chunks: the head in 12 pieces of 63 rows, so the encoder's 16-row bands and the
+       thumbnails' runs cross pieces; each print = the one-block print byte for byte after APP1 */
+    h_shoot_max = 6 << 20;
+    h_shoot_chunk = 640 << 10;
+    chk(mem_roll(film, 3, dir, 507), "roll 003: 3 frames (%d)", wf_roll_now()->nshot);
+    h_lvp = h_disp_pause_off = h_disp_stuck = 1; /* and a display that does not come back: the run goes on dark */
+    mem_run("chunks", 3);
+    chk(strstr(log_line("dark: display off after the pause"), "display 0 after ")
+        && strstr(log_line("dark: display off before F02"), "(not asked again this run)") && !log_has("display off before F03")
+        && strstr(log_line("dark: display off after the run"), "display 0 after ")
+        && log_has("dark: screen at the end: display 0 -> 0, LiveView 1 (resumed), display turned on 4 times"),
+        "chunks: a display that stays off: asked 3 times in a row, then not, once more after the run ('%s')",
+        log_line("dark: screen at the end"));
+    h_lvp = h_disp_pause_off = h_disp_stuck = 0;
+    h_disp = 1;
+    chk(strstr(log_line("frame split at row "), "from shoot chunks (12 pieces") != 0, "chunks: the head in 12 pieces ('%s')",
+        log_line("frame split at row "));
+    chk(strstr(log_line("dark: roll 003 end"), "3 developed, 0 failed, 0 left") != 0, "chunks: 3 of 3 ('%s')",
+        log_line("dark: roll 003 end"));
+    mem_same("chunks", 3, 507, ref, refn);
+    for (int i = 0; i < 3; i++)
+        free(ref[i]);
+    h_shoot_chunk = 0;
+
+    /* owner: the owner's look with grain, shoot blocks up to 6 MB (a 7 MB head in two chunks of the suite) */
+    wf_grain = 2;
+    chk(mem_roll(film, 4, dir, 510), "roll 004: 3 frames (%d)", wf_roll_now()->nshot);
+    mem_run("owner", 4);
+    chk(strstr(log_line("frame split at row "), "from shoot chunks (2 pieces") != 0, "owner: the head from a shoot suite's "
+        "chunks ('%s')", log_line("frame split at row "));
+    chk(strstr(log_line("dark: look ready"), "halation + bloom normal, grain") && !strstr(log_line("dark: look ready"), " -"),
+        "owner: the owner's look built ('%s')", log_line("dark: look ready"));
+    chk(strstr(log_line("dark: roll 004 end"), "3 developed, 0 failed, 0 left") != 0, "owner: 3 of 3 ('%s')",
+        log_line("dark: roll 004 end"));
+    mem_prints("owner", 4, 510, 0, 0);
+    h_srm_n = 0;
+    h_shoot_max = 0;
+    mod_deinit();
+#endif
+}
+
 static void t_roll(const char *cs)
 {
+    if (!strcmp(cs, "mem")) {
+        t_roll_mem();
+        return;
+    }
     if (!strcmp(cs, "save") || !strcmp(cs, "short") || !strcmp(cs, "back")) {
         t_roll_save(cs);
         return;
