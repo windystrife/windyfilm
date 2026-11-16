@@ -296,6 +296,15 @@ static const char *const wf_popt_nm[WF_PO_N] = { "Frame", "Info", "Date", "Camer
 static volatile int *const wf_popt_v[WF_PO_N] = { &wf_pr_frame, &wf_pr_info, &wf_pr_date, &wf_pr_jpeg };
 static const int wf_popt_n[WF_PO_N] = { WF_PFR_N, WF_PIN_N, WF_PDT_N, WF_PJ_N };
 
+static const char *const wf_ds_key[WF_DS_N] = { "on", "off" };   /* Screen Off (DESIGN 3.11): the Darkroom's chip only */
+void wf_dk_scr_step(int d)
+{
+    if (!d)
+        return;
+    wf_dk_scr = wf_dk_scr == WF_DS_OFF ? WF_DS_ON : WF_DS_OFF;
+    wf_dirty();
+}
+
 const char *wf_popt_name(int k) { return k >= 0 && k < WF_PO_N ? wf_popt_nm[k] : ""; }
 int wf_popt_avail(int k) { return k != WF_PO_INFO || (wf_pr_frame > WF_PFR_OFF && wf_pr_frame < WF_PFR_N); }
 void wf_popt_step(int k, int d)
@@ -963,6 +972,8 @@ void wf_cfg_load(void)
             wf_pr_date = wf_cfg_word(v, wf_pdt_key, WF_PDT_N, WF_PDT_OFF);
         } else if ((v = wf_cfg_val(l, "jpeg"))) {
             wf_pr_jpeg = wf_cfg_word(v, wf_pj_key, WF_PJ_N, WF_PJ_KEEP);
+        } else if ((v = wf_cfg_val(l, "dkscreen"))) {
+            wf_dk_scr = wf_cfg_word(v, wf_ds_key, WF_DS_N, WF_DS_ON);
         } else if ((v = wf_cfg_val(l, "stage"))) {
             int q[11] = { 0 }, okq = 1, nq = 0;            /* 7 values (before the last four rows) or 11 */
             for (int i = 0; i < 11 && okq; i++) {
@@ -1028,7 +1039,8 @@ static int wf_cfg_save(void)
     int n = snprintf(b, sizeof b,
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
                      "strength=%s\nhl=%d\nsh=%d\npaper=%s\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\n"
-                     "exposure=%s\nexptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\njpeg=%s\nshoulder=%s\n",
+                     "exposure=%s\nexptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\njpeg=%s\ndkscreen=%s\n"
+                     "shoulder=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
@@ -1039,7 +1051,7 @@ static int wf_cfg_save(void)
                      wf_pick(wf_exp_key, 2, wf_exp_mode), wf_exp_trim >= -16 && wf_exp_trim <= 16 ? (int)wf_exp_trim : 0,
                      wf_exif_off ? "off" : "on", wf_blind ? "on" : "off", wf_pick(wf_pfr_key, WF_PFR_N, wf_pr_frame),
                      wf_pick(wf_pin_key, WF_PIN_N, wf_pr_info), wf_pick(wf_pdt_key, WF_PDT_N, wf_pr_date),
-                     wf_pick(wf_pj_key, WF_PJ_N, wf_pr_jpeg),
+                     wf_pick(wf_pj_key, WF_PJ_N, wf_pr_jpeg), wf_pick(wf_ds_key, WF_DS_N, wf_dk_scr),
                      wf_pick(wf_hue_key, WF_DEV_HUE_N, wf_rb_hue));
     struct wf_sg_knobs sk;
     wf_sg_knobs_now(&sk);

@@ -87,6 +87,19 @@ int  wf_popt_avail(int k);                       /* 0 = greyed: Info with the fr
 void wf_popt_step(int k, int d);                 /* LEFT / RIGHT / wheel (wraps); the config is saved later */
 int  wf_clock_ymd(void);                         /* the camera clock's date as y * 10000 + m * 100 + d, -1 = unknown */
 
+/* Screen Off while a roll develops (owner 11-16, DESIGN 3.11): one chip at the Darkroom screen's top right, the only
+   place it changes (config dkscreen=on|off, kept silently). WF_DS_ON (default) = a run keeps the LCD on, as before;
+   WF_DS_OFF = while a run lives the display is turned off WF_DS_WAKE_MS after the last key on the Darkroom screen; a key
+   while it is dark only wakes it; the run's end (done, stopped, failed) turns it on. EOS M (the 5D2 has no Darkroom). */
+extern volatile int wf_dk_scr;
+enum { WF_DS_ON = 0, WF_DS_OFF, WF_DS_N };
+#define WF_DS_WAKE_MS 10000
+void wf_dk_scr_step(int d);                      /* the chip's LEFT / RIGHT / wheel: On <-> Off; the config is saved later */
+int  wf_dark_wake(int now);                      /* the UI, on each key of the Darkroom screen: 1 = a Screen Off run's
+                                                    display was dark (it is turned on): the key does nothing else */
+int  wf_dark_dark(int now);                      /* the UI's tick on the Darkroom screen: turns the display off when a
+                                                    Screen Off run is due dark; 1 = it reads dark (redraws can wait) */
+
 /* ------------------------------------------------------------------ UI */
 #define WF_UI_SCR_ROLL 1                         /* = WFUI_SCR_ROLL / WFUI_SCR_DARK of src/ui/wf_ui_int.h */
 #define WF_UI_SCR_DARK 2

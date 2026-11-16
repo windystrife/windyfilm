@@ -304,11 +304,25 @@ int main(int argc, char **argv)
     shot("dark_print_jpeg_overwrite");
     key(MODULE_KEY_WHEEL_LEFT);
     CHECK(wf_pr_jpeg == 0, "wheel left on Camera JPEG: %d (want Keep)", wf_pr_jpeg);
+    key(MODULE_KEY_PRESS_DOWN);                              /* the Screen chip at the top right (owner 11-16) */
+    CHECK(wfdr_host_pfoc() == WF_PO_N && wf_dk_scr == WF_DS_ON, "DOWN from Camera JPEG: focus %d screen %d (want the "
+          "Screen chip, On)", wfdr_host_pfoc(), wf_dk_scr);
+    shot("dark_screen_chip_on");
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wf_dk_scr == WF_DS_OFF && wf_pr_jpeg == 0 && fake_nstart() == 0, "RIGHT on the chip: screen %d jpeg %d "
+          "started %d (want Off, nothing else)", wf_dk_scr, wf_pr_jpeg, fake_nstart());
+    shot("dark_screen_off");
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wf_dk_scr == WF_DS_ON, "wheel left on the chip: %d (want On)", wf_dk_scr);
     key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfdr_host_pfoc() == 0, "DOWN from Camera JPEG: focus %d (want Frame, wraps)", wfdr_host_pfoc());
+    CHECK(wfdr_host_pfoc() == 0, "DOWN from the chip: focus %d (want Frame, wraps)", wfdr_host_pfoc());
+    key(MODULE_KEY_PRESS_UP);
+    CHECK(wfdr_host_pfoc() == WF_PO_N, "UP from Frame: focus %d (want the chip)", wfdr_host_pfoc());
+    key(MODULE_KEY_PRESS_DOWN);
     key(MODULE_KEY_PRESS_LEFT);
     key(MODULE_KEY_PRESS_LEFT);
     CHECK(wf_pr_frame == 4, "LEFT LEFT from White: %d (want Black wide, wraps)", wf_pr_frame);
+    key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_WHEEL_LEFT);
@@ -344,6 +358,25 @@ int main(int argc, char **argv)
     v->nwire = 1; v->wire_frame[0] = 0; v->hung_ms = get_ms_clock() - 100000;
     v->expose = 180; v->prog = 230; v->t_frame = 11000;
     shot("dark_expose_18");
+    /* 5b. Screen Off while it develops (owner 11-16): dark = no redraws; a key only wakes it (MENU too); awake, LEFT /
+     * RIGHT switch the chip (the run's only control) */
+    wf_dk_scr = WF_DS_OFF;
+    fake_set_dark(1);
+    tick(2);
+    CHECK(wfdr_dark(WFUI_SCR_DARK), "Screen Off run, display dark: the UI still draws");
+    key(MODULE_KEY_MENU);
+    CHECK(fake_nwake() == 1 && !wfdr_dark(WFUI_SCR_DARK) && !wfdr_host_confirm() && fake_nstop() == 0 && !closed,
+          "MENU on the dark screen: woken %d, dark %d, confirm %d, stop %d (want a wake only)", fake_nwake(),
+          wfdr_dark(WFUI_SCR_DARK), wfdr_host_confirm(), fake_nstop());
+    shot("dark_run_screen_off_wake");
+    fake_set_dark(1);
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(fake_nwake() == 2 && wf_dk_scr == WF_DS_OFF, "RIGHT on the dark screen: woken %d, screen %d (want a wake, "
+          "still Off)", fake_nwake(), wf_dk_scr);
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(fake_nwake() == 2 && wf_dk_scr == WF_DS_ON, "RIGHT awake during the run: screen %d (want On)", wf_dk_scr);
+    shot("dark_run_screen_on");
+    fake_set_dark(0);
     v = fake_view(); v->expose = 520; v->prog = 480; v->t_frame = 21000;
     shot("dark_expose_52");
     v = fake_view(); v->expose = 900; v->prog = 760; v->t_frame = 32000;

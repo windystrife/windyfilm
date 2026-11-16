@@ -15,4 +15,6 @@ int  fake_nstop(void);
 void fake_set_locked(int k);                /* wf_roll_shutter_locked() */
 int  fake_nswap(void);                      /* wf_roll_req_swap calls that closed + loaded */
 void fake_set_date(int ymd);                /* wf_clock_ymd() (the Date row shows today in its format) */
+void fake_set_dark(int d);                  /* a Screen Off run: the display reads dark (wf_dark_dark) until a key */
+int  fake_nwake(void);                      /* keys that only woke it (wf_dark_wake = 1) */
 #endif

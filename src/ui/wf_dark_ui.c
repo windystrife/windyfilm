@@ -811,6 +811,29 @@ static void dr_right(const struct wf_dark_view *v, int now)
     }
 }
 
+/* Screen Off (owner 11-16, DESIGN 3.11): the screen's one control for it, a chip at the top right. Idle: UP from the
+ * first print row (or DOWN from the last) focuses it; LEFT / RIGHT / the wheel switch it. While a run lives it is the
+ * only control: always focused, the same keys. The icon is an LCD on its foot: lit for On, an empty outline for Off. */
+#define DR_FOC_SCR WF_PO_N                                 /* dr_pfoc of the chip (after the print rows) */
+static int dr_chip(int xr, int foc)                        /* right-aligned at xr; returns its width */
+{
+    int off = wf_dk_scr == WF_DS_OFF, pad = foc ? 20 : 12;
+    const char *t = off ? "Screen Off" : "Screen On";
+    int w = pad + 18 + 8 + ui_textw(F_13, t) + pad, x0 = xr - w, ix = x0 + pad;
+    int ic = foc ? C_AMBER : off ? C_TXT3 : C_TXT2;
+    wfg_rrect(x0, 5, xr, 27, 11, foc ? C_AMBERD : C_CHIPF, foc ? C_AMBER : C_CHIPO, 1);
+    wfg_rrect(ix, 9, ix + 17, 20, 2, off ? -1 : ic, ic, 1);  /* the screen */
+    wfg_rect(ix + 7, 21, ix + 10, 22, ic);                   /* its foot */
+    wfg_rect(ix + 4, 23, ix + 13, 23, ic);
+    ui_text(F_13, ix + 26, 8, t, foc ? C_TXT : off ? C_TXT3 : C_TXT2);
+    if (foc)
+    {
+        wfg_tri(xr - 13, 11, xr - 8, 16, xr - 13, 21, C_AMBER);
+        wfg_tri(x0 + 13, 11, x0 + 8, 16, x0 + 13, 21, C_AMBER);
+    }
+    return w;
+}
+
 static void dr_top(const struct wf_dark_view *v)
 {
     wfg_ellipse(16, 9, 30, 23, C_AMBER);                              /* the safelight lamp */
@@ -818,7 +841,9 @@ static void dr_top(const struct wf_dark_view *v)
     spaced(F_13, 40, 10, "DARKROOM", C_AMBER, 3);
     char ck[8], b[24];
     clock_text(ck, sizeof ck);
-    int xr = WFUI_W - 14;
+    int run = v->state == WF_DR_RUN || v->state == WF_DR_STOPPING;
+    int xr = WFUI_W - 12;
+    xr -= dr_chip(xr, run || (v->state != WF_DR_DONE && dr_pfoc == DR_FOC_SCR)) + 16;
     if (ck[0]) xr -= text_r(F_15, xr, 8, ck, C_TXT2) + 14;
     if (v->battery >= 0)
     {
@@ -842,7 +867,9 @@ static void dr_footer(const struct wf_dark_view *v)
     const char *const *k = v->state == WF_DR_RUN ? (dr_confirm ? k_conf : k_run)
                          : v->state == WF_DR_DONE ? k_done : k_idle;
     hints(k, 16, 455, C_TXT2, C_TXT3);
-    const char *h = v->state == WF_DR_RUN || v->state == WF_DR_STOPPING ? "Keep the camera on"
+    int run = v->state == WF_DR_RUN || v->state == WF_DR_STOPPING;
+    const char *h = run && wf_dk_scr == WF_DS_OFF ? "Screen Off: any key wakes it for 10 s"
+                  : run ? "Keep the camera on"
                   : v->state == WF_DR_DONE ? "" : "The shutter is locked while the darkroom works";
     text_r(F_13, WFUI_W - 16, 455, h, C_TXT3);
 }
@@ -866,10 +893,23 @@ static void dark_render(int now)
     dr_footer(v);
 }
 
+static int dr_dark;                                        /* the display reads dark (a Screen Off run): no redraws */
 static int dark_key(int key, int now)
 {
     const struct wf_dark_view *v = wf_dark_view();
     int run = v->state == WF_DR_RUN || v->state == WF_DR_STOPPING;
+    if (wf_dark_wake(now))                                 /* Screen Off, dark: this key only wakes it */
+    {
+        dr_dark = 0;
+        return 0;
+    }
+    int lr = key == MODULE_KEY_PRESS_LEFT || key == MODULE_KEY_WHEEL_LEFT || key == MODULE_KEY_WHEEL_UP
+          || key == MODULE_KEY_PRESS_RIGHT || key == MODULE_KEY_WHEEL_RIGHT || key == MODULE_KEY_WHEEL_DOWN;
+    if (lr && (run || (v->state != WF_DR_DONE && dr_pfoc == DR_FOC_SCR)))
+    {
+        wf_dk_scr_step(1);                                 /* two values: either way switches */
+        return 0;
+    }
     switch (key)
     {
     case MODULE_KEY_PRESS_SET: case MODULE_KEY_JOY_CENTER:
@@ -881,9 +921,9 @@ static int dark_key(int key, int now)
             else if (rc == -3) say("Not now: the camera is busy", now);
         }
         break;
-    case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:  /* the print finishes (no run, nothing done yet) */
+    case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:  /* the print finishes + the Screen chip (no run, not done) */
         if (!run && v->state != WF_DR_DONE)
-            dr_pfoc = (dr_pfoc + (key == MODULE_KEY_PRESS_UP ? WF_PO_N - 1 : 1)) % WF_PO_N;
+            dr_pfoc = (dr_pfoc + (key == MODULE_KEY_PRESS_UP ? WF_PO_N : 1)) % (WF_PO_N + 1);
         break;
     case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_UP:
     case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_DOWN:
@@ -905,7 +945,13 @@ static int dark_key(int key, int now)
 static int dark_tick(int now)
 {
     const struct wf_dark_view *v = wf_dark_view();
-    int moved = 0;
+    int moved = 0, d = wf_dark_dark(now);                  /* Screen Off: turns the display off when due */
+    if (d != dr_dark)
+    {
+        dr_dark = d;
+        if (!d) moved = 1;                                 /* woken: draw what changed while dark */
+    }
+    if (d) return 0;
     static int last_state = -1;
     if (v->state != last_state) { last_state = v->state; msg = 0; dr_confirm = 0; moved = 1; }
     if (v->gen != dr_gen) { dr_gen = v->gen; moved = 1; }
@@ -1143,6 +1189,8 @@ int wfdr_tick(int scr, int now)
     if (scr == WFUI_SCR_DARK) moved |= dark_tick(now);
     return moved;
 }
+
+int wfdr_dark(int scr) { return scr == WFUI_SCR_DARK && dr_dark; }
 
 #ifdef WF_HOST
 int wfdr_host_tab(void) { return rtab; }

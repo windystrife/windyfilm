@@ -969,6 +969,37 @@ B and the Darkroom); flat Log and Film LUT Off have no print, so the row is grey
   RAWB cases (Leica Vivid Warm on the cached .RBT, a chain film on Matte); CFG (the saved line); tests/ui (the row,
   `b2s_paper`).
 
+### 3.11 Screen Off while a roll develops (owner 2026-11-16, EOS M Darkroom)
+
+A frame takes about 2 min, a roll many; the owner wants the LCD off meanwhile to save battery, chosen on the Darkroom
+screen itself ("one UI"), at its top right.
+- **Control.** One chip at the top right of the Darkroom screen (`src/ui/wf_dark_ui.c` `dr_chip`), right of the clock
+  and battery: an LCD icon (lit = On, an empty outline = Off) and "Screen On" / "Screen Off". No ML menu row. Config
+  `dkscreen=on|off` (default on), saved like the other rows (`wf_dk_scr`, `wf_dk_scr_step`, `src/wf_menu.c`).
+- **Keys.** Idle (and stopped / failed): the chip is a fifth focus after the four PRINT rows: UP from Frame (or DOWN from
+  Camera JPEG) reaches it, LEFT / RIGHT / the wheel switch it; SET still starts the run. While a run lives the chip is
+  the only control: drawn focused, LEFT / RIGHT / the wheel switch it (the rows are hidden then). Done: shown, not
+  focused.
+- **Run with Screen Off** (`src/wf_dark.c`). From after LiveView's pause to the run's end the display may go dark:
+  `WF_DS_WAKE_MS` (10 s) after the last key on the Darkroom screen (SET counts), the UI's tick (`wf_dark_dark`) asks ML's
+  `display_off` (Canon's TurnOffDisplay through ML's GUI task; EOSM_202.sym exports it), at most every 2 s. `dk_screen`
+  no longer turns the display on before each frame while it is due dark. A key while dark (`wf_dark_wake`, every key of
+  the screen, MENU too) only wakes it: `display_on`, 10 s again, the key does nothing else. Awake, keys work as
+  before (MENU twice stops; LEFT / RIGHT switch the chip back to On). The UI draws nothing while the display reads
+  dark (`wfdr_dark`, `src/ui/wf_ui.c`), and redraws on waking. Screen On = as before (the run keeps the LCD on).
+- **End.** Done, stopped or failed: no more dark from the tick, an off asked under 2 s before is let land, then
+  `dk_screen("after the run")` turns the display on so the result shows; `powersave_permit` then leaves Canon's own
+  auto-off to Canon. Unloading after a dark run: one `display_on` (no wait).
+- **Text.** `dark: Screen Off: the display goes dark 10 s after the last key` at the start, `dark: Screen Off: display
+  turned off N times, woken M times` at the end. The footer while running says "Screen Off: any key wakes it for 10 s".
+- **Checks.** `test.sh` ROLL:jpeg roll 002 (a real run, the test standing in for the screen's tick and keys): shown
+  after a key, dark when due (display_off), a key wakes it (display_on) and only that, dark again, no turn-on before
+  the frames, on at the end, the end line. CFG: `dkscreen=` read and saved. `tests/ui/dr_ui_test.c`: focus order, the
+  switch, a dark run draws nothing, MENU / RIGHT on the dark screen only wake it, RIGHT awake switches it; shots
+  `dark_screen_chip_on`, `dark_screen_off`, `dark_run_screen_off_wake`, `dark_run_screen_on`.
+- **Not checked on the camera:** that Canon keeps the display off while LiveView is paused, and how the EOS M's own
+  keys reach ML while it is dark (the first key may also be seen by Canon). The 5D2 has no Darkroom: stubs only.
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`

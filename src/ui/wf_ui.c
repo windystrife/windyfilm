@@ -943,7 +943,7 @@ int wfui_task_tick(void)
         }
     }
     if (scr != WFUI_SCR_BROWSER && wfdr_tick(scr, now)) dirty = 1;
-    if (dirty || now - t_heal >= HEAL_MS)
+    if ((dirty || now - t_heal >= HEAL_MS) && !wfdr_dark(scr))   /* Screen Off: nothing drawn while dark */
     {
         dirty = 0;
         drawn_gen = gen;

@@ -178,6 +178,20 @@ VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như
 - CHƯA THỬ ĐƯỢC trên máy thật: máy Canon có mở và hiện ảnh thu nhỏ của file đã đè hay
   không (giả lập không có phần xem lại của Canon). Lần đầu thử nên dùng cuộn ngắn.
 
+TẮT MÀN HÌNH KHI TRÁNG (16/11; mặc định Screen On = như cũ)
+- Góc trên bên phải màn hình Darkroom có nút "Screen On" / "Screen Off" (hình màn hình
+  sáng = On, chỉ có viền = Off). Chỉ chỉnh ở đây, không có trong menu ML; máy nhớ trong
+  cấu hình (dkscreen=on/off).
+- Lúc chưa tráng: lên từ dòng Frame (hoặc xuống từ dòng Camera JPEG) để chọn nút, trái /
+  phải hoặc bánh xe để đổi. SET vẫn là bắt đầu tráng.
+- Đang tráng: nút luôn sáng viền cam, trái / phải / bánh xe để đổi.
+- Screen Off: 10 giây sau phím cuối cùng (kể cả SET lúc bắt đầu) màn hình tắt. Bấm phím
+  bất kỳ: màn hình sáng lại 10 giây, phím đó không làm gì khác (kể cả MENU). Lúc màn hình
+  đang sáng thì phím chạy như thường (MENU hai lần để dừng).
+- Tráng xong / dừng / lỗi: màn hình tự sáng lại để xem kết quả.
+- Log: "dark: Screen Off: the display goes dark 10 s after the last key" và cuối cuộn
+  "dark: Screen Off: display turned off N times, woken M times".
+
 CUỘN PHIM FILM STAGE (15/11)
 - Cuộn nạp bằng lon Film stage được in bằng đúng bảng âm bản x print stock, cùng các
   hàng Print stock, 11 hàng knob (Film exp, Push / pull, Exp comp, Printer R / G / B,
@@ -284,6 +298,11 @@ u. (16/11, RAWB21) Camera JPEG = Overwrite, Frame Off, cuộn 3 kiểu RAW+L. Tr
 v. (16/11, RAWB21) Như u. nhưng Frame White + Info: PLAY trên máy phải mở được (ảnh
    không viền, cỡ 5184x3456); bản có viền ở ROLLS. Máy báo lỗi / không mở được / ảnh thu
    nhỏ sai thì chụp màn hình và ghi lại tấm nào. Xong thì đặt lại Camera JPEG = Keep.
+w. (16/11) Screen Off: chọn nút góc trên phải = Screen Off, tráng cuộn 3 kiểu. Sau khoảng
+   10 giây màn hình phải tắt. Bấm nút bất kỳ (thử cả MENU): màn hình sáng lại, cuộn không
+   bị dừng; 10 giây sau tắt lại. Tráng xong màn hình phải tự sáng. Ghi lại: phím nào không
+   làm sáng được màn hình, màn hình có tự sáng lại giữa chừng không, và % pin trước / sau
+   so với một cuộn Screen On.
 
 
 6. GỬI LẠI

@@ -728,11 +728,13 @@ int image_review_time = 2, battery_level_bars = 3;
 void LoadCalendarFromRTC(void *tm) { memset(tm, 0, 9 * sizeof(int)); }
 /* LiveView pause and the display (the owner's RAWB18 EOS M: the screen went dark while the Darkroom ran). Off unless
  * h_lvp: then PauseLiveView turns lv off (and the display too with h_disp_pause_off), ResumeLiveView turns both on;
- * display_on turns the display on unless h_disp_stuck (then neither does) */
-volatile int h_disp = 1, h_disp_ons, h_lvp, h_disp_pause_off, h_disp_stuck;
+ * display_on turns the display on unless h_disp_stuck (then neither does); display_off (the Darkroom's Screen Off)
+ * turns it off, counted in h_disp_offs */
+volatile int h_disp = 1, h_disp_ons, h_disp_offs, h_lvp, h_disp_pause_off, h_disp_stuck;
 static int h_lv_paused;
 int  display_is_on(void) { return h_disp; }
 void display_on(void) { h_disp_ons++; if (!h_disp_stuck) h_disp = 1; }
+void display_off(void) { h_disp_offs++; h_disp = 0; }
 void PauseLiveView(void)
 {
     if (!h_lvp || !lv)

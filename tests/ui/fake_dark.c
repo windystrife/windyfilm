@@ -116,3 +116,20 @@ const char *wf_popt_text(int k, char *b, int n)
     }
     return "Off";
 }
+
+/* ------------------------------------------------------------------ Screen Off (wf_dark.h, DESIGN 3.11) */
+volatile int wf_dk_scr;
+static int fdark, nwake;
+void fake_set_dark(int d) { fdark = d; }
+int fake_nwake(void) { return nwake; }
+void wf_dk_scr_step(int d) { if (d) wf_dk_scr = !wf_dk_scr; }
+static int frun(void) { return view.state == WF_DR_RUN || view.state == WF_DR_STOPPING; }
+int wf_dark_wake(int now)
+{
+    (void)now;
+    if (!frun() || wf_dk_scr != WF_DS_OFF || !fdark) return 0;
+    fdark = 0;
+    nwake++;
+    return 1;
+}
+int wf_dark_dark(int now) { (void)now; return frun() && wf_dk_scr == WF_DS_OFF && fdark; }

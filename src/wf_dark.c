@@ -44,6 +44,7 @@ extern void powersave_prohibit(void);
 extern void powersave_permit(void);
 extern int  display_is_on(void);
 extern void display_on(void);                    /* ML: TurnOnDisplay from the GUI task (MLEV_TURN_ON_DISPLAY) */
+extern void display_off(void);                   /* ML: TurnOffDisplay from the GUI task (MLEV_TURN_OFF_DISPLAY) */
 extern int  is_movie_mode(void);
 extern int  gui_menu_shown(void);
 extern uint8_t *bmp_vram(void);
@@ -611,6 +612,7 @@ int wf_clock_ymd(void)
 
 /* print finishes (wf_dark.h, DESIGN 3.9): the settings; a run takes them at its start */
 volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg;
+volatile int wf_dk_scr;                          /* Screen Off (wf_dark.h, DESIGN 3.11): read live, a run follows a change */
 
 #if WF_DARK_CAN
 /* the develop tables a run builds for a look, B's choice (wf_rawb.c): Leica Vivid (WF_FLUT_DISP) = the sRGB develop + the
@@ -683,9 +685,46 @@ static int dk_battery(void)
  * DK_DISP_TRIES asks in a row: the run goes on dark (developing needs no screen) and says so once. */
 #define DK_DISP_WAIT 1000                        /* ms for TurnOnDisplay (ML's GUI task) to take */
 #define DK_DISP_TRIES 3
+#define DK_OFF_EVERY 2000                        /* ms between two asks to turn the display off (it may take a moment) */
 static int dk_disp_ons, dk_disp_miss;            /* asks this run, asks in a row that did not take */
+/* Screen Off (owner 11-16): dk_dark_ok while a run may go dark (from after LiveView's pause to the run's end), the last
+ * key on the Darkroom screen (UI task), the last ask to turn it off, and this run's counts for the end line */
+static volatile int dk_dark_ok, dk_wake_ms, dk_off_ms, dk_offs, dk_wakes;
+static int dk_dark_due(int now)
+{
+    return dk_running && dk_dark_ok && wf_dk_scr == WF_DS_OFF && now - dk_wake_ms >= WF_DS_WAKE_MS;
+}
+
+int wf_dark_wake(int now)
+{
+    if (!dk_running)
+        return 0;
+    int dark = dk_dark_ok && wf_dk_scr == WF_DS_OFF && (now - dk_wake_ms >= WF_DS_WAKE_MS || !display_is_on());
+    dk_wake_ms = now;                            /* any key restarts the time, Screen On too (a switch to Off waits) */
+    if (dark) {
+        dk_wakes++;
+        if (!display_is_on())
+            display_on();
+    }
+    return dark;
+}
+
+int wf_dark_dark(int now)
+{
+    if (!dk_dark_due(now))
+        return 0;
+    if (display_is_on() && now - dk_off_ms >= DK_OFF_EVERY) {
+        dk_off_ms = now;
+        dk_offs++;
+        display_off();
+    }
+    return !display_is_on();
+}
+
 static int dk_screen(const char *when)
 {
+    if (dk_dark_due(get_ms_clock()))             /* Screen Off: dark is what the owner chose */
+        return display_is_on();
     if (display_is_on()) {
         dk_disp_miss = 0;
         return 1;
@@ -1694,6 +1733,10 @@ static void dk_task(void)
     }
     wf_log("dark: screen at the start: display %d -> %d, LiveView %d -> %d%s", d0, display_is_on(), lv0, lv,
            paused ? " (paused)" : "");
+    dk_offs = dk_wakes = 0;
+    dk_dark_ok = 1;                              /* Screen Off from here: dark WF_DS_WAKE_MS after the last key (SET) */
+    if (wf_dk_scr == WF_DS_OFF)
+        wf_log("dark: Screen Off: the display goes dark %d s after the last key", WF_DS_WAKE_MS / 1000);
     dk_screen("after the pause");
     powersave_prohibit();
     int src = wf_dark_src(lk.output, lk.flut), lgw = wf_rawb_logpk(&lk);
@@ -1817,14 +1860,24 @@ static void dk_task(void)
         wf_task_yield(1);                        /* the frame's lines to the card (no file of the run is open now) */
     }
     dk_free();
+    dk_dark_ok = 0;                              /* the result shows: no more dark from the UI's tick */
+    if (dk_offs) {                               /* an off asked a moment ago may still be on its way: let it land */
+        int w = DK_OFF_EVERY - (get_ms_clock() - dk_off_ms);
+        if (w > 0)
+            msleep(w);
+    }
     powersave_permit();
     int d1 = display_is_on();
     if (paused)
         ResumeLiveView();
     dk_disp_miss = 0;                            /* the screen after the run: asked again whatever the run's asks did */
     dk_screen("after the run");
+    if (dk_offs && !display_is_on() && wf_unloading && !ml_shutdown_requested)
+        display_on();                            /* unloading after a dark run: not left dark (dk_screen asks nothing now) */
     wf_log("dark: screen at the end: display %d -> %d, LiveView %d%s, display turned on %d times", d1, display_is_on(), lv,
            paused ? " (resumed)" : "", dk_disp_ons);
+    if (dk_offs || dk_wakes)
+        wf_log("dark: Screen Off: display turned off %d times, woken %d times", dk_offs, dk_wakes);
     int left = wf_roll_left(&roll);
     dv.frame = -1;
     dv.phase = WF_DP_NONE;
@@ -1843,6 +1896,8 @@ static void dk_task(void)
 int wf_dark_start(void) { dv.msg = "The Darkroom runs on the EOS M first"; dv_bump(); return -3; }
 void wf_dark_stop(void) {}
 void wf_dark_poll(void) {}
+int wf_dark_wake(int now) { (void)now; return 0; }
+int wf_dark_dark(int now) { (void)now; return 0; }
 #endif
 
 #if WF_DARK_CAN
@@ -1882,6 +1937,7 @@ int wf_dark_start(void)
     dv.nwire = 0;
     dv.avg_ms = 0;
     dk_t0 = get_ms_clock();
+    dk_wake_ms = dk_t0;                          /* Screen Off: the SET that started it is the last key */
     WF_BARRIER();
     dk_running = 1;                              /* the roll is the run's from here (the shutter goes free) */
     dk_go = 1;                                   /* wf_task's next loop runs it: no task to create, none to be refused */

@@ -2484,8 +2484,8 @@ static void t_cfg(void)
     const char *code1 = wf_flut_code[1];
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
-            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=Overwrite\nshoulder=D\nuserwb=1,5600,2,-3\n", wf_films[fA].id,
-            code1);
+            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=Overwrite\ndkscreen=Off\nshoulder=D\nuserwb=1,5600,2,-3\n",
+            wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
         "film %d output %d curve %d flut %d lutei %d", wf_film_id, wf_out, wf_curve, wf_flut, wf_lut_ei);
@@ -2499,8 +2499,9 @@ static void t_cfg(void)
         "exposure %d exptrim %d exif off %d", wf_exp_mode, wf_exp_trim, wf_exif_off);
     chk(wf_blind == 0, "blind=OFF read: Blind roll off (%d)", wf_blind);
     chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
-    chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_OVER,
-        "print finishes read: frame %d info %d date %d jpeg %d (want 4 2 2 1)", wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg);
+    chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_OVER && wf_dk_scr == WF_DS_OFF,
+        "print finishes read: frame %d info %d date %d jpeg %d dkscreen %d (want 4 2 2 1 1)", wf_pr_frame, wf_pr_info,
+        wf_pr_date, wf_pr_jpeg, wf_dk_scr);
     chk(WAIT(h_kelvin_last == 3200, 5000), "Light Tungsten applied at start (%dK)", h_kelvin_last);
     wf_row_step(WF_ROW_GRAIN, 1);
     h_clock_add_ms += 2000;
@@ -2511,7 +2512,7 @@ static void t_cfg(void)
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\npaper=glossy\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\n"
              "exposure=%s\n"
-             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=overwrite\nshoulder=d\n"
+             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=overwrite\ndkscreen=off\nshoulder=d\n"
              "stage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
@@ -6198,10 +6199,39 @@ static void t_roll_jpeg(void)
     chk(log_has("dark: F01 print Exif thumbnail 160x120 q"), "keep: '%s'", log_line("print Exif thumbnail"));
     chk(jp_cr2s(dir, 501) && !jp_wft(501), "keep: CR2s untouched, no .WFT");
 
-    /* copy: frame Off, Overwrite */
+    /* copy: frame Off, Overwrite; and Screen Off (owner 11-16, DESIGN 3.11): the test stands in for the Darkroom screen's
+     * tick (wf_dark_dark) and keys (wf_dark_wake; a key "WF_DS_WAKE_MS ago" = the time without a key is over) */
     wf_pr_jpeg = WF_PJ_OVER;
+    wf_dk_scr = WF_DS_OFF;
     chk(mem_roll(film, 2, dir, 504), "roll 002: 3 frames (%d)", wf_roll_now()->nshot);
-    mem_run("copy", 2);
+    {
+        log_mark();
+        int on0 = h_disp_ons, off0 = h_disp_offs, ds = wf_dark_start(), now = get_ms_clock();
+        chk(ds == 0 && LOGW("dark: Screen Off: the display goes dark 10 s after the last key", 120000),
+            "screen off: the run says so ('%s')", log_line("dark: Screen Off"));
+        now = get_ms_clock();
+        wf_dark_wake(now);                       /* a key now (the start may be more than 10 s back on the host) */
+        int d0 = wf_dark_dark(now);              /* a key a moment ago: shown */
+        int w0 = wf_dark_wake(now - WF_DS_WAKE_MS);   /* (screen shown: not a wake, the key's time set back) */
+        int d1 = wf_dark_dark(now), h1 = h_disp; /* due: turned off */
+        int w1 = wf_dark_wake(now), h2 = h_disp; /* a key on the dark screen: woken, the key does nothing else */
+        int d2 = wf_dark_dark(now);              /* within its 10 s: shown */
+        chk(!d0 && !w0 && d1 && !h1 && h_disp_offs == off0 + 1 && w1 && h2 && h_disp_ons == on0 + 1 && !d2,
+            "screen off: shown %d, dark %d (display %d, %d offs), woken %d (display %d, %d ons), shown again %d", !d0, d1, h1,
+            h_disp_offs - off0, w1, h2, h_disp_ons - on0, !d2);
+        usleep(2100000);                         /* (asks to turn it off: 2 s apart) */
+        now = get_ms_clock();
+        wf_dark_wake(now - WF_DS_WAKE_MS);
+        chk(wf_dark_dark(now) && !h_disp && h_disp_offs == off0 + 2, "screen off: dark again 10 s after the wake (%d offs)",
+            h_disp_offs - off0);
+        int ok = WAIT(log_has("dark: roll 002 end") && !wf_dark_busy(), 1500000);
+        chk(ok, "copy: the run ends ('%s')", log_line("dark: roll 002 end"));
+        chk(h_disp && !log_has("dark: display off before") && !log_has("dark: display off after the pause")
+            && log_has("dark: Screen Off: display turned off 2 times, woken ") && !wf_dark_dark(get_ms_clock()),
+            "screen off: dark for the frames, on at the end (display %d, '%s', '%s')", h_disp,
+            log_line("dark: Screen Off: display turned"), log_line("dark: screen at the end"));
+    }
+    wf_dk_scr = WF_DS_ON;
     chk(strstr(log_line("dark: roll 002 start"), "jpeg 1") && strstr(log_line("dark: roll 002 end"),
         "3 developed, 0 failed, 0 left"), "copy: 3 of 3 ('%s')", log_line("dark: roll 002 end"));
     for (int i = 0; i < 3; i++) {
