@@ -1005,3 +1005,44 @@ gate PASS on both. Image: EOS M 721,184 -> 721,808 B, 5D2 675,120 -> 675,760 B.
 **Fix to 10.12 in the same commit:** tools/mk_wfstlog.py read WFSTAGE.DAT as version 1 only, so a PACKS=1 EOS M build
 after 102b0ce left WFSTLOG.DAT out (build.sh removes a pack whose tool fails; an old file in build/ hid it). It takes
 version 1 or 2 now: version 2 only appends the knob data, the index and blobs it reads are as before.
+
+## 11. Paper finish (branch `paper-finish`, 2026-11-16, both cameras + the Darkroom web core)
+
+Owner, 11-16: a "Paper" row, Glossy (default) / Matte / Warm / Cool, at the print / final stage of every film look.
+The design, model and numbers are DESIGN 3.10; this section is how it sits in the code.
+
+**Files.** New: `tools/mk_paper.py` (the model; writes / checks `src/wf_paper_tab.h`, 7 curves x 65 knots, code x 16),
+`tools/paper_bench.c` + `tools/paper_bench.sh` (memsim cost). The curves and `wf_paper_name` / `wf_paper_ch` /
+`wf_paper_ycc16` / `wf_ll_paper` live in `wf_loglut.c`, because every object that builds tables links wf_loglut.o
+(dev_check links wf_dev.o without wf_film.o). `wf_film.c` `wf_film_paper` (static, the build's last step, flag
+`WF_FT_PAPER` bits 24-25), `wf_dev.c` `wf_dev_paper`. `wf_shot.c` `wf_paper_t` (here so the WASM needs only the
+variable), the look's `paper`, the Log + LUT poll, the shot / yuv log text. `wf_rawb.c` / `wf_dark.c` the develop tables.
+`wf_menu.c` row, cfg, EXIF, ML menu entry. `wf_pv.c` the preview key.
+
+**Invariants (each has a test).**
+- Glossy is the code of before: no flag bit (`t->flags` keeps the low byte only, so the set's bytes are unchanged), no
+  `wf_ll_paper` / `wf_dev_paper` call, no key bit (rb_key, wf_pv_fkey, the shot set's flags), no cfg / EXIF / log text
+  beyond the new `paper=glossy` line in a saved WINDYFLM.CFG. Checked: host HS gold FNV, paper_bench (film FNV
+  5f01b244 at Glossy), the WASM (8 of 8 renders byte-equal to the core before), the module's shot tests.
+- Caches stay unpapered. `.FRT`: written inside the load, the paper goes on after. `.RBT`: `wf_rawb_rbt_key` hashes
+  the look with paper 0; the paper goes on after the read; a papered table never pays the owed write (`wr ==
+  WF_FE_BUSY && !lk.paper`), the next Glossy build of that look writes it.
+- The Log + LUT HS-only fast path (bend N again from the 256-byte copy, no card read) runs only with paper Glossy now
+  and before: a paper is applied after the bend, so it cannot be bent again in place. Any change with a paper reloads
+  (a .FRT hit).
+- Paper is last everywhere, after Highlights / Shadows, the Strong pass and the chain's trim.
+
+**Darkroom web core** (the WASM; not in this repo): it compiles wf_film.c / wf_dev.c / wf_loglut.c / wf_shot.c as they
+are, and its prep.py extracts wf_rawb.c / wf_dark.c pieces verbatim, so the paper reaches its tables through rb_key /
+`wf_rawb_rbt_key` / `wf_rawb_logpk_build` without a change. Its
+own files need: `volatile int wf_paper;` and the EXIF item (wfd_menu.c), paper after the RBT in its table build and its
+log (wfd_dark.c), `paper` in its look key, the `wfd_look` argument and the JSON (wfdark.c), and a `paper` field in the
+look API (wfdark.js: "glossy" | "matte" | "warm" | "cool" or 0..3). Patch + diff handed to the coordinator 11-16.
+
+**Cost** (memsim, 200 MHz): film set +30 ms (+4.07 M ins) on 60 ms; `wf_ll_paper` 56.5 ms per load; `wf_dev_paper`
+54.9 ms per develop table; 0 per pixel.
+
+**Found on the way.** The physical flare flattens the deepest tones (Matte maps 16..48 to a span of about 22 codes, not
+32): tests compare against the model, not a fixed contrast. A Leica Vivid "RBT hit" test must wait for the 0 / 0 table
+build first (else it races the cache write). The camera Darkroom's 200-byte print comment (dk_frame) takes at most 14
+more bytes (` | Paper Matte`).

@@ -73,6 +73,7 @@ struct wf_look {
     uint8_t  why;                                 /* WF_OUT_OFF: 0 set Off, 1 no film loaded, 2 film without a table */
     uint8_t  incurve;                             /* WF_INC_*: how Log + LUT read the JPEG (LLUT) */
     int8_t   hl, sh;                              /* Highlights / Shadows -5..5 (FILM: in ftflags; LLUT: the tables'), else 0 */
+    uint8_t  paper;                               /* the Paper row, WF_PAPER_* (FILM: in ftflags; LLUT: the tables'), else 0 */
     uint32_t stk;                                 /* film-stage knob key (wf_sg_key): 0 = the pack's table, else composed */
     int8_t   sexp, spush, sprn[3];                /* the knob rows the composed table used (stk != 0), for EXIF */
     uint8_t  scomp, siie;
@@ -191,6 +192,7 @@ enum { WF_ST_NONE = 0, WF_ST_FILM, WF_ST_NOTAB, WF_ST_LOG, WF_ST_LLUT, WF_ST_NOL
 extern volatile int wf_out, wf_film_id, wf_print, wf_light, wf_curve, wf_flut, wf_lut_ei, wf_strength, wf_exif_off;
 extern volatile int wf_incurve;
 extern volatile int wf_hl, wf_sh;                 /* Highlights / Shadows, WF_HS_MIN..WF_HS_MAX (wf_film.h) */
+extern volatile int wf_paper;                     /* the Paper row, WF_PAPER_* (wf_loglut.h); wf_paper_t() reads it in range */
 extern volatile int wf_sg_exp, wf_sg_push, wf_sg_comp, wf_sg_prn[3], wf_sg_iie;   /* film-stage knob rows (wf_stagek.h) */
 extern volatile int wf_sg_bl, wf_sg_pbl, wf_sg_nn, wf_sg_np;   /* Bleach bypass, Print bleach, Neutral neg / print 0..4 */
 extern volatile int wf_cfg_dirty;
@@ -201,6 +203,7 @@ void wf_cfg_load(void);
 int  wf_lut_ei_t(void);                           /* LUT EI in 1/3 EV */
 int  wf_hl_t(void);                               /* Highlights / Shadows in range (-5..5) */
 int  wf_sh_t(void);
+int  wf_paper_t(void);                            /* the Paper row in range (WF_PAPER_*, wf_shot.c: the WASM core needs only wf_paper) */
 const char *wf_hs_text(int v);                    /* "-5" .. "0" .. "+5" (no %+d on the camera) */
 int  wf_incurve_t(void);                          /* WF_INC_* in use: a Canon curve only when its table is built in
                                                      and the camera is on its Picture Style (or not known yet) */

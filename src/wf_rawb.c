@@ -400,6 +400,11 @@ int wf_rawb_logpk_build(struct wf_dev_tabs *t, void *scr, size_t scr_n, const st
                      : wf_dev_build_pack(t, RB_CAM, RB_LG_PACK, f->id, lk->variant, f->code, 0, &li, pi);
     if (!rc && wf_rb_hue == WF_DEV_HUE_I)        /* i's colour trim lives in the table (rb_key holds it) */
         wf_dev_trim(t, WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB);
+    int tp = get_ms_clock();
+    if (!rc)
+        wf_dev_paper(t, lk->paper);              /* the print's paper last (Glossy: nothing; rb_key holds it) */
+    if (!rc && lk->paper)
+        wf_log("rawb: paper %s on the chain table %dms", wf_paper_name(lk->paper), get_ms_clock() - tp);
     *ms = get_ms_clock() - t0;
     if (lk->stk) {                               /* the knob table: its failures leave the pack path alone */
         if (rc == RB_SL_E_OPEN || rc == RB_SL_E_FORMAT)
@@ -425,19 +430,22 @@ int wf_rawb_logpk_build(struct wf_dev_tabs *t, void *scr, size_t scr_n, const st
     return rc;
 }
 
-/* the tables a look needs: 0 = B cannot do it (Off) */
+/* the tables a look needs: 0 = B cannot do it (Off). Paper (wf_dev_paper, after the build) is in the key of the tables
+   that carry it: a chain film's log table and the cube tables; the sRGB base gets it from the film tables after. */
 static int rb_key(const struct wf_look *lk)
 {
+    int pap = lk->paper & 3;
     switch (lk->output) {
     case WF_OUT_FILM:                                             /* a chain film's log table (the whole look) */
         if (wf_rawb_logpk(lk) == WF_RLG_OK)
-            return RB_K_LG | lk->row << 4 | lk->variant << 16 | (wf_rb_hue == WF_DEV_HUE_I) << 24;   /* + i's trim */
+            return RB_K_LG | lk->row << 4 | lk->variant << 16 | (wf_rb_hue == WF_DEV_HUE_I) << 24   /* + i's trim */
+                   | pap << 25;
         return 1;                                                 /* the sRGB base develop, the film tables after */
     case WF_OUT_LOG:  return 2 | lk->curve << 4;                  /* the log code itself */
     case WF_OUT_LLUT:
         if (WF_FLUT_DISP(lk->flut))                               /* Leica Vivid: raw -> sRGB -> the display cube */
-            return 4 | lk->flut << 8 | ((uint8_t)lk->lei) << 16 | (lk->hl & 15) << 24 | (lk->sh & 15) << 28;
-        return 3 | lk->curve << 4 | lk->flut << 8 | ((uint8_t)lk->lei) << 16;
+            return 4 | pap << 4 | lk->flut << 8 | ((uint8_t)lk->lei) << 16 | (lk->hl & 15) << 24 | (lk->sh & 15) << 28;
+        return 3 | lk->curve << 4 | lk->flut << 8 | ((uint8_t)lk->lei) << 16 | pap << 24;
     }
     return 0;
 }
@@ -699,9 +707,11 @@ int wf_rawb_rbt_key(const struct wf_look *lk, int src, const char *cube, char *p
     if ((src != WF_DEV_CUBE && src != WF_DEV_DISP) || !cube || !rb_rbt_name(path, cube) || wf_llb_cube_id(cube, key + 5) != 0)
         return -1;
     int curve = src >= WF_DEV_SRGB ? 0 : lk->curve, autoexp = src == WF_DEV_CUBE && lk->flut != 0;
+    struct wf_look k0 = *lk;                     /* the file holds the tables before the paper (wf_dev_paper after the read) */
+    k0.paper = 0;
     key[0] = RB_RBT_MAGIC;
     key[1] = wf_dev_tabs_id(RB_CAM, src, curve);
-    key[2] = (uint32_t)rb_key(lk);
+    key[2] = (uint32_t)rb_key(&k0);
     key[3] = (uint32_t)autoexp | (uint32_t)RB_CAM << 8;
     key[4] = (uint32_t)sizeof(struct wf_dev_tabs);
     return 0;
@@ -939,7 +949,7 @@ void wf_rawb_poll(void)
             else
                 snprintf(rs, sizeof rs, ", %s %s, %s (%s)", rp + 8, rb_llbname[got],
                          wr == WF_FE_BUSY ? "write later" : "not written", wf_fe_name(wr));
-            if (wr == WF_FE_BUSY) {
+            if (wr == WF_FE_BUSY && !lk.paper) { /* papered tables below: never the owed write (the file is unpapered) */
                 for (int i = 0; i < RB_RBT_NKEY; i++)
                     rb_rbt_k[i] = rk[i];
                 for (int i = 0; i < WF_LL_NAME; i++)
@@ -948,10 +958,19 @@ void wf_rawb_poll(void)
                 rb_rbt_t = get_ms_clock();
             }
         }
-        wf_log("rawb: tables %s c%d%s%s %dms (%d KB shoot memory)%s",
+        int pms = 0;
+        if (cube && lk.paper) {                  /* the cube tables' paper, after the .RBT (the file keeps them unpapered) */
+            int t1 = get_ms_clock();
+            wf_dev_paper(rb_tabs, lk.paper);
+            pms = get_ms_clock() - t1;
+        }
+        wf_log("rawb: tables %s c%d%s%s %dms (%d KB shoot memory)%s%s%s",
                src == WF_DEV_SRGB ? "srgb" : src == WF_DEV_LOG ? "log" : src == WF_DEV_DISP ? "disp" : "cube",
                curve, cube ? " " : "", cube ? cube + 8 : "", rb_build_ms,
-               (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10), rs);
+               (int)((sizeof(struct wf_dev_tabs) + wf_dev_scratch_bytes(RB_W, RB_H)) >> 10), rs,
+               cube && lk.paper ? ", paper " : "", cube && lk.paper ? wf_paper_name(lk.paper) : "");
+        if (pms)
+            wf_log("rawb: paper %s %dms", wf_paper_name(lk.paper), pms);
         int lw = src == WF_DEV_SRGB ? wf_rawb_logpk(&lk) : WF_RLG_NOTCHAIN;
         if (lw != WF_RLG_NOTCHAIN)
             wf_log("rawb: chain film %s v%d on the 8-bit chain (%s)", wf_films[lk.row].code, lk.variant,

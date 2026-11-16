@@ -129,6 +129,11 @@ const char *wf_dev_hue_name(int hue);           /* "a" / "i" / "d" (logs, WINDYF
    the colour's own saturation (negative: the strong colours cut most, the muted ones left to sat). Once per build, no
    per-pixel cost; sat = vib = 0 leaves the table as built. */
 void wf_dev_trim(struct wf_dev_tabs *t, int sat, int vib);
+/* the Paper row on built tables (wf_loglut.h WF_PAPER_*; DESIGN 3.10): every node's Y'CbCr through wf_paper_ycc16, once
+   per build, no per-pixel cost. Callers: the tables that hold the whole look (a can's CUBE / DISP, a chain film's log
+   table: wf_rawb.c, wf_dark.c), never the SRGB base develop (its film table carries the paper) nor plain LOG. The .RBT
+   holds the tables without it (applied after the cache read / write). p = Glossy: untouched. */
+void wf_dev_paper(struct wf_dev_tabs *t, int p);
 
 /* per-shot results (log line, tests) */
 struct wf_dev_stat {

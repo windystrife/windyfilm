@@ -19,8 +19,8 @@ WFFONTS.DAT v1 (little endian, own format):
   bitmaps       rows top to bottom, MSB first, rows padded to whole bytes
 Pen positions are 26.6 fixed point; a glyph is drawn at ((pen + 32) >> 6) + x, as PIL places mono glyphs.
 
---icons OUT.h  also writes the 22 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
-               as the mockup's icon() (Light, Print, Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights, Shadows,
+--icons OUT.h  also writes the 23 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
+               as the mockup's icon() (Light, Print, Paper, Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights, Shadows,
                Film LUT, and the film-stage knobs Film exp, Push, Exp comp, Printer R / G / B, Interlayer), and the 3
                Darkroom print rows' icons (Frame, Info, Date) as wf_picons.
 --check        renders sample strings with the pack's own algorithm and compares them with PIL (pixel mismatches).
@@ -232,7 +232,7 @@ def check(fonts):
 
 
 # ------------------------------------------------------------------ row icons (mockup.py icon(), our own drawing)
-ICONS = ('Light', 'Print', 'Grain', 'Halation', 'Bloom', 'Gauge', 'Mist', 'Strength', 'Highlights', 'Shadows', 'Film LUT',
+ICONS = ('Light', 'Print', 'Paper', 'Grain', 'Halation', 'Bloom', 'Gauge', 'Mist', 'Strength', 'Highlights', 'Shadows', 'Film LUT',
          'Film exp', 'Push', 'Exp comp', 'Printer R', 'Printer G', 'Printer B', 'Interlayer',
          'Bleach', 'Print bl', 'Neutral N', 'Neutral P')
 
@@ -252,6 +252,12 @@ def icon_img(k):
         d.polygon([(x + 9, y + 1), (x + 13, y + 5), (x + 9, y + 5)], fill=col)
         d.line([x + 4, y + 8, x + 11, y + 8], fill=col)
         d.line([x + 4, y + 11, x + 11, y + 11], fill=col)
+    elif k == 'Paper':                             # a sheet lying flat, a sheen across it, one corner lifting
+        d.polygon([(x + 1, y + 4), (x + 14, y + 4), (x + 14, y + 9), (x + 10, y + 13), (x + 1, y + 13)], outline=col)
+        d.line([x + 10, y + 13, x + 10, y + 10], fill=col)
+        d.line([x + 10, y + 10, x + 14, y + 9], fill=col)
+        d.line([x + 3, y + 11, x + 7, y + 6], fill=col)
+        d.line([x + 5, y + 11, x + 9, y + 6], fill=col)
     elif k == 'Grain':
         for dx, dy in ((2, 3), (8, 2), (12, 6), (5, 8), (10, 11), (3, 12), (13, 13), (7, 14)):
             d.rectangle([x + dx, y + dy, x + dx + 1, y + dy + 1], fill=col)

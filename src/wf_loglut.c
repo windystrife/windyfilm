@@ -51,6 +51,7 @@
 #include "wf_loglut.h"
 #include "wf_loglut_tab.h"
 #include "wf_fio.h"
+#include "wf_paper_tab.h"                      /* the Paper row's channel curves (tools/mk_paper.py) */
 
 /* ML / DryOS API (ML/src/fio-ml.h, mem.h; declared here so the file builds without ML headers) */
 extern void *FIO_OpenFile(const char *name, unsigned mode);   /* 0 on error */
@@ -1242,4 +1243,78 @@ const char *wf_loglut_errstr(int err)
         "bad 3D size", "bad DOMAIN", "bad data line", "truncated", "extra data", "line too long",
         "too many lines", "bad mode" };
     return err >= 0 && err < WF_LL_E_N ? s[err] : "?";
+}
+
+/* ------------------------------------------------------------------ Paper finish (wf_loglut.h, docs/DESIGN.md 3.10) */
+typedef char wf_paper_check[WF_NPAPER == 4 && WF_PP_NK == 65 ? 1 : -1];
+
+const char *wf_paper_name(int p)
+{
+    static const char *const s[WF_NPAPER] = { "Glossy", "Matte", "Warm", "Cool" };
+    return s[p > 0 && p < WF_NPAPER ? p : 0];
+}
+
+/* knots at codes 0, 4, .., 256 (x16: 0, 64, .., 4096), linear between them, the end segments continued outside */
+int wf_paper_ch(int p, int c, int x16)
+{
+    if (p <= WF_PAPER_GLOSSY || p >= WF_NPAPER || c < 0 || c > 2)
+        return x16;
+    const int16_t *K = wf_pp_knot[wf_pp_curve[p][c]];
+    int i = x16 >> 6;
+    i = i < 0 ? 0 : i > WF_PP_NK - 2 ? WF_PP_NK - 2 : i;
+    int f = x16 - (i << 6);
+    return K[i] + (((K[i + 1] - K[i]) * f + 32) >> 6);
+}
+
+void wf_paper_ycc16(int p, int *y, int *cb, int *cr)
+{
+    if (p <= WF_PAPER_GLOSSY || p >= WF_NPAPER)
+        return;
+    int Y = *y, u = *cb, v = *cr;                /* |x16| < 2^14: every product below < 2^31 */
+    int R = Y + ((91881 * v + 32768) >> 16), G = Y - ((22554 * u + 46802 * v + 32768) >> 16),
+        B = Y + ((116130 * u + 32768) >> 16);
+    R = wf_paper_ch(p, 0, R);
+    G = wf_paper_ch(p, 1, G);
+    B = wf_paper_ch(p, 2, B);
+    *y = (19595 * R + 38470 * G + 7471 * B + 32768) >> 16;
+    *cb = (-11059 * R - 21709 * G + 32768 * B + 32768) >> 16;
+    *cr = (32768 * R - 27439 * G - 5329 * B + 32768) >> 16;
+}
+
+static int wf_pp_clamp(int x, int lo, int hi) { return x < lo ? lo : x > hi ? hi : x; }
+static int wf_pp_rnd16(int x) { return (x + 8) >> 4; }   /* x16 -> code, half up (floor shift) */
+
+void wf_ll_paper(struct wf_lltabs *t, int p)
+{
+    if (!t || p <= WF_PAPER_GLOSSY || p >= WF_NPAPER)
+        return;
+    const int nn = (WF_LL_NC / 2) * WF_LL_NC + WF_LL_NC / 2;   /* the node u = v = 128 */
+    uint8_t Np[256];
+    for (int y = 0, q = 0; y < 256; y++) {       /* N with the neutral axis's own colour (its C, linear in luma) */
+        int l = y >> 3, f = y & 7;
+        uint32_t a = t->C[l * WF_LL_LSTEP + nn], b = t->C[(l + 1) * WF_LL_LSTEP + nn];
+        int Y = t->N[y] * 16, u = (int)(a & 0xffff) * (8 - f) + (int)(b & 0xffff) * f - 257 * 8;
+        int v = (int)(a >> 16) * (8 - f) + (int)(b >> 16) * f - 257 * 8;   /* lanes 2 c + 257: the weighted sum - 2056 = c x 16 */
+        wf_paper_ycc16(p, &Y, &u, &v);
+        q = wf_pp_clamp(wf_pp_rnd16(Y), q, 255);  /* kept non-decreasing */
+        Np[y] = (uint8_t)q;
+    }
+    for (int l = 0; l < WF_LL_NL; l++) {
+        int yl = l * 8 > 255 ? 255 : l * 8;
+        int dh = t->N[yl] - ((t->L[l] + 4 + 8 * WF_LL_KOFF) >> 3);   /* Highlights / Shadows at the level (L: unbent N) */
+        for (int k = 0; k < WF_LL_LSTEP; k++) {
+            int o = l * WF_LL_LSTEP + k;
+            uint32_t c = t->C[o];
+            int Y = wf_pp_clamp(t->Y[o] + dh, 0, 255) * 16;
+            int u = ((int)(c & 0xffff) - 257) * 8, v = ((int)(c >> 16) - 257) * 8;
+            wf_paper_ycc16(p, &Y, &u, &v);
+            int U = wf_pp_clamp(wf_pp_rnd16(u), -128, 127), V = wf_pp_clamp(wf_pp_rnd16(v), -128, 127);
+            t->Y[o] = (uint8_t)wf_pp_clamp(wf_pp_rnd16(Y), 0, 255);
+            t->C[o] = (uint32_t)(2 * U + 257) | (uint32_t)(2 * V + 257) << 16;
+        }
+    }
+    for (int y = 0; y < 256; y++)
+        t->N[y] = Np[y];
+    for (int l = 0; l < WF_LL_NL; l++)
+        t->L[l] = 8 * t->N[l * 8 > 255 ? 255 : l * 8] - 4 - 8 * WF_LL_KOFF;
 }

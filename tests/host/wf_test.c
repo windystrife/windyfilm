@@ -2504,7 +2504,8 @@ static void t_cfg(void)
     char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
-             "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\nexposure=%s\n"
+             "strength=strong\nhl=3\nsh=-2\npaper=glossy\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\n"
+             "exposure=%s\n"
              "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\nshoulder=d\nstage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
@@ -4113,6 +4114,7 @@ static const char *rb_ref_cube;
 static int rb_ref_auto = 1;                      /* WF_DEV_CUBE: 0 = no auto exposure (a chain film's log table) */
 static int rb_ref_hue;                           /* WF_DEV_HUE_* of the reference (A: each channel on its own) */
 static int rb_ref_trim;                          /* 1: i's colour trim on the reference's table (wf_rawb_logpk_build) */
+static int rb_ref_paper;                         /* WF_PAPER_* on the reference's table, last (as B) */
 static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
 {
     static struct wf_dev_tabs T;
@@ -4123,6 +4125,8 @@ static void rb_ref(uint32_t *dst, const uint32_t *canon, int src, int roll)
                                                cu && rb_ref_auto, &inf);
     if (!rc && rb_ref_trim)
         wf_dev_trim(&T, WF_DEV_HUE_I_SAT, WF_DEV_HUE_I_VIB);
+    if (!rc)
+        wf_dev_paper(&T, rb_ref_paper);
     void *scr = memalign(32, wf_dev_scratch_bytes(FW, FH));
     struct wf_dev_job j;
     memset(&j, 0, sizeof j);
@@ -4368,6 +4372,21 @@ static void t_rawb(void)
         chk(sb == 0 && LOGW("rawb: done", 3000) && ndiff(out, ref, NW) == 0 && ndiff(out, l0, NW) > NW / 4,
             "Leica Vivid +2 / -2: bit-exact (%d words differ), bent (%d words moved)", ndiff(out, ref, NW), ndiff(out, l0, NW));
         wf_hl = wf_sh = 0; rb_ref_hl = rb_ref_sh = 0;
+        /* Paper Warm on the display cube (11-16): the tables from LEICAVSR.RBT (its key without the paper), the paper
+           after the read; the same frame as the direct develop with wf_dev_paper on its table */
+        chk(LOGW("rawb: tables disp c0 LEICAVSR.CUB", 30000) && WAIT(wf_rawb_state() == WF_RB_READY, 5000),
+            "Leica Vivid 0 / 0 again: '%s'", log_line("rawb: tables disp"));
+        log_mark();
+        wf_paper = WF_PAPER_WARM;
+        chk(LOGW(", paper Warm", 30000) && strstr(log_line("rawb: tables disp c0 LEICAVSR.CUB"), "LEICAVSR.RBT hit, paper Warm"),
+            "Leica Vivid Warm: the .RBT read, then the paper ('%s')", log_line("rawb: tables disp"));
+        rb_ref_paper = WF_PAPER_WARM;
+        rb_ref(ref, in, WF_DEV_DISP, 1);
+        log_mark();
+        sb = shot(in, out, FW, FH);
+        chk(sb == 0 && LOGW("rawb: done", 3000) && ndiff(out, ref, NW) == 0 && ndiff(out, l0, NW) > NW / 4,
+            "Leica Vivid Warm: bit-exact (%d words differ), toned (%d words moved)", ndiff(out, ref, NW), ndiff(out, l0, NW));
+        wf_paper = 0; rb_ref_paper = 0;
         wf_flut = 0;
         free(l0);
     }
@@ -4735,6 +4754,28 @@ static void t_rawb_chain(void)
         chk(LOGW("rawb: done rows 3456,", 5000) && strstr(log_line("rawb: black"), sw), "shoulder=%c logged: '%s'", hk[hv],
             log_line("rawb: black"));
         printf("shoulder=%c: %d of %d words differ from I\n", hk[hv], dv, NW);
+    }
+    /* Paper Matte on the chain table (11-16, shoulder d here): rb_key holds it, the table is the pack's + wf_dev_paper */
+    {
+        uint32_t *gl = malloc(NW * 4);
+        memcpy(gl, out, NW * 4);
+        log_mark();
+        wf_paper = WF_PAPER_MATTE;
+        chk(LOGW("rawb: paper Matte on the chain table", 10000) && LOGW(want, 10000)
+            && WAIT(wf_rawb_state() == WF_RB_READY, 2000), "Matte: the log pack's table again, papered ('%s')",
+            log_line("rawb: paper"));
+        sb = shot(in, out, FW, FH);
+        rb_ref_paper = WF_PAPER_MATTE;
+        rb_ref(ref, in, WF_DEV_CUBE, 1);
+        chk(sb == 0 && ndiff(out, ref, NW) == 0 && ndiff(out, gl, NW) > NW / 4, "chain film Matte: bit-exact vs the direct "
+            "develop with wf_dev_paper on its table (%d words differ), %d words moved", ndiff(out, ref, NW),
+            ndiff(out, gl, NW));
+        log_mark();
+        wf_paper = 0;
+        rb_ref_paper = 0;
+        chk(LOGW(want, 10000) && WAIT(wf_rawb_state() == WF_RB_READY, 2000) && !log_has("rawb: paper"),
+            "Glossy: the table without the paper ('%s')", log_line("rawb: tables"));
+        free(gl);
     }
     wf_rb_hue = WF_DEV_HUE_I;
     rb_ref_hue = WF_DEV_HUE_A;
@@ -6404,6 +6445,303 @@ static void t_hs(void)
     mod_deinit();
 }
 
+/* ------------------------------------------------------------------ PAPER: the print's paper (owner 11-16, mk_paper.py)
+ * Glossy = the tables before the feature, bit for bit. Matte: Dmax ~1.7 instead of ~2.2 (black at code ~28), the
+ * shadows a little flatter and less saturated, white kept. Warm / Cool: a cream / blue-white base in the highlights and
+ * a light tone in the shadows, the neutral axis tinted, not the picture. Last in every table (after Highlights /
+ * Shadows); plain Log and Off have none. */
+static int pp_c16(int p, int c, int code) { return wf_paper_ch(p, c, code * 16); }
+static void t_paper(void)
+{
+    /* 1. the model */
+    int bad = 0, dec = 0;
+    for (int c = 0; c < 3; c++)
+        for (int x = -64; x <= 4160; x++)
+            bad += wf_paper_ch(WF_PAPER_GLOSSY, c, x) != x;
+    int y = 1000, u = -300, v = 200;
+    wf_paper_ycc16(WF_PAPER_GLOSSY, &y, &u, &v);
+    chk(bad == 0 && y == 1000 && u == -300 && v == 200, "Glossy: every channel and Y'CbCr unchanged (%d off)", bad);
+    for (int p = WF_PAPER_MATTE; p < WF_NPAPER; p++)
+        for (int c = 0; c < 3; c++)
+            for (int x = 1; x <= 4096; x++)
+                dec += wf_paper_ch(p, c, x) < wf_paper_ch(p, c, x - 1);
+    chk(dec == 0, "Matte / Warm / Cool: every channel non-decreasing (%d steps down)", dec);
+    int m0 = pp_c16(WF_PAPER_MATTE, 0, 0), m118 = pp_c16(WF_PAPER_MATTE, 0, 118), m255 = pp_c16(WF_PAPER_MATTE, 0, 255);
+    int same = 1;
+    for (int x = 0; x < 4096; x += 7)
+        same &= pp_c16(WF_PAPER_MATTE, 1, x) == pp_c16(WF_PAPER_MATTE, 0, x)
+                && pp_c16(WF_PAPER_MATTE, 2, x) == pp_c16(WF_PAPER_MATTE, 0, x);
+    chk(same && m0 >= 27 * 16 && m0 <= 29 * 16 && m118 >= 119 * 16 && m118 <= 123 * 16 && abs(m255 - 255 * 16) <= 8,
+        "Matte: one curve for R / G / B; black -> %.1f, 118 -> %.1f, 255 -> %.1f", m0 / 16.0, m118 / 16.0, m255 / 16.0);
+    int s1 = pp_c16(WF_PAPER_MATTE, 0, 48) - pp_c16(WF_PAPER_MATTE, 0, 16);
+    int s2 = pp_c16(WF_PAPER_MATTE, 0, 230) - pp_c16(WF_PAPER_MATTE, 0, 200);
+    /* the surface flare adds the same light everywhere: it flattens the deepest tones most (~0.7 there), not the top */
+    chk(s1 < 26 * 16 && s1 > 18 * 16 && s2 >= 29 * 16, "Matte: the shadows flatter (16..48 spans %.1f codes of 32), the "
+        "highlights not (200..230 spans %.1f of 30)", s1 / 16.0, s2 / 16.0);
+    int wr = pp_c16(WF_PAPER_WARM, 0, 255), wg = pp_c16(WF_PAPER_WARM, 1, 255), wb = pp_c16(WF_PAPER_WARM, 2, 255);
+    int cr = pp_c16(WF_PAPER_COOL, 0, 255), cg = pp_c16(WF_PAPER_COOL, 1, 255), cb = pp_c16(WF_PAPER_COOL, 2, 255);
+    chk(abs(wr - 4080) <= 8 && wg > wb && abs(wg - 250 * 16) <= 16 && abs(wb - 244 * 16) <= 16,
+        "Warm white: %.1f %.1f %.1f (cream: R > G > B)", wr / 16.0, wg / 16.0, wb / 16.0);
+    chk(abs(cb - 4080) <= 8 && cg > cr && abs(cg - 249 * 16) <= 16 && abs(cr - 247 * 16) <= 16,
+        "Cool white: %.1f %.1f %.1f (blue-white: B > G > R)", cr / 16.0, cg / 16.0, cb / 16.0);
+    int nu = 0;
+    for (int yy = 0; yy <= 4080; yy += 16) {
+        y = yy; u = 0; v = 0;
+        wf_paper_ycc16(WF_PAPER_MATTE, &y, &u, &v);
+        nu += u != 0 || v != 0;
+    }
+    chk(nu == 0, "Matte keeps grey grey: Cb = Cr = 0 on the whole axis (%d off)", nu);
+    int tint[2][2][2];                           /* [warm/cool][white/deep][Cb/Cr] */
+    for (int p = 0; p < 2; p++)
+        for (int d = 0; d < 2; d++) {
+            y = d ? 24 * 16 : 4080; u = v = 0;
+            wf_paper_ycc16(p ? WF_PAPER_COOL : WF_PAPER_WARM, &y, &u, &v);
+            tint[p][d][0] = u; tint[p][d][1] = v;
+        }
+    chk(tint[0][0][0] < 0 && tint[0][0][1] > 0 && tint[0][1][0] < 0 && tint[0][1][1] > 0,
+        "Warm: grey gets Cb < 0, Cr > 0 at white (%d, %d) and in the shadows (%d, %d), x16", tint[0][0][0], tint[0][0][1],
+        tint[0][1][0], tint[0][1][1]);
+    chk(tint[1][0][0] > 0 && tint[1][0][1] < 0 && tint[1][1][0] > 0 && tint[1][1][1] < 0,
+        "Cool: grey gets Cb > 0, Cr < 0 at white (%d, %d) and in the shadows (%d, %d), x16", tint[1][0][0], tint[1][0][1],
+        tint[1][1][0], tint[1][1][1]);
+    chk(abs(tint[0][0][0]) < 8 * 16 && abs(tint[0][0][1]) < 8 * 16 && abs(tint[1][0][0]) < 8 * 16
+        && abs(tint[1][0][1]) < 8 * 16, "the tints stay subtle (under 8 codes of Cb / Cr at white)");
+    int pk = 0;
+    for (int p = 0; p < WF_NPAPER; p++) {
+        int f = WF_FT_PAPER(p) | WF_FT_HS(3, -2) | WF_FT_S(125) | WF_FT_V21;
+        pk += WF_FT_POF(f) != p || WF_FT_HOF(f) != 3 || WF_FT_SHOF(f) != -2 || WF_FT_SOF(f) != 125
+              || (WF_FT_PAPER(p) & 0x00ffffff) != 0;
+    }
+    chk(pk == 0 && WF_FT_PAPER(0) == 0, "WF_FT_PAPER: bits 24-25, Glossy adds no bit, strength / H / S untouched (%d bad)", pk);
+    chk(!strcmp(wf_paper_name(0), "Glossy") && !strcmp(wf_paper_name(1), "Matte") && !strcmp(wf_paper_name(2), "Warm")
+        && !strcmp(wf_paper_name(3), "Cool") && !strcmp(wf_paper_name(9), "Glossy"), "names Glossy / Matte / Warm / Cool");
+
+    /* 2. film sets: Glossy is the builder before the feature (the HS gold, built before Highlights / Shadows too) */
+    static struct wf_ftabs t1, t2, t3;
+    int ng = (int)(sizeof hs_gold / sizeof *hs_gold), gb = 0;
+    size_t end = offsetof(struct wf_ftabs, src);
+    for (int i = 0; i < ng; i++) {
+        uint32_t *T = tab_make(hs_gold[i].dy, hs_gold[i].du, hs_gold[i].dv, hs_gold[i].mono);
+        memset(&t1, 0, sizeof t1);
+        wf_film_build(&t1, T, hs_gold[i].flags | WF_FT_PAPER(WF_PAPER_GLOSSY));
+        gb += fnv(2166136261u, (const uint8_t *)&t1, end) != hs_gold[i].fnv;
+        free(T);
+    }
+    chk(gb == 0, "Glossy: %d film sets bit-identical to the builder before the Paper row (%d differ)", ng, gb);
+    uint32_t *TI = tab_make(0, 0, 0, 0), *TC = tab_make(12, 6, -6, 0), *TM = tab_make(0, 0, 0, 1);
+    memset(&t1, 0, sizeof t1);
+    memset(&t2, 0, sizeof t2);
+    wf_film_build(&t1, TI, WF_FT_V21);
+    wf_film_build(&t2, TI, WF_FT_V21 | WF_FT_PAPER(WF_PAPER_MATTE));
+    int ndec = 0;
+    for (int i = 1; i < 256; i++) ndec += t2.N[i] < t2.N[i - 1];
+    chk(t2.N[0] >= 27 && t2.N[0] <= 29 && t2.N[255] >= 254 && t2.N[118] >= 119 && t2.N[118] <= 123 && ndec == 0
+        && t1.flags == t2.flags && t2.src == TI, "Matte set on the identity: N 0 -> %d, 118 -> %d, 255 -> %d, never down",
+        t2.N[0], t2.N[118], t2.N[255]);
+    /* the kernel on greys and on a dark colour: grey = the matte curve of the glossy grey (+-1), less colour in the dark */
+    uint32_t g1[128], g2[128];
+    for (int i = 0; i < 128; i++) g1[i] = g2[i] = word(0, 2 * i, 0, 2 * i + 1);
+    wf_film_words(g1, 128, (int)(uintptr_t)&t1);
+    wf_film_words(g2, 128, (int)(uintptr_t)&t2);
+    int ge = 0, gc = 0;
+    for (int i = 0; i < 128; i++) {
+        int e0 = (pp_c16(WF_PAPER_MATTE, 0, WY0(g1[i])) + 8) >> 4, e1 = (pp_c16(WF_PAPER_MATTE, 0, WY1(g1[i])) + 8) >> 4;
+        ge += abs(WY0(g2[i]) - e0) > 1 || abs(WY1(g2[i]) - e1) > 1;
+        gc += abs(WU(g2[i])) > 1 || abs(WV(g2[i])) > 1;
+    }
+    chk(ge == 0 && gc == 0, "Matte shot greys: the curve of the Glossy grey (+-1, %d off), still grey (%d coloured)", ge, gc);
+    uint32_t d1 = word(36, 40, -36, 40), d2 = d1;
+    wf_film_words(&d1, 1, (int)(uintptr_t)&t1);
+    wf_film_words(&d2, 1, (int)(uintptr_t)&t2);
+    chk(abs(WU(d2)) + abs(WV(d2)) < abs(WU(d1)) + abs(WV(d1)) && WY0(d2) > WY0(d1),
+        "Matte: a dark colour comes out lighter and less saturated (Y %d -> %d, |U| + |V| %d -> %d)", WY0(d1), WY0(d2),
+        abs(WU(d1)) + abs(WV(d1)), abs(WU(d2)) + abs(WV(d2)));
+    /* Highlights / Shadows first: Shadows -5 on Matte cannot pull black under the paper's Dmax */
+    memset(&t3, 0, sizeof t3);
+    wf_film_build(&t3, TC, WF_FT_V21 | WF_FT_HS(0, -5) | WF_FT_PAPER(WF_PAPER_MATTE));
+    chk(t3.N[0] >= 27, "Matte + Shadows -5: black still at the paper's black (%d)", t3.N[0]);
+    /* Warm / Cool: the neutral node's colour at the top and in the shadows; a B&W film is toned too */
+    for (int p = WF_PAPER_WARM; p <= WF_PAPER_COOL; p++) {
+        int sgn = p == WF_PAPER_WARM ? 1 : -1, okt = 1;
+        for (int k = 0; k < 2; k++) {
+            memset(&t3, 0, sizeof t3);
+            wf_film_build(&t3, k ? TM : TI, (k ? WF_FT_MONO : 0) | WF_FT_V21 | WF_FT_PAPER(p));
+            int top = (WF_NL - 1) * 289 + 8 * 17 + 8, dk = 6 * 289 + 8 * 17 + 8;
+            int Ut = (int)(t3.C[top] & 0xffff) - 128, Vt = (int)(t3.C[top] >> 16) - 128;
+            int Ud = (int)(t3.C[dk] & 0xffff) - 128, Vd = (int)(t3.C[dk] >> 16) - 128;
+            okt &= sgn * Vt > 0 && sgn * Ut < 0 && sgn * Vd >= 0 && sgn * Ud <= 0 && (Vd || Ud) && abs(Ut) < 8 && abs(Vt) < 8;
+            printf("%s %s: neutral node top U %d V %d, level 6 U %d V %d, N 255 -> %d\n", wf_paper_name(p),
+                   k ? "B&W" : "colour", Ut, Vt, Ud, Vd, t3.N[255]);
+        }
+        chk(okt, "%s: the neutral axis toned at the top and in the shadows, colour and B&W films", wf_paper_name(p));
+    }
+    free(TI); free(TC); free(TM);
+
+    /* 3. through the module: the row, a film shot (+ log, EXIF), the preview */
+    std_pack();
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\npreview=on\n", wf_films[fA].id);
+    mod_init(1);
+    chk(!strcmp(wf_row_name(WF_ROW_PAPER), "Paper") && WF_ROW_PAPER == WF_ROW_PRINT + 1 && WF_NROWS == 23
+        && !strcmp(wf_row_text(WF_ROW_PAPER), "Glossy") && wf_paper == 0, "row Paper under Print stock, Glossy without the "
+        "key in the file");
+    chk(wf_row_avail(WF_ROW_PAPER), "the row is live with a film");
+    static const char *const cyc[5] = { "Matte", "Warm", "Cool", "Glossy", "Cool" };
+    int cy = 0;
+    for (int i = 0; i < 4; i++)
+        cy += wf_row_step(WF_ROW_PAPER, 1) && !strcmp(wf_row_text(WF_ROW_PAPER), cyc[i]);
+    cy += wf_row_step(WF_ROW_PAPER, -1) && !strcmp(wf_row_text(WF_ROW_PAPER), cyc[4]);
+    chk(cy == 5, "steps: Matte, Warm, Cool, Glossy (wraps), back to Cool (%d of 5)", cy);
+    wf_row_step(WF_ROW_PAPER, 1);
+    wf_row_step(WF_ROW_PAPER, 1);
+    struct wf_look lk;
+    wf_look_now(&lk);
+    chk(wf_paper == WF_PAPER_MATTE && lk.paper == WF_PAPER_MATTE
+        && lk.ftflags == (flags_of(fA, 1) | WF_FT_PAPER(WF_PAPER_MATTE)), "the look: paper %d, flags %x", lk.paper,
+        (unsigned)lk.ftflags);
+    gen_frame(in, FW, FH, 0);
+    chk(WAIT(look_table_ready(), 10000), "table published");
+    char p[64];
+    log_mark();
+    h_li_set("job", 1);
+    int sb = shot(in, out, FW, FH);
+    jpg_name(p, 9); jpeg_write(p, 0, 264, 0);
+    h_set_file_number(9);
+    h_li_set("job", 0);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fA][0], flags_of(fA, 1) | WF_FT_PAPER(WF_PAPER_MATTE));
+    memcpy(out2, in, NW * 4);
+    ref_film(out2, NW, tabs[fA][0], flags_of(fA, 1));
+    chk(ndiff(out, ref, NW) == 0 && sb == 0, "film shot Matte: bit-exact vs wf_film_build with WF_FT_PAPER(1) (%d differ)",
+        ndiff(out, ref, NW));
+    chk(ndiff(out, out2, NW) > NW / 4, "... and not the Glossy picture (%d of %d words differ)", ndiff(out, out2, NW), NW);
+    chk(LOGW(" paper Matte:", 5000) && strstr(log_line("shot #"), " paper Matte:"), "shot line: '%s'", log_line("shot #"));
+    chk(strstr(log_line("yuv "), " p1 ") != 0, "yuv line: '%s'", log_line("yuv "));
+    chk(LOGW("exif IMG_0009.JPG ok", 8000) && strstr(comment(p), " | Paper Matte"), "EXIF: '%s'", comment(p));
+    chk(WAIT(wf_pv_state() == WF_PV_READY, 10000), "preview ready (state %d)", wf_pv_state());
+    int d = hs_pv_diff(fA, flags_of(fA, 1) | WF_FT_PAPER(WF_PAPER_MATTE));
+    chk(d == 0, "preview Matte: bit-exact vs the shot's kernel (%d words differ)", d);
+    wf_row_step(WF_ROW_PAPER, 1);
+    chk(WAIT(wf_pv_state() == WF_PV_READY, 10000), "preview rebuilt after Warm (state %d)", wf_pv_state());
+    d = hs_pv_diff(fA, flags_of(fA, 1) | WF_FT_PAPER(WF_PAPER_WARM));
+    chk(d == 0, "preview Warm: the new set (%d words differ)", d);
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fA][0], flags_of(fA, 1) | WF_FT_PAPER(WF_PAPER_WARM));
+    chk(ndiff(out, ref, NW) == 0 && sb == 0, "film shot Warm: bit-exact (%d differ)", ndiff(out, ref, NW));
+    wf_hl = 2;                                   /* with Highlights: both in the key, paper after the bend */
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fA][0], flags_of(fA, 1) | WF_FT_HS(2, 0) | WF_FT_PAPER(WF_PAPER_WARM));
+    chk(ndiff(out, ref, NW) == 0 && sb == 0 && LOGW(" hl+2 sh0 paper Warm:", 5000), "Warm + Highlights +2: bit-exact "
+        "(%d differ), '%s'", ndiff(out, ref, NW), log_line("shot #"));
+    wf_hl = 0;
+    wf_row_step(WF_ROW_PAPER, 1);
+    wf_row_step(WF_ROW_PAPER, 1);
+    chk(wf_paper == WF_PAPER_GLOSSY, "back to Glossy");
+    log_mark();
+    sb = shot(in, out, FW, FH);
+    chk(ndiff(out, out2, NW) == 0 && sb == 0, "film shot Glossy: the picture without the feature (%d differ)",
+        ndiff(out, out2, NW));
+    chk(LOGW("shot #", 5000) && !strstr(log_line("shot #"), "paper") && !strstr(log_line("yuv "), " p1 ")
+        && !strstr(log_line("yuv "), " p2 ") && !strstr(log_line("yuv "), " p3 "),
+        "Glossy: nothing in the log lines: '%s'", log_line("shot #"));
+
+    /* 4. Log + LUT: the paper after the load and the bend (the .FRT holds neither); a change loads again (cache hit) */
+    static struct wf_lltabs ll, l2, lb;
+    struct wf_ll_info inf;
+    cube_write("ML/DATA/VLOG.CUB", 9);
+    wf_curve = WF_CURVE_VLOG;
+    wf_flut = 0;
+    wf_paper = WF_PAPER_MATTE;
+    log_mark();
+    wf_out = WF_OUT_LLUT;
+    chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+        && strstr(log_line("lut VLOG.CUB"), " paper Matte"), "Log + LUT Matte: '%s'", log_line("lut VLOG.CUB"));
+    chk(wf_row_avail(WF_ROW_PAPER), "the row is live with Log + LUT");
+    int rc = wf_loglut_load("ML/DATA/VLOG.CUB", WF_CURVE_VLOG, &ll, &inf);
+    memcpy(&lb, &ll, sizeof ll);
+    wf_ll_paper(&lb, WF_PAPER_MATTE);
+    chk(rc == WF_LL_OK && ll_same(&lb, wf_ll_tables()) && !ll_same(&ll, wf_ll_tables()),
+        "published tables = wf_loglut_load + wf_ll_paper Matte (rc %d)", rc);
+    rc = wf_loglut_load_cached("ML/DATA/VLOG.CUB", "ML/DATA/VLOG.FRT", WF_CURVE_VLOG, &l2, &inf);
+    chk(rc == WF_LL_OK && inf.cached && ll_same(&ll, &l2), "ML/DATA/VLOG.FRT holds the tables without the paper (rc %d, "
+        "cache %d)", rc, inf.cached);
+    memcpy(&l2, &ll, sizeof ll);
+    wf_ll_paper(&l2, WF_PAPER_GLOSSY);
+    chk(ll_same(&ll, &l2), "wf_ll_paper Glossy: nothing");
+    for (int i = 0; i < 128; i++) g1[i] = g2[i] = word(0, 2 * i, 0, 2 * i + 1);
+    wf_ll_words_c(g1, 128, (int)(uintptr_t)&ll);
+    wf_ll_words_c(g2, 128, (int)(uintptr_t)wf_ll_tables());
+    ge = gc = 0;
+    for (int i = 0; i < 128; i++) {
+        int e0 = (pp_c16(WF_PAPER_MATTE, 0, WY0(g1[i])) + 8) >> 4, e1 = (pp_c16(WF_PAPER_MATTE, 0, WY1(g1[i])) + 8) >> 4;
+        ge += abs(WY0(g2[i]) - e0) > 1 || abs(WY1(g2[i]) - e1) > 1;
+        gc += abs(WU(g2[i]) - WU(g1[i])) > 1 || abs(WV(g2[i]) - WV(g1[i])) > 1;
+    }
+    chk(ge == 0 && gc == 0, "Log + LUT Matte greys: the curve of the plain grey (+-1, %d off), colour as before (%d)", ge, gc);
+    sb = shot(in, out, FW, FH);
+    memcpy(ref, in, NW * 4);
+    ref_fn(ref, NW, wf_ll_words, (int)(uintptr_t)&lb);
+    chk(ndiff(out, ref, NW) == 0 && sb == 0, "Log + LUT shot Matte: bit-exact vs wf_ll_words on the papered tables");
+    chk(LOGW(" p1", 5000) && strstr(log_line("yuv "), " p1"), "yuv line: '%s'", log_line("yuv "));
+    log_mark();
+    wf_paper = WF_PAPER_COOL;
+    wf_hl = 2;
+    chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000)
+        && strstr(log_line("lut VLOG.CUB"), " cache ") && strstr(log_line("lut VLOG.CUB"), " hl+2 sh0 paper Cool"),
+        "Cool + Highlights +2: loaded again from the .FRT: '%s'", log_line("lut VLOG.CUB"));
+    memcpy(&lb, &ll, sizeof ll);
+    wf_hs_bend(lb.N, 2, 0);
+    wf_ll_paper(&lb, WF_PAPER_COOL);
+    chk(ll_same(&lb, wf_ll_tables()), "tables = load, N bent +2, then the Cool paper");
+    sb = shot(in, out, FW, FH);
+    memcpy(ref, in, NW * 4);
+    ref_fn(ref, NW, wf_ll_words, (int)(uintptr_t)&lb);
+    chk(ndiff(out, ref, NW) == 0 && sb == 0, "Log + LUT shot Cool + Highlights +2: bit-exact");
+    log_mark();
+    wf_hl = 0;
+    wf_paper = WF_PAPER_GLOSSY;
+    chk(LOGW("lut VLOG.CUB", 60000) && WAIT(wf_ll_state(WF_CURVE_VLOG) == WF_LL_OK, 5000) && ll_same(&ll, wf_ll_tables())
+        && !strstr(log_line("lut VLOG.CUB"), "paper"), "Glossy: the loaded tables as they are: '%s'", log_line("lut VLOG.CUB"));
+    log_mark();
+    wf_hl = 1;                                   /* Glossy again: Highlights alone bends N, no load */
+    chk(LOGW("lut: highlights +1 shadows 0", 10000) && !log_has("lut VLOG.CUB"), "Glossy + Highlights: the fast path ('%s')",
+        log_line("lut"));
+    wf_hl = 0;
+
+    /* 5. flat Log and Off: no paper */
+    wf_paper = WF_PAPER_MATTE;
+    wf_out = WF_OUT_LOG;
+    chk(!wf_row_avail(WF_ROW_PAPER), "row greyed for flat Log");
+    wf_look_now(&lk);
+    chk(lk.paper == 0, "flat Log: the look carries no paper");
+    sb = shot(in, out, FW, FH);
+    memcpy(ref, in, NW * 4);
+    ref_fn(ref, NW, wf_log_words, WF_CURVE_VLOG);
+    chk(ndiff(out, ref, NW) == 0 && sb == 0, "flat Log with Matte set: plain wf_log_words");
+    wf_out = WF_OUT_OFF;
+    chk(!wf_row_avail(WF_ROW_PAPER), "row greyed for Off");
+
+    /* 6. the file: paper= saved, read back, an unknown word = Glossy */
+    wf_row_step(WF_ROW_PAPER, 1);                /* Warm: also marks the file to be saved */
+    h_clock_add_ms += 2000;
+    usleep(400000);
+    long n;
+    char *f = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(f && strstr(f, "\nsh=0\npaper=warm\ngrain="), "saved: paper=warm after sh=");
+    free(f);
+    put_cfg("paper=cool\n");
+    wf_cfg_load();
+    chk(wf_paper == WF_PAPER_COOL, "read back: paper %d", wf_paper);
+    put_cfg("paper=shiny\n");
+    wf_cfg_load();
+    chk(wf_paper == WF_PAPER_GLOSSY, "unknown word: Glossy (%d)", wf_paper);
+    wf_paper = 0;
+    mod_deinit();
+}
+
 /* ------------------------------------------------------------------ LEICA: the display-look can and the Windy names */
 static int ps_changes(int from, int val)
 {
@@ -6765,6 +7103,7 @@ int main(int argc, char **argv)
 #endif
     else if (!strcmp(mode, "RAWB")) t_rawb();
     else if (!strcmp(mode, "HS")) t_hs();
+    else if (!strcmp(mode, "PAPER")) t_paper();
     else if (!strcmp(mode, "ROLL")) t_roll(cs);
     else if (!strcmp(mode, "LEICA")) t_leica();
     else if (!strcmp(mode, "CLOG2")) t_clog2();

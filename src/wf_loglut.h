@@ -199,6 +199,27 @@ void wf_ll_words(uint32_t *p, int n, int tabs);
 void wf_ll_words_c(uint32_t *p, int n, int tabs);
 uint32_t wf_ll_edge_w(const struct wf_lltabs *t, uint32_t wd);
 
+/* Paper finish (the Paper row, owner 2026-11-16, docs/DESIGN.md 3.10): the surface and base the print is on, as one curve
+ * per R'G'B' channel on the look's output (tools/mk_paper.py: our own model, its numbers in the docstring; the curves in
+ * src/wf_paper_tab.h). Glossy = no curve: every builder skips the pass, so a Glossy look is the look of before, bit for
+ * bit. Matte: the surface's diffuse reflection lifts the blacks (glossy Dmax 2.20 -> matte 1.75: code 0 -> 28), the
+ * shadows lose a little contrast and colour, white stays. Warm / Cool: a cream / blue-white paper base (whites
+ * 255 250 244 / 247 249 255) and a brown-black / blue-black image tone growing with density. It is folded into each
+ * look's tables at build time (wf_film_build WF_FT_PAPER, wf_ll_paper, wf_dev_paper): nothing per pixel. Lives here
+ * because every object that builds tables links wf_loglut.o (tools/dev_check.sh links wf_dev.o without wf_film.o). */
+enum { WF_PAPER_GLOSSY = 0, WF_PAPER_MATTE, WF_PAPER_WARM, WF_PAPER_COOL, WF_NPAPER };
+const char *wf_paper_name(int p);                /* "Glossy", "Matte", "Warm", "Cool"; out of range: "Glossy" */
+/* channel c (0 R, 1 G, 2 B) of paper p on an R'G'B' code x 16 (0..4080; outside: the curve's end segments continued),
+ * result code x 16; Glossy and out-of-range p return x16 */
+int  wf_paper_ch(int p, int c, int x16);
+/* Y'CbCr (BT.601 full range) x 16 through paper p, in place: Y' 0..4080 in, Cb / Cr signed; R'G'B' by the same Q16
+ * matrices as wf_dev_trim, each channel through its curve, back. A neutral stays neutral on Matte, exactly. */
+void wf_paper_ycc16(int p, int *y, int *cb, int *cr);
+/* the Log + LUT tables (a successful wf_loglut_load(_cached), Highlights / Shadows already bent into N) through paper p,
+ * last: node Y' + the level's bend, Cb / Cr through the paper; N through it with the neutral axis's colour; L from the
+ * new N. The .FRT stays without it (wf_shot.c applies it after the cache read / write). p = Glossy: untouched. */
+void wf_ll_paper(struct wf_lltabs *t, int p);
+
 /* parser alone (host tests): hdr is called once when the first data line is reached (n and the
  * domain known; a nonzero return aborts with that code), smp once per sample in file order
  * (R fastest), values u16 0..65535 = 0..1 after clamping. dmin/dmax are Q24. */

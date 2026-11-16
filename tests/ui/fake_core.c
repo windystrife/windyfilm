@@ -17,10 +17,11 @@ static int val[WF_NROWS];
 
 /* the names and choices of src/wf_menu.c (film-stage: print stocks, Grain / Halation with the Even / Wrap choices,
  * Bloom and Gauge; the print stocks' full names of wf_row_text_long) */
-static const char *const names[WF_NROWS] = { "Light", "Print stock", "Grain", "Halation", "Bloom", "Gauge", "Mist",
+static const char *const names[WF_NROWS] = { "Light", "Print stock", "Paper", "Grain", "Halation", "Bloom", "Gauge", "Mist",
                                              "Strength", "Highlights", "Shadows", "Film LUT", "Film exp", "Push / pull",
                                              "Exp comp", "Printer R", "Printer G", "Printer B", "Interlayer",
                                              "Bleach bypass", "Print bleach", "Neutral neg", "Neutral print" };
+static const char *const v_paper[] = { "Glossy", "Matte", "Warm", "Cool", 0 };
 static const char *const v_light[] = { "Auto", "Day", "Cloudy", "Tungsten", 0 };
 static const char *const v_print[] = { "Scan", "Cine", "Paper", "2302", "2383", "2393", "2395", "5380", "5381/50", "5381/72",
                                        "5382", "5384/82", "5384/92", "5385/93", "5385/62", "5386", "5383", "3513D", "3523XD", 0 };
@@ -45,11 +46,11 @@ static const char *const v_sprn[] = { "-12", "-11", "-10", "-9", "-8", "-7", "-6
                                       "+2", "+3", "+4", "+5", "+6", "+7", "+8", "+9", "+10", "+11", "+12", 0 };
 static const char *const v_siie[] = { "0%", "25%", "50%", "75%", "100%", "125%", "150%", "175%", "200%", 0 };
 static const char *const v_samt[] = { "0%", "25%", "50%", "75%", "100%", 0 };
-static const char *const *vals[WF_NROWS] = { v_light, v_print, v_grain, v_halo, v_bloom, v_gauge, v_mist, 0, v_hs, v_hs,
+static const char *const *vals[WF_NROWS] = { v_light, v_print, v_paper, v_grain, v_halo, v_bloom, v_gauge, v_mist, 0, v_hs, v_hs,
                                              v_flut, v_sexp, v_spush, v_scomp, v_sprn, v_sprn, v_sprn, v_siie,
                                              v_samt, v_samt, v_samt, v_samt };
 typedef char fake_rows_check[sizeof names / sizeof *names == WF_NROWS && sizeof vals / sizeof *vals == WF_NROWS
-                             && WF_NROWS == 22 ? 1 : -1];
+                             && WF_NROWS == 23 ? 1 : -1];
 #define STRENGTH_MAX 6                      /* 0 .. 150 %, 25 % steps */
 
 static int nvals(int r)

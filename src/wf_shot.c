@@ -134,6 +134,13 @@ static int wf_variant_eff(int k, int v)
     return v;
 }
 
+/* the Paper row in range (wf_core.h); here, not in wf_menu.c, so the darkroom WASM needs only the variable */
+int wf_paper_t(void)
+{
+    int p = wf_paper;
+    return p > WF_PAPER_GLOSSY && p < WF_NPAPER ? p : WF_PAPER_GLOSSY;
+}
+
 static int wf_look_at(struct wf_look *lk, int out, int k, int c, int l)
 {
     int s = wf_strength;
@@ -176,7 +183,9 @@ static int wf_look_at(struct wf_look *lk, int out, int k, int c, int l)
         }
         lk->hl = (int8_t)wf_hl_t();
         lk->sh = (int8_t)wf_sh_t();
-        lk->ftflags = wf_cat_ftflags[k] | WF_FT_S(wf_strength_pct(lk->strength)) | WF_FT_HS(lk->hl, lk->sh);
+        lk->paper = (uint8_t)wf_paper_t();
+        lk->ftflags = wf_cat_ftflags[k] | WF_FT_S(wf_strength_pct(lk->strength)) | WF_FT_HS(lk->hl, lk->sh)
+                    | WF_FT_PAPER(lk->paper);
         lk->post = WF_POST_FILM + k;
         break;
     case WF_OUT_LOG:
@@ -187,6 +196,7 @@ static int wf_look_at(struct wf_look *lk, int out, int k, int c, int l)
         lk->post = WF_POST_LLUT;
         lk->hl = (int8_t)wf_hl_t();               /* the menu's; a shot gets the tables' (wf_dispatch) */
         lk->sh = (int8_t)wf_sh_t();
+        lk->paper = (uint8_t)wf_paper_t();
         if (k >= 0 && wf_cat_lut[k] && wf_cat_lut[k] == lk->flut)
             lk->row = (int16_t)k;                /* its Film LUT can is loaded: the shot is titled by the can */
         break;
@@ -228,8 +238,8 @@ int wf_post_now(void)
 /* ------------------------------------------------------------------ Log + LUT tables (wf_task writes, worker reads) */
 static struct wf_lltabs *wf_ll_tabs;             /* 181,356 B, malloc'd only while Log + LUT is the output */
 static volatile int wf_ll_have, wf_ll_loading;
-static volatile int wf_ll_have_lut, wf_ll_have_ei, wf_ll_have_inc, wf_ll_have_hs;
-static int wf_ll_tried, wf_ll_tried_lut, wf_ll_tried_ei, wf_ll_tried_inc, wf_ll_tried_hs;
+static volatile int wf_ll_have_lut, wf_ll_have_ei, wf_ll_have_inc, wf_ll_have_hs, wf_ll_have_pap;
+static int wf_ll_tried, wf_ll_tried_lut, wf_ll_tried_ei, wf_ll_tried_inc, wf_ll_tried_hs, wf_ll_tried_pap;
 /* Highlights / Shadows on Log + LUT: the loaded tables' N before the bend (the .FRT cache holds the tables unbent), so a
    change of only Highlights / Shadows bends N again without a card read; WF_FT_HS packing (0 = 0 / 0) */
 static uint8_t wf_ll_n0[256];
@@ -261,7 +271,8 @@ int wf_ll_state(int curve)
         return -1;
     if (wf_ll_loading == curve || (wf_out == WF_OUT_LLUT && wf_curve == curve
                                    && (wf_ll_tried != curve || wf_ll_tried_lut != wf_flut || wf_ll_tried_ei != wf_lut_ei_t()
-                                       || wf_ll_tried_inc != wf_incurve_t() || wf_ll_tried_hs != wf_ll_hs_now())))
+                                       || wf_ll_tried_inc != wf_incurve_t() || wf_ll_tried_hs != wf_ll_hs_now()
+                                       || wf_ll_tried_pap != wf_paper_t())))
         return -2;
     return wf_ll_rc[curve - 1];
 }
@@ -273,8 +284,9 @@ static void wf_ll_poll(void)
     int want = wf_yuv_active() && wf_look_use() == WF_LU_SHOTS && wf_out == WF_OUT_LLUT && c >= 1 && c <= WF_NCURVE ? c : 0;
     int lut = want && l > 0 && l < WF_FLUT_N ? l : 0;
     int ei = want ? wf_lut_ei_t() : 0, inc = want ? wf_incurve_t() : 0, hs = want ? wf_ll_hs_now() : 0;
+    int pap = want ? wf_paper_t() : 0;
     int same = want == wf_ll_tried && lut == wf_ll_tried_lut && ei == wf_ll_tried_ei && inc == wf_ll_tried_inc;
-    if (same && hs == wf_ll_tried_hs)
+    if (same && hs == wf_ll_tried_hs && pap == wf_ll_tried_pap)
         return;
     int had = wf_ll_have;
     wf_ll_have = 0;                              /* new shots stop using the tables */
@@ -305,7 +317,9 @@ static void wf_ll_poll(void)
         msleep(10);
     }
     wf_ll_tried_hs = hs;
-    if (same && want && had == want && wf_ll_tabs) {   /* only Highlights / Shadows changed: bend N again, no load */
+    /* only Highlights / Shadows changed, no paper before or now: bend N again, no load. A paper is the tables' last step
+       (wf_ll_paper, after the bend), so with one any change loads the tables again (the .FRT: a cache hit) */
+    if (same && !pap && !wf_ll_tried_pap && want && had == want && wf_ll_tabs) {
         memcpy(wf_ll_tabs->N, wf_ll_n0, sizeof wf_ll_n0);
         wf_hs_bend(wf_ll_tabs->N, WF_FT_HOF(hs), WF_FT_SHOF(hs));
         wf_log("lut: highlights %s shadows %s", wf_hs_text(WF_FT_HOF(hs)), wf_hs_text(WF_FT_SHOF(hs)));
@@ -319,6 +333,7 @@ static void wf_ll_poll(void)
     wf_ll_tried_lut = lut;
     wf_ll_tried_ei = ei;
     wf_ll_tried_inc = inc;
+    wf_ll_tried_pap = pap;
     if (wf_ll_tabs && !want) {
         __mem_free(wf_ll_tabs);
         wf_ll_tabs = 0;
@@ -346,6 +361,7 @@ static void wf_ll_poll(void)
     if (rc == WF_LL_OK) {
         memcpy(wf_ll_n0, wf_ll_tabs->N, sizeof wf_ll_n0);
         wf_hs_bend(wf_ll_tabs->N, WF_FT_HOF(hs), WF_FT_SHOF(hs));   /* after the cache write: the .FRT stays unbent */
+        wf_ll_paper(wf_ll_tabs, pap);                                /* last (Glossy: nothing), the .FRT without it */
         char eis[64] = "";
         int n = 0, av = (int8_t)wf_ll_tabs->pad[0];
         int ch = wf_incurve > WF_INC_SRGB && wf_incurve < WF_INC_N && wf_ll_curve_have(wf_incurve) ? wf_incurve : 0;
@@ -367,13 +383,16 @@ static void wf_ll_poll(void)
             n += snprintf(eis + n, sizeof eis - n, " auto%s%d.%dEV", av < 0 ? "-" : "+", u, a);
         }
         if (hs && n < (int)sizeof eis)
-            snprintf(eis + n, sizeof eis - n, " hl%s sh%s", wf_hs_text(WF_FT_HOF(hs)), wf_hs_text(WF_FT_SHOF(hs)));
+            n += snprintf(eis + n, sizeof eis - n, " hl%s sh%s", wf_hs_text(WF_FT_HOF(hs)), wf_hs_text(WF_FT_SHOF(hs)));
+        if (pap && n < (int)sizeof eis)
+            snprintf(eis + n, sizeof eis - n, " paper %s", wf_paper_name(pap));
         wf_log("lut %s %d^3 %s %dms c%d s%d%s%s '%s'", nm, in->n, in->cached ? "cache" : "ok", ms,
                in->clamped, in->skipped, in->domain ? " dom" : "", eis, in->title);
         wf_ll_have_lut = lut;
         wf_ll_have_ei = ei;
         wf_ll_have_inc = inc;
         wf_ll_have_hs = hs;
+        wf_ll_have_pap = pap;
         WF_BARRIER();
         wf_ll_have = want;                       /* published last */
     } else {
@@ -1161,6 +1180,7 @@ static int wf_dispatch(struct wf_frame *f, int bot, struct wf_look *lk, int *llu
         lk->incurve = (uint8_t)wf_ll_have_inc;
         lk->hl = (int8_t)WF_FT_HOF(wf_ll_have_hs);
         lk->sh = (int8_t)WF_FT_SHOF(wf_ll_have_hs);
+        lk->paper = (uint8_t)wf_ll_have_pap;
         wf_colour_fx(f, bot, lk, wf_ll_words, (int)(uintptr_t)wf_ll_tabs);
         return WF_ST_LLUT;
     }
@@ -1350,6 +1370,10 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
         snprintf(nb, sizeof nb, " hl%s sh%s", wf_hs_text(lk->hl), wf_hs_text(lk->sh));
         wf_ap(line, sizeof line, &l, nb);
     }
+    if (lk->paper) {
+        wf_ap(line, sizeof line, &l, " paper ");
+        wf_ap(line, sizeof line, &l, wf_paper_name(lk->paper));
+    }
     wf_ap(line, sizeof line, &l, ": ");
     wf_apt(line, sizeof line, &l, a->ms + (b ? b->ms : 0));
     wf_ap(line, sizeof line, &l, " s = look ");
@@ -1452,7 +1476,9 @@ static void wf_report(void)
         else
             code[0] = 0;
         if ((e->lk.hl || e->lk.sh) && cl >= 0 && cl < (int)sizeof code)
-            snprintf(code + cl, sizeof code - cl, " hl%s sh%s", wf_hs_text(e->lk.hl), wf_hs_text(e->lk.sh));
+            cl += snprintf(code + cl, sizeof code - cl, " hl%s sh%s", wf_hs_text(e->lk.hl), wf_hs_text(e->lk.sh));
+        if (e->lk.paper && cl >= 0 && cl < (int)sizeof code)
+            snprintf(code + cl, sizeof code - cl, " p%d", e->lk.paper);
         n = 0;
         if (e->rb) n += snprintf(ex + n, sizeof ex - n, e->rb == 1 ? " raw" : " raw-stop");
         if (e->fxp && n < (int)sizeof ex) n += snprintf(ex + n, sizeof ex - n, " fx pending");

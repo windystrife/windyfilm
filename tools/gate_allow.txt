@@ -49,6 +49,8 @@ str Portrait
 str Picture Style
 str Normal
 str Strong
+# the Paper row's first choice (11-16): the plain photo-paper surface word, our own row and model (tools/mk_paper.py)
+str Glossy
 str failed
 str loaded
 str orange
