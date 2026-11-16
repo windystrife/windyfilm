@@ -167,6 +167,8 @@ CUỘN PHIM FILM STAGE (15/11)
   chụp (README mục 5). Log: "dark: tables log pack G08 v4 c1 NNms (...)". Khác mặc
   định (hoặc thiếu WFLOG.DAT): đường 8-bit như trên, log "dark: chain film G08 v4 on
   the 8-bit chain (...)".
+- (16/11 khuya) Interlayer mặc định 50 %: "knob mặc định" ở trên nghĩa là Interlayer
+  100 % và các knob khác 0 (bảng gốc). Ở 50 % là bảng dựng.
 
 
 5. NHỮNG GÌ CẦN THỬ

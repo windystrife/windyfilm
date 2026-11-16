@@ -2502,7 +2502,7 @@ static void t_cfg(void)
     char want[700];
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\nexposure=%s\n"
-             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\nshoulder=d\nstage=0,0,0,0,0,0,4,0,0,0,0\n"
+             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\nshoulder=d\nstage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
     free(b);
@@ -3181,7 +3181,7 @@ static void t_stage(const char *cs)
         stage_write(kc, v1, v2, T1, !strcmp(cs, "bad") ? 'N' : 0, v1p ? 1 : 2);
     put_cfg("film=%d\noutput=film\nprint=scan\ngrain=off\nhalation=off\nmist=off\n%s", wf_films[kc].id,
             !strcmp(cs, "missing") ? "stage=-6,3,1,-12,12,5,0\n" : !strcmp(cs, "bad") ? "stage=1,2,x,0,0,0,4\n"
-            : v1p ? "stage=3,0,0,0,0,0,4,2,3,4,1\n" : "");
+            : v1p ? "stage=3,0,0,0,0,0,4,2,3,4,1\n" : !strcmp(cs, "dark") ? "stage=0,0,0,0,0,0,4,0,0,0,0\n" : "");
     mod_init(1);
     gen_frame(in, FW, FH, 0);
     {
@@ -3249,27 +3249,78 @@ static void t_stage(const char *cs)
     }
     chk(WAIT(wf_sg_state() == 1, 5000) && LOGW("stage ok: 1 of 2 pairs match", 3000),
         "stage pack read, the entry naming another table refused: state %d, '%s'", wf_sg_state(), log_line("stage"));
-    chk(stage_rows_avail() == 11 && wf_sg_has(kc, v1) && !wf_sg_has(kc, v2) && wf_sg_kdata(),
-        "first print: the eleven knob rows on (a version 2 pack: knob data)");
-    chk(!strcmp(wf_row_text(WF_ROW_SEXP), "0") && !strcmp(wf_row_text(WF_ROW_SPUSH), "0")
-        && !strcmp(wf_row_text(WF_ROW_SCOMP), "Off") && !strcmp(wf_row_text(WF_ROW_SPG), "0")
-        && !strcmp(wf_row_text(WF_ROW_SIIE), "100%"), "default knob texts (a bad stage line keeps them)");
-    tabs[kc][v1] = T1;
-    film_shot("default knobs: the pack's table", kc, v1, 1, 0, 0.5);
     struct wf_look lk;
-    if (!strcmp(cs, "dark")) {
-        stage_dark(kc, v1);
-        mod_deinit();
-        return;
-    }
     if (!strcmp(cs, "bad")) {
-        log_mark();
-        for (int i = 0; i < 3; i++)
-            wf_row_step(WF_ROW_SEXP, 1);
+        /* a bad stage line keeps the defaults: Interlayer starts at 50 % (WF_SG_IIE_START), a composed table from the
+           start, so the bad negative half shows at once */
+        chk(wf_sg_iie == WF_SG_IIE_START && !wf_sg_exp && !strcmp(wf_row_text(WF_ROW_SIIE), "50%"),
+            "a bad stage line keeps the defaults (Interlayer '%s')", wf_row_text(WF_ROW_SIIE));
         chk(LOGW("stage negative half 0 bad", 5000), "a bad negative half: logged ('%s')", log_line("stage"));
         chk(WAIT(stage_rows_avail() == 0, 3000) && wf_look_now(&lk) == WF_OUT_FILM && lk.stk == 0,
             "a bad negative half: knob rows greyed, the look back on the pack's table");
+        tabs[kc][v1] = T1;
         film_shot("bad negative half: the pack's table", kc, v1, 1, 0, 0.5);
+        mod_deinit();
+        return;
+    }
+    chk(stage_rows_avail() == 11 && wf_sg_has(kc, v1) && !wf_sg_has(kc, v2) && wf_sg_kdata(),
+        "first print: the eleven knob rows on (a version 2 pack: knob data)");
+    if (!*cs) {
+        /* no stage line: Interlayer starts at 50 % (owner 11-16, to shoot it), a composed table from the first shot */
+        struct wf_sg_knobs ks = { 0, 0, 0, { 0, 0, 0 }, WF_SG_IIE_START };
+        char eb[300];
+        wf_look_now(&lk);
+        wf_exif_text(&lk, 0, 0, 0, 0, WF_EV_NONE, eb, sizeof eb);
+        chk(WF_SG_IIE_START == 2 && wf_sg_iie == WF_SG_IIE_START && !strcmp(wf_row_text(WF_ROW_SIIE), "50%")
+            && lk.stk == wf_sg_key(&ks) && lk.stk && lk.siie == WF_SG_IIE_START && strstr(eb, " | Interlayer 50%"),
+            "no stage line: Interlayer starts at '%s', key %x (want %x), EXIF '%s'", wf_row_text(WF_ROW_SIIE), lk.stk,
+            wf_sg_key(&ks), eb);
+        stage_shot("Interlayer 50% (the start)", kc, v1, &ks);
+        /* the WindyFilm UI's rows follow the film under the cursor before SET (owner 11-16): wf_row_*_for */
+        int fn = -1, fl = -1, idc = wf_films[kc].id;
+        for (int k = 0; k < wf_nfilms; k++) {
+            if (fn < 0 && (wf_films[k].flags & (WF_F_LUTCAN | WF_F_READY)) == WF_F_READY
+                && !(wf_films[k].prints >> WF_PRINT_STOCK0) && (wf_films[k].prints & (1u << WF_PRINT_SCAN)))
+                fn = k;
+            if (fl < 0 && (wf_films[k].flags & WF_F_LUTCAN))
+                fl = k;
+        }
+        chk(wf_row_avail(WF_ROW_SIIE) && wf_row_avail_for(WF_ROW_SIIE, idc) && wf_row_avail_for(WF_ROW_SBL, idc)
+            && !strcmp(wf_row_text_for(WF_ROW_PRINT, idc), wf_row_text(WF_ROW_PRINT)) && wf_row_avail_for(WF_ROW_SIIE, -7),
+            "browser on the loaded chain film (or an unknown id): its rows as the menu's");
+        if (fn >= 0) {
+            chk(!wf_row_avail_for(WF_ROW_SIIE, wf_films[fn].id) && !wf_row_avail_for(WF_ROW_SBL, wf_films[fn].id)
+                && !wf_row_avail_for(WF_ROW_SEXP, wf_films[fn].id) && wf_row_avail_for(WF_ROW_STRENGTH, wf_films[fn].id)
+                && wf_row_avail(WF_ROW_SIIE) && !strcmp(wf_row_text_for(WF_ROW_PRINT, wf_films[fn].id), "Scan")
+                && strcmp(wf_row_text(WF_ROW_PRINT), "Scan"),
+                "browser on film %s (not loaded, no stage pair): knob rows greyed, Strength on, Print '%s' (loaded: '%s')",
+                wf_films[fn].code, wf_row_text_for(WF_ROW_PRINT, wf_films[fn].id), wf_row_text(WF_ROW_PRINT));
+        }
+        if (fl >= 0) {
+            int idl = wf_films[fl].id;
+            chk(!wf_row_avail_for(WF_ROW_SIIE, idl) && !wf_row_avail_for(WF_ROW_PRINT, idl)
+                && !wf_row_avail_for(WF_ROW_STRENGTH, idl) && wf_row_avail_for(WF_ROW_HL, idl)
+                && wf_row_avail_for(WF_ROW_FLUT, idl), "browser on can %s: Log + LUT rows (knobs, Print, Strength greyed; "
+                "Highlights on)", wf_films[fl].code);
+        }
+        wf_out = WF_OUT_LOG;                          /* plain log: the chain film is not loaded, SET gives it Film */
+        chk(WAIT(!wf_loaded() && !wf_row_avail(WF_ROW_SIIE), 2000) && wf_row_avail_for(WF_ROW_SIIE, idc)
+            && wf_row_avail_for(WF_ROW_STRENGTH, idc) && !wf_row_avail(WF_ROW_STRENGTH),
+            "plain log: the menu's knob rows greyed, the browser's on the chain film (SET loads it on Film)");
+        wf_out = WF_OUT_FILM;
+        chk(WAIT(wf_loaded() == idc, 2000), "Film again: the chain film loaded");
+        chk(wf_row_step(WF_ROW_SIIE, 1) && wf_row_step(WF_ROW_SIIE, 1), "Interlayer up to 100%%");
+        wf_look_now(&lk);
+        chk(lk.stk == 0, "Interlayer 100 %%: the shipped table again (key %x)", lk.stk);
+    }
+    chk(!strcmp(wf_row_text(WF_ROW_SEXP), "0") && !strcmp(wf_row_text(WF_ROW_SPUSH), "0")
+        && !strcmp(wf_row_text(WF_ROW_SCOMP), "Off") && !strcmp(wf_row_text(WF_ROW_SPG), "0")
+        && !strcmp(wf_row_text(WF_ROW_SIIE), "100%"), "knob texts at the shipped table (Interlayer %s)",
+        wf_row_text(WF_ROW_SIIE));
+    tabs[kc][v1] = T1;
+    film_shot("Interlayer 100 percent, the rest 0: the pack's table", kc, v1, 1, 0, 0.5);
+    if (!strcmp(cs, "dark")) {
+        stage_dark(kc, v1);
         mod_deinit();
         return;
     }
@@ -4969,7 +5020,8 @@ static void t_rawb_knobs(void)
                 (p[4] | p[5] << 8) / 65535.0);
     }
     fclose(cf);
-    put_cfg("film=%d\noutput=film\nprint=scan\ngrain=off\nhalation=off\nmist=off\n", f->id);
+    /* Interlayer 100 %: the shipped table to start from (a fresh cfg starts at 50 %, STAGE checks that) */
+    put_cfg("film=%d\noutput=film\nprint=scan\ngrain=off\nhalation=off\nmist=off\nstage=0,0,0,0,0,0,4,0,0,0,0\n", f->id);
     mod_init(1);
     h_prop_send(PROP_ASPECT, 0);
     chk(WAIT(look_table_ready(), 10000), "chain film %s: its 8-bit table published", f->code);

@@ -266,9 +266,15 @@ Sửa bằng bánh xe, hoặc nhấn joystick ("JOY Edit") rồi trái / phải.
                      màu như máy in phim: thêm điểm = thêm ánh sáng màu đó lên print,
                      bản in ngả về màu đối (R+ ngả xanh lơ, G+ ngả hồng tím, B+ ngả
                      vàng) và tối hơn chút. Cả ba cùng +: tối hơn, cùng -: sáng hơn.
-    Interlayer ..... 0 .. 200 %, bước 25 %, mặc định 100 % (= của chuỗi). Hiệu ứng
-                     giữa các lớp màu: thấp = màu nhạt và lẫn hơn, cao = màu tách và
-                     đậm hơn.
+    Interlayer ..... 0 .. 200 %, bước 25 %, mặc định 50 % (từ 16/11 khuya; 100 % =
+                     của chuỗi, bảng gốc). Hiệu ứng giữa các lớp màu: thấp = màu nhạt
+                     và lẫn hơn, cao = màu tách và đậm hơn. Thẻ đã lưu cài đặt
+                     (dòng stage= trong ML/SETTINGS/WINDYFLM.CFG) thì giữ giá trị cũ:
+                     muốn 50 % thì chỉnh hàng này một lần.
+  Trong trình chọn phim, các hàng sáng / mờ theo phim đang đứng (lướt trái / phải),
+  không cần bấm SET: lon Film stage thì hàng knob sáng, phim thường thì mờ, lon Film
+  LUT thì Print stock và Strength mờ. Chỉnh hàng trước khi SET cũng được: giá trị
+  dùng chung cho mọi phim.
     (16/11, 4 hàng mới, cả bốn 0 .. 100 %, bước 25 %, mặc định 0 % = tắt)
     Bleach bypass .. bỏ tẩy bạc ở âm bản: bạc giữ lại cộng vào cả ba lớp màu, ảnh
                      nhạt màu và tương phản khác đi.
@@ -311,6 +317,11 @@ Sửa bằng bánh xe, hoặc nhấn joystick ("JOY Edit") rồi trái / phải.
    "stage ML/DATA/WFSTAGE.DAT missing (-1): film-stage knob rows hidden" thì thẻ thiếu
    file; "... bad (-N) ..." là file hỏng hoặc khác bản: chép lại và kiểm MD5SUMS.txt.
    Thiếu file thì lon Film stage vẫn chụp được, chỉ mất 11 hàng knob.
+1b. (16/11 khuya) Interlayer mặc định 50 %: chụp vài tấm như thường (log có
+   "stage G08 v4 composed NNms k...", EXIF "| Interlayer 50%"). Trong trình chọn, lướt
+   từ lon Film stage sang phim thường và lon Film LUT, chưa bấm SET: hàng knob phải
+   sáng / mờ ngay theo phim đang đứng. Các bước dưới viết cho bảng gốc: đặt
+   Interlayer 100 % trước bước 2.
 2. Nhóm Film stage: lon có màu hãng, header đúng phim (ví dụ G08 Vision3 5219 500T:
    ISO 500, 3200 K). Nạp G08, để Print stock mặc định: hàng hiện "Kodak Vision Color
    2383". Chụp 1 tấm: ảnh màu. Log "pack G08 v4 loaded NNms", rồi hai dòng

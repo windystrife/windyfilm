@@ -134,9 +134,9 @@ static int wf_variant_eff(int k, int v)
     return v;
 }
 
-int wf_look_now(struct wf_look *lk)
+static int wf_look_at(struct wf_look *lk, int out, int k, int c, int l)
 {
-    int out = wf_out, k = wf_cat_index(wf_film_id), c = wf_curve, l = wf_flut, s = wf_strength;
+    int s = wf_strength;
     memset(lk, 0, sizeof *lk);
     lk->row = -1;
     lk->curve = c >= 1 && c <= WF_NCURVE ? c : WF_CURVE_VLOG;
@@ -195,6 +195,27 @@ int wf_look_now(struct wf_look *lk)
         break;
     }
     return lk->output;
+}
+
+int wf_look_now(struct wf_look *lk)
+{
+    return wf_look_at(lk, wf_out, wf_cat_index(wf_film_id), wf_curve, wf_flut);
+}
+
+/* the look with film id loaded, as wf_load would set it: a film on its tables, a can on its cube's own curve + LUT.
+ * An unknown id is the look now. The browser greys its rows by the film under the cursor with this, before SET
+ * (owner 11-16); wf_row_avail_for takes the loaded film's look now itself (its output and curve as the user set them),
+ * so this file needs nothing of wf_menu.c beyond the state wf_look_now reads (the darkroom WASM stubs that). */
+int wf_look_for(struct wf_look *lk, int id)
+{
+    int k = wf_cat_index(id);
+    if (k < 0)
+        return wf_look_now(lk);
+    if (wf_films[k].flags & WF_F_LUTCAN) {
+        int l = wf_cat_lut[k];
+        return wf_look_at(lk, WF_OUT_LLUT, k, WF_FLUT_CURVE(l), l);
+    }
+    return wf_look_at(lk, WF_OUT_FILM, k, wf_curve, wf_flut);
 }
 
 int wf_post_now(void)

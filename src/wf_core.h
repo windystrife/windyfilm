@@ -169,6 +169,7 @@ int  wf_ws_state(void);                           /* 0 index not read, 1 read, <
 int  wf_ws_has(int row, int variant);             /* the pack lists a good table for this film and variant */
 int  wf_ws_listed(int row, int variant);          /* the pack's index lists it, whether the table verified or not */
 int  wf_look_now(struct wf_look *lk);             /* the look a shot would get now (menu state); returns lk->output */
+int  wf_look_for(struct wf_look *lk, int id);     /* the same as SET on film id would give (unknown id: wf_look_now) */
 int  wf_post_now(void);                           /* the effect post code of the current state, 0 none */
 int  wf_post_want(void);                          /* the same, when it can run now (path up, Log + LUT cube loaded) */
 int  wf_ll_ready(int post);                       /* 1 = not Log + LUT, or its tables match the current curve / cube / EI */

@@ -219,7 +219,9 @@ Bật:
     rawb: tables knobs G08 v4 k... exp 3 prn 0 0 0 interlayer 100 bleach 0 0 neutral 0 0 c1 NNms (...)
   (exp = độ phơi còn lại sau Exp comp, đơn vị 1/3 stop; prn = Printer R G B; bleach =
   Bleach bypass, Print bleach; neutral = Neutral neg, Neutral print, đơn vị %).
-  Ghi lại NN. Mọi knob mặc định vẫn dùng đúng bảng gốc như trên.
+  Ghi lại NN. Interlayer 100 % và các knob khác ở 0 thì dùng đúng bảng gốc như trên.
+  Từ 16/11 khuya Interlayer mặc định 50 %, nên mặc định là bảng dựng (dòng "tables
+  knobs ... interlayer 50 ...").
 - Còn tạm thời: Strength và Highlights / Shadows chưa có trên RAW. Một trong hai
   hàng đó khác mặc định thì lon Film stage đi đường 8-bit như trước: develop RAW ra
   sRGB rồi áp bảng phim 8-bit. Log ghi lý do:
@@ -254,7 +256,7 @@ Cần thử và gửi lại:
 4. Một loạt chụp liên tục 3 tấm khi RAW develop On (phải ra màu phim thường).
 5. 1-2 tấm lon Leica Vivid với RAW develop On, kèm cùng cảnh với RAW develop Off.
 6. (15/11 tối) Lon Film stage trên RAW: nạp G08 (Vision3 5219 500T), Print stock
-   2383, mọi knob mặc định, Strength 100 %, Highlights / Shadows 0. Bật RAW develop
+   2383, Interlayer 100 %, các knob khác mặc định, Strength 100 %, Highlights / Shadows 0. Bật RAW develop
    On. Log phải có "rawb: tables log pack G08 v4 c1 NNms": ghi lại NN. Chụp 2 tấm:
    một cảnh có trời sáng / đèn cháy sáng, một cảnh tối; mỗi cảnh thêm 1 tấm RAW
    develop Off để so. Đổi Print stock 2393, rồi 2302 (ảnh ĐEN TRẮNG): mỗi lần đổi có
@@ -268,8 +270,8 @@ Cần thử và gửi lại:
    bù hết độ phơi). Rồi Exp comp Off, Film exp về 0, Printer R -6 và B +6: log
    "prn -6 0 6", chụp cùng cảnh (ấm hơn: bớt đèn đỏ, thêm đèn xanh khi in thì ảnh
    ngả đỏ - vàng; chiều ngược lại R +6 B -6 ra ảnh ngả cyan). Cuối cùng đưa mọi
-   knob về mặc định: dòng "tables log pack" quay lại.
-6c. (16/11) 4 hàng mới trên RAW: G08, 2383, RAW develop On, mọi knob mặc định. Bleach
+   knob về 0 và Interlayer 100 %: dòng "tables log pack" quay lại.
+6c. (16/11) 4 hàng mới trên RAW: G08, 2383, RAW develop On, Interlayer 100 %, các knob khác mặc định. Bleach
    bypass 100 %: log "rawb: tables knobs ... bleach 100 0 neutral 0 0 c1 NNms", ghi NN,
    chụp 1 tấm. Về 0 %, Print bleach 100 %: "bleach 0 100", chụp cùng cảnh (tối và nhạt
    hơn). Về 0 %, Neutral neg 100 % và Neutral print 100 %: "neutral 100 100", chụp cùng
@@ -340,9 +342,15 @@ Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ t
                      màu như máy in phim: thêm điểm = thêm ánh sáng màu đó lên print,
                      bản in ngả về màu đối (R+ ngả xanh lơ, G+ ngả hồng tím, B+ ngả
                      vàng) và tối hơn chút. Cả ba cùng +: tối hơn, cùng -: sáng hơn.
-    Interlayer ..... 0 .. 200 %, bước 25 %, mặc định 100 % (= của chuỗi). Hiệu ứng
-                     giữa các lớp màu: thấp = màu nhạt và lẫn hơn, cao = màu tách và
-                     đậm hơn.
+    Interlayer ..... 0 .. 200 %, bước 25 %, mặc định 50 % (từ 16/11 khuya; 100 % =
+                     của chuỗi, bảng gốc). Hiệu ứng giữa các lớp màu: thấp = màu nhạt
+                     và lẫn hơn, cao = màu tách và đậm hơn. Thẻ đã lưu cài đặt
+                     (dòng stage= trong ML/SETTINGS/WINDYFLM.CFG) thì giữ giá trị cũ:
+                     muốn 50 % thì chỉnh hàng này một lần.
+  Trong trình chọn phim, các hàng sáng / mờ theo phim đang đứng (lướt L/R), không
+  cần bấm SET: lon Film stage thì hàng knob sáng, phim thường thì mờ, lon Film LUT
+  thì Print stock và Strength mờ. Chỉnh hàng trước khi SET cũng được: giá trị dùng
+  chung cho mọi phim.
     (16/11, 4 hàng mới, cả bốn 0 .. 100 %, bước 25 %, mặc định 0 % = tắt)
     Bleach bypass .. bỏ tẩy bạc ở âm bản: bạc giữ lại cộng vào cả ba lớp màu, ảnh
                      nhạt màu và tương phản khác đi.
@@ -385,6 +393,11 @@ Film stage, Output Film, và có ML/DATA/WFSTAGE.DAT trên thẻ; không đủ t
    "stage ML/DATA/WFSTAGE.DAT missing (-1): film-stage knob rows hidden" thì thẻ thiếu
    file; "... bad (-N) ..." là file hỏng hoặc khác bản: chép lại và kiểm MD5SUMS.txt.
    Thiếu file thì lon Film stage vẫn chụp được, chỉ mất 11 hàng knob.
+1b. (16/11 khuya) Interlayer mặc định 50 %: chụp vài tấm như thường (log có
+   "stage G08 v4 composed NNms k...", EXIF "| Interlayer 50%"). Trong trình chọn, lướt
+   từ lon Film stage sang phim thường và lon Film LUT, chưa bấm SET: hàng knob phải
+   sáng / mờ ngay theo phim đang đứng. Các bước dưới viết cho bảng gốc: đặt
+   Interlayer 100 % trước bước 2.
 2. Nhóm Film stage: lon có màu hãng, header đúng phim (ví dụ G08 Vision3 5219 500T:
    ISO 500, 3200 K). Nạp G08, để Print stock mặc định: hàng hiện "Kodak Vision Color
    2383". Chụp 1 tấm: ảnh màu. Log "pack G08 v4 loaded NNms".

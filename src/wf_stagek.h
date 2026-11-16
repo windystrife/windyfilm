@@ -55,7 +55,10 @@ struct wf_sg_pair {
 #define WF_SG_PUSH_MAX 3                   /* Push / pull: -3..+3 thirds of a stop */
 #define WF_SG_PRN_MAX 12                   /* Printer R / G / B: -12..+12 printer points (0.025 logE each) */
 #define WF_SG_IIE_MAX 8                    /* Interlayer: 0..8 = 0..200 % in 25 % steps */
-#define WF_SG_IIE_DEF 4                    /* 100 %, the chain's default */
+#define WF_SG_IIE_DEF 4                    /* 100 %, the chain's default: the shipped table */
+#define WF_SG_IIE_START 2                  /* 50 %: where the Interlayer row starts, a fresh WINDYFLM.CFG and a bad
+                                              stage= line (owner 11-16, to shoot it); a composed table, not the shipped
+                                              one: a saved stage= line keeps its own value */
 #define WF_SG_OFF_MAX (WF_SG_FEXP_MAX + WF_SG_PUSH_MAX)   /* Film exp + Push / pull, thirds of a stop */
 #define WF_SG_AMT_MAX 4                    /* Bleach bypass, Print bleach, Neutral neg, Neutral print: 0..4 = 0..100 %
                                               in 25 % steps (the chain's bleach, print_bleach, neutral_tonescale,

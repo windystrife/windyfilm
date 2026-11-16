@@ -6,6 +6,7 @@ void fake_set_cam(int cam);
 void fake_set_loaded(int id);
 void fake_set_row(int row, int value);
 void fake_set_grey(int mask);              /* bit r: row r has no effect (greyed) */
+void fake_set_film_grey(int id, int mask); /* and for film id under the browser's cursor (not loaded): these too */
 void fake_set_missing(int id);             /* film id not on the card */
 void fake_set_status(const char *s);
 void fake_set_films_state(int s);          /* wf_films_state(): 1 tables read, 0 starting, -1 worker failed, -2 no pack */
