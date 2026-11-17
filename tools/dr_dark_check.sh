@@ -11,13 +11,25 @@
 # border, the Exif size and orientation) and kept as out/fin_<pair>_<tag>.JPG + a quarter-size PNG as shown.
 #
 #   bash tools/dr_dark_check.sh [DIR] [N]     the first N pairs of DIR (default Day09 EOS M, all)
+#   CAM=5D2 bash tools/dr_dark_check.sh [DIR] [N]   the 5D2 frame (wf_dk_geom; default the owner's Day 10 5D2 pairs, the
+#                                             finishes on 100EOS5D pairs: landscape, Orientation 6, 8; FIN_DIR)
 # Env: W (default /root/ml/wf_dr_dark), KEEP=1 keeps the prints, FIN=0 skips the finishes, LOGO_SVG = the wordmark of
 # the logo runs (default tests/host/logo_test.svg). The photos and every output stay in W: never commit them.
 set -e
 R=$(cd "$(dirname "$0")/.." && pwd)
 S=$R/src
 W=${W:-/root/ml/wf_dr_dark}
-D=${1:-/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM}
+CAM=${CAM:-EOSM}
+export WF_DK_CAM=$CAM
+if [ $CAM = 5D2 ]; then
+  D=${1:-"/mnt/f/MagicLatern/_test mau film/5D2/Day 10"}
+  FD=${FIN_DIR:-"/mnt/f/MagicLatern/_test mau film/5D2/100EOS5D"}
+  FP="IMG_8380 IMG_8419 IMG_8381"                          # landscape, Orientation 6, Orientation 8 (ISO 200, daylight)
+else
+  D=${1:-/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM}
+  FD=${FIN_DIR:-$D}
+  FP="IMG_0208 IMG_0206 IMG_0212"                          # landscape, Orientation 6, Orientation 8
+fi
 N=${2:-9999}
 PY="python3 -I -B"
 G=$W/gen
@@ -89,17 +101,18 @@ import numpy as np
 from PIL import Image
 p, c, uy, png_d, png_c = sys.argv[1:6]
 a = Image.open(p); b = Image.open(c)
-ok = a.size == b.size == (5184, 3456) and a.mode == "RGB"
+W, H = b.size
+ok = a.size == b.size == ((5616, 3744) if W == 5616 else (5184, 3456)) and a.mode == "RGB"
 ya = np.asarray(a.convert("L")).astype(np.float64); yb = np.asarray(b.convert("L")).astype(np.float64)
 # the print against our own UYVY frame (the encoder) and against Canon's JPEG (the develop)
-d = np.frombuffer(open(uy, "rb").read(), dtype="<u4").reshape(3456, 2592)
-yd = np.empty((3456, 5184)); yd[:, 0::2] = (d >> 8) & 255; yd[:, 1::2] = d >> 24
+d = np.frombuffer(open(uy, "rb").read(), dtype="<u4").reshape(H, W // 2)
+yd = np.empty((H, W)); yd[:, 0::2] = (d >> 8) & 255; yd[:, 1::2] = d >> 24
 mse = ((ya - yd) ** 2).mean(); pe = 99.0 if mse == 0 else 10 * math.log10(255 * 255 / mse)
 def lin(y): y = np.clip(y / 255, 0, 1); return np.where(y <= 0.04045, y / 12.92, ((y + 0.055) / 1.055) ** 2.4)
 m = (yb > 30) & (yb < 220)
 ev = math.log2(np.median(lin(ya[m])) / np.median(lin(yb[m])))
 mse2 = ((ya - yb) ** 2).mean(); pc = 10 * math.log10(255 * 255 / mse2)
-a.resize((1296, 864), Image.BOX).save(png_d); b.resize((1296, 864), Image.BOX).save(png_c)
+a.resize((W // 4, H // 4), Image.BOX).save(png_d); b.resize((W // 4, H // 4), Image.BOX).save(png_c)
 print("cmp %s: decodes %s, Y vs own frame %.1f dB (encoder), vs Canon's JPEG %.1f dB, mid-tone offset %+.2f EV" % (p.split("/")[-1], ok, pe, pc, ev))
 sys.exit(0 if ok and pe > 40 else 1)
 EOF
@@ -125,11 +138,11 @@ done
 if [ "${FIN:-1}" = 1 ]; then
   LOOK="WindyFilm: Portra 400 | Print Cine | Strength 100% | Grain Normal | Halation Film | Bloom Low | Mist 1/8"
   fin() {   # fin PAIR TAG FRAME INFO DATE [ROLL|-] [LOGO|-] [MODEL]
-    local b=$1 tag=$2 c="$D/$1.CR2" j="$D/$1.JPG"
-    [ -f "$c" ] && [ -f "$j" ] || { echo "fin $b: not in $D"; return; }
+    local b=$1 tag=$2 c="$FD/$1.CR2" j="$FD/$1.JPG"
+    [ -f "$c" ] && [ -f "$j" ] || { echo "fin $b: not in $FD"; return; }
     ( cd $W && qemu-arm-static $W/wf_dark_test finish "$c" "$j" $W/out $tag $3 $4 $5 $W/WFPRINT.DAT "$LOOK" "${6:--}" \
         "${7:--}" "${8:--}" ) > $W/out/fin_${b}_$tag.log 2>&1 || true
-    grep -E "^(finish|FAIL)" $W/out/fin_${b}_$tag.log | sed "s#$D/##; s#$W/out/##; s/^/fin $b $tag: /"
+    grep -E "^(finish|FAIL)" $W/out/fin_${b}_$tag.log | sed "s#$FD/##; s#$W/out/##; s/^/fin $b $tag: /"
     tally $W/out/fin_${b}_$tag.log
     [ -f $W/out/${b}_$tag.JPG ] || { TF=$((TF + 1)); return; }
     rm -f $W/out/${b}_$tag.dev.uyvy $W/out/${b}_$tag.print.l8 $W/out/${b}_$tag.wire.l8
@@ -139,10 +152,12 @@ if [ "${FIN:-1}" = 1 ]; then
          $W/out/fin_${b}_$tag.log) $3 $5 $W/out/fin_${b}_$tag.png $([ "${7:--}" = - ] || echo logo); then TP=$((TP + 1))
     else TF=$((TF + 1)); fi
   }
-  for b in IMG_0208 IMG_0206 IMG_0212; do                   # landscape, Orientation 6, Orientation 8
-    [ -f "$D/$b.CR2" ] || continue
-    ( cd $W && qemu-arm-static $W/wf_dark_test frame "$D/$b.CR2" "$D/$b.JPG" $W/out ) > $W/out/fin_${b}_plain.log 2>&1 || true
-    ( cd $W && qemu-arm-static $W/wf_dark_test finish "$D/$b.CR2" "$D/$b.JPG" $W/out off 0 1 0 $W/WFPRINT.DAT "$LOOK" - ) \
+  set -- $FP
+  P1=$1 P2=$2 P3=$3
+  for b in $FP; do                                       # landscape, Orientation 6, Orientation 8
+    [ -f "$FD/$b.CR2" ] || continue
+    ( cd $W && qemu-arm-static $W/wf_dark_test frame "$FD/$b.CR2" "$FD/$b.JPG" $W/out ) > $W/out/fin_${b}_plain.log 2>&1 || true
+    ( cd $W && qemu-arm-static $W/wf_dark_test finish "$FD/$b.CR2" "$FD/$b.JPG" $W/out off 0 1 0 $W/WFPRINT.DAT "$LOOK" - ) \
       > $W/out/fin_${b}_off.log 2>&1 || true
     if [ -f $W/out/$b.JPG ] && cmp -s $W/out/$b.JPG $W/out/${b}_off.JPG; then
       echo "fin $b: frame Off + date Off = the plain print, byte for byte ($(stat -c %s $W/out/$b.JPG) B): ok"; TP=$((TP + 1))
@@ -152,23 +167,23 @@ if [ "${FIN:-1}" = 1 ]; then
     mv -f $W/out/${b}_off.JPG $W/out/fin_${b}_off.JPG
     rm -f $W/out/$b.JPG $W/out/$b.dev.uyvy $W/out/$b.print.l8 $W/out/$b.wire.l8 $W/out/${b}_off.*.l8 $W/out/${b}_off.dev.uyvy
   done
-  fin IMG_0208 white_info 1 2 0 "ROLL 021 $(printf '\x7f') 07/24"
-  fin IMG_0208 black 2 0 0
-  fin IMG_0208 whitew_info_date 3 1 1
-  fin IMG_0208 date 0 1 2
-  fin IMG_0206 blackw_info_date 4 1 3 "ROLL 021 $(printf '\x7f') 01/24"
-  fin IMG_0206 white_info 1 1 0
-  fin IMG_0212 date 0 1 1
-  fin IMG_0212 white_info_date 1 2 1 "ROLL 021 $(printf '\x7f') 07/24"
+  fin $P1 white_info 1 2 0 "ROLL 021 $(printf '\x7f') 07/24"
+  fin $P1 black 2 0 0
+  fin $P1 whitew_info_date 3 1 1
+  fin $P1 date 0 1 2
+  fin $P2 blackw_info_date 4 1 3 "ROLL 021 $(printf '\x7f') 01/24"
+  fin $P2 white_info 1 1 0
+  fin $P3 date 0 1 1
+  fin $P3 white_info_date 1 2 1 "ROLL 021 $(printf '\x7f') 07/24"
   # the logo (owner 11-16): a pack from LOGO_SVG (default our own test shape keyed "Canon"; the owner's wordmark only from
-  # the private folder, never committed); two previews with the 5D2's name (its darkroom is not there yet)
+  # the private folder, never committed); two with the 5D2's name (on CAM=5D2: its own frame, DESIGN 3.16)
   $PY $R/tools/mk_wflogo.py "${LOGO_SVG:-$R/tests/host/logo_test.svg}" $W/WFLOGO.DAT --maker Canon > /dev/null
-  fin IMG_0208 logo_white_info 1 2 2 "ROLL 021 $(printf '\x7f') 07/24" $W/WFLOGO.DAT
-  fin IMG_0208 logo_blackw_info 4 1 0 - $W/WFLOGO.DAT
-  fin IMG_0206 logo_white_info 1 1 1 - $W/WFLOGO.DAT
-  fin IMG_0212 logo_black 2 0 0 - $W/WFLOGO.DAT
-  fin IMG_0208 logo5d2_white_info 1 2 0 "ROLL 021 $(printf '\x7f') 07/24" $W/WFLOGO.DAT "Canon EOS 5D Mark II"
-  fin IMG_0208 logo5d2_black_info 2 1 2 - $W/WFLOGO.DAT "Canon EOS 5D Mark II"
+  fin $P1 logo_white_info 1 2 2 "ROLL 021 $(printf '\x7f') 07/24" $W/WFLOGO.DAT
+  fin $P1 logo_blackw_info 4 1 0 - $W/WFLOGO.DAT
+  fin $P2 logo_white_info 1 1 1 - $W/WFLOGO.DAT
+  fin $P3 logo_black 2 0 0 - $W/WFLOGO.DAT
+  fin $P1 logo5d2_white_info 1 2 0 "ROLL 021 $(printf '\x7f') 07/24" $W/WFLOGO.DAT "Canon EOS 5D Mark II"
+  fin $P1 logo5d2_black_info 2 1 2 - $W/WFLOGO.DAT "Canon EOS 5D Mark II"
   rm -f $W/out/*.dev.uyvy $W/out/*_*.print.l8 $W/out/*_*.wire.l8
 fi
 

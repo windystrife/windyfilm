@@ -35,6 +35,7 @@
 #include "wf_print.h"
 
 static int pass, fail;
+static int dk_cam = WF_DK_EOSM;                       /* env WF_DK_CAM=5D2: the 5D2 frame (wf_dk_geom) */
 #define CHECK(c, ...) do { if (c) pass++; else { fail++; printf("FAIL line %d: ", __LINE__); printf(__VA_ARGS__); \
                            printf("\n"); } } while (0)
 
@@ -865,31 +866,37 @@ static void frame(const char *cr2, const char *jpg, const char *od, const char *
     free(ib);
     if (rc) { free(raw); return; }
 
-    /* levels and scales (EOS M L frame at 84, 64 of the CR2's sensor image) */
-    int W = 5184, H = 3456;
+    /* levels and scales (the camera's L frame in its CR2: wf_dk_geom; EOS M at 84, 64, 5D2 at 168, 56) */
+    const struct wf_dk_geom *g = wf_dk_geom(dk_cam);
+    const int dcam = dk_cam == WF_DK_5D2 ? WF_DEV_5D2 : WF_DEV_EOSM;
+    int W = g->w, H = g->h;
+    CHECK(inf.w == g->sw && inf.h == g->sh && inf.pitch == g->pitch, "sensor image %dx%d pitch %d (want %dx%d %d)", inf.w,
+          inf.h, inf.pitch, g->sw, g->sh, g->pitch);
     struct wf_dev_job j;
     memset(&j, 0, sizeof j);
     j.raw = raw; j.pitch = inf.pitch;
-    j.ax0 = 72; j.ay0 = 52; j.ax1 = inf.w; j.ay1 = inf.h;
-    j.x0 = 84; j.y0 = 64; j.w = W; j.h = H; j.cfa = 0;
-    void *scr = malloc(wf_dev_scratch_bytes(W, H));
+    j.ax0 = g->ax0; j.ay0 = g->ay0; j.ax1 = inf.w; j.ay1 = inf.h;
+    j.x0 = g->x0 - g->dx; j.y0 = g->y0; j.w = g->dw; j.h = H; j.cfa = g->cfa;
+    void *scr = malloc(wf_dev_scratch_bytes(g->dw, H));
     int lb = 0, lw = 0;
-    wf_dev_levels(scr, &j, 16, 64, &lb, &lw);
-    j.black = lb ? lb : 2048;
-    j.white = lw ? lw : wf_dk_white(WF_DK_EOSM, inf.iso);
-    int as = wf_dk_scales(WF_DK_EOSM, inf.wb, j.black, j.white, inf.iso, j.wb_q8);
+    wf_dev_levels(scr, &j, g->bx0, g->bx1, &lb, &lw);
+    j.black = lb ? lb : g->black;
+    j.white = lw ? lw : wf_dk_white(dk_cam, inf.iso);
+    int as = wf_dk_scales(dk_cam, inf.wb, j.black, j.white, inf.iso, j.wb_q8);
     j.roll = 1;
     static struct wf_dev_tabs T;
-    CHECK(wf_dev_build(&T, WF_DEV_SRGB, 1, WF_DEV_EOSM, 0, 0, 0, 0) == 0, "build sRGB");
+    CHECK(wf_dev_build(&T, WF_DEV_SRGB, 1, dcam, 0, 0, 0, 0) == 0, "build sRGB");
     struct wf_dev_stat st;
     rc = wf_dev_prepare(scr, &T, &j, &st);
     CHECK(rc == 0 && st.wb_src == 2, "prepare %d src %d", rc, st.wb_src);
-    printf("frame %s: ISO %d EV8 %d, %d steps, black %d white %d%s, WB %s R/G %.3f B/G %.3f, trim %+d/10 EV, shoulder %d\n", cr2,
-           inf.iso, wf_dk_ev8(inf.iso, inf.et_n, inf.et_d, inf.fn_n, inf.fn_d), steps, j.black, j.white,
-           lw ? " (pile-up)" : " (table)", as ? "as-shot" : "daylight",
-           (double)st.m_q8[0] / st.m_q8[1], (double)st.m_q8[2] / st.m_q8[1], wf_dk_trim10(WF_DK_EOSM, inf.iso), st.roll);
+    printf("frame %s: ISO %d EV8 %d, %d steps, black %d white %d%s, WB %s R/G %.3f B/G %.3f, trim %+d/10 EV, shoulder %d,"
+           " orient %d, cd %d\n", cr2, inf.iso, wf_dk_ev8(inf.iso, inf.et_n, inf.et_d, inf.fn_n, inf.fn_d), steps, j.black,
+           j.white, lw ? " (pile-up)" : " (table)", as ? "as-shot" : "daylight",
+           (double)st.m_q8[0] / st.m_q8[1], (double)st.m_q8[2] / st.m_q8[1], wf_dk_trim10(dk_cam, inf.iso), st.roll,
+           inf.orient, inf.cd_count);
 
-    /* the fit against Canon's own frame (the at-shot B): how far the scene scale is from Canon's exposure */
+    /* the fit against Canon's own frame (the at-shot B): how far the scene scale is from Canon's exposure. The 5D2's
+       develop is wider than Canon's frame: the fit takes a 5600-column window inside it (a multiple of 32) */
     uint32_t *frm = malloc((size_t)W * H * 2);
     if (juyvy) {
         FILE *u = fopen(juyvy, "rb");
@@ -898,6 +905,10 @@ static void frame(const char *cr2, const char *jpg, const char *od, const char *
         struct wf_dev_job j2 = j;
         memset(j2.wb_q8, 0, sizeof j2.wb_q8);
         j2.canon = frm; j2.canon_y0 = 0; j2.canon_h = H;
+        if (g->dw != W) {
+            j2.x0 = g->x0 + 8; j2.w = (W - 16) & ~31;
+            j2.canon = frm + 4; j2.canon_pw = W / 2;
+        }
         struct wf_dev_stat s2;
         if (wf_dev_prepare(scr, &T, &j2, &s2) == 0 && s2.wb_src == 1) {
             double ev = log2((double)s2.m_q8[1] / st.m_q8[1]);
@@ -916,7 +927,10 @@ static void frame(const char *cr2, const char *jpg, const char *od, const char *
     wf_dk_thumb_begin(&th, W, H);
     for (int y = 0; y < H; y += 64) {
         int yb = y + 64 < H ? y + 64 : H;
-        wf_dev_rows(scr, y, yb, frm + y * (W / 2), W * 2);
+        if (g->dw == W)
+            wf_dev_rows(scr, y, yb, frm + y * (W / 2), W * 2);
+        else
+            wf_dev_rows_win(scr, y, yb, frm + y * (W / 2), W * 2, g->dx, W);
         wf_dk_thumb_rows(&th, frm + y * (W / 2), W * 2, y, yb - y, pr);
     }
     CHECK(wf_dk_thumb_done(&th) == WF_DK_PH, "thumbs");
@@ -1149,6 +1163,9 @@ static void devset(const char *list, const char *od)
 
 int main(int argc, char **argv)
 {
+    const char *cm = getenv("WF_DK_CAM");
+    if (cm && !strcmp(cm, "5D2"))
+        dk_cam = WF_DK_5D2;
     if (argc >= 2 && !strcmp(argv[1], "units")) {
         units();
         punits();

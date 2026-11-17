@@ -210,6 +210,9 @@ int  wf_dev_prepare(void *scratch, const struct wf_dev_tabs *t, const struct wf_
 /* output rows [ya, yb) of the frame into dst (UYVY words, dst_pitch bytes per row; dst row 0 = frame row ya), through
  * the cached scratch (rows are written whole, 8-word bursts). */
 void wf_dev_rows(void *scratch, int ya, int yb, uint32_t *dst, int dst_pitch);
+/* the same rows, each one's pixels [x, x + n) only (x, n even; clamped to the job's w): the 5D2 Darkroom develops 5632
+   columns (w a multiple of 32) for Canon's 5616 (wf_darkp.h wf_dk_geom) */
+void wf_dev_rows_win(void *scratch, int ya, int yb, uint32_t *dst, int dst_pitch, int x, int n);
 
 /* this shot's levels from its own raw (worker, before wf_dev_prepare; j: raw, pitch, ax0..ay1 only).
  *   black: mean of the masked columns [bx0, bx1) (EOS M: 16, 64; the image data starts at 72) on every 64th active row;

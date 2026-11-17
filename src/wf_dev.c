@@ -2055,3 +2055,20 @@ void wf_dev_rows(void *scratch, int ya, int yb, uint32_t *dst, int dst_pitch)
     }
     c->st->hl_px = c->hl_px;
 }
+
+void wf_dev_rows_win(void *scratch, int ya, int yb, uint32_t *dst, int dst_pitch, int x, int n)
+{
+    struct wf_dv_ctx *c = (struct wf_dv_ctx *)wf_dv_al((uint8_t *)scratch);
+    x &= ~1;
+    if (x < 0) x = 0;
+    if (n > c->j.w - x) n = c->j.w - x;
+    n &= ~1;
+    if (ya < 0) ya = 0;
+    if (yb > c->j.h) yb = c->j.h;
+    for (int y = ya; y < yb; y++) {
+        wf_dv_rowk(c, y);
+        if (n > 0)
+            wf_copyw((uint32_t *)((uint8_t *)dst + (size_t)(y - ya) * dst_pitch), c->out + (x >> 1), n >> 1);
+    }
+    c->st->hl_px = c->hl_px;
+}
