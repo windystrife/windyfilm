@@ -1,5 +1,7 @@
 HƯỚNG DẪN THỬ ROLL + DARKROOM TRÊN 5D MARK II (lần đầu)
 =========================================================
+Thẻ RAWB27, 18/11/2026 (từ RAWB26): RAW after Darkroom chọn ngay trong Darkroom (dòng thứ 5
+"RAW files" của khối PRINT) và chữ thông số dưới ảnh in đậm hơn một chút; thử ở bước n.
 Thẻ RAWB26, 17/11/2026 khuya (nhánh wf-onescreen, gộp dark-5d2). Darkroom trước giờ chỉ có
 trên EOS M; thẻ này bật nó trên 5D2. Thêm hàng RAW after Darkroom (bước m). CHƯA chạy trên máy 5D2 thật lần nào. Trên máy tính, mọi bước (nạp cuộn, chụp,
 tráng, viền / ngày / logo, Camera JPEG, kệ cuộn, tráng lại) đã chạy qua với CR2 + JPG
@@ -79,10 +81,11 @@ Màn hình giống EOS M, chỉ khác tên phím (chân màn hình ghi đúng ph
 - Nút góc trên phải: Screen On (màn hình sáng suốt lúc tráng) / Screen Off (tắt, bấm phím
   bất kỳ sáng 10 giây).
 - Khối PRINT: Frame (Off / White / Black / White wide / Black wide), Info (Off / On / On +
-  roll), Date, Camera JPEG (Keep / Overwrite / Over + print). Lên / xuống chọn dòng,
-  trái / phải hoặc DIAL đổi giá trị.
-- Menu ML Shoot > WindyFilm > RAW after Darkroom (ngay dưới Camera JPEG): Keep in DCIM (mặc
-  định) / Move to ROLLS. Move to ROLLS + Camera JPEG Overwrite / Over + print: tráng xong
+  roll), Date, Camera JPEG (Keep / Overwrite / Over + print), RAW files (RAWB27: Keep in
+  DCIM / Move to ROLLS; mờ, ghi "needs Overwrite" khi Camera JPEG = Keep). Lên / xuống
+  chọn dòng, trái / phải hoặc DIAL đổi giá trị.
+- Menu ML Shoot > WindyFilm > RAW after Darkroom (ngay dưới Camera JPEG; từ RAWB27 cũng là
+  dòng RAW files trong Darkroom, một cài đặt chung): Keep in DCIM (mặc định) / Move to ROLLS. Move to ROLLS + Camera JPEG Overwrite / Over + print: tráng xong
   kiểu nào thì CR2 của nó chuyển sang ROLLS/ROLL00n/ (5D2 chép rồi đọc lại so từng byte,
   đúng mới xoá bản trong DCIM), DCIM chỉ còn JPEG nên PLAY hiện bản tráng.
 - Hàng ROLL trên cùng: cuộn trong máy, rồi các cuộn trên kệ. Cuộn đã tráng: "develop
@@ -133,6 +136,12 @@ m. (RAWB26) RAW after Darkroom = Move to ROLLS, Camera JPEG = Overwrite, Frame O
    số file nối tiếp. Trên đầu đọc thẻ: DCIM chỉ còn JPG, ROLLS/ROLL00n có ba CR2 (cỡ như lúc
    chụp, mở được). Tráng lại cuộn đó: log "read from ROLLS/ROLL00n/". Camera JPEG = Keep:
    log "but Camera JPEG is Keep: the CR2s stay in DCIM", CR2 ở lại DCIM.
+n. (RAWB27) Dòng "RAW files" trong Darkroom: Camera JPEG = Keep thì dòng mờ, "needs
+   Overwrite"; trái / phải chỉ hiện dòng vàng "Camera JPEG is Keep: the CR2 files stay in
+   DCIM". Camera JPEG = Overwrite: dòng sáng, DIAL / trái / phải đổi Keep in DCIM / Move to
+   ROLLS; hàng menu RAW after Darkroom đổi theo (và ngược lại). Chữ dòng nào cũng nằm gọn.
+   Bản in Frame White / Black / White wide, Info On + roll, tấm ngang và tấm dọc: dòng 2-3
+   và "ROLL ..." rõ hơn RAWB26, vẫn trong viền dưới; dòng 1, logo, ngày như cũ.
 
 
 7. GỬI LẠI

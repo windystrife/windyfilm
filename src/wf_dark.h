@@ -124,10 +124,10 @@ extern volatile int wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2,
 enum { WF_PJ_KEEP = 0, WF_PJ_OVER, WF_PJ_BOTH, WF_PJ_N };
 enum { WF_J2_PREFIX = 0, WF_J2_FOLDER, WF_J2_N };
 enum { WF_PC_KEEP = 0, WF_PC_MOVE, WF_PC_N };
-enum { WF_PO_FRAME = 0, WF_PO_INFO, WF_PO_DATE, WF_PO_JPEG, WF_PO_N };   /* the Darkroom's print rows (wf_menu.c) */
-const char *wf_popt_name(int k);                 /* "Frame", "Info", "Date", "Camera JPEG" */
+enum { WF_PO_FRAME = 0, WF_PO_INFO, WF_PO_DATE, WF_PO_JPEG, WF_PO_RAW, WF_PO_N };   /* the Darkroom's print rows (wf_menu.c) */
+const char *wf_popt_name(int k);                 /* "Frame", "Info", "Date", "Camera JPEG", "RAW files" */
 const char *wf_popt_text(int k, char *b, int n); /* the value as shown: "White wide", "On + roll", "'26 11 15" (today) */
-int  wf_popt_avail(int k);                       /* 0 = greyed: Info with the frame Off */
+int  wf_popt_avail(int k);                       /* 0 = greyed: Info with the frame Off, RAW files with Camera JPEG Keep */
 void wf_popt_step(int k, int d);                 /* LEFT / RIGHT / wheel (wraps); the config is saved later */
 int  wf_clock_ymd(void);                         /* the camera clock's date as y * 10000 + m * 100 + d, -1 = unknown */
 

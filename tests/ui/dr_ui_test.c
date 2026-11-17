@@ -282,8 +282,36 @@ int main(int argc, char **argv)
     CHECK(wf_pr_jpeg == 1, "wheel left on Camera JPEG: %d (want Overwrite)", wf_pr_jpeg);
     key(MODULE_KEY_WHEEL_LEFT);
     CHECK(wf_pr_jpeg == 0, "wheel left on Camera JPEG: %d (want Keep)", wf_pr_jpeg);
+    /* RAW files (owner 11-18): the menu's RAW after Darkroom on the screen; greyed while Camera JPEG is Keep */
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfdr_host_pfoc() == WF_PO_RAW && wf_pr_cr2 == 0 && !wf_popt_avail(WF_PO_RAW), "DOWN from Camera JPEG: focus "
+          "%d cr2 %d avail %d (want RAW files, Keep, greyed)", wfdr_host_pfoc(), wf_pr_cr2, wf_popt_avail(WF_PO_RAW));
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wf_pr_cr2 == 0 && strstr(wfdr_host_msg(), "Camera JPEG is Keep"), "RIGHT on a greyed RAW files: cr2 %d, '%s' "
+          "(want unchanged, why)", wf_pr_cr2, wfdr_host_msg());
+    shot("dark_print_raw_greyed");
+    key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_PRESS_RIGHT);                             /* Camera JPEG Overwrite: RAW files can move */
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfdr_host_pfoc() == WF_PO_RAW && wf_pr_jpeg == 1 && wf_popt_avail(WF_PO_RAW) && !*wfdr_host_msg(), "RAW files "
+          "with Overwrite: focus %d jpeg %d avail %d, '%s' (want no message left)", wfdr_host_pfoc(), wf_pr_jpeg,
+          wf_popt_avail(WF_PO_RAW), wfdr_host_msg());
+    shot("dark_print_raw_keep");
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wf_pr_cr2 == 1, "RIGHT on RAW files: %d (want Move to ROLLS)", wf_pr_cr2);
+    shot("dark_print_raw_move");
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wf_pr_cr2 == 0, "wheel right on RAW files: %d (want Keep in DCIM, wraps)", wf_pr_cr2);
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wf_pr_cr2 == 1, "wheel left on RAW files: %d (want Move to ROLLS)", wf_pr_cr2);
+    key(MODULE_KEY_PRESS_LEFT);
+    key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_PRESS_LEFT);                              /* Camera JPEG back to Keep, RAW files Keep */
+    CHECK(wf_pr_cr2 == 0 && wf_pr_jpeg == 0 && wfdr_host_pfoc() == WF_PO_JPEG, "back: cr2 %d jpeg %d focus %d",
+          wf_pr_cr2, wf_pr_jpeg, wfdr_host_pfoc());
+    key(MODULE_KEY_PRESS_DOWN);
     key(MODULE_KEY_PRESS_DOWN);                              /* the Screen chip at the top right (owner 11-16) */
-    CHECK(wfdr_host_pfoc() == WF_PO_N && wf_dk_scr == WF_DS_ON, "DOWN from Camera JPEG: focus %d screen %d (want the "
+    CHECK(wfdr_host_pfoc() == WF_PO_N && wf_dk_scr == WF_DS_ON, "DOWN from RAW files: focus %d screen %d (want the "
           "Screen chip, On)", wfdr_host_pfoc(), wf_dk_scr);
     shot("dark_screen_chip_on");
     key(MODULE_KEY_PRESS_RIGHT);
@@ -311,6 +339,7 @@ int main(int argc, char **argv)
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_PRESS_UP);                                /* (ROLL, chip, RAW files, Camera JPEG, Date) */
     key(MODULE_KEY_WHEEL_LEFT);
     CHECK(wfdr_host_pfoc() == 2 && wf_pr_date == 0, "UP to Date, wheel left: focus %d date %d", wfdr_host_pfoc(), wf_pr_date);
     shot("dark_print_black_wide");

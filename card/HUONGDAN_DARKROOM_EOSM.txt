@@ -14,6 +14,16 @@ Thay đổi 15/11 (sau log RAWB9):
 - (15/11 tối) Cuộn bằng lon Film stage (âm bản x print stock) và các hàng knob (11 hàng từ 16/11): mục 4
   "CUỘN PHIM FILM STAGE", thử ở 5s.
 
+Thay đổi 18/11 (thẻ RAWB27, nhánh wf-onescreen, từ RAWB26):
+- RAW after Darkroom chọn ngay lúc tráng: dòng thứ 5 "RAW files" của khối PRINT trên màn
+  hình Darkroom (Keep in DCIM / Move to ROLLS), cùng một cài đặt với hàng menu RAW after
+  Darkroom (đổi chỗ này thì chỗ kia đổi theo). Camera JPEG = Keep thì dòng này mờ, bên
+  phải ghi "needs Overwrite"; trái / phải lúc đó chỉ hiện dòng vàng "Camera JPEG is Keep:
+  the CR2 files stay in DCIM". Thử ở bước ak.
+- Chữ thông số dưới ảnh in (dòng 2-3 và "ROLL ... · nn/nn") đậm hơn một chút: nét
+  Ubuntu Sans 500 thay cho 400, xám đậm hơn trên viền trắng, sáng hơn trên viền đen. Cỡ
+  chữ giữ nguyên nên chữ vẫn nằm gọn trong viền dưới; dòng 1, logo và dấu ngày như cũ.
+
 Thay đổi 17/11 khuya (thẻ RAWB26, nhánh wf-onescreen, từ RAWB25):
 - ISO theo phim (bước ag), phím tắt Quick keys (bước ah), PLAY sau Overwrite (bước ai).
 - RAW after Darkroom (hàng mới ngay dưới Camera JPEG, mặc định Keep in DCIM): Move to ROLLS
@@ -192,10 +202,11 @@ KỆ CUỘN VÀ TRÁNG LẠI (17/11 tối)
   roll file").
 
 VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như cũ)
-- Trên màn hình Darkroom (lúc chưa tráng / đã dừng) có khối PRINT 4 dòng (dòng thứ 4
-  "Camera JPEG" có từ RAWB21). Lên / xuống để chọn dòng, trái / phải hoặc bánh xe để đổi
-  giá trị. Cũng có trong menu ML: "Print frame", "Print info", "Date stamp", "Camera
-  JPEG" ngay dưới "Darkroom". Máy nhớ trong cấu hình.
+- Trên màn hình Darkroom (lúc chưa tráng / đã dừng) có khối PRINT 5 dòng (dòng thứ 4
+  "Camera JPEG" có từ RAWB21, dòng thứ 5 "RAW files" từ RAWB27). Lên / xuống để chọn
+  dòng, trái / phải hoặc bánh xe để đổi giá trị. Cũng có trong menu ML: "Print frame",
+  "Print info", "Date stamp", "Camera JPEG", "RAW after Darkroom" ngay dưới "Darkroom".
+  Máy nhớ trong cấu hình.
   - Frame: Off / White / Black / White wide / Black wide (viền trắng / đen, mỏng / dày).
   - Info: Off / On / On + roll. Dưới ảnh in 3 dòng chữ: máy / ống kính; tiêu cự, khẩu,
     tốc, ISO; tên phim + Print / Grain / Halation / Bloom / Mist. "On + roll" thêm
@@ -570,6 +581,20 @@ aj. (17/11 khuya, RAWB26) RAW after Darkroom = Move to ROLLS (Shoot > WindyFilm,
       thành RAW only): CR2 của nó ở lại DCIM, log "kept in DCIM: its JPEG was not written".
    Lưu ý: nút xoá ảnh của Canon chỉ xoá JPEG trong DCIM, CR2 trong ROLLS vẫn còn; phần mềm
    nhập ảnh theo cặp RAW + JPEG chỉ thấy JPEG trong DCIM.
+ak. (18/11, RAWB27) Dòng "RAW files" trong Darkroom và chữ trên bản in.
+   1. Camera JPEG = Keep, mở Darkroom: dòng thứ 5 "RAW files" mờ, bên phải "needs
+      Overwrite". Xuống tới dòng đó, bấm trái / phải: dòng vàng "Camera JPEG is Keep: the
+      CR2 files stay in DCIM", không đổi gì.
+   2. Lên dòng Camera JPEG, phải (Overwrite), xuống lại: dòng sáng lên, "Keep in DCIM";
+      phải hoặc vòng xoay: "Move to ROLLS". Chữ dòng nào cũng nằm gọn, không đè lên nhau.
+   3. Ra menu Shoot > WindyFilm: hàng RAW after Darkroom cũng là Move to ROLLS; đổi ở menu
+      về Keep in DCIM, mở lại Darkroom: dòng RAW files cũng là Keep in DCIM.
+   4. Để Move to ROLLS, tráng một cuộn: log đầu lượt vẫn có "dark: RAW after Darkroom Move
+      to ROLLS: each CR2 goes to ROLLS/ROLL00n/ ...", rồi như bước aj.
+   5. Chữ trên bản in: Frame White rồi Black (và White wide), Info On + roll, một tấm ngang
+      một tấm dọc. Dòng 2-3 (tiêu cự, khẩu, tốc, ISO; phim · Print · Grain ...) và "ROLL
+      ... · nn/nn" đọc rõ hơn bản RAWB26, vẫn nằm trong viền dưới; dòng 1, logo Canon +
+      "EOS M" và ngày cam như cũ. Nói lại nếu muốn đậm / to hơn nữa hay quay về như cũ.
 
 
 6. GỬI LẠI

@@ -37,7 +37,7 @@ int wf_pf_layout(struct wf_pf_lay *L, int frame, int info, int iw, int ih, int o
     int black = frame == WF_PFR_BLACK || frame == WF_PFR_BLACK_W, wide = frame >= WF_PFR_WHITE_W;
     L->bg = black ? 12 : 255;
     L->fg1 = black ? 236 : 30;
-    L->fg2 = black ? 150 : 118;
+    L->fg2 = black ? 196 : 84;                   /* (owner 11-18: lines 2 / 3 a little stronger; were 150 / 118) */
     int bd = pf_sc16(wide ? WF_PF_BD_WIDE : WF_PF_BD_THIN, s);
     int bb = L->info ? bd + pf_sc16(WF_PF_CAP, s) : bd;
     int dw0 = L->dw, dh0 = L->dh;

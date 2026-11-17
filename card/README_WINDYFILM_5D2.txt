@@ -7,6 +7,12 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT và WFSTAGE.DAT) là dữ liệu dẫn xuất
 (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB27 (18/11, nhánh wf-onescreen, từ RAWB26): RAW after Darkroom chọn ngay lúc tráng
+(dòng thứ 5 "RAW files" trong khối PRINT của Darkroom, cùng cài đặt với hàng menu; mờ, ghi
+"needs Overwrite" khi Camera JPEG = Keep). Chữ thông số dưới ảnh in (dòng 2-3, chữ ROLL)
+đậm và rõ hơn một chút; cỡ chữ, dòng 1, logo, ngày giữ nguyên; WFPRINT.DAT là bản mới.
+Xem mục 3 bước 9; HUONGDAN_DARKROOM_5D2.txt bước n.
+
 Thẻ RAWB26 (17/11 khuya, nhánh wf-onescreen gộp dark-5d2, từ RAWB25): Darkroom chạy trên
 5D2 như trên EOS M. Chip chế độ thêm nấc Darkroom (hàng Exposures, nạp cuộn), PLAY vào
 Darkroom, viền / ngày / logo trên bản in, Camera JPEG (Keep / Overwrite / Over + print),
@@ -198,6 +204,9 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
    RAW after Darkroom = Move to ROLLS, Camera JPEG = Overwrite: tráng xong DCIM chỉ còn
    JPEG, CR2 nằm trong ROLLS/ROLLnnn/; PLAY hiện bản tráng ngay và sau khi tắt bật máy.
    HUONGDAN_DARKROOM_5D2.txt bước m.
+9. (18/11, RAWB27) Darkroom, dòng thứ 5 "RAW files": mờ với Camera JPEG = Keep, sáng với
+   Overwrite; DIAL / trái / phải đổi Keep in DCIM / Move to ROLLS, hàng menu đổi theo.
+   Bản in có viền + Info: dòng 2-3 và chữ ROLL rõ hơn RAWB26. HUONGDAN bước n.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

@@ -22,14 +22,14 @@ Pen positions are 26.6 fixed point; a glyph is drawn at ((pen + 32) >> 6) + x, a
 --icons OUT.h  also writes the 23 row icons (16 x 16, 1 bit, MSB first, 2 bytes per row) drawn with the same PIL calls
                as the mockup's icon() (Light, Print, Paper, Grain, Halation, Bloom, Gauge, Mist, Strength, Highlights, Shadows,
                Film LUT, and the film-stage knobs Film exp, Push, Exp comp, Printer R / G / B, Interlayer), and the 3
-               Darkroom print rows' icons (Frame, Info, Date) as wf_picons.
+               Darkroom print rows' icons (Frame, Info, Date, Camera JPEG, RAW files) as wf_picons.
 --check        renders sample strings with the pack's own algorithm and compares them with PIL (pixel mismatches).
 --render DIR   writes a PNG sample sheet of the three fonts.
 --print-only   OUT is that print font pack alone (build.sh's pack step: mk_wffont.py WFPRINT.DAT --print-only).
 --print P.DAT  also writes the Darkroom's print font pack ML/DATA/WFPRINT.DAT (src/wf_print.c, DESIGN 3.9): the caption
                under a framed print, at print size and anti-aliased (16 levels), same font file:
   font 0: 84 px, wght 500   (line 1: camera / lens)
-  font 1: 62 px, wght 400   (lines 2 / 3, the roll)
+  font 1: 62 px, wght 500   (lines 2 / 3, the roll; wght 400 up to RAWB26)
   WFPRINT.DAT v1 (little endian, own format):
   header 16 B   "WFPF", u16 version 1, u16 nfonts, u32 file bytes, u32 FNV-1a of every byte after the header
   font dir      nfonts x 24 B: u16 px, u16 wght, u8 wdth, u8 first (32), u8 count (96), u8 0, u16 ascent, u16 descent,
@@ -353,7 +353,7 @@ def icon_img(k):
     return im
 
 
-PICONS = ('Frame', 'Info', 'Date', 'Camera JPEG')               # the Darkroom's print rows (src/ui/wf_dark_ui.c)
+PICONS = ('Frame', 'Info', 'Date', 'Camera JPEG', 'RAW files')  # the Darkroom's print rows (src/ui/wf_dark_ui.c)
 
 
 def picon_img(k):
@@ -379,6 +379,14 @@ def picon_img(k):
         d.line([0, 8, 10, 8], fill=1)
         d.line([7, 5, 10, 8], fill=1)
         d.line([7, 11, 10, 8], fill=1)
+    elif k == 'RAW files':                         # a folder with an arrow down in it: the CR2 goes to ROLLS/ROLLnnn
+        d.line([1, 4, 5, 4], fill=1)
+        d.line([6, 5, 7, 6], fill=1)
+        d.line([1, 4, 1, 6], fill=1)
+        d.rectangle([1, 6, 14, 14], outline=1)
+        d.line([8, 8, 8, 12], fill=1)
+        d.line([5, 9, 8, 12], fill=1)
+        d.line([11, 9, 8, 12], fill=1)
     return im
 
 
@@ -426,7 +434,7 @@ def sheet(fonts, d):
 
 
 # ------------------------------------------------------------------ print font pack (WFPRINT.DAT, src/wf_print.c)
-PRINT_FONTS = ((84, 100, 500), (62, 100, 400))
+PRINT_FONTS = ((84, 100, 500), (62, 100, 500))   # (owner 11-18: lines 2 / 3 at wght 500, were 400; same size)
 PRINT_CHARS = [chr(o) for o in range(32, 127)] + ['·']   # code 127 = the middle dot
 
 

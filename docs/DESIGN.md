@@ -823,7 +823,8 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
   - `wf_pr_date` 0..3 = Off / 'YY MM DD / DD MM 'YY / MM DD 'YY.
   - Config `frame=off|white|black|whitewide|blackwide`, `info=off|on|roll` (default on), `date=off|ymd|dmy|mdy`.
   - ML menu "Print frame", "Print info", "Date stamp" under "Darkroom" ("Camera JPEG", below, is the fourth).
-  - Darkroom screen: a PRINT block of three rows (four since RAWB21). UP / DOWN pick a row; LEFT / RIGHT / the wheel change it; this works
+  - Darkroom screen: a PRINT block of three rows (four since RAWB21, five since RAWB27: RAW files, below). UP / DOWN
+    pick a row; LEFT / RIGHT / the wheel change it; this works
     while idle, stopped or failed, not during a run. The easel shows a sketch of the finished print while no print is
     on it. A run takes a snapshot of the three settings at start (`dark: roll .. print frame f info i date d`).
 - **Frame.**
@@ -836,17 +837,19 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
   - The canvas is made band by band while the encoder streams: the frame colour, the picture's own rows and the
     caption band (rendered once). There is no downscale and no second frame buffer.
   - The APP1 Exif PixelX / YDimension are rewritten to the canvas size (`wf_dk_dims`). The orientation is kept.
-  - White frame Y 255 with captions Y 30 / 118; black frame Y 12 with captions Y 236 / 150. No logo from the repo:
+  - White frame Y 255 with captions Y 30 / 84; black frame Y 12 with captions Y 236 / 196 (lines 2 / 3 and the roll
+    were Y 118 / 150 up to RAWB26; owner 11-18 "sửa info exif cho font chữ nổi hơn tí"). No logo from the repo:
     the maker's wordmark comes only from the owner's card-time pack (Logo, below).
 - **Caption** (`wf_pf_caption`, from `wf_dk_shot`: the Exif of the print's APP1, gaps filled from the CR2's own tags).
   - Line 1: camera / lens (84 px, medium).
-  - Line 2: focal length, f-number, shutter, ISO (62 px).
-  - Line 3: the film, then Print / Grain / Halation / Bloom / Mist from the look's text (62 px).
+  - Line 2: focal length, f-number, shutter, ISO (62 px, wght 500 since RAWB27, was 400).
+  - Line 3: the film, then Print / Grain / Halation / Bloom / Mist from the look's text (62 px, the same).
   - On + roll adds `ROLL 021 · 07/24` at the right of line 1.
   - Items that do not fit the picture width are dropped from the end: line 1's lens, then line 3's effects; the film
     name is cut last.
-- **Font pack** `ML/DATA/WFPRINT.DAT` (`tools/mk_wffont.py --print-only`, own format "WFPF" v1, 167,228 B, in the
-  tool's header). Ubuntu Sans at 84 px wght 500 and 62 px wght 400, 4-bit anti-aliased, ASCII plus the middle dot,
+- **Font pack** `ML/DATA/WFPRINT.DAT` (`tools/mk_wffont.py --print-only`, own format "WFPF" v1, 169,746 B, in the
+  tool's header). Ubuntu Sans at 84 px wght 500 and 62 px wght 500 (400 up to RAWB26: the same size, so the cap
+  height, the lines' places and the logo's size do not move), 4-bit anti-aliased, ASCII plus the middle dot,
   with kerning, FNV-1a checked. Pack missing or bad: frames are printed without the details, and the log says so once
   per run.
 - **Date stamp** (`wf_pf_stamp`).
@@ -966,7 +969,14 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
       the CR2 (the rule), a second CR2 (the card's space).
   - **RAW after Darkroom** (owner 2026-11-17, RAWB26: "Thêm tuỳ chọn chuyển CR2"; both cameras). An ML menu row after
     Camera JPEG: **Keep in DCIM** (default) / **Move to ROLLS**; config `cr2=keep|move`; `wf_pr_cr2`, taken at the
-    run's start like the other print settings (`dk_pcr`). Not in the Darkroom's PRINT block (its four rows stay).
+    run's start like the other print settings (`dk_pcr`). Since RAWB27 (owner 11-18: "RAW after darkroom cho chọn lúc
+    tráng film đi bạn, chứ bật thế hơi lâu") also the Darkroom's fifth PRINT row **RAW files** (`WF_PO_RAW`, the same
+    `wf_pr_cr2` through `wf_popt_*`, so the menu row and the screen row always agree): values "Keep in DCIM" / "Move to
+    ROLLS"; with Camera JPEG Keep it is greyed (`wf_popt_avail`) and shows "needs Overwrite" in place of its value, no
+    arrows, and LEFT / RIGHT / the wheel there only say "Camera JPEG is Keep: the CR2 files stay in DCIM" (a message
+    under the idle block, `DR_MY` 410, gone with the next key). Icon: a folder with an arrow down in it. The idle
+    block's two lines move one row down (`DR_IY` 365 / 387). The EOS M and the 5D2 draw the same screen (CAM=5D2
+    dr_run: the same pixels); the shelf's rolls and a develop again show the same five rows.
     - When: Move, Camera JPEG Overwrite or Over + print, and that frame's JPEG(s) written and read back (`dk_camjpg`
       says so: `IMG_nnnn.JPG`, and with Over + print and a frame also `WFP_nnnn.JPG`). Otherwise the CR2 stays and one
       log line says why: Keep (the run says it once at its start), a frame shot RAW only, a JPEG without Canon's Exif,
@@ -1036,8 +1046,9 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     fitted, different bytes and thumbnails, the three log lines, no .WFT, the CR2s unchanged. `tests/host/
     wf_roll_test.c`: `wf_roll_jpg2` names, temps, Canon's other prefixes, our own prefix refused, non-DCF names and
     short buffers.
-  - `tests/ui/dr_ui_test.c` 3b: the PRINT rows (Camera JPEG the fourth, Keep / Overwrite / Over + print) and the easel
-    sketch.
+  - `tests/ui/dr_ui_test.c` 3b: the PRINT rows (Camera JPEG the fourth, Keep / Overwrite / Over + print; RAW files the
+    fifth: greyed with Camera JPEG Keep, its keys say why and change nothing; with Overwrite RIGHT / the wheel step
+    Keep in DCIM / Move to ROLLS and wrap; the message gone with the next key) and the easel sketch.
   - `test.sh` ROLL:cr2mv (RAW after Darkroom, both cameras, real RAW+L pairs): the row Keep by default, shown, SET
     steps it; Move with Camera JPEG Keep moves nothing; Overwrite + Move: F01's CR2 in `ROLLS/ROLL002/` byte for byte
     and gone from DCIM (EOS M renamed, 5D2 copied), F02's copy made wrong by `h_fio_wflip` (EOS M: its rename refused
@@ -1100,8 +1111,8 @@ screen itself ("one UI"), at its top right.
 - **Control.** One chip at the top right of the Darkroom screen (`src/ui/wf_dark_ui.c` `dr_chip`), right of the clock
   and battery: an LCD icon (lit = On, an empty outline = Off) and "Screen On" / "Screen Off". No ML menu row. Config
   `dkscreen=on|off` (default on), saved like the other rows (`wf_dk_scr`, `wf_dk_scr_step`, `src/wf_menu.c`).
-- **Keys.** Idle (and stopped / failed): the chip is a fifth focus after the four PRINT rows: UP from Frame (or DOWN from
-  Camera JPEG) reaches it, LEFT / RIGHT / the wheel switch it; SET still starts the run. While a run lives the chip is
+- **Keys.** Idle (and stopped / failed): the chip is a focus after the PRINT rows (five since RAWB27): UP from Frame (or
+  DOWN from RAW files) reaches it, LEFT / RIGHT / the wheel switch it; SET still starts the run. While a run lives the chip is
   the only control: drawn focused, LEFT / RIGHT / the wheel switch it (the rows are hidden then). Done: shown, not
   focused.
 - **Run with Screen Off** (`src/wf_dark.c`). From after LiveView's pause to the run's end the display may go dark:
@@ -1634,7 +1645,8 @@ Drawn by our own renderer, which needs none of ML's 7 dynamic font slots. Title 
 ### 4.6 `ML/DATA/WFPRINT.DAT` (core reads; the Darkroom's cameras: EOS M, and the 5D2 from `dark-5d2`)
 
 The Darkroom's print caption font (section 3.9): `tools/mk_wffont.py WFPRINT.DAT --print-only`, run by `build.sh`.
-"WFPF" v1, two fonts (84 px wght 500, 62 px wght 400), ASCII 32..126 plus 127 = U+00B7, 4-bit coverage, kern pairs,
+"WFPF" v1, two fonts (84 px wght 500, 62 px wght 500; 400 up to RAWB26), ASCII 32..126 plus 127 = U+00B7, 4-bit
+coverage, kern pairs,
 FNV-1a over everything after the header. The byte layout is in the tool's docstring. `wf_pf_fonts` checks the magic,
 version, sizes and hash, and `mk_wffont.py` checks its own renderer against PIL. The Darkroom reads the pack per
 framed print into `M.raw` scratch (at most `WF_PF_MAXB` 512 KB).

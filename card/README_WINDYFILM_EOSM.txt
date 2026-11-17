@@ -7,6 +7,15 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
 dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB27 (18/11, nhánh wf-onescreen, từ RAWB26): hai thứ nhỏ theo ý anh.
+- RAW after Darkroom chọn ngay lúc tráng: dòng thứ 5 "RAW files" trong khối PRINT của
+  Darkroom (Keep in DCIM / Move to ROLLS), cùng cài đặt với hàng menu. Camera JPEG = Keep
+  thì dòng mờ, ghi "needs Overwrite".
+- Chữ thông số dưới ảnh in (dòng 2-3, chữ ROLL) đậm và rõ hơn một chút (nét 500 thay 400,
+  tông đậm hơn trên viền trắng, sáng hơn trên viền đen); cỡ chữ, dòng 1, logo, ngày giữ
+  nguyên. ML/data/WFPRINT.DAT trên thẻ là bản mới.
+Xem mục 3 bước 21; HUONGDAN_DARKROOM_EOSM.txt bước ak.
+
 Thẻ RAWB26 (17/11 khuya, nhánh wf-onescreen, từ RAWB25): bốn thứ mới.
 - ISO theo phim: SET nạp một lon (hay nạp cuộn) thì ISO của máy thành tốc độ phim.
 - Phím tắt (Quick keys, mặc định DOWN ring): DOWN = vòng xoay chỉnh ISO, lần nữa = khẩu;
@@ -282,6 +291,9 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 20. (17/11 khuya, RAWB26) RAW after Darkroom = Move to ROLLS, Camera JPEG = Overwrite: tráng
    xong, DCIM chỉ còn JPEG, CR2 nằm trong ROLLS/ROLLnnn/; PLAY hiện bản tráng ngay và sau
    khi tắt bật máy; tấm chụp mới số nối tiếp. HUONGDAN bước aj.
+21. (18/11, RAWB27) Darkroom, dòng thứ 5 "RAW files": mờ với Camera JPEG = Keep, sáng với
+   Overwrite; trái / phải / vòng xoay đổi Keep in DCIM / Move to ROLLS, hàng menu đổi theo.
+   Bản in có viền + Info: dòng 2-3 và chữ ROLL rõ hơn RAWB26. HUONGDAN bước ak.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

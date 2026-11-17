@@ -304,9 +304,10 @@ static const char *const wf_pj_name[WF_PJ_N] = { "Keep", "Overwrite", "Over + pr
 static const char *const wf_j2_key[WF_J2_N] = { "prefix", "folder" };   /* the second JPEG's place (wf_dark.h) */
 static const char *const wf_pc_key[WF_PC_N] = { "keep", "move" };   /* RAW after Darkroom (wf_dark.h, DESIGN 3.9) */
 static const char *wf_pc_name[WF_PC_N] = { "Keep in DCIM", "Move to ROLLS" };
-static const char *const wf_popt_nm[WF_PO_N] = { "Frame", "Info", "Date", "Camera JPEG" };
-static volatile int *const wf_popt_v[WF_PO_N] = { &wf_pr_frame, &wf_pr_info, &wf_pr_date, &wf_pr_jpeg };
-static const int wf_popt_n[WF_PO_N] = { WF_PFR_N, WF_PIN_N, WF_PDT_N, WF_PJ_N };
+/* the Darkroom screen's PRINT rows; RAW files is the menu's RAW after Darkroom (owner 11-18: picked when developing) */
+static const char *const wf_popt_nm[WF_PO_N] = { "Frame", "Info", "Date", "Camera JPEG", "RAW files" };
+static volatile int *const wf_popt_v[WF_PO_N] = { &wf_pr_frame, &wf_pr_info, &wf_pr_date, &wf_pr_jpeg, &wf_pr_cr2 };
+static const int wf_popt_n[WF_PO_N] = { WF_PFR_N, WF_PIN_N, WF_PDT_N, WF_PJ_N, WF_PC_N };
 
 static const char *const wf_qk_cfg[WF_QK_N] = { "off", "down", "lr" };      /* the quick keys (DESIGN 3.17) */
 static const char *wf_qk_name[WF_QK_N] = { "Off", "DOWN ring", "L/R ISO" };
@@ -321,7 +322,14 @@ void wf_dk_scr_step(int d)
 }
 
 const char *wf_popt_name(int k) { return k >= 0 && k < WF_PO_N ? wf_popt_nm[k] : ""; }
-int wf_popt_avail(int k) { return k != WF_PO_INFO || (wf_pr_frame > WF_PFR_OFF && wf_pr_frame < WF_PFR_N); }
+int wf_popt_avail(int k)
+{
+    if (k == WF_PO_INFO)
+        return wf_pr_frame > WF_PFR_OFF && wf_pr_frame < WF_PFR_N;
+    if (k == WF_PO_RAW)                           /* a CR2 moves only once its print is the camera JPEG */
+        return wf_pr_jpeg > WF_PJ_KEEP && wf_pr_jpeg < WF_PJ_N;
+    return 1;
+}
 void wf_popt_step(int k, int d)
 {
     if (k < 0 || k >= WF_PO_N || !d)
@@ -341,6 +349,8 @@ const char *wf_popt_text(int k, char *b, int n)
         return wf_pick(wf_pin_name, WF_PIN_N, v);
     if (k == WF_PO_JPEG)
         return wf_pick(wf_pj_name, WF_PJ_N, v);
+    if (k == WF_PO_RAW)
+        return wf_pick((const char *const *)wf_pc_name, WF_PC_N, v);
     if (k != WF_PO_DATE || v <= WF_PDT_OFF || v >= WF_PDT_N)
         return "Off";
     int t = wf_clock_ymd(), y = t < 0 ? 26 : t / 10000 % 100, m = t < 0 ? 1 : t / 100 % 100, d = t < 0 ? 1 : t % 100;

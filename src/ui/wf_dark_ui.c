@@ -364,8 +364,10 @@ static const char *phase_text(int ph)
     return "";
 }
 
-/* the print finishes (owner 11-15, DESIGN 3.9; Camera JPEG 11-16): four rows in the browser's style while no run lives;
- * UP / DOWN pick one, LEFT / RIGHT / the wheel change it (wf_menu.c keeps them and saves the config) */
+/* the print finishes (owner 11-15, DESIGN 3.9; Camera JPEG 11-16; RAW files 11-18): five rows in the browser's style
+ * while no run lives; UP / DOWN pick one, LEFT / RIGHT / the wheel change it (wf_menu.c keeps them and saves the
+ * config). RAW files is the menu's RAW after Darkroom (the same setting): with Camera JPEG Keep it is greyed with
+ * "needs Overwrite" in place of its value, and its keys only say why (the CR2 stays in DCIM then) */
 #define DR_RX0 384
 #define DR_RX1 696
 #define DR_RY  230                                 /* (owner 11-17: under the ROLL row, the film / Film row and the */
@@ -386,10 +388,11 @@ static void dr_prows(void)
         }
         wfg_bits16(wf_picons[k], DR_RX0 + 12, y + 2, !av ? (foc ? C_TXT3 : C_BAROFF) : foc ? C_AMBER : C_TXT3);
         ui_text(F_15, DR_RX0 + 36, y + 1, wf_popt_name(k), !av ? C_TXT3 : foc ? C_TXT : C_TXT2);
-        const char *val = wf_popt_text(k, b, sizeof b);
-        int vx = foc ? DR_RX1 - 16 : DR_RX1 - 4;
+        int note = k == WF_PO_RAW && !av, arw = foc && !note;   /* (a greyed RAW files row: no value to change) */
+        const char *val = note ? "needs Overwrite" : wf_popt_text(k, b, sizeof b);
+        int vx = arw ? DR_RX1 - 16 : DR_RX1 - 4;
         int xl = vx - text_r(F_15, vx, y + 1, val, !av ? C_TXT3 : foc ? C_TXT : C_TXT2);
-        if (foc)
+        if (arw)
         {
             wfg_tri(DR_RX1 - 10, y + 5, DR_RX1 - 5, y + 10, DR_RX1 - 10, y + 15, C_AMBER);
             wfg_tri(xl - 7, y + 5, xl - 12, y + 10, xl - 7, y + 15, C_AMBER);
@@ -425,7 +428,7 @@ static void dr_ppreview(void)
     wfg_ellipse(px0 + pw * 2 / 3, py0 + ph / 6, px0 + pw * 2 / 3 + ph / 6, py0 + ph / 6 + ph / 6, paper);   /* the sun */
     if (info)
     {
-        int fg = fr == 1 ? ink : paper - 4, fg2 = fr == 1 ? C_DRY0 + 12 : C_DRY0 + 18, ty = py0 + ph + (bb - bd) * k / 2000;
+        int fg = fr == 1 ? ink : paper - 4, fg2 = fr == 1 ? C_DRY0 + 9 : C_DRY0 + 22, ty = py0 + ph + (bb - bd) * k / 2000;
         wfg_rect(px0, ty - 4, px0 + pw * 45 / 100, ty - 2, fg);           /* line 1 */
         if (roll) wfg_rect(px0 + pw * 80 / 100, ty - 4, px0 + pw - 1, ty - 2, fg2);
         wfg_rect(px0, ty + 2, px0 + pw * 38 / 100, ty + 3, fg2);          /* lines 2 and 3 */
@@ -440,7 +443,8 @@ static void dots_c(int font, int cx, int y, const char *const *s, int n, int gap
  * wheel pick another roll while it has the focus */
 #define DR_SY 110
 #define DR_FY 138
-#define DR_IY (DR_RY + (WF_PO_N - 1) * DR_RH + 35)   /* the idle block's two lines under the PRINT rows (340, 362) */
+#define DR_IY (DR_RY + (WF_PO_N - 1) * DR_RH + 35)   /* the idle block's two lines under the PRINT rows (365, 387) */
+#define DR_MY 410                                    /* a short message (say): under them, over the footer line */
 static void dr_arrows(int y, int x0, int x1, int on)
 {
     wfg_tri(x1 - 10, y + 5, x1 - 5, y + 10, x1 - 10, y + 15, on ? C_AMBER : C_LINE);
@@ -667,7 +671,7 @@ static void dark_render(int now)
     dr_easel(v, now);
     dr_slide(v, now);
     dr_right(v, now);
-    if (msg && now - msg_until < 0) text_c(F_13, 540, 384, msg, C_WARN);
+    if (msg && now - msg_until < 0) text_c(F_13, 540, DR_MY, msg, C_WARN);
     wfg_rect(12, 440, WFUI_W - 13, 440, C_SEP);
     dr_footer(v);
 }
@@ -716,6 +720,7 @@ static int dark_key(int key, int now)
         if (idle)
         {
             int st[WF_PO_N + 3], n = 0, i = 0;
+            msg = 0;                                       /* (a message answers the last key: gone with the next) */
             st[n++] = DR_FOC_SCR;
             st[n++] = DR_FOC_ROLL;
             if (dr_again()) st[n++] = DR_FOC_FILM;
@@ -727,6 +732,7 @@ static int dark_key(int key, int now)
     case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_UP:
     case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_DOWN:
         if (!idle) break;
+        msg = 0;
         if (dr_pfoc == DR_FOC_ROLL)                        /* another roll */
         {
             if (dr_nit > 1)
@@ -737,6 +743,8 @@ static int dark_key(int key, int now)
                 dr_afilm = 0;
             }
         }
+        else if (dr_pfoc == WF_PO_RAW && !wf_popt_avail(WF_PO_RAW))
+            say("Camera JPEG is Keep: the CR2 files stay in DCIM", now);
         else if (dr_pfoc >= 0 && dr_pfoc < WF_PO_N)
             wf_popt_step(dr_pfoc, neg ? -1 : 1);
         break;
