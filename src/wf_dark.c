@@ -975,7 +975,8 @@ static void dk_free(void)
 }
 
 /* the print finishes' scratch this run needs (dk_finish): the date stamp's glow map, or the font pack + the caption band +
- * a 16-row buffer + the logo's maps (the larger: the stamp is drawn first) */
+ * a 16-row buffer + the logo's maps (the larger: the stamp is drawn first); with Overwrite also the print fitted to
+ * Canon's size (dk_fit: its band, row buffer, maps and the picture's scale buffers) */
 static uint32_t dk_fin_need(void)
 {
     uint32_t n = 0;
@@ -985,6 +986,12 @@ static uint32_t dk_fin_need(void)
         struct wf_pf_lay L;
         if (wf_pf_layout(&L, dk_pfr, dk_pin, DK_W, DK_H, o)) {
             uint32_t k = WF_PF_MAXB + ((wf_pf_band_bytes(&L) + 3) & ~3u) + (uint32_t)L.cw * 2 * 16 + (dk_lgn ? DK_LG_B : 0);
+            if (k > n)
+                n = k;
+        }
+        if (dk_pjp == WF_PJ_OVER && wf_pf_fit(&L, dk_pfr, dk_pin, DK_W, DK_H, o, DK_W, DK_H)) {   /* dk_fit's */
+            uint32_t k = WF_PF_MAXB + ((wf_pf_band_bytes(&L) + 3) & ~3u) + (uint32_t)DK_W * 2 * 16
+                         + (dk_lgn ? DK_LG_B : 0) + wf_pf_scale_bytes(L.iw);
             if (k > n)
                 n = k;
         }
@@ -1254,6 +1261,15 @@ static void dk_yield(void)
 
 /* ------------------------------------------------------------------ print finishes (DESIGN 3.9, wf_print.h) */
 static const char *const dk_pfr_name[WF_PFR_N] = { "off", "white", "black", "white wide", "black wide" };
+/* the print's fonts, logo, caption text and shot (dk_finish), kept for the camera's JPEG (dk_fit); static: wf_task's
+   stack is small (the fonts alone 8 KB) */
+static struct wf_pf_font dk_F[WF_PF_NFONT];
+static struct wf_pf_logo dk_lg;
+static struct wf_pf_txt dk_tx;
+static struct wf_pf_lpos dk_lp;
+static struct wf_dk_shot dk_s;
+static char dk_rl[40];
+static int dk_fok;
 
 /* before the encode, in M.fin (the raw's block: the develop is done with the raw): the date stamp into the frame; with a frame its layout,
  * the caption band (WFPRINT.DAT read into the scratch, the shot's details from Canon's APP1 and the CR2's for the gaps,
@@ -1294,7 +1310,7 @@ static void dk_finish(int i, uint32_t ao, uint32_t al, const char *look, struct 
     }
     *band = scr + WF_PF_MAXB;
     *rowbuf = (uint32_t *)(scr + WF_PF_MAXB + nb);
-    static struct wf_pf_font F[WF_PF_NFONT];      /* (wf_task: 8 KB of stack) */
+    struct wf_pf_font *F = dk_F;
     int fok = 0;
     uint32_t pn = 0;
     if (L->tw) {                                 /* the details: the print font pack (167 KB) into the scratch */
@@ -1311,8 +1327,7 @@ static void dk_finish(int i, uint32_t ao, uint32_t al, const char *look, struct 
         }
     }
     /* the logo pack after the fonts in the same 512 KB; its maps after the band and the row buffer */
-    static struct wf_pf_logo lg;
-    memset(&lg, 0, sizeof lg);
+    memset(&dk_lg, 0, sizeof dk_lg);
     uint32_t lo = fok ? (pn + 31) & ~31u : 0;
     if (dk_lgn && (dk_lgn > WF_PF_LOGO_MAXB || lo + dk_lgn > WF_PF_MAXB)) {
         if (!dk_lg_said)
@@ -1321,43 +1336,45 @@ static void dk_finish(int i, uint32_t ao, uint32_t al, const char *look, struct 
         dk_lg_said = 1;
     } else if (dk_lgn) {
         void *g = FIO_OpenFile(DK_LG_PACK, 0);
-        int ok = WF_FH_OK(g) && dk_read_at(g, 0, scr + lo, dk_lgn) == 0 && wf_pf_logo(&lg, scr + lo, dk_lgn, s.model) == 0;
+        int ok = WF_FH_OK(g) && dk_read_at(g, 0, scr + lo, dk_lgn) == 0
+                 && wf_pf_logo(&dk_lg, scr + lo, dk_lgn, s.model) == 0;
         if (WF_FH_OK(g))
             FIO_CloseFile(g);
         if (!ok) {
-            memset(&lg, 0, sizeof lg);
+            memset(&dk_lg, 0, sizeof dk_lg);
             if (!dk_lg_said)
                 wf_log("dark: %s bad (%d B): no logo", DK_LG_PACK, (int)dk_lgn);
             dk_lg_said = 1;
         }
     }
-    static struct wf_pf_txt tx;                  /* (wf_task's stack is small) */
-    static struct wf_pf_lpos lp;
     struct wf_pf_cap c;
     char rl[40], dr[200];
     rl[0] = 0;
     if (dk_pin == WF_PIN_ROLL)
         snprintf(rl, sizeof rl, "ROLL %03d " WF_PF_DOT " %02d/%02d", roll.num, i + 1, roll.exp);
-    wf_pf_caption(&s, look, rl, &tx, &c);
-    uint32_t mo = WF_PF_MAXB + nb + nr, ln = wf_pf_logo_place(L, fok ? F : 0, &lg, &c, &lp);
-    if (lp.n && ln > M.fin_n - mo) {             /* no room for the maps: the caption as before */
+    wf_pf_caption(&s, look, rl, &dk_tx, &c);
+    dk_s = s;                                    /* for the camera's JPEG (dk_fit) */
+    memcpy(dk_rl, rl, sizeof dk_rl);
+    dk_fok = fok;
+    uint32_t mo = WF_PF_MAXB + nb + nr, ln = wf_pf_logo_place(L, fok ? F : 0, &dk_lg, &c, &dk_lp);
+    if (dk_lp.n && ln > M.fin_n - mo) {          /* no room for the maps: the caption as before */
         wf_log("dark: F%02d logo needs %d KB of scratch, %d left: not drawn", i + 1, (int)(ln >> 10),
                (int)((M.fin_n - mo) >> 10));
-        lp.n = 0;
+        dk_lp.n = 0;
         c.rsv = c.roll3 = 0;
     }
-    if (lp.n)
-        wf_pf_cap_logo(&tx, &c, &lg);            /* the model's words the logo says, out of line 1 */
+    if (dk_lp.n)
+        wf_pf_cap_logo(&dk_tx, &c, &dk_lg);      /* the model's words the logo says, out of line 1 */
     wf_pf_band(L, fok ? F : 0, &c, *band, dr, sizeof dr);
     int dims = al ? wf_dk_dims(M.app1 + ao, al, L->cw, L->ch) : -1;
     wf_log("dark: F%02d frame %s o%d %dx%d (Exif size %s), band %d KB, %dms", i + 1, dk_pfr_name[L->frame], orient, L->cw,
            L->ch, dims == 0 ? "set" : "not set", (int)(nb >> 10), get_ms_clock() - t1);
     if (fok)
         wf_log("dark: F%02d caption %s", i + 1, dr);
-    if (lp.n && wf_pf_logo_maps(L, &lp, scr + mo, M.fin_n - mo) == 0)
-        wf_log("dark: F%02d logo %s %dx%d%s%s, %d KB", i + 1, lg.maker, lp.w[0], lp.h[0], lp.n > 1 ? " + lettering " : "",
-               lp.n > 1 ? s.model : "", (int)(ln >> 10));
-    else if (lp.n)
+    if (dk_lp.n && wf_pf_logo_maps(L, &dk_lp, scr + mo, M.fin_n - mo) == 0)
+        wf_log("dark: F%02d logo %s %dx%d%s%s, %d KB", i + 1, dk_lg.maker, dk_lp.w[0], dk_lp.h[0],
+               dk_lp.n > 1 ? " + lettering " : "", dk_lp.n > 1 ? s.model : "", (int)(ln >> 10));
+    else if (dk_lp.n)
         wf_log("dark: F%02d logo maps failed: not drawn", i + 1);
 }
 
@@ -1404,11 +1421,12 @@ static int dk_xthumb(int i, const char *path, uint8_t *app1, uint32_t al, const 
     return 0;
 }
 
-/* the canvas L into path (a new file): Canon's APP1 (al bytes, none = JFIF), the frame's rows through L's band / logo,
- * the darkroom screen's thumbnails (what 0: the print) and the Exif thumbnail. w: the bytes and their hash (dk_verify).
+/* the canvas L into path (a new file): Canon's APP1 (al bytes, none = JFIF), the picture's rows (rf(rctx, y): the
+ * frame's, dk_row, or the fitted print's scaled picture) through L's band / logo, the darkroom screen's thumbnails
+ * (what 0: the print) and the Exif thumbnail. w: the bytes and their hash (dk_verify).
  * DK_OK / DK_STOP / DK_FATAL (dk_why); a file not finished is removed */
 static int dk_encode(int i, const char *path, const struct wf_pf_lay *L, uint8_t *app1, uint32_t al, const uint8_t *band,
-                     uint32_t *rowbuf, int what, struct dk_wr *w)
+                     uint32_t *rowbuf, int what, struct dk_wr *w, wf_pf_rowfn *rf, void *rctx)
 {
     struct wf_fe e = { 0, 0 };
     uint32_t osz = 0;
@@ -1439,7 +1457,7 @@ static int dk_encode(int i, const char *path, const struct wf_pf_lay *L, uint8_t
     int stopped = 0;
     for (int y = 0; rc == WF_JPE_OK && y < L->ch; y += 16) {   /* no frame: the frame's own rows, as before */
         const uint32_t *rows;
-        int pitch, n = wf_pf_band_rows_fn(L, y, dk_row, 0, DK_FP, band, rowbuf, &rows, &pitch), py = y - L->iy;
+        int pitch, n = wf_pf_band_rows_fn(L, y, rf, rctx, DK_FP, band, rowbuf, &rows, &pitch), py = y - L->iy;
         if (n <= 0) {
             rc = WF_JPE_E_ARG;
             break;
@@ -1477,13 +1495,67 @@ static int dk_encode(int i, const char *path, const struct wf_pf_lay *L, uint8_t
     return DK_OK;
 }
 
+/* Camera JPEG Overwrite with a frame (owner 11-17, RAWB23: "the DCIM file has the film colour but no frame, date, logo
+ * or caption"): the DCIM file is the whole print at Canon's 5184 x 3456. The frame is laid out again round the picture
+ * scaled down until the canvas fits, centred, the margin in the frame colour (wf_pf_fit / wf_pf_pad: 4320 x 2880 in a
+ * 4512 x 3456 frame landscape, 4560 x 3040 portrait, thin frame with the details); the caption band and the logo drawn
+ * again at that size from the print's fonts, logo pack and text (dk_finish left them in the scratch's pack area, which
+ * nothing after it touches), the print fonts at their own size, so the text reads as on the print; the picture (date
+ * stamp in it) area-resampled from the frame (wf_pf_scale). The roll print is written and checked by now: its band,
+ * row buffer and logo maps are free. 0 = P, *band, *rowbuf and dk_sc set; -1 = no fit / no room (logged: the picture
+ * alone, as before) */
+static struct wf_pf_scale dk_sc;
+static int dk_fit(int i, const char *look, int orient, struct wf_pf_lay *P, uint8_t **band, uint32_t **rowbuf)
+{
+    uint8_t *scr = M.fin;
+    if (!wf_pf_fit(P, dk_pfr, dk_pin, DK_W, DK_H, orient, DK_W, DK_H)) {
+        wf_log("dark: F%02d camera JPEG: the print does not fit %dx%d: the picture alone", i + 1, DK_W, DK_H);
+        return -1;
+    }
+    uint32_t nb = (wf_pf_band_bytes(P) + 3) & ~3u, mo = WF_PF_MAXB + nb + (uint32_t)DK_W * 2 * 16;
+    uint32_t sn = wf_pf_scale_bytes(P->iw), ln = 0;
+    if (!scr || mo + sn > M.fin_n) {
+        wf_log("dark: F%02d camera JPEG: the fitted print needs %d KB of scratch, %d: the picture alone", i + 1,
+               (int)((mo + sn) >> 10), (int)(M.fin_n >> 10));
+        return -1;
+    }
+    struct wf_pf_cap c;
+    wf_pf_caption(&dk_s, look, dk_rl, &dk_tx, &c);
+    ln = (wf_pf_logo_place(P, dk_fok ? dk_F : 0, &dk_lg, &c, &dk_lp) + 3) & ~3u;
+    if (dk_lp.n && mo + ln + sn > M.fin_n) {     /* no room for the maps: the caption without the logo */
+        dk_lp.n = 0;
+        c.rsv = c.roll3 = 0;
+    }
+    if (dk_lp.n)
+        wf_pf_cap_logo(&dk_tx, &c, &dk_lg);
+    *band = scr + WF_PF_MAXB;
+    *rowbuf = (uint32_t *)(scr + WF_PF_MAXB + nb);
+    char dr[200];
+    wf_pf_band(P, dk_fok ? dk_F : 0, &c, *band, dr, sizeof dr);
+    uint32_t so = mo;
+    if (dk_lp.n && wf_pf_logo_maps(P, &dk_lp, scr + mo, ln) == 0)
+        so = mo + ln;                            /* (the maps first, their resample tables after them: free again) */
+    if (wf_pf_scale_init(&dk_sc, dk_row, 0, DK_W, DK_H, P->iw, P->ih, scr + so, M.fin_n - so) != 0) {
+        wf_log("dark: F%02d camera JPEG: picture %dx%d not scaled: the picture alone", i + 1, P->iw, P->ih);
+        return -1;
+    }
+    int pw = P->iw, ph = P->ih;
+    wf_pf_pad(P, DK_W, DK_H);
+    wf_log("dark: F%02d camera JPEG: the print fitted %dx%d, picture %dx%d at %d,%d%s", i + 1, DK_W, DK_H, pw, ph,
+           P->ix, P->iy, P->nink ? ", logo" : "");
+    if (dk_fok && P->tw)
+        wf_log("dark: F%02d camera JPEG caption %s", i + 1, dr);
+    return 0;
+}
+
 /* Camera JPEG Overwrite (owner 11-16: shoot fast, the darkroom's print goes over the camera's JPEG later, the ROLLS copy
  * stays): only once the roll print (out, pw) reads back right. A temp file IMG_nnnn.WFT next to the JPEG: frame Off =
- * the print's bytes, a frame = the picture alone at Canon's 5184 x 3456 (a second encode: Canon's playback keeps the
- * size it made), read back, then renamed over the JPEG. Never the CR2. Each step logged; whatever fails, the camera's
- * JPEG stays (or, renamed away, the .WFT holds the print). Returns DK_STOP when stopped, else DK_OK: the print is done. */
+ * the print's bytes, a frame = the print fitted into Canon's 5184 x 3456 (dk_fit, a second encode: Canon's playback
+ * keeps the size it made; no room = the picture alone at that size), read back, then renamed over the JPEG. Never the
+ * CR2. Each step logged; whatever fails, the camera's JPEG stays (or, renamed away, the .WFT holds the print). Returns
+ * DK_STOP when stopped, else DK_OK: the print is done. */
 static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr *pw, uint8_t *app1, uint32_t al,
-                     const struct wf_pf_lay *L, uint32_t *rowbuf)
+                     const struct wf_pf_lay *L, uint32_t *rowbuf, const char *look)
 {
     int t0 = get_ms_clock(), n = 0;
     char tmp[96];
@@ -1517,7 +1589,7 @@ static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr
         return DK_OK;
     }
     struct dk_wr w;
-    int rc = DK_OK, copy = !L->frame;
+    int rc = DK_OK, copy = !L->frame, fit = 0;
     if (copy) {                                  /* the canvas is the picture: the print's bytes */
         void *f = FIO_OpenFile(out, 0), *o = WF_FH_OK(f) ? wf_fopen_w(tmp, WF_FO_NEW, 0, &e) : 0;
         memset(&w, 0, sizeof w);
@@ -1545,11 +1617,18 @@ static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr
             return DK_OK;
         }
         v = dk_verify(tmp, pw, app1, al);
-    } else {                                     /* the picture alone, the Exif size back to Canon's */
+    } else {                                     /* the print fitted into 5184 x 3456, the Exif size back to Canon's */
         struct wf_pf_lay P;
-        wf_pf_layout(&P, WF_PFR_OFF, 0, DK_W, DK_H, 1);
+        uint8_t *band = 0;
+        uint32_t *rb = rowbuf;
+        fit = dk_fit(i, look, L->orient, &P, &band, &rb) == 0;
+        if (!fit) {                              /* the picture alone, as before */
+            wf_pf_layout(&P, WF_PFR_OFF, 0, DK_W, DK_H, 1);
+            band = 0;
+            rb = rowbuf;
+        }
         int dims = wf_dk_dims(app1, al, DK_W, DK_H);
-        rc = dk_encode(i, tmp, &P, app1, al, 0, rowbuf, 1, &w);
+        rc = dk_encode(i, tmp, &P, app1, al, band, rb, 1, &w, fit ? wf_pf_scale_row : dk_row, fit ? (void *)&dk_sc : 0);
         if (rc == DK_STOP) {
             wf_log("dark: F%02d camera JPEG kept (stopped)", i + 1);
             return DK_STOP;
@@ -1577,7 +1656,8 @@ static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr
         return DK_OK;
     }
     wf_log("dark: F%02d camera JPEG IMG_%04d.JPG overwritten: %s, %d KB, %dms", i + 1, roll.file[i],
-           copy ? "the print" : "the picture 5184x3456", (int)(w.n >> 10), get_ms_clock() - t0);
+           copy ? "the print" : fit ? "the print fitted 5184x3456" : "the picture 5184x3456", (int)(w.n >> 10),
+           get_ms_clock() - t0);
     return DK_OK;
 }
 
@@ -1741,11 +1821,11 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
         rowbuf = (uint32_t *)M.fin;              /* a 16-row band across two pieces is copied here (a split at a multiple of
                                                     16 rows never makes one without a frame) */
     struct dk_wr wr;
-    rc = dk_encode(i, out, &L, al ? M.app1 + ao : 0, al, band, rowbuf, 0, &wr);
+    rc = dk_encode(i, out, &L, al ? M.app1 + ao : 0, al, band, rowbuf, 0, &wr, dk_row, 0);
     if (rc != DK_OK)
         return rc;
     if (dk_pjp == WF_PJ_OVER)                    /* stopped in it: the print is done, the run stops at the next frame */
-        dk_camjpg(i, jpg, out, &wr, M.app1 + ao, al, &L, rowbuf);
+        dk_camjpg(i, jpg, out, &wr, M.app1 + ao, al, &L, rowbuf, t2);
     dk_t[3] = get_ms_clock() - t;
     wf_dev_note(lk, WF_PATH_DARK, dk_t[0] + dk_t[1] + dk_t[2] + dk_t[3]);   /* the whole print, dry included (11-17) */
     *bytes = (int)wr.n;

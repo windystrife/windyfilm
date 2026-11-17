@@ -1068,3 +1068,150 @@ int wf_pf_logo_maps(struct wf_pf_lay *L, const struct wf_pf_lpos *P, uint8_t *me
     L->nink = P->n;
     return 0;
 }
+
+/* ================================================================== the camera's size (owner 11-17, wf_print.h) */
+int wf_pf_fit(struct wf_pf_lay *L, int frame, int info, int iw, int ih, int orient, int W, int H)
+{
+    for (int h = ih & ~15; iw >= 128 && h * 2 > ih; h -= 16) {
+        int w = (iw * h / ih) & ~1;
+        if (!wf_pf_layout(L, frame, info, w, h, orient))
+            break;                               /* frame Off: nothing to fit */
+        if (L->cw <= W && L->ch <= H && w * 2 > iw)
+            return 1;
+    }
+    wf_pf_layout(L, WF_PFR_OFF, info, W, H, orient);
+    return 0;
+}
+
+void wf_pf_pad(struct wf_pf_lay *L, int W, int H)
+{
+    if (W < L->cw || H < L->ch)
+        return;
+    int px = ((W - L->cw) / 2) & ~1, py = (H - L->ch) / 2, rot = L->orient == 6 || L->orient == 8;
+    L->ix += px;
+    L->iy += py;
+    if (L->tw) {
+        L->tx += px;
+        L->ty += py;
+    }
+    for (int k = 0; k < L->nink; k++) {
+        L->ink[k].x += px;
+        L->ink[k].y += py;
+    }
+    L->cw = W;
+    L->ch = H;
+    L->dw = rot ? H : W;
+    L->dh = rot ? W : H;
+}
+
+/* output sample i of m over n source samples (m <= n < 2 m): it covers the source [i n / m, (i + 1) n / m), in units of
+   1 / m source sample (32-bit: n m <= 2^31); Q12 weights by overlap, the largest takes the rounding */
+static void pf_tap(struct wf_pf_tap *t, int i, int n, int m)
+{
+    int a = i * n, b = a + n, s = a / m, e = (b + m - 1) / m, sum = 0, big = 0;
+    if (e > n)
+        e = n;
+    if (e - s > 3)
+        e = s + 3;
+    t->s = (uint16_t)s;
+    t->n = (uint8_t)(e - s);
+    for (int k = s; k < e; k++) {
+        int lo = a > k * m ? a : k * m, hi = b < (k + 1) * m ? b : (k + 1) * m;
+        int w = ((hi - lo) * 4096 + n / 2) / n;
+        t->w[k - s] = (uint16_t)w;
+        sum += w;
+        if (w > t->w[big])
+            big = k - s;
+    }
+    t->w[big] = (uint16_t)(t->w[big] + 4096 - sum);
+}
+
+uint32_t wf_pf_scale_bytes(int dw)
+{
+    uint32_t t = ((uint32_t)dw * sizeof(struct wf_pf_tap) + 3) & ~3u;
+    uint32_t c = ((uint32_t)(dw / 2) * sizeof(struct wf_pf_tap) + 3) & ~3u;
+    return t + c + 4u * (uint32_t)dw * 2;
+}
+
+int wf_pf_scale_init(struct wf_pf_scale *S, wf_pf_rowfn *row, void *ctx, int sw, int sh, int dw, int dh, uint8_t *mem,
+                     uint32_t n)
+{
+    if (((sw | dw) & 1) || dw < 2 || dh < 1 || dw > sw || dh > sh || dw * 2 <= sw || dh * 2 <= sh || sh > 32767
+        || sw > 32767 || !mem || ((uintptr_t)mem & 3) || n < wf_pf_scale_bytes(dw))
+        return -1;
+    S->row = row;
+    S->ctx = ctx;
+    S->sw = sw;
+    S->sh = sh;
+    S->dw = dw;
+    S->dh = dh;
+    S->tx = (struct wf_pf_tap *)mem;
+    uint8_t *p = mem + (((uint32_t)dw * sizeof(struct wf_pf_tap) + 3) & ~3u);
+    S->tc = (struct wf_pf_tap *)p;
+    p += ((uint32_t)(dw / 2) * sizeof(struct wf_pf_tap) + 3) & ~3u;
+    for (int k = 0; k < 3; k++) {
+        S->cache[k] = p;
+        S->tag[k] = -1;
+        p += dw * 2;
+    }
+    S->out = p;
+    for (int x = 0; x < dw; x++)
+        pf_tap(&S->tx[x], x, sw, dw);
+    for (int x = 0; x < dw / 2; x++)
+        pf_tap(&S->tc[x], x, sw / 2, dw / 2);
+    return 0;
+}
+
+/* source row b (UYVY: U Y0 V Y1 per pair, U / V signed) resampled across into o (dw px): Y per pixel, U / V per pair */
+static void pf_hrow(const struct wf_pf_scale *S, const uint8_t *b, uint8_t *o)
+{
+    for (int x = 0; x < S->dw; x++) {
+        const struct wf_pf_tap *t = &S->tx[x];
+        int acc = 0;
+        for (int k = 0; k < t->n; k++) {
+            int j = t->s + k;
+            acc += b[(j >> 1) * 4 + 1 + (j & 1) * 2] * t->w[k];
+        }
+        o[(x >> 1) * 4 + 1 + (x & 1) * 2] = (uint8_t)((acc + 2048) >> 12);
+    }
+    for (int p = 0; p < S->dw / 2; p++) {
+        const struct wf_pf_tap *t = &S->tc[p];
+        int au = 0, av = 0;
+        for (int k = 0; k < t->n; k++) {
+            const uint8_t *q = b + (t->s + k) * 4;
+            au += (int8_t)q[0] * t->w[k];
+            av += (int8_t)q[2] * t->w[k];
+        }
+        o[p * 4] = (uint8_t)((au + 2048) >> 12);
+        o[p * 4 + 2] = (uint8_t)((av + 2048) >> 12);
+    }
+}
+
+uint32_t *wf_pf_scale_row(void *ctx, int y)
+{
+    struct wf_pf_scale *S = ctx;
+    struct wf_pf_tap t;
+    const uint8_t *r[3];
+    pf_tap(&t, y, S->sh, S->dh);
+    for (int k = 0; k < t.n; k++) {
+        int j = t.s + k, c = j % 3;
+        if (S->tag[c] != j) {
+            pf_hrow(S, (const uint8_t *)S->row(S->ctx, j), S->cache[c]);
+            S->tag[c] = j;
+        }
+        r[k] = S->cache[c];
+    }
+    if (t.n == 1)
+        return (uint32_t *)r[0];
+    uint8_t *o = S->out;
+    for (int i = 0, nb = S->dw * 2; i < nb; i += 2) {
+        int c = 0, l = 0;
+        for (int k = 0; k < t.n; k++) {
+            c += (int8_t)r[k][i] * t.w[k];
+            l += r[k][i + 1] * t.w[k];
+        }
+        o[i] = (uint8_t)((c + 2048) >> 12);
+        o[i + 1] = (uint8_t)((l + 2048) >> 12);
+    }
+    return (uint32_t *)o;
+}

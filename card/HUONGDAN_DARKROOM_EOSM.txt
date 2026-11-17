@@ -183,14 +183,18 @@ VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như
 - Thứ tự mỗi kiểu: ghi bản in vào ROLLS, đọc lại kiểm tra; ghi file tạm IMG_nnnn.WFT cạnh
   JPG trong DCIM, đọc lại kiểm tra; rồi mới đổi tên đè lên IMG_nnnn.JPG. CR2 không bao
   giờ bị đụng. Bước nào lỗi thì JPG của Canon giữ nguyên, log ghi rõ "camera JPEG kept".
-- Frame Off: file trong DCIM giống hệt bản in trong ROLLS. Có viền: file trong DCIM là
-  phần ẢNH (không viền, không chữ) đúng cỡ 5184x3456 như Canon, vì máy Canon có thể không
-  mở được ảnh khác cỡ; bản có viền nằm trong ROLLS.
+- Frame Off: file trong DCIM giống hệt bản in trong ROLLS. Có viền (17/11): file trong
+  DCIM là CẢ bản in (viền, dòng chữ thông số, ngày, logo Canon + chữ EOS M) thu vào đúng
+  cỡ 5184x3456 như Canon (máy Canon có thể không mở được ảnh khác cỡ). Khung được sắp lại
+  quanh ảnh thu nhỏ (ngang 4320x2880, dọc 4560x3040 với viền mỏng có chữ), chữ và logo vẽ
+  lại ở cỡ đó cho nét; phần thừa hai bên (hoặc trên dưới) tô cùng màu viền. Bản in đủ cỡ
+  (5408x4144) vẫn nằm trong ROLLS. Thiếu bộ nhớ thì như cũ: chỉ phần ảnh 5184x3456.
 - Ảnh thu nhỏ trong EXIF (160x120, máy dùng khi xem lại / lưới ảnh) được thay bằng ảnh
   của bản in, ở cả hai file.
-- Log mỗi kiểu: "dark: F01 camera JPEG IMG_0208.JPG overwritten: the print, NN KB" (hoặc
-  "the picture 5184x3456" khi có viền). Không có JPG (chụp chỉ RAW): "not there: not
-  overwritten".
+- Log mỗi kiểu: "dark: F01 camera JPEG IMG_0208.JPG overwritten: the print, NN KB" (khi có
+  viền: "the print fitted 5184x3456", trước đó một dòng "camera JPEG: the print fitted
+  5184x3456, picture 4320x2880 at 432,96, logo"; "the picture 5184x3456" = thiếu bộ nhớ,
+  chỉ phần ảnh). Không có JPG (chụp chỉ RAW): "not there: not overwritten".
 - CHƯA THỬ ĐƯỢC trên máy thật: máy Canon có mở và hiện ảnh thu nhỏ của file đã đè hay
   không (giả lập không có phần xem lại của Canon). Lần đầu thử nên dùng cuộn ngắn.
 

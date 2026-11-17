@@ -887,9 +887,21 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     back and checked; then renamed over `IMG_nnnn.JPG` (`wf_frename`). The CR2 is never touched. Any step failing
     leaves the camera's JPEG (or, if only the rename failed after its removal, the print in the .WFT, logged).
   - Check = FNV-1a of every byte outside the APP1 while writing, compared on read-back, plus the APP1 bytes compared.
-  - Frame Off: the .WFT is the roll print's bytes. Frame On: a second encode of the picture alone at Canon's
-    5184 x 3456 with the Exif size set back, so Canon's playback sees the size it made (a framed canvas could be
-    refused).
+  - Frame Off: the .WFT is the roll print's bytes. Frame On (owner 2026-11-17, RAWB23: the DCIM file "has the film
+    colour but no frame, date, logo or caption"): a second encode of the whole print fitted into Canon's 5184 x 3456
+    with the Exif size set back, so Canon's playback sees the size it made (a bigger canvas could be refused).
+    `dk_fit` (`src/wf_dark.c`): `wf_pf_fit` lays the frame out natively round the biggest picture (3:2 kept, at least
+    half size) whose canvas fits: landscape thin frame with the details = picture 4320 x 2880 in a 4512 x 3456 frame,
+    portrait = 4560 x 3040 in 5168 x 3232 (shown 3232 x 5168); borders, caption band and logo at that size, the print
+    fonts at their own size (the text reads as on the print; a line that no longer fits the narrower picture drops
+    its last items, as on the print). `wf_pf_pad` centres it on 5184 x 3456, the margin in the frame colour. The
+    caption band and the logo maps are drawn again from what `dk_finish` left in the scratch (fonts and logo pack in
+    the 512 KB pack area, the shot, the roll text); the picture, date stamp included, is area-resampled from the
+    developed frame (`wf_pf_scale`, `src/wf_print.c`: Q12 overlap weights, each source row resampled across once, 3
+    rows cached, ~97 KB). Chosen over shrinking the finished 5408 x 4144 print: the text and logo are drawn sharp at
+    their final size, and only the picture is resampled. Memory: the roll print is written and checked by then, so
+    its band, row buffer and maps are reused (the fitted band is smaller); `dk_fin_need` also counts the fitted
+    print's need with Overwrite. No fit or no room: the picture alone at 5184 x 3456, as before, logged.
   - Exif thumbnail (both the roll print and the DCIM file): Canon's 160 x 120 IFD1 JPEG is replaced by ours of the
     print (`wf_dk_xthumb_*`, `src/wf_darkp.c`): the band rows are averaged into 160 x 120 while encoding, encoded at
     q90 down to q40 until it fits the slot (the IFD1 JPEG to the APP1's end when only zeros follow), our JFIF APP0
@@ -905,8 +917,10 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
 - **Text.** `dark: F07 frame white o1 5408x4144 (Exif size set), band .. KB, ..ms`,
   `dark: F07 caption <line 1> | <line 2> | <line 3>`, `dark: F07 date stamp 06 03 '24 o1 ..ms`,
   `dark: F07 logo Canon 529x111 + lettering Canon EOS M, .. KB`, `dark: F07 print Exif thumbnail 160x120 q90 .. B`,
-  `dark: F07 camera JPEG IMG_0208.JPG overwritten: the picture 5184x3456, .. KB, ..ms` (or `the print` with Frame
-  Off); every refusal names the step and says "camera JPEG kept".
+  `dark: F07 camera JPEG: the print fitted 5184x3456, picture 4320x2880 at 432,96, logo`, `dark: F07 camera JPEG
+  caption ...`, `dark: F07 camera JPEG IMG_0208.JPG overwritten: the print fitted 5184x3456, .. KB, ..ms` (or `the
+  print` with Frame Off, `the picture 5184x3456` when it could not be fitted); every refusal names the step and says
+  "camera JPEG kept".
 - **Checks.**
   - `tests/host/wf_dark_test.c`: layouts for every frame / info / orientation, Exif parsing in both byte orders,
     caption and date text, the pack, band text, stamp place and colour, frame-Off identity. A `finish` mode prints
@@ -917,8 +931,12 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     the picture, caption and border placements, EOS M and 5D2 lettering. `tests/host/wf_dark_test.c` units: the pack
     parser (bad magic / FNV / sizes, maker key), placement, maps, the thumbnail slot and put.
   - `test.sh` ROLL:jpeg (real RAW+L pairs through the module under qemu): Keep leaves DCIM byte for byte; Overwrite
-    with Frame Off = the DCIM JPEG is the roll print's bytes; with a frame + logo = the DCIM JPEG is 5184 x 3456 with
-    the Exif size set back while the roll print is framed; no .WFT left, CR2s unchanged, a missing JPEG is logged and
+    with Frame Off = the DCIM JPEG is the roll print's bytes; with a frame + logo = the DCIM JPEG is the print fitted
+    into 5184 x 3456 (the layout lines: picture 4320 x 2880 at 432,96 landscape, 4560 x 3040 at 104,208 portrait, the
+    logo) with the Exif size set back while the roll print is framed full size; `wf_pf_fit` / `wf_pf_pad` for every
+    frame / info / orientation, `wf_pf_scale` within 1.25 of the exact area mean (two roundings), chroma flat, half
+    size and short memory refused; `WF_OW_OUT=dir` keeps these DCIM files and adds a black frame roll (the owner's
+    preview images); no .WFT left, CR2s unchanged, a missing JPEG is logged and
     skipped, both files carry our Exif thumbnail.
   - `tests/ui/dr_ui_test.c` 3b: the PRINT rows (Camera JPEG the fourth) and the easel sketch.
   - The 5D2 has no Darkroom: `wf_print.o` and WFPRINT.DAT are EOS M only.

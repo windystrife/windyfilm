@@ -20,6 +20,8 @@
  *                     composed into a row buffer (wf_pf_rows)
  *   wf_pf_stamp       the date in orange seven-segment digits with a glow, drawn into the picture (procedural)
  *   wf_pf_line1 / 2, wf_pf_date   caption and date text from struct wf_dk_shot (wf_darkp.h: Exif / CR2 tags)
+ *   wf_pf_fit / pad   the framed print fitted into the camera's own size (Camera JPEG Overwrite), wf_pf_scale the
+ *                     picture area-resampled for it
  *   wf_pf_logo        the logo pack ML/DATA/WFLOGO.DAT (owner 11-16; tools/mk_wflogo.py at card time from the owner's
  *                     private wordmark SVG): the maker's wordmark and our lettering of the model, placed in the frame band
  *                     (wf_pf_logo_place), scaled into coverage maps (wf_pf_logo_maps) that wf_pf_rows draws in colour */
@@ -46,6 +48,8 @@ enum { WF_PDT_OFF = 0, WF_PDT_YMD, WF_PDT_DMY, WF_PDT_MDY, WF_PDT_N };          
 #define WF_PF_BD_WIDE 256                        /* "wide": about 7 % */
 #define WF_PF_CAP     464                        /* the caption under the picture adds this to the bottom border */
 
+typedef uint32_t *wf_pf_rowfn(void *ctx, int y);
+
 struct wf_pf_lay {
     int frame, info, orient;                     /* the settings; Exif orientation 1 / 3 / 6 / 8 (else 1) */
     int iw, ih;                                  /* the picture as stored */
@@ -60,6 +64,33 @@ struct wf_pf_lay {
 };
 /* 0 = the canvas is the picture (frame Off); 1 = a frame */
 int wf_pf_layout(struct wf_pf_lay *L, int frame, int info, int iw, int ih, int orient);
+
+/* ------------------------------------------------------------------ the camera's size (owner 2026-11-17)
+ * Camera JPEG Overwrite with a frame: the DCIM file is the whole print (frame, caption, date, logo) at the camera's own
+ * W x H (Canon's playback opens the size it made). wf_pf_fit lays the frame out natively round the biggest picture
+ * (iw:ih kept, at least half size) whose canvas fits W x H: borders, caption band and logo at that picture's size, the
+ * print fonts at their own; draw the band and the logo maps on that layout, then wf_pf_pad centres the canvas on W x H,
+ * the margin in the frame colour (the rows only: dw / dh / bd / bb no longer describe it). 1 = laid out; 0 = frame
+ * Off or no fit (L = the plain W x H canvas of the picture). */
+int  wf_pf_fit(struct wf_pf_lay *L, int frame, int info, int iw, int ih, int orient, int W, int H);
+void wf_pf_pad(struct wf_pf_lay *L, int W, int H);
+/* the picture (row(ctx, y), sw x sh UYVY) area-resampled to dw x dh (dw <= sw < 2 dw, dh <= sh < 2 dh, sw / dw even):
+   each source row resampled across once (3 cached), rows down as asked (in order: wf_pf_rows_fn's). mem =
+   wf_pf_scale_bytes(dw), 4-aligned. wf_pf_scale_row is a wf_pf_rowfn (ctx = the struct): its row lasts to the next
+   call */
+struct wf_pf_tap { uint16_t s; uint8_t n, pad; uint16_t w[3]; };   /* n source samples from s, Q12 weights (sum 4096) */
+struct wf_pf_scale {
+    wf_pf_rowfn *row;
+    void *ctx;
+    int sw, sh, dw, dh;
+    struct wf_pf_tap *tx, *tc;                   /* luma per column (dw), chroma per pair (dw / 2) */
+    uint8_t *cache[3], *out;                     /* source rows resampled across (dw px), the row handed out */
+    int tag[3];
+};
+uint32_t wf_pf_scale_bytes(int dw);
+int wf_pf_scale_init(struct wf_pf_scale *S, wf_pf_rowfn *row, void *ctx, int sw, int sh, int dw, int dh, uint8_t *mem,
+                     uint32_t n);                /* 0 = ok, -1 = sizes or memory refused */
+uint32_t *wf_pf_scale_row(void *S, int y);
 
 /* ------------------------------------------------------------------ print font pack */
 #define WF_PF_NFONT  2                           /* 0: caption line 1 (84 px, medium); 1: lines 2 / 3, roll (62 px) */
@@ -103,7 +134,6 @@ int wf_pf_band_rows(const struct wf_pf_lay *L, int cy, const uint32_t *img, int 
    y) = the picture's row y. _fn bands: the picture's own rows only when the 16 rows are one run of ipitch bytes, else
    copied into rowbuf; -1 = they are not and rowbuf is 0. wf_pf_rows / wf_pf_band_rows / wf_pf_stamp are these with
    img + y * ipitch (same bytes as before) */
-typedef uint32_t *wf_pf_rowfn(void *ctx, int y);
 void wf_pf_rows_fn(const struct wf_pf_lay *L, int cy, int n, wf_pf_rowfn *row, void *ctx, const uint8_t *band,
                    uint32_t *out);
 int wf_pf_band_rows_fn(const struct wf_pf_lay *L, int cy, wf_pf_rowfn *row, void *ctx, int ipitch, const uint8_t *band,

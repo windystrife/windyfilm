@@ -95,6 +95,7 @@
 #include "wf_dev.h"
 #include "wf_darkp.h"
 #include "wf_cr2.h"
+#include "wf_print.h"
 /* this build's input curve decode tables (generated header, static copies for the checks) */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-const-variable"
@@ -6310,11 +6311,83 @@ static const unsigned char *jp_thumb(const unsigned char *b, long n, uint32_t *l
         }
     return b + 2 + off;
 }
+/* the fitted print's resample (wf_pf_scale) on a 600 x 400 test picture: its rows, and the exact area mean of an output
+   pixel's source area (doubles) */
+static uint8_t *sc_img;
+static uint32_t *sc_row(void *c, int y) { (void)c; return (uint32_t *)(sc_img + y * 600 * 2); }
+static double sc_area(int x, int y, int dw, int dh)
+{
+    double a = x * 600.0 / dw, b = (x + 1) * 600.0 / dw, c = y * 400.0 / dh, d = (y + 1) * 400.0 / dh, s = 0;
+    for (int j = (int)c; j < d; j++) {
+        double wy = fmin(d, j + 1) - fmax(c, j);
+        for (int k = (int)a; k < b; k++)
+            s += (fmin(b, k + 1) - fmax(a, k)) * wy * sc_img[(j * 600 + k) * 2 + 1];
+    }
+    return s / ((b - a) * (d - c));
+}
+
 static void t_roll_jpeg(void)
 {
 #ifdef WF_BUILD_5D2
     chk(1, "5D2: no darkroom");
 #else
+    {   /* Camera JPEG Overwrite with a frame (owner 11-17): the print fitted into 5184 x 3456 (wf_pf_fit / wf_pf_pad)
+           and its picture's area resample (wf_pf_scale) */
+        struct wf_pf_lay P;
+        int f1 = wf_pf_fit(&P, WF_PFR_WHITE, WF_PIN_ROLL, 5184, 3456, 1, 5184, 3456);
+        int s1 = P.iw == 4320 && P.ih == 2880 && P.cw == 4512 && P.ch == 3456 && P.ix == 96 && P.ty == 2976;
+        wf_pf_pad(&P, 5184, 3456);
+        int p1 = P.cw == 5184 && P.ch == 3456 && P.ix == 432 && P.iy == 96 && P.tx == 432 && P.ty == 2976;
+        int f6 = wf_pf_fit(&P, WF_PFR_BLACK, WF_PIN_ROLL, 5184, 3456, 6, 5184, 3456);
+        int s6 = P.iw == 4560 && P.ih == 3040 && P.cw == 5168 && P.ch == 3232;
+        wf_pf_pad(&P, 5184, 3456);
+        int p6 = P.ix == 104 && P.iy == 208 && P.cw == 5184 && P.ch == 3456;
+        int f0 = wf_pf_fit(&P, WF_PFR_OFF, WF_PIN_ROLL, 5184, 3456, 1, 5184, 3456), all = 0, nall = 0;
+        static const int ors[4] = { 1, 3, 6, 8 };
+        for (int fr = WF_PFR_WHITE; fr < WF_PFR_N; fr++)
+            for (int in = 0; in < WF_PIN_N; in++)
+                for (int k = 0; k < 4; k++) {
+                    struct wf_pf_lay Q;
+                    nall++;
+                    if (!wf_pf_fit(&Q, fr, in, 5184, 3456, ors[k], 5184, 3456) || Q.iw * 2 <= 5184 || (Q.iw & 1))
+                        continue;
+                    wf_pf_pad(&Q, 5184, 3456);
+                    all += Q.cw == 5184 && Q.ch == 3456 && !(Q.ix & 1) && Q.ix >= 0 && Q.iy >= 0 && Q.ix + Q.iw <= 5184
+                           && Q.iy + Q.ih <= 3456
+                           && (!Q.tw || (!(Q.tx & 1) && Q.tx + Q.tw <= 5184 && Q.ty + Q.th <= 3456));
+                }
+        chk(f1 && s1 && p1 && f6 && s6 && p6 && !f0 && all == nall, "fit: landscape %d %d %d, portrait %d %d %d, "
+            "Off %d, every frame / info / orientation %d of %d inside 5184x3456", f1, s1, p1, f6, s6, p6, !f0, all,
+            nall);
+        sc_img = malloc(600 * 400 * 2);
+        uint32_t sn = wf_pf_scale_bytes(500);
+        uint8_t *mem = malloc(sn);
+        for (int y = 0; sc_img && y < 400; y++)
+            for (int x = 0; x < 600; x++) {
+                sc_img[(y * 600 + x) * 2 + 1] = (uint8_t)((x * 37 + y * 11 + (x * y >> 7)) & 255);
+                sc_img[(y * 600 + x) * 2] = (uint8_t)(x & 1 ? -20 : 10);   /* U 10, V -20 */
+            }
+        struct wf_pf_scale S;
+        int ok = sc_img && mem && wf_pf_scale_init(&S, sc_row, 0, 600, 400, 500, 334, mem, sn) == 0, flat = 1;
+        double worst = 0;
+        for (int y = 0; ok && y < 334; y++) {
+            const uint8_t *r = (const uint8_t *)wf_pf_scale_row(&S, y);
+            for (int x = 0; x < 500; x++) {
+                double e = fabs(r[2 * x + 1] - sc_area(x, y, 500, 334));
+                if (e > worst)
+                    worst = e;
+                if (!(x & 1) && ((int8_t)r[2 * x] != 10 || (int8_t)r[2 * x + 2] != -20))
+                    flat = 0;
+            }
+        }
+        int half = mem && wf_pf_scale_init(&S, sc_row, 0, 600, 400, 300, 334, mem, sn) == 0;
+        int small = mem && wf_pf_scale_init(&S, sc_row, 0, 600, 400, 500, 334, mem, sn - 4) == 0;
+        chk(ok && worst <= 1.25 && flat && !half && !small, "scale: 600x400 to 500x334 within %.2f of the area mean, "
+            "chroma flat %d, half size refused %d, short memory refused %d", worst, flat, !half, !small);
+        free(sc_img);
+        free(mem);
+        sc_img = 0;
+    }
     const char *dir = getenv("WF_DARK_CR2");
     char t[300];
     if (!dir)
@@ -6462,16 +6535,25 @@ static void t_roll_jpeg(void)
         char d[64], e[80];
         long n = 0;
         snprintf(d, sizeof d, "DCIM/100CANON/IMG_%04d.JPG", 507 + i);
-        snprintf(e, sizeof e, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the picture 5184x3456", i + 1, 507 + i);
+        snprintf(e, sizeof e, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the print fitted 5184x3456", i + 1,
+                 507 + i);
         char *b = get_file(d, &n);
+        long pn = 0;
+        char *pb = mem_print(3, i, 507 + i, &pn);
         int w = 0, h = 0, eoi = b && n > 2 && (unsigned char)b[n - 2] == 0xFF && (unsigned char)b[n - 1] == 0xD9;
         uint32_t tl = 0;
         const unsigned char *tp = b ? jp_thumb((unsigned char *)b, n, &tl) : 0;
         chk(b && eoi && mem_dims((unsigned char *)b, n, &w, &h) && w == 5184 && h == 3456 && log_has(e)
-            && memmem(b, (size_t)(n < 65536 ? n : 65536), "WindyFilm Darkroom", 18) && tp && tl > 1000,
-            "frame: IMG_%04d.JPG the picture %dx%d, our comment + thumbnail (%u B) ('%s')", 507 + i, w, h, tl, log_line(e));
+            && memmem(b, (size_t)(n < 65536 ? n : 65536), "WindyFilm Darkroom", 18) && tp && tl > 1000 && pb && pn != n,
+            "frame: IMG_%04d.JPG the print fitted %dx%d (%ld B, the roll print %ld B), our comment + thumbnail (%u B) "
+            "('%s')", 507 + i, w, h, n, pn, tl, log_line(e));
         free(b);
+        free(pb);
     }
+    chk(log_has("dark: F01 camera JPEG: the print fitted 5184x3456, picture 4320x2880 at 432,96, logo")
+        && log_has("dark: F02 camera JPEG: the print fitted 5184x3456, picture 4560x3040 at 104,208, logo")
+        && log_has("dark: F01 camera JPEG caption "), "frame: the print laid out again round the picture scaled down "
+        "('%s', '%s')", log_line("dark: F01 camera JPEG: the print"), log_line("dark: F02 camera JPEG: the print"));
     chk(log_has("dark: F03 camera JPEG IMG_0509.JPG not there: not overwritten") && access("DCIM/100CANON/IMG_0509.JPG",
         F_OK) != 0, "frame: no JPEG for F03, none made ('%s')", log_line("dark: F03 camera JPEG"));
     chk(jp_cr2s(dir, 507) && !jp_wft(507), "frame: CR2s untouched, no .WFT");
@@ -6487,6 +6569,28 @@ static void t_roll_jpeg(void)
             }
         chk(dims && w > 5184 && h > 3456, "frame: F%02d print %dx%d (framed)", i + 1, w, h);
         free(b);
+    }
+    const char *ow = getenv("WF_OW_OUT");
+    if (ow) {                                    /* previews for the owner: these DCIM files, then a black frame roll */
+        char s[64], d[300];
+        int okw = 1, okb = 1;
+        for (int i = 0; i < 2; i++) {
+            snprintf(s, sizeof s, "DCIM/100CANON/IMG_%04d.JPG", 507 + i);
+            snprintf(d, sizeof d, "%s/ow_white_F%02d.JPG", ow, i + 1);
+            okw &= mem_copy(s, d);
+        }
+        wf_pr_frame = WF_PFR_BLACK;
+        chk(mem_roll(film, 4, dir, 510), "roll 004: 3 frames (%d)", wf_roll_now()->nshot);
+        mem_run("frame black", 4);
+        for (int i = 0; i < 3; i++) {
+            char e[80];
+            snprintf(e, sizeof e, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the print fitted 5184x3456", i + 1,
+                     510 + i);
+            snprintf(s, sizeof s, "DCIM/100CANON/IMG_%04d.JPG", 510 + i);
+            snprintf(d, sizeof d, "%s/ow_black_F%02d.JPG", ow, i + 1);
+            okb &= log_has(e) && mem_copy(s, d);
+        }
+        chk(okw && okb, "previews in %s: white %d, black %d", ow, okw, okb);
     }
     wf_pr_frame = 0;
     wf_pr_info = 1;
