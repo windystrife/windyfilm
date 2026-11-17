@@ -865,7 +865,7 @@ int wf_clock_ymd(void)
 }
 
 /* print finishes (wf_dark.h, DESIGN 3.9): the settings; a run takes them at its start */
-volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2;
+volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2, wf_pr_cr2;
 volatile int wf_dk_scr;                          /* Screen Off (wf_dark.h, DESIGN 3.11): read live, a run follows a change */
 volatile int wf_roll_look8;                      /* a JPEG 8-bit roll (wf_dark.h, DESIGN 3.14): config rolllook=, read live */
 void wf_roll_look8_set(int on)
@@ -929,6 +929,7 @@ static int dk_pjp;                               /* this run's Camera JPEG (wf_p
                                                     print also replaces the shot's own JPEG; WF_PJ_BOTH = with a frame
                                                     the picture there and the print in a second JPEG */
 static int dk_pj2;                               /* and where that second JPEG goes (wf_pr_jpg2: WF_J2_*) */
+static int dk_pcr;                               /* RAW after Darkroom (wf_pr_cr2): 1 = Move to ROLLS (dk_cr2_move) */
 
 static int dk_battery(void)
 {
@@ -1907,14 +1908,16 @@ static int dk_dcim_put(int i, const char *dst, const char *nm, const char *verb,
  * shot's JPEG becomes the picture alone at 5184 x 3456 (as Overwrite was up to RAWB23) and a second JPEG holds the
  * print fitted into 5184 x 3456: WFP_nnnn.JPG beside it (config jpeg2=prefix) or NNNWFILM/WFP_nnnn.JPG (jpeg2=folder),
  * DESIGN 3.9 says why; frame Off = Overwrite, one file. A JPEG missing (RAW only) or without Canon's Exif: nothing.
- * Returns DK_STOP when stopped, else DK_OK: the print is done. */
+ * Returns DK_STOP when stopped, else DK_OK: the print is done. *jok = 1 when every JPEG it makes is written and read
+ * back (RAW after Darkroom moves the CR2 only then, dk_cr2_move). */
 static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr *pw, uint8_t *app1, uint32_t al,
-                     const struct wf_pf_lay *L, uint32_t *rowbuf, const char *look)
+                     const struct wf_pf_lay *L, uint32_t *rowbuf, const char *look, int *jok)
 {
     int t0 = get_ms_clock(), b = 0, n = 0;
     char tmp[96], d2[96], dir2[64];
     struct wf_fe e = { 0, 0 };
     uint32_t sz = 0;
+    *jok = 0;
     while (jpg[n])
         n++;
     for (b = n; b > 0 && jpg[b - 1] != '/';)
@@ -1942,8 +1945,10 @@ static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr
     int two = dk_pjp == WF_PJ_BOTH && L->frame;
     int r1 = dk_dcim_put(i, jpg, jpg + b, "overwritten", !L->frame ? DK_CJ_COPY : two ? DK_CJ_PIC : DK_CJ_FIT, 0, out,
                          pw, app1, al, L, rowbuf, look);
-    if (r1 == DK_STOP || !two)
+    if (r1 == DK_STOP || !two) {
+        *jok = r1 == DK_OK;
         return r1 == DK_STOP ? DK_STOP : DK_OK;
+    }
     int k = wf_roll_jpg2(jpg, dk_pj2 == WF_J2_FOLDER, "JPG", dir2, sizeof dir2, d2, sizeof d2);
     if (k < 0) {
         wf_log("dark: F%02d camera JPEG: no second name for %s: the print stays in ROLLS only", i + 1, jpg + b);
@@ -1960,14 +1965,155 @@ static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr
     int r2 = dk_dcim_put(i, d2, d2 + c, "written", DK_CJ_FIT, 1, out, pw, app1, al, L, rowbuf, look);
     if (r2 == DK_STOP)
         return DK_STOP;
+    *jok = r1 == DK_OK && r2 == DK_OK;
     wf_log("dark: F%02d camera JPEG: %d of 2 files in DCIM, %dms", i + 1, (r1 == DK_OK) + (r2 == DK_OK),
            get_ms_clock() - t0);
     return DK_OK;
 }
 
+/* RAW after Darkroom "Move to ROLLS" (owner 11-17, DESIGN 3.9): once the frame's camera JPEG(s) are written and read
+ * back (jok), its CR2 leaves DCIM for the roll's first ROLLS folder (mv, wf_roll_cr2_moved), bytes unchanged, so
+ * Canon's PLAY finds only our JPEG; the shelf and develop again read it there. EOS M: a rename (its ML core's
+ * FIO_RenameFile is Canon's own), ok when the source is gone and the target has its size; a rename that leaves the
+ * source in place falls back to the copy. 5D2 (its ML core's FIO_RenameFile is a copy + remove that reads nothing
+ * back): the copy. The copy: through M.dma into a new file, then both files read back in DK_RD chunks and compared byte
+ * for byte (M.in holds the source's: the decoder's input, free after the decode), and only then the source removed;
+ * whatever fails, the copy goes and the CR2 stays in DCIM. A target already there: the same bytes = the source
+ * removed, else both kept. One log line a frame. */
+static const char *dk_base(const char *p)       /* the file name of a path */
+{
+    const char *b = p;
+    for (; *p; p++)
+        if (*p == '/')
+            b = p + 1;
+    return b;
+}
+static int dk_neq(const uint8_t *a, const uint8_t *b, uint32_t n)   /* (no memcmp in the module's imports); words while
+                                                                      both are aligned (M.in, M.dma: allocations) */
+{
+    uint32_t w = ((uintptr_t)a | (uintptr_t)b) & 3 ? 0 : n >> 2;
+    const uint32_t *x = (const uint32_t *)(const void *)a, *y = (const uint32_t *)(const void *)b;
+    for (uint32_t k = 0; k < w; k++)
+        if (x[k] != y[k])
+            return 1;
+    for (uint32_t k = w << 2; k < n; k++)
+        if (a[k] != b[k])
+            return 1;
+    return 0;
+}
+static int dk_cr2_same(const char *a, const char *b, uint32_t n)   /* 0 = n bytes the same; -1 open, -2 read, -3 not the
+                                                                       same, -4 stopped */
+{
+    void *f = FIO_OpenFile(a, 0), *g = WF_FH_OK(f) ? FIO_OpenFile(b, 0) : 0;
+    int rc = WF_FH_OK(f) && WF_FH_OK(g) ? 0 : -1;
+    for (uint32_t at = 0; !rc && at < n; at += DK_RD) {
+        uint32_t k = n - at > DK_RD ? DK_RD : n - at;
+        if (FIO_ReadFile(f, M.dma, k) != (int)k)
+            rc = -2;
+        else {
+            memcpy(M.in, M.dma, k);              /* (M.in: DK_IN = DK_RD bytes) */
+            rc = FIO_ReadFile(g, M.dma, k) != (int)k ? -2 : dk_neq(M.in, M.dma, k) ? -3 : dk_should_stop() ? -4 : 0;
+        }
+        if (!rc)
+            dk_yield();
+    }
+    if (WF_FH_OK(g))
+        FIO_CloseFile(g);
+    if (WF_FH_OK(f))
+        FIO_CloseFile(f);
+    return rc;
+}
+static const char *const dk_cp_why[] = { "", "open", "create", "read", "write", "size", "read back", "not the same",
+                                         "stopped" };
+static int dk_cr2_copy(const char *src, const char *dst, uint32_t n)   /* 0 = copied and read back, else dk_cp_why's */
+{
+    struct wf_fe e = { 0, 0 };
+    uint32_t sz = 0;
+    void *f = FIO_OpenFile(src, 0), *o = WF_FH_OK(f) ? wf_fopen_w(dst, WF_FO_NEW, 0, &e) : 0;
+    int rc = !WF_FH_OK(f) ? 1 : !o ? 2 : 0;
+    for (uint32_t at = 0; !rc && at < n; at += DK_RD) {
+        uint32_t k = n - at > DK_RD ? DK_RD : n - at;
+        rc = FIO_ReadFile(f, M.dma, k) != (int)k ? 3 : FIO_WriteFile(o, M.dma, k) != (int)k ? 4 : dk_should_stop() ? 8 : 0;
+        if (!rc)
+            dk_yield();
+    }
+    if (o)
+        FIO_CloseFile(o);
+    if (WF_FH_OK(f))
+        FIO_CloseFile(f);
+    if (!rc && (FIO_GetFileSize(dst, &sz) != 0 || sz != n))
+        rc = 5;
+    int s = rc ? 0 : dk_cr2_same(src, dst, n);
+    return rc ? rc : s == -3 ? 7 : s == -4 ? 8 : s ? 6 : 0;
+}
+static void dk_cr2_move(int i, const char *cr2, const char *mv, const char *rn, int jok)
+{
+    int t0 = get_ms_clock(), renfail = 0, dl = mv ? (int)(dk_base(mv) - mv) - 1 : -1;
+    const char *nm = dk_base(cr2);
+    struct wf_fe e = { 0, 0 };
+    uint32_t sz = 0, dz = 0;
+    char dir[96];
+    if (!jok) {
+        wf_log("dark: F%02d %s kept in DCIM: its JPEG was not written", i + 1, nm);
+        return;
+    }
+    if (dl <= 0 || dl >= (int)sizeof dir || FIO_GetFileSize(cr2, &sz) != 0) {
+        wf_log("dark: F%02d %s kept in DCIM: %s", i + 1, nm, dl <= 0 || dl >= (int)sizeof dir ? "no ROLLS name"
+               : "not there");
+        return;
+    }
+    memcpy(dir, mv, (size_t)dl);
+    dir[dl] = 0;
+    if (wf_fmkdir(dir, &e) != 0) {
+        wf_log("dark: F%02d %s kept in DCIM: folder ROLLS/%s not made (%s %d)", i + 1, nm, rn, wf_fe_name(e.step), e.rc);
+        return;
+    }
+    if (FIO_GetFileSize(mv, &dz) == 0) {         /* that name there already: a run stopped after its copy, or the same
+                                                    number from another DCIM folder */
+        int same = dz == sz && dk_cr2_same(cr2, mv, sz) == 0;
+        if (same && wf_fremove(cr2, &e) == 0)
+            wf_log("dark: F%02d %s moved to ROLLS/%s/ (the same file was there, %d KB)", i + 1, nm, rn, (int)(sz >> 10));
+        else
+            wf_log("dark: F%02d %s kept in DCIM: ROLLS/%s/ has %s file of that name", i + 1, nm, rn,
+                   same ? "the same (not removed from DCIM)" : "another");
+        return;
+    }
+#ifndef WF_BUILD_5D2
+    if (wf_frename(cr2, mv, &e) == 0) {
+        if (FIO_GetFileSize(mv, &dz) == 0 && dz == sz)
+            wf_log("dark: F%02d %s moved to ROLLS/%s/ (renamed, %d KB, %dms)", i + 1, nm, rn, (int)(sz >> 10),
+                   get_ms_clock() - t0);
+        else
+            wf_log("dark: F%02d %s renamed to ROLLS/%s/ but it reads %d bytes, not %d", i + 1, nm, rn, (int)dz, (int)sz);
+        return;
+    }
+    if (FIO_GetFileSize(cr2, &dz) != 0) {        /* gone from DCIM and not in ROLLS: nothing left to copy */
+        wf_log("dark: F%02d %s rename to ROLLS/%s/ failed (%s %d) with the file gone from DCIM", i + 1, nm, rn,
+               wf_fe_name(e.step), e.rc);
+        return;
+    }
+    renfail = 1;                                 /* still in DCIM: the copy */
+#endif
+    int rc = dk_cr2_copy(cr2, mv, sz);
+    if (rc) {
+        if (FIO_GetFileSize(mv, &dz) == 0)
+            wf_fremove(mv, &e);
+        wf_log("dark: F%02d %s kept in DCIM: the copy to ROLLS/%s/ failed (%s%s)", i + 1, nm, rn, dk_cp_why[rc],
+               renfail ? ", after the rename failed" : "");
+        return;
+    }
+    if (wf_fremove(cr2, &e) != 0) {
+        wf_log("dark: F%02d %s copied to ROLLS/%s/ but not removed from DCIM (%s %d): both kept", i + 1, nm, rn,
+               wf_fe_name(e.step), e.rc);
+        return;
+    }
+    wf_log("dark: F%02d %s moved to ROLLS/%s/ (%scopied and read back, %d KB, %dms)", i + 1, nm, rn,
+           renfail ? "rename failed: " : "", (int)(sz >> 10), get_ms_clock() - t0);
+}
+
 static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
 {
-    char cr2[96], jpg[96], out[96], root[16], txt[200], t2[200];
+    char cr2[96], jpg[96], out[96], root[16], txt[200], t2[200], mv[96], rn[12];
     int t = get_ms_clock(), rc;
     dk_why = "";
     if (wf_roll_cr2(dkr, i, wf_dcim_dir(), wf_file_prefix(), "CR2", cr2, sizeof cr2) < 0
@@ -1976,13 +2122,20 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
         dk_why = "path";
         return DK_ERR;
     }
+    int mvk = wf_roll_cr2_moved(dkr->num, dkr->file[i], root, wf_file_prefix(), mv, sizeof mv);   /* RAW after Darkroom */
+    wf_roll_name(dkr->num, 1, rn);
     /* 1. load: head, the lossless JPEG header, the decode */
     dk_phase(WF_DP_LOAD, 0);
     dv.print_ready = 0;
     memset(dv_print, 0, sizeof dv_print);
     uint32_t fsize = 0;
-    if (FIO_GetFileSize(cr2, &fsize) != 0 || fsize < 4096) { dk_why = "no CR2"; return DK_ERR; }
-    void *f = FIO_OpenFile(cr2, 0);
+    const char *src_cr2 = cr2;
+    if (FIO_GetFileSize(cr2, &fsize) != 0 || fsize < 4096) {   /* moved beside the prints by RAW after Darkroom? */
+        if (mvk < 0 || FIO_GetFileSize(mv, &fsize) != 0 || fsize < 4096) { dk_why = "no CR2"; return DK_ERR; }
+        src_cr2 = mv;
+        wf_log("dark: F%02d %s read from ROLLS/%s/", i + 1, dk_base(mv), rn);
+    }
+    void *f = FIO_OpenFile(src_cr2, 0);
     if (!WF_FH_OK(f)) { dk_why = "open CR2"; return DK_ERR; }
     uint32_t nh = fsize < WF_CR2_HEAD ? fsize : WF_CR2_HEAD;
     rc = dk_read_at(f, 0, M.in, nh) ? WF_CR2_E_READ : wf_cr2_parse(M.in, nh, fsize, &dk_inf);
@@ -2134,8 +2287,12 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     rc = dk_encode(i, out, &L, al ? M.app1 + ao : 0, al, band, rowbuf, 0, &wr, dk_row, 0);
     if (rc != DK_OK)
         return rc;
-    if (dk_pjp != WF_PJ_KEEP)                    /* stopped in it: the print is done, the run stops at the next frame */
-        dk_camjpg(i, jpg, out, &wr, M.app1 + ao, al, &L, rowbuf, t2);
+    if (dk_pjp != WF_PJ_KEEP) {                  /* stopped in it: the print is done, the run stops at the next frame */
+        int jok = 0;
+        dk_camjpg(i, jpg, out, &wr, M.app1 + ao, al, &L, rowbuf, t2, &jok);
+        if (dk_pcr && src_cr2 == cr2)            /* RAW after Darkroom Move to ROLLS: once the JPEG(s) are in DCIM */
+            dk_cr2_move(i, cr2, mvk < 0 ? 0 : mv, rn, jok);
+    }
     dk_t[3] = get_ms_clock() - t;
     wf_dev_note(lk, WF_PATH_DARK, dk_t[0] + dk_t[1] + dk_t[2] + dk_t[3]);   /* the whole print, dry included (11-17) */
     *bytes = (int)wr.n;
@@ -2201,11 +2358,17 @@ static int dk_film_prev;                          /* the film loaded before a sh
 /* a run's roll file saved: the camera's (WFROLL.TXT), or a shelf roll's copy in its ROLLS folder */
 static int dk_save(void) { return dkr == &roll ? roll_save() : shelf_put(dkr, 0); }
 
-/* a frame of a shelf roll still to develop: its CR2 on the card? (gone: skipped, logged) */
+/* a frame of a shelf roll still to develop: its CR2 on the card, in DCIM or moved beside the prints by RAW after
+   Darkroom (ROLLS/ROLLnnn/)? (in neither: skipped, logged) */
 static int dk_has_cr2(void *ctx, int folder, int file)
 {
     const struct wf_roll *r = ctx;
-    if (roll_has_cr2(0, folder, file))
+    char root[16], mv[96];
+    uint32_t sz = 0;
+    if (roll_has_cr2(0, folder, file)
+        || (wf_roll_root(wf_dcim_dir(), root, sizeof root) >= 0
+            && wf_roll_cr2_moved(r->num, file, root, wf_file_prefix(), mv, sizeof mv) > 0
+            && FIO_GetFileSize(mv, &sz) == 0 && sz > 0))
         return 1;
     int i = 0;
     while (i < r->nshot - 1 && !(r->folder[i] == folder && r->file[i] == file))
@@ -2319,6 +2482,7 @@ static void dk_task(void)
     dk_pdt = wf_pr_date > WF_PDT_OFF && wf_pr_date < WF_PDT_N ? wf_pr_date : WF_PDT_OFF;
     dk_pjp = wf_pr_jpeg > WF_PJ_KEEP && wf_pr_jpeg < WF_PJ_N ? wf_pr_jpeg : WF_PJ_KEEP;
     dk_pj2 = wf_pr_jpg2 == WF_J2_FOLDER ? WF_J2_FOLDER : WF_J2_PREFIX;
+    dk_pcr = wf_pr_cr2 == WF_PC_MOVE;
     dk_pf_said = dk_lg_said = dk_wa_said = 0;
     dk_lgn = 0;
     if (dk_pfr && (FIO_GetFileSize(DK_LG_PACK, &dk_lgn) != 0 || dk_lgn < 40))
@@ -2330,6 +2494,13 @@ static void dk_task(void)
                : dk_pj2 == WF_J2_FOLDER ? "the picture over IMG_nnnn.JPG, the print in NNN" WF_J2_SUFFIX "/"
                  WF_J2_LETTERS "nnnn.JPG" : "the picture over IMG_nnnn.JPG, the print beside it as " WF_J2_LETTERS
                  "nnnn.JPG");
+    if (dk_pcr && dk_pjp == WF_PJ_KEEP)
+        wf_log("dark: RAW after Darkroom Move to ROLLS, but Camera JPEG is Keep: the CR2s stay in DCIM");
+    else if (dk_pcr) {
+        char rn[12];
+        wf_roll_name(dkr->num, 1, rn);
+        wf_log("dark: RAW after Darkroom Move to ROLLS: each CR2 goes to ROLLS/%s/ once its frame's JPEG is in DCIM", rn);
+    }
     dk_look(&lk);
     dk_disp_ons = dk_disp_miss = 0;
     int d0 = display_is_on(), lv0 = lv;

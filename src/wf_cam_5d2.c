@@ -206,12 +206,14 @@ static const struct wf_prb_cam prb_5d2 = {
 #define RB_RH        3804
 extern int drive_mode;
 
-/* the white when the raw has no clip pile-up to measure: ISO 640 clipped at 13318 (raw-path measurements); the other
-   1/3-stop-down ISOs are taken as the same family, the full stops as 15600 (ISO 2000 >= 15674 measured) */
+/* the white when the raw has no clip pile-up to measure: ISO 640 clipped at 13318 (raw-path measurements); 160, 320 and
+   1250 are taken as the same family (the Darkroom's own pile-ups: 13300, wf_darkp.c); the rest as 15600 (ISO 2000 >=
+   15674 measured). ISO 2500 / 5000 clip at 16268..16332 on the owner's 5D2 CR2s (dark-5d2), not at 13300: 15600 too
+   (RAWB26; under the clip, so a highlight stays white) */
 static int rb_white(int iso)
 {
     switch (iso) {
-    case 160: case 320: case 640: case 1250: case 2500: case 5000: return 13300;
+    case 160: case 320: case 640: case 1250: return 13300;
     }
     return 15600;
 }

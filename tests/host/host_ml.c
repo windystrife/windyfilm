@@ -33,9 +33,10 @@ int h_change_val[256];
 volatile int h_kelvin_n, h_kelvin_last, h_gm_last, h_ba_last;
 volatile int h_shoot_fail, h_heap_free = 8 << 20, h_arena_live;
 volatile int h_clock_add_ms;
-char h_fio_busy[128], h_fio_wpath[128];
+char h_fio_busy[128], h_fio_wpath[128], h_fio_ren_fail[128];
 static void *h_wf;                                  /* the open file of h_fio_wpath */
 volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy, h_fio_rm_open, h_fio_odd_fd, h_fio_cpath_n;
+volatile int h_fio_wflip;
 char h_fio_cpath[128];
 void *h_menu;
 volatile int h_menu_count;
@@ -472,7 +473,8 @@ void *FIO_CreateFile(const char *path)
 }
 int FIO_ReadFile(void *f, void *p, size_t n) { FILE *F = h_fd_get(f); return F ? (int)fread(p, 1, n, F) : -1; }
 /* h_fio_wmax > 0: the next write to a file opened by the path h_fio_wpath stops after that many bytes (a short write),
-   then writes are whole again */
+   then writes are whole again; h_fio_wflip: the next write to that file has one byte flipped (a copy that reads back
+   wrong), then writes are true again */
 int FIO_WriteFile(void *f, const void *p, size_t n)
 {
     int m = h_fio_wmax;
@@ -483,6 +485,18 @@ int FIO_WriteFile(void *f, const void *p, size_t n)
     FILE *F = h_fd_get(f);
     if (!F)
         return -1;
+    if (h_fio_wflip && f == h_wf && n) {
+        unsigned char *q = malloc(n);
+        if (!q)
+            return -1;
+        h_fio_wflip = 0;
+        memcpy(q, p, n);
+        q[n / 2] ^= 0x5A;
+        int k = (int)fwrite(q, 1, n, F);
+        fflush(F);
+        free(q);
+        return k;
+    }
     int k = (int)fwrite(p, 1, n, F);
     fflush(F);
     return k;
@@ -526,10 +540,10 @@ int FIO_RemoveFile(const char *path)             /* a busy path or an open file:
     }
     return !h_busy(path) && unlink(h_path(path)) == 0 ? 0 : -1;
 }
-int FIO_RenameFile(const char *src, const char *dst)
+int FIO_RenameFile(const char *src, const char *dst)   /* h_fio_ren_fail: a rename to a name with that part refused */
 {
     h_dir_change();
-    if (h_busy(src) || h_busy(dst))
+    if (h_busy(src) || h_busy(dst) || (h_fio_ren_fail[0] && strstr(h_path(dst), h_fio_ren_fail)))
         return -1;
     char s[256];
     snprintf(s, sizeof s, "%s", h_path(src));

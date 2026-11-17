@@ -7,6 +7,17 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
 dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB26 (17/11 khuya, nhánh wf-onescreen, từ RAWB25): bốn thứ mới.
+- ISO theo phim: SET nạp một lon (hay nạp cuộn) thì ISO của máy thành tốc độ phim.
+- Phím tắt (Quick keys, mặc định DOWN ring): DOWN = vòng xoay chỉnh ISO, lần nữa = khẩu;
+  SET nhanh khi lấy nét tay = Magic Zoom.
+- RAW after Darkroom (hàng mới dưới Camera JPEG, mặc định Keep in DCIM): Move to ROLLS =
+  tráng xong kiểu nào (Camera JPEG Overwrite / Over + print, JPEG đã ghi và đọc lại đúng)
+  thì CR2 của kiểu đó chuyển nguyên vẹn sang ROLLS/ROLLnnn/; DCIM chỉ còn JPEG nên PLAY của
+  Canon hiện bản tráng. Tráng lại vẫn tìm thấy CR2 ở đó.
+- Darkroom cũng chạy trên 5D2 (thẻ 5D2 RAWB26); EOS M không đổi gì vì việc đó.
+Xem mục 3 bước 17-20; HUONGDAN_DARKROOM_EOSM.txt bước ag-aj.
+
 Thẻ RAWB25 (17/11 tối, nhánh wf-onescreen, từ RAWB24): Darkroom thêm ba thứ.
 - Camera JPEG = Over + print (nấc thứ ba sau Keep / Overwrite): có viền thì IMG_nnnn.JPG
   trong DCIM là ảnh màu phim không viền 5184x3456, cạnh nó thêm WFP_nnnn.JPG là cả bản
@@ -268,6 +279,9 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 19. (17/11 đêm) Overwrite mà PLAY vẫn màu Canon: JPEG đã là bản tráng (cả thumbnail), ảnh
    Canon còn lại chỉ nằm trong CR2 của cặp RAW+L, module không sửa CR2. HUONGDAN bước ai
    thử trên thẻ (cắt CR2 ra PC rồi PLAY).
+20. (17/11 khuya, RAWB26) RAW after Darkroom = Move to ROLLS, Camera JPEG = Overwrite: tráng
+   xong, DCIM chỉ còn JPEG, CR2 nằm trong ROLLS/ROLLnnn/; PLAY hiện bản tráng ngay và sau
+   khi tắt bật máy; tấm chụp mới số nối tiếp. HUONGDAN bước aj.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

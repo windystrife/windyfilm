@@ -40,6 +40,7 @@ ALL="$ALL ROLL:mem"                               # 11-16: RAWB17 "no memory": t
 ALL="$ALL LIGHT:awb"                              # 11-17: Light Auto = Canon's Auto WB in the Darkroom (CR2 ColorData)
 ALL="$ALL ROLL:jpeg"                              # 11-16: Camera JPEG Overwrite + the logo on real RAW+L pairs
 ALL="$ALL ROLL:shelf ROLL:shelfboot"               # 11-17: many rolls waiting (the shelf), develop again into ROLL001B; the shelf at boot
+ALL="$ALL ROLL:cr2mv"                              # 11-17 (RAWB26): RAW after Darkroom Move to ROLLS on real RAW+L pairs, develop again from there
 ALL="$ALL ISO"                                     # 11-17: a film / roll load sets the camera's ISO to the film's speed
 ALL="$ALL QKEYS"                                   # 11-17: the EOS M quick keys (ISO, aperture, Magic Zoom in MF)
 MODES=${MODES:-$ALL}

@@ -7,11 +7,15 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT và WFSTAGE.DAT) là dữ liệu dẫn xuất
 (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
-Thẻ có Darkroom (17/11 tối, nhánh dark-5d2, từ RAWB25): Darkroom chạy trên 5D2 như trên
-EOS M. Chip chế độ thêm nấc Darkroom (hàng Exposures, nạp cuộn), PLAY vào Darkroom, viền /
-ngày / logo trên bản in, Camera JPEG (Keep / Overwrite / Over + print), Screen On / Off,
-kệ cuộn và tráng lại. Thẻ có thêm ML/DATA/WFPRINT.DAT và WFLOGO.DAT. Lần đầu trên máy
-thật: thử theo HUONGDAN_DARKROOM_5D2.txt (bộ nhớ, thời gian, màn hình, khoá chụp).
+Thẻ RAWB26 (17/11 khuya, nhánh wf-onescreen gộp dark-5d2, từ RAWB25): Darkroom chạy trên
+5D2 như trên EOS M. Chip chế độ thêm nấc Darkroom (hàng Exposures, nạp cuộn), PLAY vào
+Darkroom, viền / ngày / logo trên bản in, Camera JPEG (Keep / Overwrite / Over + print),
+Screen On / Off, kệ cuộn và tráng lại. Thẻ có thêm ML/DATA/WFPRINT.DAT và WFLOGO.DAT.
+Cùng thẻ này: ISO theo phim cả khi nạp cuộn; hàng mới RAW after Darkroom (Move to ROLLS:
+tráng xong thì CR2 chép sang ROLLS/ROLLnnn/, đọc lại đúng mới xoá khỏi DCIM, để PLAY hiện
+bản tráng); RAW develop B ở ISO 2500 / 5000 lấy điểm trắng 15600 (trước là 13300, thấp hơn
+mức CR2 thật bị cắt). Quick keys là của EOS M: menu 5D2 không có hàng đó. Lần đầu trên máy
+thật: thử theo HUONGDAN_DARKROOM_5D2.txt (bộ nhớ, thời gian, màn hình, khoá chụp, bước m).
 
 Thẻ RAWB25 (17/11 tối, nhánh wf-onescreen): module dựng lại cùng mã với thẻ EOS M
 RAWB25. Over + print, kệ cuộn và tráng lại đều là của Darkroom (5D2 không có). Trên 5D2
@@ -190,6 +194,10 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
    nhất máy nhận (50 thành 100, trần 6400); ISO Auto cũng bị đặt; log "load: ISO ...".
    Nếu C.Fn I-3 (bước ISO) đặt 1 stop: lon 250 cho ISO 200, log "whole stops only". Chỉ
    lướt qua lon hay bật lại máy: ISO không đổi.
+8. (17/11 khuya, RAWB26) Nạp cuộn Darkroom cũng đặt ISO theo phim (log "roll: ISO ...").
+   RAW after Darkroom = Move to ROLLS, Camera JPEG = Overwrite: tráng xong DCIM chỉ còn
+   JPEG, CR2 nằm trong ROLLS/ROLLnnn/; PLAY hiện bản tráng ngay và sau khi tắt bật máy.
+   HUONGDAN_DARKROOM_5D2.txt bước m.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

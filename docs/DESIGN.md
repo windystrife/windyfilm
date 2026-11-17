@@ -959,13 +959,40 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     - So the Canon picture on the screen can only come from the CR2: for a RAW+L pair the playback draws the CR2's
       own previews (by elimination; HUONGDAN step ai proves it on the card: the CR2 moved out on the PC, the frame
       then shows the film look). The CR2 stays byte for byte as shot (the rule), so nothing of ours changes.
-    - Options for the owner (none taken): as now (a pair shows Canon's look on the camera; the film look is the
-      JPEG on the PC or phone, and ROLLS); or an opt-in "RAW to ROLLS after the Darkroom": each developed frame's CR2
-      renamed into its `ROLLS/ROLLnnn/` (bytes untouched, one directory call a frame through `wf_frename`), so DCIM
-      holds the JPEG alone and playback shows it. Its costs: RAW+JPEG importers no longer find the pair in one
-      folder, Canon's erase no longer takes the CR2, a rename across folders on DryOS is unchecked. Not proposed:
-      hiding the CR2 by name or attribute (PC software would not read it), our previews written into the CR2 (the
-      rule), a second CR2 (the card's space).
+    - Options for the owner: as now (a pair shows Canon's look on the camera; the film look is the JPEG on the PC
+      or phone, and ROLLS), or an opt-in that moves each developed frame's CR2 into its `ROLLS/ROLLnnn/` so DCIM holds
+      the JPEG alone and playback shows it. The owner took the second (17-11, RAWB26): "RAW after Darkroom" below.
+      Not proposed: hiding the CR2 by name or attribute (PC software would not read it), our previews written into
+      the CR2 (the rule), a second CR2 (the card's space).
+  - **RAW after Darkroom** (owner 2026-11-17, RAWB26: "Thêm tuỳ chọn chuyển CR2"; both cameras). An ML menu row after
+    Camera JPEG: **Keep in DCIM** (default) / **Move to ROLLS**; config `cr2=keep|move`; `wf_pr_cr2`, taken at the
+    run's start like the other print settings (`dk_pcr`). Not in the Darkroom's PRINT block (its four rows stay).
+    - When: Move, Camera JPEG Overwrite or Over + print, and that frame's JPEG(s) written and read back (`dk_camjpg`
+      says so: `IMG_nnnn.JPG`, and with Over + print and a frame also `WFP_nnnn.JPG`). Otherwise the CR2 stays and one
+      log line says why: Keep (the run says it once at its start), a frame shot RAW only, a JPEG without Canon's Exif,
+      a print that did not read back, a stop in the camera JPEG, no second JPEG name / folder.
+    - Where: `ROLLS/ROLLnnn/IMG_nnnn.CR2` (`wf_roll_cr2_moved`): Canon's name, the roll's first folder for every
+      develop pass (ROLL021, not ROLL021B), so one folder holds a roll's CR2s.
+    - How, bytes unchanged. EOS M (its ML core defines `CONFIG_FIO_RENAMEFILE_WORKS`: `FIO_RenameFile` is Canon's
+      own): `wf_frename`, ok when the source is gone and the target has the source's size; a rename that leaves the
+      source in DCIM falls back to the copy. 5D2 (no such config: ML's `FIO_RenameFile` there is `FIO_CopyFile` +
+      `FIO_RemoveFile`, nothing read back): the copy. The copy: the CR2 through `M.dma` (256 KB chunks) into
+      `wf_fopen_w(WF_FO_NEW)`, the size checked, then both files read back and compared chunk by chunk (`M.in` holds
+      the source's chunk: the decoder's input, free after the decode), and only then `wf_fremove` on the source. Any
+      failure (open, create, read, write, size, read back, not the same, a stop) removes the copy and keeps the CR2.
+      A target there already: the same bytes = the source removed, else both kept. All inside the run (wf_task),
+      through wf_fio.h only (W13, W24); no new imports (W11: FIO_OpenFile / ReadFile / WriteFile / CloseFile /
+      GetFileSize are imported already; no memcmp, `dk_neq` compares).
+    - Found again: `dk_frame` reads `ROLLS/ROLLnnn/` when the DCIM CR2 is gone (`dark: F01 IMG_0208.CR2 read from
+      ROLLS/ROLL021/`); the shelf and develop again count a frame whose CR2 is in either place (`dk_has_cr2`); a CR2
+      in neither is skipped as before.
+    - Canon's side, unchecked on the camera (HUONGDAN step aj, 5D2 step m). File numbers: the JPEG keeps its number in
+      DCIM, so the highest number in the folder does not change (Continuous numbering keeps its own counter; Auto
+      reset sees the same highest file). Playback: whether its list notices a CR2 that ML removed before a power cycle
+      is not known for DryOS; the step looks at PLAY right after the run and again after a power cycle.
+    - Costs (told to the owner): an importer that pairs RAW + JPEG by folder sees the JPEG alone in DCIM; Canon's erase
+      takes only the JPEG; the 5D2 copy reads the CR2 twice and writes it once (about 25 MB a frame; the time is in the
+      log line); a rename across folders on DryOS is first tried by the card run.
   - Not checked on the camera yet: how playback lists `WFP_nnnn.JPG` beside the pair. The roll copy is the safe one.
 - **Memory.** Nothing new is allocated: the pack (<= 512 KB), the caption band (<= about 3.7 MB) and the row buffer
   (about 197 KB) use `M.raw`, which is free scratch in the DRY phase. The stamp's map (about 148 KB) uses `M.raw` too.
@@ -982,7 +1009,12 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
   file kept. Over + print: `dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print beside it as
   WFP_nnnn.JPG` at the start, then per frame `... IMG_0208.JPG overwritten: the picture 5184x3456, .. KB, ..ms`,
   `... WFP_0208.JPG written: the print fitted 5184x3456, .. KB, ..ms` (`100WFILM/WFP_0208.JPG` with the fallback)
-  and `dark: F07 camera JPEG: 2 of 2 files in DCIM, ..ms`.
+  and `dark: F07 camera JPEG: 2 of 2 files in DCIM, ..ms`. RAW after Darkroom: `dark: RAW after Darkroom Move to ROLLS:
+  each CR2 goes to ROLLS/ROLL021/ once its frame's JPEG is in DCIM` at the start (or `..., but Camera JPEG is Keep: the
+  CR2s stay in DCIM`), then per frame `dark: F07 IMG_0208.CR2 moved to ROLLS/ROLL021/ (renamed, .. KB, ..ms)` (5D2
+  `(copied and read back, ...)`, EOS M fallback `(rename failed: copied and read back, ...)`) or `dark: F07
+  IMG_0208.CR2 kept in DCIM: its JPEG was not written` / `...: the copy to ROLLS/ROLL021/ failed (not the same)`, and
+  on a later pass `dark: F07 IMG_0208.CR2 read from ROLLS/ROLL021/`.
 - **Checks.**
   - `tests/host/wf_dark_test.c`: layouts for every frame / info / orientation, Exif parsing in both byte orders,
     caption and date text, the pack, band text, stamp place and colour, frame-Off identity. A `finish` mode prints
@@ -1006,6 +1038,12 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     short buffers.
   - `tests/ui/dr_ui_test.c` 3b: the PRINT rows (Camera JPEG the fourth, Keep / Overwrite / Over + print) and the easel
     sketch.
+  - `test.sh` ROLL:cr2mv (RAW after Darkroom, both cameras, real RAW+L pairs): the row Keep by default, shown, SET
+    steps it; Move with Camera JPEG Keep moves nothing; Overwrite + Move: F01's CR2 in `ROLLS/ROLL002/` byte for byte
+    and gone from DCIM (EOS M renamed, 5D2 copied), F02's copy made wrong by `h_fio_wflip` (EOS M: its rename refused
+    first by `h_fio_ren_fail`) leaves no copy and its CR2 in DCIM, F03 shot RAW only keeps its CR2; develop again:
+    F01 read from ROLLS, nothing skipped, F02 moved by the copy (EOS M: the fallback), the pass-2 prints. CFG reads and
+    saves `cr2=`; `tests/host/wf_roll_test.c` checks `wf_roll_cr2_moved`.
   - The 5D2 has no Darkroom: `wf_print.o` and WFPRINT.DAT are EOS M only (both cameras from `dark-5d2`, 3.18).
 
 ### 3.10 Paper finish (owner 2026-11-16, both cameras and the Darkroom web core)
@@ -1521,6 +1559,10 @@ ring, and there is no zoom key. EOS M only (the 5D2 has an ISO button and two di
   55 s); the display and keys while LiveView is paused, and a run started without LiveView (viewfinder); the end-of-roll
   notice, drawn only over LiveView (with the viewfinder only the shutter lock shows the roll is full); the battery
   percentage during a run.
+- **After the merge into `wf-onescreen` (RAWB26):** the Quick keys row is hidden on the 5D2 (3.17); ISO from the film
+  (3.16) sets the 5D2's ISO on a roll load too; RAW after Darkroom (3.9) copies the CR2 on the 5D2 and renames it on the
+  EOS M; B's fallback white (`rb_white`, `wf_cam_5d2.c`) takes ISO 2500 / 5000 as 15600, not 13300 (the CR2s clip them
+  at 16268..16332).
 
 ## 4. Interfaces
 

@@ -1,7 +1,7 @@
 HƯỚNG DẪN THỬ ROLL + DARKROOM TRÊN 5D MARK II (lần đầu)
 =========================================================
-17/11/2026 tối, nhánh dark-5d2. Darkroom trước giờ chỉ có trên EOS M; thẻ này bật nó
-trên 5D2. CHƯA chạy trên máy 5D2 thật lần nào. Trên máy tính, mọi bước (nạp cuộn, chụp,
+Thẻ RAWB26, 17/11/2026 khuya (nhánh wf-onescreen, gộp dark-5d2). Darkroom trước giờ chỉ có
+trên EOS M; thẻ này bật nó trên 5D2. Thêm hàng RAW after Darkroom (bước m). CHƯA chạy trên máy 5D2 thật lần nào. Trên máy tính, mọi bước (nạp cuộn, chụp,
 tráng, viền / ngày / logo, Camera JPEG, kệ cuộn, tráng lại) đã chạy qua với CR2 + JPG
 của chính anh (100EOS5D, Day 10). Lần chụp này để đo bộ nhớ, thời gian, màn hình và
 phím trên máy thật.
@@ -81,6 +81,10 @@ Màn hình giống EOS M, chỉ khác tên phím (chân màn hình ghi đúng ph
 - Khối PRINT: Frame (Off / White / Black / White wide / Black wide), Info (Off / On / On +
   roll), Date, Camera JPEG (Keep / Overwrite / Over + print). Lên / xuống chọn dòng,
   trái / phải hoặc DIAL đổi giá trị.
+- Menu ML Shoot > WindyFilm > RAW after Darkroom (ngay dưới Camera JPEG): Keep in DCIM (mặc
+  định) / Move to ROLLS. Move to ROLLS + Camera JPEG Overwrite / Over + print: tráng xong
+  kiểu nào thì CR2 của nó chuyển sang ROLLS/ROLL00n/ (5D2 chép rồi đọc lại so từng byte,
+  đúng mới xoá bản trong DCIM), DCIM chỉ còn JPEG nên PLAY hiện bản tráng.
 - Hàng ROLL trên cùng: cuộn trong máy, rồi các cuộn trên kệ. Cuộn đã tráng: "develop
   again" + hàng Film (SET chọn phim khác). Bản in lần 2 vào ROLLS/ROLL001B.
 - Không mở nắp thẻ, không tắt máy khi đang tráng.
@@ -121,6 +125,14 @@ j. Light Auto: hàng Light = Auto, tráng một cuộn chụp dưới đèn vàn
    theo Auto WB của Canon; WB của máy giữ nguyên sau khi tráng.
 k. Pin: % trên đầu màn hình Darkroom so với Menu > Battery info của máy.
 l. Tắt máy bật lại giữa cuộn: cuộn (ROLL, bộ đếm) phải còn.
+m. (RAWB26) RAW after Darkroom = Move to ROLLS, Camera JPEG = Overwrite, Frame Off. Chụp trước
+   một tấm thường, PLAY ghi lại số IMG_nnnn. Nạp cuộn 3 kiểu, chụp 3 tấm, tráng. Log mỗi kiểu
+   "dark: F01 IMG_nnnn.CR2 moved to ROLLS/ROLL00n/ (copied and read back, ... KB, ...ms)":
+   ghi lại số ms (thời gian chép khoảng 25 MB mỗi kiểu). PLAY ngay sau khi tráng và sau khi
+   tắt bật máy: phải là bản tráng (không phải màu Canon), máy không báo lỗi. Chụp tấm mới:
+   số file nối tiếp. Trên đầu đọc thẻ: DCIM chỉ còn JPG, ROLLS/ROLL00n có ba CR2 (cỡ như lúc
+   chụp, mở được). Tráng lại cuộn đó: log "read from ROLLS/ROLL00n/". Camera JPEG = Keep:
+   log "but Camera JPEG is Keep: the CR2s stay in DCIM", CR2 ở lại DCIM.
 
 
 7. GỬI LẠI

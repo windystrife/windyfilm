@@ -2514,7 +2514,7 @@ static void t_cfg(void)
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
             "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=Both\njpeg2=Folder\ndkscreen=Off\nrolllook=ON\nshoulder=D\n"
-            "qkeys=LR\nuserwb=1,5600,2,-3\n",
+            "qkeys=LR\ncr2=Move\nuserwb=1,5600,2,-3\n",
             wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
@@ -2531,6 +2531,7 @@ static void t_cfg(void)
     chk(wf_roll_look8 == 1, "rolllook=ON read: a JPEG 8-bit roll (%d)", wf_roll_look8);
     chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
     chk(wf_qk == WF_QK_LR, "qkeys=LR read: Quick keys L/R ISO (%d)", wf_qk);
+    chk(wf_pr_cr2 == WF_PC_MOVE, "cr2=Move read: RAW after Darkroom Move to ROLLS (%d)", wf_pr_cr2);
     chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_BOTH && wf_pr_jpg2 == WF_J2_FOLDER
         && wf_dk_scr == WF_DS_OFF, "print finishes read: frame %d info %d date %d jpeg %d jpeg2 %d dkscreen %d (want 4 2 2 "
         "2 1 1)", wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2, wf_dk_scr);
@@ -2544,7 +2545,8 @@ static void t_cfg(void)
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\npaper=glossy\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\n"
              "exposure=%s\n"
-             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=both\njpeg2=folder\ndkscreen=off\n"
+             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=both\njpeg2=folder\ncr2=move\n"
+             "dkscreen=off\n"
              "rolllook=on\n"
              "shoulder=d\n"
              "qkeys=lr\n"
@@ -2573,6 +2575,7 @@ static void t_cfg(void)
     chk(b && !strcmp(b, want), "back to the first file");
     free(b);
     wf_qk = WF_QK_DOWN;
+    wf_pr_cr2 = WF_PC_KEEP;
     wf_roll_look8 = 0;                           /* the other checks: a roll keeps Canon's JPEG */
     put_cfg("film=99999\noutput=nope\nlutei=77\nexptrim=99\ncurve=x\nprint=\nhl=7\nsh=\n");
     wf_cfg_load();
@@ -6793,6 +6796,128 @@ static void t_roll_jpeg(void)
     mod_deinit();
 }
 
+/* ROLL:cr2mv - RAW after Darkroom "Move to ROLLS" (owner 11-17, RAWB26, DESIGN 3.9) on the three real pairs, the whole
+ * run in the module (memory as ROLL:jpeg):
+ *   row:   Keep in DCIM by default, the menu row shown on both cameras, SET steps it;
+ *   keep:  Move set with Camera JPEG Keep: said once at the start, every CR2 stays in DCIM byte for byte;
+ *   move:  roll 002, Overwrite + Move: F01's CR2 moves to ROLLS/ROLL002/ byte for byte (EOS M renamed, 5D2 copied and
+ *          read back) and leaves DCIM, IMG_0704.JPG = its print; F02's copy reads back wrong (a byte flipped in its
+ *          write; on the EOS M its rename refused first): no copy left, its CR2 in DCIM; F03 shot RAW only (its JPEG
+ *          gone): its CR2 kept;
+ *   again: roll 002 developed again (ROLL002B): every frame found (F01 read from ROLLS/ROLL002/, nothing skipped), F02
+ *          moves now (EOS M: the rename refused again, the copy moves it), F03 still kept, each pass-2 print made. */
+static void t_roll_cr2mv(void)
+{
+    const char *dir = dk_t_dir();
+    if (!*dir) {
+        chk(1, "SKIPPED: no %s RAW+L pairs (WF_DARK_CR2)", DK_T_CAM);
+        return;
+    }
+    char s1[300], s2[300], s3[300];
+    snprintf(s1, sizeof s1, "%s/%s.CR2", dir, mem_pairs[0]);
+    snprintf(s2, sizeof s2, "%s/%s.CR2", dir, mem_pairs[1]);
+    snprintf(s3, sizeof s3, "%s/%s.CR2", dir, mem_pairs[2]);
+    std_pack();
+    const int film = wf_films[fC].id;
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nbloom=off\nmist=off\n", film);
+    wf_fx_retry_ms = 500;
+    h_set_folder_number(100);
+    h_set_file_number(700);
+    mod_init(1);
+    h_shoot_max = 16 << 20;
+    h_srm_n = 3;
+    wf_pr_frame = 0;
+    wf_pr_info = 1;
+    wf_pr_date = 0;
+    uint8_t *row = menu_named("RAW after Darkroom");
+    chk(wf_pr_cr2 == WF_PC_KEEP && row && !wf_t_me_shidden(row), "RAW after Darkroom: Keep in DCIM by default (%d), "
+        "the row shown (%s)", wf_pr_cr2, DK_T_CAM);
+    int m1 = menu_set("RAW after Darkroom") == 0 && wf_pr_cr2 == WF_PC_MOVE;
+    int m2 = menu_set("RAW after Darkroom") == 0 && wf_pr_cr2 == WF_PC_KEEP;
+    chk(m1 && m2, "SET on the row: Move to ROLLS (%d), then Keep in DCIM again (%d)", m1, m2);
+    wf_pr_cr2 = WF_PC_MOVE;
+
+    /* keep: Camera JPEG Keep, nothing moves */
+    wf_pr_jpeg = WF_PJ_KEEP;
+    chk(mem_roll(film, 1, dir, 701), "roll 001: 3 real RAW+L frames shot (%d)", wf_roll_now()->nshot);
+    mem_run("keep", 1);
+    chk(log_has("dark: RAW after Darkroom Move to ROLLS, but Camera JPEG is Keep: the CR2s stay in DCIM")
+        && strstr(log_line("dark: roll 001 end"), "3 developed, 0 failed, 0 left") && !log_has(".CR2 moved to ")
+        && !log_has(".CR2 kept in DCIM"), "keep: said once, 3 developed ('%s')", log_line("dark: roll 001 end"));
+    chk(jp_cr2s(dir, 701) && !file_exists("ROLLS/ROLL001/IMG_0701.CR2"), "keep: the three CR2s in DCIM, byte for byte");
+
+    /* move: Overwrite; F02's copy reads back wrong; F03 RAW only */
+    wf_pr_jpeg = WF_PJ_OVER;
+    chk(mem_roll(film, 2, dir, 704), "roll 002: 3 real RAW+L frames shot (%d)", wf_roll_now()->nshot);
+    remove("DCIM/100CANON/IMG_0706.JPG");        /* F03 shot RAW only */
+#ifndef WF_BUILD_5D2
+    snprintf(h_fio_ren_fail, sizeof h_fio_ren_fail, "%s", "IMG_0705.CR2");   /* the EOS M: F02's rename refused */
+#endif
+    snprintf(h_fio_wpath, sizeof h_fio_wpath, "%s", "ROLLS/ROLL002/IMG_0705.CR2");
+    h_fio_wflip = 1;                             /* and a byte flipped in its copy's first write */
+    mem_run("move", 2);
+    int flipped = !h_fio_wflip;
+    h_fio_wflip = 0;
+    h_fio_wpath[0] = 0;
+    h_fio_ren_fail[0] = 0;
+#ifdef WF_BUILD_5D2
+    const char *how = "(copied and read back, ", *how2 = "(copied and read back, ", *bad = "(not the same)";
+#else
+    const char *how = "(renamed, ", *how2 = "(rename failed: copied and read back, ";
+    const char *bad = "(not the same, after the rename failed)";
+#endif
+    chk(log_has("dark: RAW after Darkroom Move to ROLLS: each CR2 goes to ROLLS/ROLL002/ once its frame's JPEG is in DCIM")
+        && strstr(log_line("dark: roll 002 end"), "3 developed, 0 failed, 0 left"), "move: 3 developed ('%s')",
+        log_line("dark: roll 002 end"));
+    chk(strstr(log_line("dark: F01 IMG_0704.CR2 moved to ROLLS/ROLL002/ "), how)
+        && jp_same(s1, "ROLLS/ROLL002/IMG_0704.CR2") && !file_exists("DCIM/100CANON/IMG_0704.CR2")
+        && jp_same("DCIM/100CANON/IMG_0704.JPG", "ROLLS/ROLL002/F01_0704.JPG"),
+        "move: F01's CR2 in ROLLS/ROLL002 byte for byte, gone from DCIM, IMG_0704.JPG = the print ('%s')",
+        log_line("dark: F01 IMG_0704.CR2"));
+    chk(flipped && strstr(log_line("dark: F02 IMG_0705.CR2 kept in DCIM: the copy to ROLLS/ROLL002/ failed ("), bad)
+        && jp_same(s2, "DCIM/100CANON/IMG_0705.CR2") && !file_exists("ROLLS/ROLL002/IMG_0705.CR2"),
+        "move: F02's copy read back wrong: no copy left, its CR2 in DCIM byte for byte ('%s')",
+        log_line("dark: F02 IMG_0705.CR2"));
+    chk(log_has("dark: F03 IMG_0706.CR2 kept in DCIM: its JPEG was not written") && jp_same(s3, "DCIM/100CANON/IMG_0706.CR2")
+        && !file_exists("ROLLS/ROLL002/IMG_0706.CR2"), "move: F03 RAW only: its CR2 kept ('%s')",
+        log_line("dark: F03 IMG_0706.CR2"));
+
+    /* again: roll 002 developed again, F01's CR2 read from ROLLS/ROLL002, F02 moves now */
+#ifndef WF_BUILD_5D2
+    snprintf(h_fio_ren_fail, sizeof h_fio_ren_fail, "%s", "IMG_0705.CR2");   /* refused again: the copy moves it */
+#endif
+    log_mark();
+    int ds = wf_dark_start_roll(2, 1, film);
+    int ok = ds == 0 && WAIT(log_has("dark: roll 002 end") && !wf_dark_busy(), 1500000);
+    h_fio_ren_fail[0] = 0;
+    chk(ok && strstr(log_line("dark: roll 002 develop 2: film "), "3 frames, prints in ROLLS/ROLL002B")
+        && !log_has("is gone: skipped") && strstr(log_line("dark: roll 002 end"), "3 developed, 0 failed, 0 left"),
+        "again (%d): 3 frames, none skipped ('%s', '%s')", ds, log_line("dark: roll 002 develop"),
+        log_line("dark: roll 002 end"));
+    chk(log_has("dark: F01 IMG_0704.CR2 read from ROLLS/ROLL002/") && !log_has("dark: F01 IMG_0704.CR2 moved")
+        && !log_has("dark: F01 IMG_0704.CR2 kept") && jp_same(s1, "ROLLS/ROLL002/IMG_0704.CR2"),
+        "again: F01's CR2 read from ROLLS/ROLL002/ and left there byte for byte");
+    chk(strstr(log_line("dark: F02 IMG_0705.CR2 moved to ROLLS/ROLL002/ "), how2)
+        && jp_same(s2, "ROLLS/ROLL002/IMG_0705.CR2") && !file_exists("DCIM/100CANON/IMG_0705.CR2"),
+        "again: F02's CR2 moved now ('%s')", log_line("dark: F02 IMG_0705.CR2"));
+    chk(log_has("dark: F03 IMG_0706.CR2 kept in DCIM: its JPEG was not written") && jp_same(s3, "DCIM/100CANON/IMG_0706.CR2"),
+        "again: F03 still RAW only, its CR2 kept");
+    for (int i = 0; i < 3; i++) {
+        char p[64];
+        long n = 0;
+        snprintf(p, sizeof p, "ROLLS/ROLL002B/F%02d_%04d.JPG", i + 1, 704 + i);
+        char *b = get_file(p, &n);
+        chk(b && n > (1 << 20), "again: %s %ld KB", p, n >> 10);
+        free(b);
+    }
+    chk(jp_same("DCIM/100CANON/IMG_0704.JPG", "ROLLS/ROLL002B/F01_0704.JPG"), "again: IMG_0704.JPG = the pass-2 print");
+    wf_pr_cr2 = WF_PC_KEEP;
+    wf_pr_jpeg = WF_PJ_KEEP;
+    h_srm_n = 0;
+    h_shoot_max = 0;
+    mod_deinit();
+}
+
 /* ROLL:shelf - many rolls waiting, develop again (owner 11-17, DESIGN 3.15), on real RAW+L pairs: the browser's
  * close-and-load puts the full roll 001 on the shelf (ROLLS/ROLL001/WFROLL.TXT, rewound, 3 to develop) and loads roll
  * 002; the Darkroom develops roll 001 from the shelf while the camera's roll 002 waits full (F02's CR2 gone: skipped);
@@ -7321,6 +7446,10 @@ static void t_roll(const char *cs)
     }
     if (!strcmp(cs, "jpeg")) {
         t_roll_jpeg();
+        return;
+    }
+    if (!strcmp(cs, "cr2mv")) {
+        t_roll_cr2mv();
         return;
     }
     if (!strcmp(cs, "save") || !strcmp(cs, "short") || !strcmp(cs, "back")) {

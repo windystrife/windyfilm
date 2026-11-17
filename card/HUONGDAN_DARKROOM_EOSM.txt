@@ -14,6 +14,12 @@ Thay đổi 15/11 (sau log RAWB9):
 - (15/11 tối) Cuộn bằng lon Film stage (âm bản x print stock) và các hàng knob (11 hàng từ 16/11): mục 4
   "CUỘN PHIM FILM STAGE", thử ở 5s.
 
+Thay đổi 17/11 khuya (thẻ RAWB26, nhánh wf-onescreen, từ RAWB25):
+- ISO theo phim (bước ag), phím tắt Quick keys (bước ah), PLAY sau Overwrite (bước ai).
+- RAW after Darkroom (hàng mới ngay dưới Camera JPEG, mặc định Keep in DCIM): Move to ROLLS
+  = tráng xong một kiểu và JPEG của nó đã ghi, đọc lại đúng thì CR2 chuyển nguyên vẹn sang
+  ROLLS/ROLL00n/; DCIM chỉ còn JPEG nên PLAY của máy hiện bản tráng. Thử ở bước aj.
+
 Thay đổi 17/11 tối (thẻ RAWB25, nhánh wf-onescreen, từ RAWB24):
 - Camera JPEG = Over + print: ảnh màu phim đè IMG_nnnn.JPG, bản in có viền thêm thành
   WFP_nnnn.JPG cạnh nó, cả hai trong DCIM (mục "ĐÈ LÊN JPEG CỦA MÁY"). Thử ở bước ac.
@@ -545,6 +551,25 @@ ai. (17/11 đêm) Ảnh xem lại sau Camera JPEG = Overwrite vẫn màu Canon: 
       - máy báo lỗi / không mở được: máy không đọc được JPEG của mình, chụp màn hình gửi;
       - vẫn màu Canon: ghi lại, gửi file JPG đó.
    3. Chép CR2 về đúng chỗ cũ trong DCIM.
+
+aj. (17/11 khuya, RAWB26) RAW after Darkroom = Move to ROLLS (Shoot > WindyFilm, hàng ngay
+   dưới Camera JPEG; mặc định Keep in DCIM, SET đổi). Camera JPEG = Overwrite. Chụp trước
+   một tấm thường, PLAY ghi lại số IMG_nnnn. Nạp cuộn 3 kiểu, chụp 3 tấm, tráng. Log mỗi
+   kiểu: "dark: F01 IMG_nnnn.CR2 moved to ROLLS/ROLL00n/ (renamed, ... KB, ..ms)".
+   1. Ngay sau khi tráng, chưa tắt máy: PLAY ba tấm đó, cả ảnh lớn lẫn lưới ảnh nhỏ: phải là
+      bản tráng (màu phim). Ghi lại nếu máy báo lỗi, hiện ô trống hay vẫn màu Canon.
+   2. Tắt máy, bật lại, PLAY lần nữa: vẫn là bản tráng; INFO của máy ghi JPEG, không còn
+      RAW+L.
+   3. Chụp một tấm mới: số file nối tiếp (không lặp số cũ, không về 0001).
+   4. Trên đầu đọc thẻ: DCIM/100CANON chỉ còn IMG_nnnn.JPG của ba tấm; ROLLS/ROLL00n có ba
+      IMG_nnnn.CR2 (cỡ như lúc chụp, mở được bằng Lightroom / DPP) cạnh các bản in.
+   5. Tráng lại cuộn đó (hàng ROLL, develop again): log "dark: F01 IMG_nnnn.CR2 read from
+      ROLLS/ROLL00n/", bản in mới vào ROLL00nB, CR2 vẫn ở ROLL00n.
+   6. Camera JPEG = Keep, tráng một cuộn khác: log "but Camera JPEG is Keep: the CR2s stay in
+      DCIM", không CR2 nào rời DCIM. Trên PC xoá JPG của một tấm trước khi tráng (tấm đó
+      thành RAW only): CR2 của nó ở lại DCIM, log "kept in DCIM: its JPEG was not written".
+   Lưu ý: nút xoá ảnh của Canon chỉ xoá JPEG trong DCIM, CR2 trong ROLLS vẫn còn; phần mềm
+   nhập ảnh theo cặp RAW + JPEG chỉ thấy JPEG trong DCIM.
 
 
 6. GỬI LẠI

@@ -110,6 +110,10 @@ int  wf_roll_root(const char *dcim_dir, char *out, int n);
    ROLLS/ROLL021B/...; level 2 = the shelf copy "<root>ROLLS/ROLL021/WFROLL.TXT" */
 int  wf_roll_dir(const struct wf_roll *r, const char *root, int level, char *out, int n);
 int  wf_roll_out(const struct wf_roll *r, int i, const char *root, char *out, int n);
+/* RAW after Darkroom "Move to ROLLS" (owner 11-17, DESIGN 3.9): where a frame's CR2 goes once its camera JPEG is
+   written, "<root>ROLLS/ROLL021/IMG_0206.CR2": Canon's name, the roll's first folder for every develop pass. The
+   length; -1 = not a roll number (1..999) / file number (0..9999), or no room */
+int  wf_roll_cr2_moved(int num, int file, const char *root, const char *prefix, char *out, int n);
 /* a roll's folder name: "ROLL021" (pass 1), "ROLL021B" (pass 2) .. into out (>= 12 bytes) */
 void wf_roll_name(int num, int dev, char *out);
 /* a ROLLS entry's name back: "ROLL021" -> 21, pass 1; "roll021b" -> 21, pass 2; 0 = ok, -1 = not a roll folder */

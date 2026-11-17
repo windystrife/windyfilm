@@ -115,10 +115,15 @@ int  wf_dark_src(int output, int flut);          /* EOS M: the WF_DEV_* tables a
    written and read back; the CR2 is never touched), so Canon's playback shows the print; default WF_PJ_KEEP.
    WF_PJ_BOTH (owner 11-17, "Over + print"): with a frame the shot's JPEG becomes the picture alone (as Overwrite did
    up to RAWB23) and a second JPEG in DCIM holds the framed print fitted to 5184 x 3456; frame Off = Overwrite.
-   wf_pr_jpg2 (config jpeg2=prefix|folder, kept silently): where that second JPEG goes (wf_roll_jpg2). */
-extern volatile int wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2;
+   wf_pr_jpg2 (config jpeg2=prefix|folder, kept silently): where that second JPEG goes (wf_roll_jpg2).
+   wf_pr_cr2 (owner 11-17, menu "RAW after Darkroom", config cr2=keep|move; default WF_PC_KEEP): WF_PC_MOVE = with Camera
+   JPEG Overwrite or Over + print, once a frame's JPEG(s) are written and read back its CR2 moves, bytes unchanged, to
+   ROLLS/ROLLnnn/ (wf_roll_cr2_moved), so Canon's PLAY finds only our JPEG; the shelf and develop again read it there.
+   Keep, or a frame without a camera JPEG (RAW only): the CR2 stays in DCIM. */
+extern volatile int wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2, wf_pr_cr2;
 enum { WF_PJ_KEEP = 0, WF_PJ_OVER, WF_PJ_BOTH, WF_PJ_N };
 enum { WF_J2_PREFIX = 0, WF_J2_FOLDER, WF_J2_N };
+enum { WF_PC_KEEP = 0, WF_PC_MOVE, WF_PC_N };
 enum { WF_PO_FRAME = 0, WF_PO_INFO, WF_PO_DATE, WF_PO_JPEG, WF_PO_N };   /* the Darkroom's print rows (wf_menu.c) */
 const char *wf_popt_name(int k);                 /* "Frame", "Info", "Date", "Camera JPEG" */
 const char *wf_popt_text(int k, char *b, int n); /* the value as shown: "White wide", "On + roll", "'26 11 15" (today) */

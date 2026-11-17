@@ -116,6 +116,13 @@ int main(void)
     CHECK(wf_roll_root("B:/DCIM/100CANON", p, sizeof p) == 3 && !strcmp(p, "B:/"), "root %s", p);
     CHECK(wf_roll_root("A:/DCIM/100EOS5D", p, sizeof p) == 3 && !strcmp(p, "A:/"), "root 5D2 %s", p);
     CHECK(wf_roll_root("B:/X/100CANON", p, sizeof p) == -1, "no DCIM");
+    CHECK(wf_roll_cr2_moved(21, 206, "B:/", "IMG_", p, sizeof p) == 29 && !strcmp(p, "B:/ROLLS/ROLL021/IMG_0206.CR2"),
+          "cr2 moved (RAW after Darkroom): %s", p);
+    CHECK(wf_roll_cr2_moved(7, 9999, "A:/", "_MG_", p, sizeof p) > 0 && !strcmp(p, "A:/ROLLS/ROLL007/_MG_9999.CR2"),
+          "cr2 moved 5D2, Adobe RGB: %s", p);
+    CHECK(wf_roll_cr2_moved(0, 206, "B:/", "IMG_", p, sizeof p) == -1 && wf_roll_cr2_moved(1000, 206, "B:/", "IMG_", p,
+          sizeof p) == -1 && wf_roll_cr2_moved(21, 10000, "B:/", "IMG_", p, sizeof p) == -1
+          && wf_roll_cr2_moved(21, 206, "B:/", "IMG_", p, 29) == -1, "cr2 moved: not a roll / file number, no room");
     CHECK(wf_roll_dir(&r, "B:/", 0, p, sizeof p) > 0 && !strcmp(p, "B:/ROLLS"), "dir 0 %s", p);
     CHECK(wf_roll_dir(&r, "B:/", 1, p, sizeof p) > 0 && !strcmp(p, "B:/ROLLS/ROLL021"), "dir 1 %s", p);
     CHECK(wf_roll_out(&r, 0, "B:/", p, sizeof p) > 0 && !strcmp(p, "B:/ROLLS/ROLL021/F01_0206.JPG"), "out %s", p);

@@ -65,9 +65,11 @@ extern volatile int h_clock_add_ms;
 /* FIO: a path that refuses to open, to be created, removed or renamed (EXIF busy test, the log / WFPROBE.BIN on a busy
    card), "*" every path, "" none; counts; h_fio_wmax > 0: the next write to a file of the path h_fio_wpath stops after
    that many bytes. h_fio_dup: creates on an existing name (two entries of one name on the camera), h_fio_dir_busy:
-   creates / removes / renames while lens_info.job_state != 0; main() fails every run on either. */
-extern char h_fio_busy[128], h_fio_wpath[128];
-extern volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy;
+   creates / removes / renames while lens_info.job_state != 0; main() fails every run on either. h_fio_ren_fail: a
+   rename to a name with that part refused (the file stays); h_fio_wflip: the next write to a file of h_fio_wpath has
+   one byte flipped (ROLL:cr2mv). */
+extern char h_fio_busy[128], h_fio_wpath[128], h_fio_ren_fail[128];
+extern volatile int h_fio_opens, h_fio_wmax, h_fio_creates, h_fio_dup, h_fio_dir_busy, h_fio_wflip;
 /* file handles are small numbers like DryOS's (odd as often as even); h_fio_rm_open: removes of a file still open
    (refused); h_fio_open_now: handles open now, their names into names */
 extern int icu_uilock, __recording, __recording_custom;

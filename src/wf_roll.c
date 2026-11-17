@@ -461,6 +461,16 @@ int wf_roll_out(const struct wf_roll *r, int i, const char *root, char *out, int
     return k > 0 && k < n ? k : -1;
 }
 
+int wf_roll_cr2_moved(int num, int file, const char *root, const char *prefix, char *out, int n)
+{
+    if (num < 1 || num > 999 || file < 0 || file > 9999)
+        return -1;
+    char nm[12];
+    wf_roll_name(num, 1, nm);
+    int k = snprintf(out, n, "%sROLLS/%s/%s%04d.CR2", root, nm, prefix, file);
+    return k > 0 && k < n ? k : -1;
+}
+
 /* ------------------------------------------------------------------ the film's speed (owner 11-17) */
 /* Canon's 1/3-stop ISO steps and their raw codes (ML's lens.c tables hold every 1/8 code; Canon's dial stops at these) */
 static const uint16_t iso_v[] = { 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200,
