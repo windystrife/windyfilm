@@ -19,6 +19,7 @@ int wfui_host_rows(void);
 int wfui_host_focus(void);
 int wfui_host_rtop(void);
 int wfui_host_info(void);
+int wfui_host_info_y(void);
 int wfui_host_anim(void);
 int wfui_host_edit(void);
 int wfui_host_phase(void);
@@ -1142,6 +1143,12 @@ int main(int argc, char **argv)
           "pill: Film stage (section %d, edit %d)", wfui_host_sec(), wfui_host_edit());
     CHECK(!wfui_host_rows(), "5D2 Film stage: no Exposures row (no rolls)");
     shot("fs_5d2_pill");
+    key(MODULE_KEY_INFO);                                           /* the 5D2's Info page: its own key names */
+    CHECK(wfui_host_info() && wfui_host_info_y() + 17 <= 361, "5D2 Film stage: the Info page (last row y %d)",
+          wfui_host_info_y());
+    shot("fs_5d2_info");
+    key(MODULE_KEY_INFO);
+    CHECK(!wfui_host_info(), "5D2: INFO again closes it");
     key(MODULE_KEY_PRESS_SET);
     CHECK(wfui_host_sec() == 0, "5D2: SET on the pill: Film again");
     key(MODULE_KEY_PRESS_UP);
@@ -1251,6 +1258,9 @@ int main(int argc, char **argv)
     key(MODULE_KEY_INFO);
     CHECK(wfui_host_info(), "INFO: the Info page (Film stage)");
     shot("fs_info_stage");
+    CHECK(wfui_host_info_y() >= 136 && wfui_host_info_y() + 17 <= 361,
+          "Info page (Film stage): 13 grid rows below the description, the last (y %d) above the key help's rule",
+          wfui_host_info_y());
     key(MODULE_KEY_INFO);
     CHECK(!wfui_host_info(), "INFO again closes the Info page");
     /* leaving Film stage with 7 frames of a JPEG 8-bit roll: the question says they are developed; MENU keeps the roll;
@@ -1281,6 +1291,8 @@ int main(int argc, char **argv)
     key(MODULE_KEY_INFO);
     CHECK(wfui_host_info(), "INFO: the Info page (Film)");
     shot("fs_info_film");
+    CHECK(wfui_host_info_y() >= 136 && wfui_host_info_y() + 17 <= 361, "Info page (Film): the grid's last row y %d",
+          wfui_host_info_y());
     key(MODULE_KEY_INFO);
     close_ui(MODULE_KEY_MENU, 0);
     /* a Film stage tab with the new cans (the Kodak / Eastman yellow, Fuji green, Double-X white cassettes) */
@@ -1295,6 +1307,11 @@ int main(int argc, char **argv)
     for (int i = 0; i < 5 && wfui_host_tab() != WF_GRP_STAGE + 3; i++) key(MODULE_KEY_Q);
     CHECK(wfui_host_tab() == WF_GRP_STAGE + 3, "TAP to the Fuji tab (%d)", wfui_host_tab());
     shot("fs_stage_tab_fuji");
+    key(MODULE_KEY_INFO);                                           /* a Fuji film's Info page: its facts line */
+    CHECK(wfui_host_info(), "INFO on a Fuji film");
+    shot("fs_info_stage_fuji");
+    key(MODULE_KEY_INFO);
+    CHECK(!wfui_host_info(), "INFO again closes it");
     /* an empty Film stage roll comes out at the pill; a finished one is set aside at once */
     key(MODULE_KEY_PRESS_SET);
     CHECK(wf_roll_now()->state == WF_RS_LOADED && wf_roll_look8 == 1 && wfui_host_anim(), "SET on a Fuji can: a roll");

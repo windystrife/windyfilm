@@ -462,6 +462,15 @@ def gx_speed(official):
     return int(m[-1][0]), 3200 if m[-1][1] == "T" else 5200
 
 
+def gx_desc(iso, kel, bw):
+    """a chain stock's details line 1 (owner 11-17: the Info page shows it, as the other films' descriptions): facts of
+    its own row only, the box speed, the balance its Light Day kelvin stands for, that kelvin. Double-X 5222's rating is
+    the daylight / tungsten pair (gx_speed)."""
+    if bw:
+        return "B&W cine negative, EI %d D / 200 T." % iso
+    return "%d-speed %s cine negative, %d K." % (iso, "tungsten" if kel < 4000 else "daylight", kel)
+
+
 def iso_code(iso):
     """Canon's ISO code (100 = 72, 8 per stop), held inside the camera's 100..3200 like the other rows."""
     return max(72, min(112, int(round(72 + 8 * math.log2(iso / 100.0)))))
@@ -477,8 +486,8 @@ for _n in range(GX_NEG_N):
         continue
     _bw = _n in GX_BW
     FILMS.append(F(89 + _n, "G%02d" % _n, _disp, "bw" if _bw else "neg", _iso, iso_code(_iso), _kel, 0, "cine", 59 + _n,
-                   ("B&W 400", 256) if _bw else ("Neg 400", 256), ("BW", 256) if _bw else ("neg", 256), _official,
-                   "B&W negative: printed on 2302 only." if _bw else "Print stock row picks the print.", ready=True,
+                   ("B&W 400", 256) if _bw else ("Neg 400", 256), ("BW", 256) if _bw else ("neg", 256),
+                   gx_desc(_iso, _kel, _bw), _official + (", printed on 2302 only." if _bw else ""), ready=True,
                    table="G%02d" % _n, spk=("spk_bw", 256) if _bw else ("spk_c", 256),
                    derived=True, prints=_pr,
                    prov="Genesis 1.6.6 film chain, negative %02d (%s) x the print stocks (declared exception, "

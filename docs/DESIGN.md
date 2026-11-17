@@ -1158,10 +1158,18 @@ compared, the develop time shown.
   Dev <n.n> s" for Film stage films only: at the shot (`src/wf_shot.c` flush: JPEG 8-bit, or RAW develop when B ran;
   the time = its two stages) and in the Darkroom's print comment (`src/wf_dark.c`: Darkroom, the develop stages). Every
   develop (all films) is noted for the UI and logged `dev time: <path> <ms> ms`.
-- **Info page** (INFO in both sections, `draw_info`; INFO again closes it). Two columns over the browser: Film, the rows
-  the film writes (the Film stage's own keys in amber: Film exp, Push / pull, Exp comp, Printer R G B, Interlayer,
+- **Info page** (INFO in both sections, `draw_info`; INFO again closes it). Under the "Info . <film>" title the film's
+  chips (kind / ISO / format, y 70) and its catalogue description (`line1` / `line2`, 15 px at y 91 / 108: the Film
+  films' browser text; the chain films' facts line, e.g. "500-speed tungsten cine negative, 3200 K.", and official name,
+  `films/catalog.py` `gx_desc`; owner 11-17 after the camera photo of the old overlay), a rule, then two columns from
+  y 136 at a 17 px pitch (15 px text, the browser description's pitch; a chain film's 26 pairs end at y 357): Film,
+  Table (the film's code; a chain film its negative's, G08), Daylight (its Light Day kelvin, "3200 K (tungsten)" for a
+  T stock), the rows the film writes (the Film stage's own keys in amber: Film exp, Push / pull, Exp comp, Printer R G B, Interlayer,
   Bleach bypass, Print bleach, Neutral neg / print), Mode (with the roll's count), Last develop "31.2 s (RAW develop)",
-  On the card; a note on when it is written.
+  On the card. Then the key help (`info_keys`, owner 11-17 "all three back": the old overlay's block with today's keys,
+  13 px, three columns x three rows at y 366..414; EOS M L/R, UP/DN, RING, SET, TAP, INFO, PLAY, MENU, Half-shutter,
+  the 5D2 its footer's names DIAL / JOY / PICT and MENU or TRASH) and one note line at y 424 (when it is written; Film
+  stage "Amber = Film stage only."), above the footer.
 - **Messages** (`draw_toast`). `say()` shows an amber toast over the browser (y 188..224, the mock's): the header holds
   the pill and the chip now (round 1's message chip in the header went).
 - **Cans** (`cans/gen_cans.py` `chain_style`). The Film stage cans are our own Vision3-style cassette: vertical text, no
@@ -1206,7 +1214,8 @@ then Paper after Print stock (`WF_NROWS` 23, section 3.10).
 - `films/catalog.py` (data) holds the rows. It keeps every field the old catalogue had (id, code, name, type, iso,
   isocode, kelvin, ev8, family, order, grain, halo, spk, v21, lut, mode, prov, ready) and adds:
   - `short` (<= 11 chars at 13 px condensed);
-  - `line1`, `line2` (each <= 44 chars at 15 px: our short description; the generic LUT-can line1 is rewritten);
+  - `line1`, `line2` (each <= 44 chars at 15 px: our short description; the generic LUT-can line1 is rewritten; the
+    chain films: `gx_desc` (box speed, balance, Light Day kelvin) and the official name, 11-17);
   - `kind`, `fmt` (the chips);
   - `group` (`colour` / `cine` / `bw` / `lut`);
   - `prints` (the variants made, e.g. `("scan", "cine", "paper")`).

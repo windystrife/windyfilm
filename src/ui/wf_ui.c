@@ -1259,17 +1259,53 @@ static void draw_swap(void)
     hints(k, cx - w / 2, y1 - 40, C_TXT, C_TXT2);
 }
 
-/* INFO (owner 11-17, both sections): what the develop writes into the EXIF and the print comment, two columns over the
- * browser between the top bar and the footer; the Film stage's own keys in amber; the mode, the last develop's time
- * and path (wf_dev_last), the film table on the card. INFO again closes it. */
-static int ipair;                                           /* the pairs drawn so far (row-major, two columns) */
+/* INFO (owner 11-17, both sections): under the title the film's chips (kind / ISO / format) and its catalogue
+ * description (line1 / line2: the Film films' browser text; the chain films' facts line and official name); the grid,
+ * two columns: Film, Table, Daylight (the old overlay's), what the develop writes into the EXIF and the print comment
+ * (the Film stage's own keys in amber), the mode, the last develop's time and path (wf_dev_last), the film table on the
+ * card; the key help (the old overlay's block, today's keys); one note line. 720 x 480 with the footer: a chain film's
+ * 26 pairs (13 rows of 17 px, 15 px text as the browser's description) end at y 357, the keys 366..414, the note 424.
+ * INFO again closes it. */
+#define INFO_Y0   136                                       /* the grid's first row (below the description) */
+#define INFO_DY   17                                        /* its pitch */
+#define INFO_KEYS 366                                       /* the key help's first row (3 rows of 16 px) */
+static int ipair, ilast;                                    /* the pairs drawn so far (row-major, two columns), last y */
 static void info_pair(const char *k, const char *v, int kc)
 {
-    int col = ipair & 1, x = col ? 372 : 22, y = 88 + (ipair >> 1) * 21, xm = col ? 698 : 356;
+    int col = ipair & 1, x = col ? 372 : 22, y = INFO_Y0 + (ipair >> 1) * INFO_DY, xm = col ? 698 : 356;
+    ilast = y;
     ui_text_clip(F_15, x, y, k, kc, x + 124);
     ui_text_clip(F_15, x + 128, y, v ? v : "", C_TXT, xm);
     ipair++;
 }
+/* the key help (owner 11-17, "all three back": the old overlay's block with today's keys; the 5D2's key names as its
+ * footer's): three columns, column-major, the key in C_TXT2, its action after the column's widest key, 13 px */
+static void info_keys(int y)
+{
+    static const char *const h_eosm[] = { "L/R", "film, or section / mode", "UP/DN", "row, or the top bar",
+        "RING", "value", "SET", "load the film, or a roll", "TAP", "next group (1 finger)", "INFO", "this page",
+        "PLAY", "Darkroom (a roll on)", "MENU", "close, or 2-finger tap", "Half-shutter", "close, shoot" };
+    static const char *const h_5d2[] = { "L/R", "film, or section / mode", "UP/DN", "row, or the top bar",
+        "DIAL", "value", "SET", "load the film", "JOY", "edit a row (L/R)", "PICT", "next group",
+        "INFO", "this page", "MENU", "close, or TRASH", "Half-shutter", "close, shoot" };
+    const char *const *h = is5d2() ? h_5d2 : h_eosm;
+    for (int c = 0; c < 3; c++)
+    {
+        int x = 22 + c * 226, kw = 0;
+        for (int r = 0; r < 3; r++)
+        {
+            int t = ui_textw(F_13, h[(c * 3 + r) * 2]);
+            if (t > kw) kw = t;
+        }
+        for (int r = 0; r < 3; r++)
+        {
+            const char *const *e = h + (c * 3 + r) * 2;
+            ui_text(F_13, x, y + r * 16, e[0], C_TXT2);
+            ui_text_clip(F_13, x + kw + 8, y + r * 16, e[1], C_TXT3, c == 2 ? 698 : x + 220);
+        }
+    }
+}
+
 static void info_row(int r, int id, int st)
 {
     if (!wf_row_avail_for(r, id)) return;
@@ -1287,9 +1323,19 @@ static void draw_info(const struct wf_film *f, int g)
     wfg_rect(22 + w + 8, 53, 22 + w + 10, 55, C_TXT3);
     ui_text_clip(F_ML23, 22 + w + 18, 40, f->name, C_TXT, 600);
     text_r(F_13, 698, 48, s ? "FILM STAGE" : "FILM", C_AMBER);
-    wfg_rect(22, 76, 697, 76, C_LINE);
+    int x = chip_s(22, 70, f->kind, acc(g), 697);           /* the chips and the description, as the browser's */
+    snprintf(b, sizeof b, "ISO %d", f->iso);
+    x = chip_s(x, 70, b, C_TXT2, 697);
+    chip_s(x, 70, f->format, C_TXT2, 697);
+    if (f->line1) ui_text_clip(F_15, 22, 91, f->line1, C_TXT2, 697);
+    if (f->line2) ui_text_clip(F_15, 22, 108, f->line2, C_TXT2, 697);
+    wfg_rect(22, INFO_Y0 - 6, 697, INFO_Y0 - 6, C_LINE);
     ipair = 0;
+    ilast = 0;
     info_pair("Film", f->name, C_TXT3);
+    info_pair("Table", f->code && *f->code ? f->code : "-", C_TXT3);   /* a chain film: its negative's (G08) */
+    snprintf(b, sizeof b, "%d K%s", f->kelvin, f->kelvin < 4000 ? " (tungsten)" : "");  /* Light Day's balance */
+    info_pair("Daylight", b, C_TXT3);
     static const uint8_t rows_film[] = { WF_ROW_PRINT, WF_ROW_STRENGTH, WF_ROW_PAPER, WF_ROW_HL, WF_ROW_SH, WF_ROW_FLUT,
                                          WF_ROW_LIGHT, WF_ROW_GRAIN, WF_ROW_HALO, WF_ROW_BLOOM, WF_ROW_GAUGE, WF_ROW_MIST };
     static const uint8_t rows_stage[] = { WF_ROW_SEXP, WF_ROW_SPUSH, WF_ROW_SCOMP, 0xFF, WF_ROW_SIIE, WF_ROW_SBL,
@@ -1322,14 +1368,13 @@ static void draw_info(const struct wf_film *f, int g)
     info_pair("On the card", av ? (lut ? "LUT cube found" : "Film table found") : lut ? "LUT cube missing"
               : fs == 0 ? "Starting (tables not read yet)" : fs == -1 ? "Worker not running" : "Film table missing",
               C_TXT3);
-    wfg_rect(22, 402, 697, 402, C_LINE);
-    char nb[112];
-    snprintf(nb, sizeof nb, "Written to EXIF and the print comment %s",
+    wfg_rect(22, INFO_KEYS - 5, 697, INFO_KEYS - 5, C_LINE);
+    info_keys(INFO_KEYS);
+    char nb[128];                                           /* one note line (the key help says INFO closes) */
+    snprintf(nb, sizeof nb, "%sWritten to EXIF and the print comment %s", s ? "Amber = Film stage only. " : "",
              m == M_DARK ? "when the Darkroom develops the roll." : m == M_RAW ? "right after the shot (RAW develop)."
              : s ? "with the JPEG at the shot (8-bit path)." : "with the JPEG at the shot.");
-    ui_text_clip(F_13, 22, 410, nb, C_TXT2, 698);
-    ui_text_clip(F_13, 22, 427, s ? "Amber = Film stage only; the mode and the develop time are written too. INFO closes."
-                                  : "INFO closes.", C_TXT2, 698);
+    ui_text_clip(F_13, 22, 424, nb, C_TXT2, 698);
 }
 
 void wfui_render(void)
@@ -1731,6 +1776,7 @@ int wfui_host_rows(void) { return rollrows(); }
 int wfui_host_focus(void) { return focus; }
 int wfui_host_rtop(void) { return rtop; }
 int wfui_host_info(void) { return info; }
+int wfui_host_info_y(void) { return ilast; }                /* the Info page's last grid row (drawn) */
 int wfui_host_anim(void) { return anim_on; }
 int wfui_host_scr(void) { return scr; }
 const char *wfui_host_msg(void) { return msg && get_ms_clock() - msg_until < 0 ? msg : ""; }
