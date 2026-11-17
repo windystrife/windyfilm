@@ -142,6 +142,9 @@ int wf_dark_wake(int now)
     return 1;
 }
 int wf_dark_dark(int now) { (void)now; return frun() && wf_dk_scr == WF_DS_OFF && fdark; }
+static int fkeep;
+int wf_dark_keep(int now, int ui) { (void)now; fkeep += ui; return 0; }
+int fake_nkeep(void) { return fkeep; }
 
 /* ------------------------------------------------------------------ one screen (wf_dark.h: the roll set aside) */
 int wf_roll_shelve(int on) { if (on && !wf_roll_open(&roll)) return -1; fshelf = on ? 1 : 0; rgen++; return 0; }

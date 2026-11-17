@@ -6343,7 +6343,41 @@ static void t_roll_jpeg(void)
     wf_pr_date = 0;
     chk(wf_pr_jpeg == WF_PJ_KEEP, "Camera JPEG: Keep by default (%d)", wf_pr_jpeg);
     chk(mem_roll(film, 1, dir, 501), "roll 001: 3 real RAW+L frames shot (%d)", wf_roll_now()->nshot);
-    mem_run("keep", 1);
+    /* and Screen On's keep-alive (owner 11-17, RAWB23: Canon turned the EOS M's display off in the middle of a frame and
+     * it stayed dark until the next frame): the test stands in for the Darkroom screen's tick (wf_dark_keep, ui 1) while
+     * F02 runs; its times run ahead of the clock (a look a second) */
+    {
+        log_mark();
+        int ds = wf_dark_start();
+        chk(ds == 0 && LOGW("dark: F01 screen: relit ", 600000), "keep: F01's screen line ('%s')",
+            log_line("dark: F01 screen"));
+        usleep(30000);                           /* F02 begun */
+        int t = get_ms_clock(), on0 = h_disp_ons;
+        int k0 = wf_dark_keep(t, 1);             /* on: nothing (and the worker leaves it to the UI from here) */
+        h_disp = 0;                              /* Canon turns it off */
+        int k1 = wf_dark_keep(t + 1000, 1), h1 = h_disp;   /* turned on again */
+        int k2 = wf_dark_keep(t + 1500, 1);      /* within its second: not looked at */
+        int k3 = wf_dark_keep(t + 2000, 1);      /* on: the ask took */
+        h_disp_stuck = 1;                        /* off again, and it does not come back */
+        h_disp = 0;
+        int k4 = wf_dark_keep(t + 3000, 1), k5 = wf_dark_keep(t + 4000, 1), k6 = wf_dark_keep(t + 5000, 1);
+        int k7 = wf_dark_keep(t + 6000, 1), k8 = wf_dark_keep(t + 7000, 1);   /* 3 asks that did not take: given up */
+        int asks = h_disp_ons - on0;
+        h_disp_stuck = 0;
+        h_disp = 1;
+        chk(!k0 && k1 && h1 && !k2 && !k3 && k4 && k5 && k6 && !k7 && !k8 && asks == 4,
+            "screen on: relit %d (display %d), %d %d, stuck %d %d %d, given up %d %d, %d asks", k1, h1, k2, k3, k4, k5,
+            k6, !k7, !k8, asks);
+        int ok = WAIT(log_has("dark: roll 001 end") && !wf_dark_busy(), 1500000);
+        chk(ok, "keep: the run ends ('%s')", log_line("dark: roll 001 end"));
+        chk(strstr(log_line("dark: F02 screen: "), "relit 4, first off at ") && log_has("dark: F01 screen: relit 0")
+            && !strstr(log_line("dark: F01 screen: "), "first off") && log_has("dark: F03 screen: relit 0")
+            && log_has("dark: display off while F02 runs: turned on 3 times, it stays off (not asked again this run)")
+            && log_has("dark: Screen On: display found off while frames ran, turned on again 4 times")
+            && !log_has("dark: display off before"),
+            "screen on: per frame ('%s', '%s'), the run ('%s')", log_line("dark: F01 screen"),
+            log_line("dark: F02 screen"), log_line("dark: Screen On:"));
+    }
     chk(strstr(log_line("dark: roll 001 start"), "jpeg 0 logo 0K") && strstr(log_line("dark: roll 001 end"),
         "3 developed, 0 failed, 0 left"), "keep: 3 of 3, jpeg 0 ('%s')", log_line("dark: roll 001 end"));
     for (int i = 0; i < 3; i++) {
@@ -6392,7 +6426,8 @@ static void t_roll_jpeg(void)
         int ok = WAIT(log_has("dark: roll 002 end") && !wf_dark_busy(), 1500000);
         chk(ok, "copy: the run ends ('%s')", log_line("dark: roll 002 end"));
         chk(h_disp && !log_has("dark: display off before") && !log_has("dark: display off after the pause")
-            && log_has("dark: Screen Off: display turned off 2 times, woken ") && !wf_dark_dark(get_ms_clock()),
+            && log_has("dark: Screen Off: display turned off 2 times, woken ") && !wf_dark_dark(get_ms_clock())
+            && !log_has("dark: F01 screen:") && !wf_dark_keep(get_ms_clock(), 1),
             "screen off: dark for the frames, on at the end (display %d, '%s', '%s')", h_disp,
             log_line("dark: Screen Off: display turned"), log_line("dark: screen at the end"));
     }

@@ -132,6 +132,7 @@ static int glow_id;
 static const char *msg;
 static int msg_until;
 static int t_probe, t_force, t_heal;
+static int disp_seen = 1;                                   /* the display read on at the last tick */
 
 /* ------------------------------------------------------------------ the mode chip (owner 11-17: one screen)
  * Top right of the browser, in place of the loaded film's chip (the film's own "Loaded" badge says that): how the camera
@@ -1655,6 +1656,9 @@ int wfui_task_tick(void)
     if (gui_menu_shown()) return 1;                         /* the ML menu took the screen */
     if (dlg_lost()) return 1;
     int now = get_ms_clock();
+    int don = display_is_on();                              /* on again (Canon blanked it; the Darkroom's keep-alive): */
+    if (don && !disp_seen) wfp_keepalive(1);                /* our palette at once, not at the next probe (no redraw) */
+    disp_seen = don;
     if (anim_on) return anim_tick(now);
     if (pack_again && now - t_pack >= PACK_RETRY_MS) pack_retry(now);
     uint32_t gen = wf_gen();

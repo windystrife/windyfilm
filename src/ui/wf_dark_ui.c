@@ -564,6 +564,7 @@ static int dark_key(int key, int now)
 static int dark_tick(int now)
 {
     const struct wf_dark_view *v = wf_dark_view();
+    wf_dark_keep(now, 1);                                  /* Screen On: on again if Canon turned it off (no redraw) */
     int moved = 0, d = wf_dark_dark(now);                  /* Screen Off: turns the display off when due */
     if (d != dr_dark)
     {

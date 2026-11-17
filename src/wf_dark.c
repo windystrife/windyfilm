@@ -760,6 +760,78 @@ int wf_dark_dark(int now)
     return !display_is_on();
 }
 
+/* Screen On keep-alive (owner 11-17: on RAWB23 the EOS M's display flashed and went dark while a frame developed with
+ * Screen On, and came back at the end; a frame takes ~185 s and dk_screen looks only at frame boundaries). Every
+ * DK_KEEP_MS while a Screen On run lives, a display that reads off is turned on again (ML's display_on, as dk_screen).
+ * Called from the Darkroom screen's tick (UI task, prio 0x1B, above wf_task's 0x1E: the worker's long steps do not hold
+ * it back; ui = 1) and from the worker's band yields (the UI may be closed, half-shutter; ui = 0: only when the UI has
+ * not kept it for DK_KEEP_UI_MS, so the two tasks do not both ask).
+ * Stopping Canon from blanking it: Canon's auto power-off is prohibited for the run (powersave_prohibit at the start,
+ * asked again here every DK_PROHIBIT_MS), and ML's idle countdowns do not blank a paused LiveView (liveview_display_idle
+ * is 0, they reset themselves). idle_wakeup_reset_counters is NOT called: with ML's "turn display off" countdown at 0,
+ * its reset makes ML's idle_display_on run ResumeLiveView, mid-run.
+ * No redraw on a re-light: the bitmap keeps the Darkroom while dark (presented as usual), the UI rewrites our palette
+ * on the tick the display reads on again (wf_ui.c), and the next redraw (1 s) is the usual double-buffered copy.
+ * Each frame counts its re-lights and when it first read off (ms into the frame) for its screen line. Its own give-up,
+ * as dk_screen's: an ask still off at the next look is a miss, DK_DISP_TRIES in a row and none again this run. */
+#define DK_KEEP_MS 1000
+#define DK_KEEP_UI_MS 3000                       /* the worker asks only when the UI has not kept it for this long */
+#define DK_PROHIBIT_MS 30000
+static volatile int dk_keep_ms, dk_keep_ui, dk_keep_pend, dk_keep_miss, dk_keep_said, dk_prohibit_ms;
+static volatile int dk_relit, dk_off_first, dk_relit_run;   /* this frame's re-lights, its first off (ms into it, -1
+                                                               none), the run's re-lights */
+int wf_dark_keep(int now, int ui)
+{
+    if (!dk_running || !dk_dark_ok || wf_dk_scr != WF_DS_ON || ml_shutdown_requested || wf_unloading)
+        return 0;
+    if (ui)
+        dk_keep_ui = now;
+    else if (now - dk_keep_ui < DK_KEEP_UI_MS)
+        return 0;
+    if (now - dk_keep_ms < DK_KEEP_MS)
+        return 0;
+    dk_keep_ms = now;
+    if (now - dk_prohibit_ms >= DK_PROHIBIT_MS) {
+        dk_prohibit_ms = now;
+        powersave_prohibit();
+    }
+    if (display_is_on()) {
+        if (dk_keep_pend)
+            dk_keep_miss = 0;                    /* the last ask took */
+        dk_keep_pend = 0;
+        return 0;
+    }
+    if (dk_off_first < 0)
+        dk_off_first = now - dk_t0;
+    if (dk_keep_pend) {                          /* asked a second ago and still off */
+        dk_keep_pend = 0;
+        dk_keep_miss++;
+    }
+    if (dk_keep_miss >= DK_DISP_TRIES) {
+        if (!dk_keep_said) {
+            dk_keep_said = 1;
+            wf_log("dark: display off while F%02d runs: turned on %d times, it stays off (not asked again this run)",
+                   dv.frame + 1, DK_DISP_TRIES);
+        }
+        return 0;
+    }
+    display_on();
+    dk_keep_pend = 1;
+    dk_relit++;
+    dk_relit_run++;
+    return 1;
+}
+
+static void dk_screen_line(int i)                /* Screen On: the frame's re-lights (its own line: the frame's is full) */
+{
+    if (wf_dk_scr != WF_DS_ON)
+        return;
+    if (dk_off_first >= 0)
+        wf_log("dark: F%02d screen: relit %d, first off at %d ms", i + 1, dk_relit, dk_off_first);
+    else
+        wf_log("dark: F%02d screen: relit %d", i + 1, dk_relit);
+}
+
 static int dk_screen(const char *when)
 {
     if (dk_dark_due(get_ms_clock()))             /* Screen Off: dark is what the owner chose */
@@ -1177,6 +1249,7 @@ static void dk_yield(void)
 {
     msleep(2);
     wf_task_yield(0);
+    wf_dark_keep(get_ms_clock(), 0);             /* Screen On: kept on when the UI is closed */
 }
 
 /* ------------------------------------------------------------------ print finishes (DESIGN 3.9, wf_print.h) */
@@ -1386,6 +1459,7 @@ static int dk_encode(int i, const char *path, const struct wf_pf_lay *L, uint8_t
                 break;
             }
             wf_task_yield(0);
+            wf_dark_keep(get_ms_clock(), 0);
         }
     }
     if (rc == WF_JPE_OK && !stopped)
@@ -1784,6 +1858,10 @@ static void dk_task(void)
     wf_log("dark: screen at the start: display %d -> %d, LiveView %d -> %d%s", d0, display_is_on(), lv0, lv,
            paused ? " (paused)" : "");
     dk_offs = dk_wakes = 0;
+    dk_relit = dk_relit_run = dk_keep_said = dk_keep_pend = dk_keep_miss = 0;
+    dk_off_first = -1;
+    dk_keep_ms = dk_prohibit_ms = get_ms_clock();   /* (the first look a second in: dk_screen asks first) */
+    dk_keep_ui = dk_keep_ms - DK_KEEP_UI_MS;     /* the UI has not kept it yet */
     dk_dark_ok = 1;                              /* Screen Off from here: dark WF_DS_WAKE_MS after the last key (SET) */
     if (wf_dk_scr == WF_DS_OFF)
         wf_log("dark: Screen Off: the display goes dark %d s after the last key", WF_DS_WAKE_MS / 1000);
@@ -1880,8 +1958,11 @@ static void dk_task(void)
         dk_screen(sw);
         dv.frame = i;
         dv.left = wf_roll_left(&roll);
+        dk_relit = 0;                            /* Screen On: this frame's re-lights (wf_dark_keep), its first off */
+        dk_off_first = -1;
         dk_t0 = get_ms_clock();
         int bytes = 0, r = dk_frame(i, &lk, src, &bytes);
+        dk_screen_line(i);
         if (r == DK_STOP) {
             end_why = dk_why;
             break;
@@ -1928,6 +2009,8 @@ static void dk_task(void)
            paused ? " (resumed)" : "", dk_disp_ons);
     if (dk_offs || dk_wakes)
         wf_log("dark: Screen Off: display turned off %d times, woken %d times", dk_offs, dk_wakes);
+    if (dk_relit_run)
+        wf_log("dark: Screen On: display found off while frames ran, turned on again %d times", dk_relit_run);
     int left = wf_roll_left(&roll);
     dv.frame = -1;
     dv.phase = WF_DP_NONE;
@@ -1948,6 +2031,7 @@ void wf_dark_stop(void) {}
 void wf_dark_poll(void) {}
 int wf_dark_wake(int now) { (void)now; return 0; }
 int wf_dark_dark(int now) { (void)now; return 0; }
+int wf_dark_keep(int now, int ui) { (void)now; (void)ui; return 0; }
 #endif
 
 #if WF_DARK_CAN

@@ -988,16 +988,38 @@ screen itself ("one UI"), at its top right.
   the screen, MENU too) only wakes it: `display_on`, 10 s again, the key does nothing else. Awake, keys work as
   before (MENU twice stops; LEFT / RIGHT switch the chip back to On). The UI draws nothing while the display reads
   dark (`wfdr_dark`, `src/ui/wf_ui.c`), and redraws on waking. Screen On = as before (the run keeps the LCD on).
+- **Screen On keep-alive** (owner 2026-11-17, RAWB23: the EOS M's LCD flashed and went dark in the middle of a frame
+  with Screen On and came back at the end; `dk_screen` only looked at frame boundaries, ~185 s apart). `wf_dark_keep`
+  (`src/wf_dark.c`) looks every second while a Screen On run lives (`dk_running`, `dk_dark_ok`): a display that reads
+  off gets ML's `display_on`. The Darkroom screen's tick calls it (UI task 0x1B, above wf_task's 0x1E, so long worker
+  steps do not hold it back); the worker's band yields call it too, only when the UI has not for 3 s (UI closed by
+  half-shutter). Its own give-up like `dk_screen`'s: an ask still off at the next look is a miss, 3 in a row and none
+  again this run (`dark: display off while Fnn runs: turned on 3 times, it stays off (not asked again this run)`).
+  Prevention: `powersave_prohibit` (already asked at the start) is asked again every 30 s. ML's
+  `idle_wakeup_reset_counters` is not used: when ML's "turn display off" countdown is at 0, its reset runs ML's
+  `idle_display_on`, which calls `ResumeLiveView` in the middle of the run; and ML's idle countdowns cannot blank a
+  paused LiveView anyway (`liveview_display_idle` is 0 then). So the blank is Canon's own, not ML's or the power-off
+  timer's. No redraw on a re-light: the bitmap keeps the Darkroom while dark, the next 1 s redraw is the usual
+  double-buffered copy, and `src/ui/wf_ui.c` rewrites our palette on the first tick the display reads on again (not
+  at the next 100 ms probe), so Canon's palette never shows on our pixels. The flash the owner saw is Canon blanking
+  the LCD, not our code: nothing of ours draws or clears when it goes off.
 - **End.** Done, stopped or failed: no more dark from the tick, an off asked under 2 s before is let land, then
   `dk_screen("after the run")` turns the display on so the result shows; `powersave_permit` then leaves Canon's own
   auto-off to Canon. Unloading after a dark run: one `display_on` (no wait).
 - **Text.** `dark: Screen Off: the display goes dark 10 s after the last key` at the start, `dark: Screen Off: display
   turned off N times, woken M times` at the end. The footer while running says "Screen Off: any key wakes it for 10 s".
+  Screen On: after each frame `dark: Fnn screen: relit N` (`, first off at T ms` = ms into the frame when it first read
+  off), its own line because the frame's line already fills the 120 characters of a log line; at the end, when any,
+  `dark: Screen On: display found off while frames ran, turned on again N times`.
 - **Checks.** `test.sh` ROLL:jpeg roll 002 (a real run, the test standing in for the screen's tick and keys): shown
   after a key, dark when due (display_off), a key wakes it (display_on) and only that, dark again, no turn-on before
   the frames, on at the end, the end line. CFG: `dkscreen=` read and saved. `tests/ui/dr_ui_test.c`: focus order, the
   switch, a dark run draws nothing, MENU / RIGHT on the dark screen only wake it, RIGHT awake switches it; shots
-  `dark_screen_chip_on`, `dark_screen_off`, `dark_run_screen_off_wake`, `dark_run_screen_on`.
+  `dark_screen_chip_on`, `dark_screen_off`, `dark_run_screen_off_wake`, `dark_run_screen_on`. Screen On keep-alive:
+  ROLL:jpeg roll 001 (a real run, the test standing in for the tick while F02 runs): on = nothing; off = turned on;
+  within its second = not looked at; the ask took; stuck off = 3 asks then given up; the F01 / F02 / F03 screen lines
+  (F02 `relit 4, first off at`), the give-up line and the end line; roll 002 (Screen Off) has no screen lines.
+  `dr_ui_test.c`: the dark screen's tick calls it on a Screen On run.
 - **Not checked on the camera:** that Canon keeps the display off while LiveView is paused, and how the EOS M's own
   keys reach ML while it is dark (the first key may also be seen by Canon). The 5D2 has no Darkroom: stubs only.
 

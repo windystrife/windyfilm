@@ -320,6 +320,12 @@ int main(int argc, char **argv)
     key(MODULE_KEY_PRESS_RIGHT);
     CHECK(fake_nwake() == 2 && wf_dk_scr == WF_DS_ON, "RIGHT awake during the run: screen %d (want On)", wf_dk_scr);
     shot("dark_run_screen_on");
+    {
+        int k0 = fake_nkeep();
+        tick(2);
+        CHECK(fake_nkeep() >= k0 + 2, "Screen On run: the tick keeps the display on (%d keep-alive calls in 2 ticks)",
+              fake_nkeep() - k0);
+    }
     fake_set_dark(0);
     v = fake_view(); v->expose = 520; v->prog = 480; v->t_frame = 21000;
     shot("dark_expose_52");

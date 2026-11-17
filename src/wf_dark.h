@@ -111,6 +111,8 @@ enum { WF_DS_ON = 0, WF_DS_OFF, WF_DS_N };
 void wf_dk_scr_step(int d);                      /* the chip's LEFT / RIGHT / wheel: On <-> Off; the config is saved later */
 int  wf_dark_wake(int now);                      /* the UI, on each key of the Darkroom screen: 1 = a Screen Off run's
                                                     display was dark (it is turned on): the key does nothing else */
+int  wf_dark_keep(int now, int ui);              /* Screen On: the UI's tick (ui 1) and the run's band yields (ui 0):
+                                                    a display Canon turned off mid-frame is turned on again, every 1 s */
 int  wf_dark_dark(int now);                      /* the UI's tick on the Darkroom screen: turns the display off when a
                                                     Screen Off run is due dark; 1 = it reads dark (redraws can wait) */
 
