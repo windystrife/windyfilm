@@ -1,10 +1,13 @@
 #!/bin/bash
 # dr_run.sh - build and run the Roll + Darkroom screen harness (tests/ui/dr_ui_test.c) in WSL; PNGs in $W/shots.
 #   bash tests/ui/dr_run.sh [IMG.JPG ...]      (default: four of the owner's Day09 JPEGs as stand-in prints)
+#   CAM=5D2 bash tests/ui/dr_run.sh            (the 5D2's keys, four of the owner's 5D2 JPEGs; W .../ui5d2)
 # Work dir W (default /root/ml/wf_darkroom/ui). Reads (never writes) the data side's can pack and ML's RBF fonts.
 set -e
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
-W=${W:-/root/ml/wf_darkroom/ui}
+CAM=${CAM:-EOSM}
+[ $CAM = 5D2 ] && W=${W:-/root/ml/wf_darkroom/ui5d2} || W=${W:-/root/ml/wf_darkroom/ui}
+export WF_UI_CAM=$CAM
 RBF=${RBF:-/root/ml/wf_ui/fonts}
 CANS=${CANS:-/root/ml/wf_data/out/WFCANS.DAT}
 D=/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM
@@ -15,8 +18,12 @@ cd $W
 cp out/WFFONTS.DAT card/ML/DATA/
 cp "$CANS" card/ML/DATA/WFCANS.DAT
 $PY $REPO/tests/ui/mk_fakecat.py build/fake_catalog.c > /dev/null
-if [ $# -gt 0 ]; then IMGS="$*"; else IMGS="$D/IMG_0208.JPG $D/IMG_0233.JPG $D/IMG_0210.JPG $D/IMG_0227.JPG"; fi
-$PY $REPO/tests/ui/dr_mkthumbs.py thumbs $IMGS
+D5="/mnt/f/MagicLatern/_test mau film/5D2"
+if [ $# -gt 0 ]; then IMGS=("$@")
+elif [ $CAM = 5D2 ]; then IMGS=("$D5/100EOS5D/IMG_8380.JPG" "$D5/100EOS5D/IMG_8419.JPG" "$D5/Day 10/IMG_8505.JPG"
+                                "$D5/100EOS5D/IMG_8381.JPG")
+else IMGS=($D/IMG_0208.JPG $D/IMG_0233.JPG $D/IMG_0210.JPG $D/IMG_0227.JPG); fi
+$PY $REPO/tests/ui/dr_mkthumbs.py thumbs "${IMGS[@]}"
 SAN="-fsanitize=address,undefined -fno-omit-frame-pointer"
 gcc -std=gnu99 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-comment $SAN -DWF_HOST -DWF_HOST_PURE \
     -I$REPO/tests/ui -I$REPO/src -I$REPO/src/ui \

@@ -188,5 +188,5 @@ int wf_roll_shelved(void) { return fshelf && wf_roll_open(&roll); }
 void fake_set_shelf(int on) { fshelf = on; rgen++; }
 
 /* RAW develop B's menu toggle (wf_rawb.h; the core's wf_rawb.c is not in the harness) */
-int wf_rawb_can(void) { return rawb_can && wf_cam() != WF_CAM_5D2; }   /* as the real builds: EOS M only */
+int wf_rawb_can(void) { return rawb_can; }     /* as the real builds: B on both cameras (wf_cam.h WF_RAWB_CAN) */
 void fake_set_rawb_can(int c) { rawb_can = c; }

@@ -23,8 +23,8 @@
 # EKTAP_C2.CUB: the owner chose the CinePrint one). The loader takes 2..65^3 under the same name, no code change.
 # LOGO (env, optional, owner 11-16): the camera maker's wordmark SVG from the owner's private folder (never the repo, never
 # committed): tools/mk_wflogo.py makes ML/DATA/WFLOGO.DAT from it here, at card time, with our own model lettering; the
-# Darkroom draws them in framed prints when the file is on the card. Without it the caption stays text only. EOS M only
-# (the 5D2 has no Darkroom: the file is left out there).
+# Darkroom draws them in framed prints when the file is on the card. Without it the caption stays text only. Both
+# cameras (the 5D2's Darkroom, DESIGN 3.16, 11-17).
 # Run in WSL: bash tools/mk_card.sh EOSM <the EOS M ML card folder> /mnt/f/MagicLatern/EOSM_WindyFilm
 set -eu
 CUBES=${CUBES:-} CINEPRINT_C2=${CINEPRINT_C2:-} LOGO=${LOGO:-}
@@ -37,7 +37,7 @@ case $CAM in
 esac
 [ -e "$DST" ] && { echo "$DST exists: refusing to overwrite"; exit 2; }
 for f in autoexec.bin ML-SETUP.FIR ML/modules/$SYM; do [ -f "$SRC/$f" ] || { echo "$SRC/$f missing"; exit 2; }; done
-PK="WFFILMS.DAT WFCANS.DAT WFFONTS.DAT"; [ $CAM = EOSM ] && PK="$PK WFPRINT.DAT"   # WFPRINT.DAT: the Darkroom's print fonts
+PK="WFFILMS.DAT WFCANS.DAT WFFONTS.DAT WFPRINT.DAT"   # WFPRINT.DAT: the Darkroom's print fonts (both cameras, 11-17)
 for f in windyflm.mo $PK; do [ -s "$B/$f" ] || { echo "$B/$f missing: build first"; exit 2; }; done
 for c in $CUBES; do
   case ${c##*/} in *.CUB) ;; *) echo "$c: a cube must be named <NAME>.CUB"; exit 2 ;; esac
@@ -104,9 +104,7 @@ for i in "${!CPMAP[@]}"; do
   cp "$f" "$D/$n"
   echo "cube: $n <- ${f##*/} ($(grep -a -m1 '^LUT_3D_SIZE' "$f" | awk '{print $2}' | tr -dc 0-9)^3, $(md5sum < "$f" | cut -c1-32))"
 done
-if [ -n "$LOGO" ] && [ $CAM != EOSM ]; then                # only the EOS M has the Darkroom (as WFPRINT.DAT)
-  echo "logo: $CAM has no Darkroom: WFLOGO.DAT left out"
-elif [ -n "$LOGO" ]; then
+if [ -n "$LOGO" ]; then                                   # the Darkroom's wordmark, both cameras (as WFPRINT.DAT)
   for f in "$D"/WFLOGO.DAT; do [ -e "$f" ] && { echo "${f#$DST/} already on the source card: refusing to replace it"; exit 1; }; done
   python3 -I -B "$R/tools/mk_wflogo.py" "$LOGO" "$D/WFLOGO.DAT" > /dev/null
   echo "logo: WFLOGO.DAT ($(stat -c %s "$D/WFLOGO.DAT") B) from ${LOGO##*/}"

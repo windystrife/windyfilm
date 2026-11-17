@@ -956,7 +956,7 @@ int main(int argc, char **argv)
 
     /* 7. one screen (owner 11-17): the mode chip at the top right (JPEG / RAW develop / Darkroom), the Exposures row and
      * a roll loaded from the browser, leaving Darkroom with a roll never loses a frame (asks, or sets the roll aside),
-     * a finished roll asks before close-and-load; the 5D2 keeps the film chip */
+     * a finished roll asks before close-and-load; the 5D2 the same with its keys (DESIGN 3.16) */
     fake_reset();
     fake_dark_reset();
     fake_set_card(card);
@@ -1134,20 +1134,19 @@ int main(int argc, char **argv)
     close_ui(MODULE_KEY_MENU, 0);
     fake_dark_reset();
     fake_reset();
-    fake_set_cam(WF_CAM_5D2);
+    fake_set_cam(WF_CAM_5D2);                                      /* the 5D2's Darkroom (DESIGN 3.16, 11-17) */
     fake_set_card(card);
+    fake_set_loaded(id_of("PRT160"));
     open_ui();
-    CHECK(!strcmp(wf_row_text(WF_ROW_LIGHT), "Auto"), "5D2 Light: '%s' (no Darkroom: Auto, the camera's WB)",
+    CHECK(!strcmp(wf_row_text(WF_ROW_LIGHT), "Auto"), "5D2 Light: '%s' (Auto: the Darkroom's prints Canon's Auto WB)",
           wf_row_text(WF_ROW_LIGHT));
-    key(MODULE_KEY_PRESS_UP);
-    CHECK(!wfui_host_chip() && wfui_host_focus() == FOC_TOP, "5D2: no chip, UP from Light: the section pill (%d)",
-          wfui_host_focus());
-    key(MODULE_KEY_PRESS_RIGHT);
-    CHECK(wfui_host_tsub() == 0, "5D2: RIGHT on the top bar: no chip to go to");
+    to_top();
+    CHECK(wfui_host_chip() && wfui_host_tsub() == 0, "5D2: the chip there, UP to the top bar: the section pill (tsub %d)",
+          wfui_host_tsub());
     key(MODULE_KEY_JOY_CENTER);
     CHECK(wfui_host_sec() == 1 && !wfui_host_edit() && wfui_host_focus() == FOC_TOP, "5D2: the joystick press on the "
           "pill: Film stage (section %d, edit %d)", wfui_host_sec(), wfui_host_edit());
-    CHECK(!wfui_host_rows(), "5D2 Film stage: no Exposures row (no rolls)");
+    CHECK(wfui_host_rows(), "5D2 Film stage: the Exposures row (a roll in every mode)");
     shot("fs_5d2_pill");
     key(MODULE_KEY_INFO);                                           /* the 5D2's Info page: its own key names */
     CHECK(wfui_host_info() && wfui_host_info_y() + 17 <= 361, "5D2 Film stage: the Info page (last row y %d)",
@@ -1157,16 +1156,68 @@ int main(int argc, char **argv)
     CHECK(!wfui_host_info(), "5D2: INFO again closes it");
     key(MODULE_KEY_PRESS_SET);
     CHECK(wfui_host_sec() == 0, "5D2: SET on the pill: Film again");
-    key(MODULE_KEY_PRESS_UP);
-    CHECK(wfui_host_focus() == WF_NROWS - 1, "5D2: UP from the top bar wraps to the last row (%d)", wfui_host_focus());
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfui_host_tsub() == 1, "5D2: RIGHT on the top bar: the chip (tsub %d)", wfui_host_tsub());
+    int m5[4] = { wfui_host_mode(), -1, -1, -1 };
+    for (int i = 1; i < 4; i++) { key(MODULE_KEY_PRESS_SET); m5[i] = wfui_host_mode(); }
+    CHECK(m5[3] == m5[0] && m5[1] != m5[0] && m5[2] != m5[0] && m5[1] != m5[2], "5D2: SET on the chip walks JPEG, RAW "
+          "develop, Darkroom (%d %d %d %d)", m5[0], m5[1], m5[2], m5[3]);
+    for (int i = 0; i < 3 && wfui_host_mode() != 2; i++) key(MODULE_KEY_PRESS_SET);
+    CHECK(wfui_host_mode() == 2 && wfui_host_rows(), "5D2: the chip on Darkroom, the Exposures row (mode %d)",
+          wfui_host_mode());
+    shot("dk5d2_chip_dark");
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == FOC_EXP, "5D2 Darkroom: DOWN from the chip: the Exposures row (focus %d)", wfui_host_focus());
+    for (int i = 0; i < 5 && wfui_host_exp() != 24; i++) key(MODULE_KEY_WHEEL_RIGHT);   /* the 5D2's rear dial */
+    CHECK(wfui_host_exp() == 24, "5D2: the dial steps the exposures to 24 (%d)", wfui_host_exp());
+    shot("dk5d2_rows");
+    CHECK(key(MODULE_KEY_PRESS_SET) == 0 && fake_req_film() == id_of("PRT160") && fake_req_exp() == 24
+          && wf_roll_now()->state == WF_RS_LOADED && wfui_host_anim(), "5D2 SET: a roll of 24 PRT160 (asked %d x%d)",
+          fake_req_film(), fake_req_exp());
+    tick(80);
+    CHECK(closed, "5D2: not closed after the roll's load animation");
+    end_checks();
+    {
+        struct wf_roll *r = fake_roll();
+        r->nshot = 5;
+        for (int i = 0; i < 5; i++) { r->folder[i] = 100; r->file[i] = 8381 + i; r->fst[i] = WF_RF_SHOT; }
+    }
+    open_ui();
+    CHECK(wfui_host_mode() == 2 && wfui_host_exp() == 24, "5D2: a roll with frames: Darkroom, its 24 (mode %d)",
+          wfui_host_mode());
+    tick(150);
+    shot("dk5d2_roll_play");                                        /* the footer with "[PLAY] Darkroom" */
+    key(MODULE_KEY_JOY_CENTER);
+    CHECK(wfui_host_edit(), "5D2: the joystick press edits the row (edit %d)", wfui_host_edit());
+    shot("dk5d2_roll_edit");                                        /* editing: the row's keys only, no PLAY */
+    key(MODULE_KEY_JOY_CENTER);
+    key(MODULE_KEY_INFO);
+    CHECK(wfui_host_info(), "5D2: the Info page with a roll");
+    shot("dk5d2_info");
+    key(MODULE_KEY_INFO);
+    {
+        unsigned pr = wf_ui_key(MODULE_KEY_PLAY);
+        tick(2);
+        CHECK(pr == 0 && wfui_host_scr() == WFUI_SCR_DARK, "5D2: PLAY with a roll: the Darkroom (screen %d, key %u)",
+              wfui_host_scr(), pr);
+    }
+    shot("dk5d2_dark_from_play");
     close_ui(MODULE_KEY_MENU, 0);
-    closed = 0;                                                     /* 5D2, the ML menu's Film roll: no rolls there */
+    fake_dark_reset();
+    fake_reset();
+    fake_set_cam(WF_CAM_5D2);                                      /* the ML menu's Film roll: Darkroom, Exposures */
+    fake_set_card(card);
+    fake_set_loaded(id_of("PRT160"));
+    closed = 0;
     wf_ui_open_scr(WF_UI_NEW_ROLL);
     wfui_task_begin();
     tick(1);
-    CHECK(wfui_host_scr() == WFUI_SCR_BROWSER && !wfui_host_chip() && !wfui_host_nr()
-          && strstr(wfui_host_msg(), "EOS M first"), "5D2 Film roll: the browser says why ('%s')", wfui_host_msg());
+    CHECK(wfui_host_scr() == WFUI_SCR_BROWSER && wfui_host_mode() == 2 && wfui_host_focus() == FOC_EXP
+          && !wfui_host_nr(), "5D2 Film roll: the browser in Darkroom mode on the Exposures row (mode %d, focus %d, '%s')",
+          wfui_host_mode(), wfui_host_focus(), wfui_host_msg());
+    shot("dk5d2_newroll");
     close_ui(MODULE_KEY_MENU, 0);
+    fake_dark_reset();
     fake_set_cam(WF_CAM_EOSM);
     fake_reset();
 

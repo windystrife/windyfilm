@@ -58,8 +58,9 @@ static uint32_t bad_a, bad_w, bad_x;
 enum { K_TOP = 0, K_BOT, K_N };
 static const char *const kname[K_N] = { "TOP", "BOT" };
 static uint8_t installed[K_N];
-enum { R_BUF, R_ARGS, R_RAW, R_NOTOP, R_OVERLAP, R_WORKER, R_N };
-static const char *const rname[R_N] = { "buffer", "r1/r3 not 0", "RAW only", "its TOP not graded",
+enum { R_BUF, R_ARGS, R_RAW, R_ROLL, R_NOTOP, R_OVERLAP, R_WORKER, R_N };
+static const char *const rname[R_N] = { "buffer", "r1/r3 not 0", "RAW only",
+                                        "roll frame: Canon's JPEG, no look (the Darkroom prints it)", "its TOP not graded",
                                         "BOT of the last shot owed", "worker" };
 static int calls[K_N], rej[R_N], rej_logged[R_N], rej_k[K_N], rej_k_nojpg[K_N], rej_seen[K_N], rej_nojpg_seen[K_N];
 static uint32_t rej_v[R_N][4];
@@ -320,6 +321,10 @@ static void wf_hook_5d2(uint32_t *regs, uint32_t *stack, uint32_t pc)
             why = R_ARGS;
         else if ((pic_quality & 0xFF000000) == PICQ_KIND_RAW)
             why = R_RAW;
+        else if (wf_look_use() == WF_LU_NONE)    /* a roll in the camera (DESIGN 3.6, the EOS M's RAWB9): Canon's own
+                                                    JPEG, the Darkroom prints the frame later (RAW develop B on:
+                                                    WF_LU_SHOTS, B now as before). Both halves: the BOT logs it too */
+            why = R_ROLL;
         else if (k == K_BOT && !owed)
             why = R_NOTOP;                       /* never grade a bottom half under a plain top half */
         else if (!wf_worker_up())

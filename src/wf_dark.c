@@ -16,10 +16,8 @@
 #include "wf_fx.h"
 #include "wf_loglut.h"
 #include "wf_rawb.h"                             /* B gives its shoot memory back before a darkroom run */
-#ifdef WF_BUILD_5D2
-#define WF_DARK_CAN 0                            /* the 5D2 follows once the EOS M works (raw 5792 x 3804, GBRG) */
-#else
-#define WF_DARK_CAN 1
+#define WF_DARK_CAN 1                            /* both cameras (the 5D2 since 11-17: DESIGN 3.16, its CR2 in wf_darkp.h) */
+#if WF_DARK_CAN
 #include "wf_darkp.h"
 #include "wf_cr2.h"
 #include "wf_dev.h"
@@ -768,10 +766,21 @@ void wf_roll_poll(void)
 }
 
 /* ================================================================== the darkroom (wf_task) */
-#define DK_W        5184                        /* the EOS M L frame in its CR2 (DESIGN 3.2: x0 84, y0 64) */
-#define DK_H        3456
-#define DK_X0       84
-#define DK_Y0       64
+/* the camera's L frame in its CR2 (wf_darkp.h wf_dk_geom: EOS M 5184 x 3456 at 84, 64; 5D2 5616 x 3744 at 168, 56, its
+   develop 5632 columns wide) */
+#ifdef WF_BUILD_5D2
+#define DK_CAM      WF_DK_5D2
+#define DK_DEV      WF_DEV_5D2
+static const struct wf_dk_geom dkg __attribute__((unused)) = WF_DK_GEOM_5D2;
+#else
+#define DK_CAM      WF_DK_EOSM
+#define DK_DEV      WF_DEV_EOSM
+static const struct wf_dk_geom dkg __attribute__((unused)) = WF_DK_GEOM_EOSM;
+#endif
+#define DK_W        (dkg.w)
+#define DK_H        (dkg.h)
+#define DK_X0       (dkg.x0)
+#define DK_Y0       (dkg.y0)
 #define DK_RD       (256 * 1024)                 /* card reads / writes through the DMA buffer */
 #define DK_IN       (256 * 1024)                 /* the decoder's cached input */
 #define DK_OB       (64 * 1024)                  /* encoder output buffer */
@@ -780,7 +789,8 @@ void wf_roll_poll(void)
 #define DK_JROWS    64
 #define DK_BAT_GO   30
 #define DK_BAT_STOP 15
-#define DK_RAW_N    (9240u * 3528u)              /* the EOS M CR2's sensor image, ML packed 14-bit */
+#define DK_RAW_N    ((uint32_t)dkg.pitch * (uint32_t)dkg.sh)   /* the CR2's sensor image, ML packed 14-bit (EOS M 9240 x
+                                                    3528 = 31.1 MB, 5D2 10136 x 3804 = 36.8 MB) */
 
 static struct wf_dark_view dv;
 static uint8_t dv_print[WF_DR_PW * WF_DR_PH];
@@ -869,7 +879,7 @@ static int dk_logpk(const struct wf_look *lk, struct wf_dev_tabs *t, void *scr)
 {
     struct wf_dev_pkinfo pi;
     int ms;
-    dk_lgk = wf_rawb_logpk_build(t, scr, wf_dev_scratch_bytes(DK_W, DK_H), lk, &ms, &pi) == WF_LL_OK;
+    dk_lgk = wf_rawb_logpk_build(t, scr, wf_dev_scratch_bytes(dkg.dw, DK_H), lk, &ms, &pi) == WF_LL_OK;
     if (dk_lgk && lk->stk) {
         struct wf_sg_knobs kk;
         wf_sg_unkey(lk->stk, &kk);
@@ -1075,7 +1085,7 @@ static int dk_screen(const char *when)
 #define DK_FP       (DK_W * 2)                   /* frame pitch, bytes */
 #define DK_FRAME_N  ((uint32_t)DK_FP * DK_H)
 #define DK_RAW_A    (DK_RAW_N + 4096)             /* the raw's block */
-#define DK_RAW_P    9240                         /* the EOS M CR2's raw pitch (5280 px x 14 bit): K is set for it */
+#define DK_RAW_P    (dkg.pitch)                  /* the CR2's raw pitch (EOS M 5280 px x 14 bit, 5D2 5792 px): K is set for it */
 #define DK_SPLIT_M  8                            /* sensor rows between the tail's last write and the next read */
 struct dk_mem {
     void *srm, *shoot;                           /* suites (shoot: the whole frame, or the split's head) */
@@ -1254,16 +1264,23 @@ static int dk_split(uint32_t fin)
     return 0;
 }
 
-/* no memory: what was short, and the biggest shoot block there is now (taken and given back at once) */
-static void dk_short(uint32_t fin)
+/* the biggest shoot block there is now, KB (taken and given back at once) */
+static int dk_biggest(void)
 {
-    int big = 0, K = dk_split_rows(fin, DK_RAW_P);
+    int big = 0;
     void *t = shoot_malloc_suite_contig(0);
     if (t) {
         void *c = GetFirstChunkFromSuite(t);
         big = c ? GetSizeOfMemoryChunk(c) >> 10 : 0;
         shoot_free_suite(t);
     }
+    return big;
+}
+
+/* no memory: what was short, and the biggest shoot block there is now */
+static void dk_short(uint32_t fin)
+{
+    int big = dk_biggest(), K = dk_split_rows(fin, DK_RAW_P);
     /* two lines: a log line holds 120 characters (wf_main.c WF_LOG_W) */
     wf_log("dark: memory short: raw %d KB %s, frame %d KB in one block none", (int)(DK_RAW_A >> 10),
            M.raw ? "ok" : M.srm ? "none in the srm chunks" : "no srm", (int)(DK_FRAME_N >> 10));
@@ -1279,12 +1296,21 @@ static int dk_alloc(void)
     M.ob = __mem_malloc(DK_OB, 0, "wf_dark.c", __LINE__);
     M.app1 = __mem_malloc(DK_APP1, 0, "wf_dark.c", __LINE__);
     M.tabs = __mem_malloc(sizeof(struct wf_dev_tabs), 0, "wf_dark.c", __LINE__);
-    M.scr = __mem_malloc(wf_dev_scratch_bytes(DK_W, DK_H), 0, "wf_dark.c", __LINE__);
+    M.scr = __mem_malloc(wf_dev_scratch_bytes(dkg.dw, DK_H), 0, "wf_dark.c", __LINE__);
     if (!M.dma || !M.in || !M.ob || !M.app1 || !M.tabs || !M.scr) {
         wf_log("dark: no memory for the buffers / tables");
         return -1;
     }
     uint32_t fin = dk_fin_need();
+#ifdef WF_BUILD_5D2
+    /* the 5D2's first runs (DESIGN 3.16, a camera probe): the shoot memory left in one block after the look, before the
+       run takes any, against what the frame wants (one block, or the split's head) */
+    {
+        int K = dk_split_rows(fin, DK_RAW_P);
+        wf_log("dark: 5D2 memory: biggest shoot block %d KB (frame %d KB in one block, split head %d KB)", dk_biggest(),
+               (int)(DK_FRAME_N >> 10), K > 0 ? (int)(((uint32_t)K * DK_FP) >> 10) : 0);
+    }
+#endif
     for (int pass = 0; pass < 2 && !M.raw; pass++) {
         if (!pass && (M.shoot = shoot_malloc_suite_contig(DK_FRAME_N)) != 0) {   /* 1. the frame in one shoot block */
             M.frame = dk_run(M.shoot, DK_FRAME_N, 0, 0);
@@ -1852,8 +1878,10 @@ static int dk_dcim_put(int i, const char *dst, const char *nm, const char *verb,
             wf_fremove(tmp, &e);
         return DK_ERR;
     }
-    wf_log("dark: F%02d camera JPEG %s %s: %s, %d KB, %dms", i + 1, nm, verb, kind == DK_CJ_COPY ? "the print" : fit
-           ? "the print fitted 5184x3456" : "the picture 5184x3456", (int)(w.n >> 10), get_ms_clock() - t0);
+    char wh[24];
+    snprintf(wh, sizeof wh, " %dx%d", DK_W, DK_H);
+    wf_log("dark: F%02d camera JPEG %s %s: %s%s, %d KB, %dms", i + 1, nm, verb, kind == DK_CJ_COPY ? "the print" : fit
+           ? "the print fitted" : "the picture", kind == DK_CJ_COPY ? "" : wh, (int)(w.n >> 10), get_ms_clock() - t0);
     return DK_OK;
 }
 
@@ -1949,7 +1977,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
         uint32_t nl = fsize - dk_inf.strip_off < WF_CR2_LJHEAD ? fsize - dk_inf.strip_off : WF_CR2_LJHEAD;
         rc = dk_read_at(f, dk_inf.strip_off, M.in, nl) ? WF_CR2_E_READ : wf_cr2_parse_ljpeg(M.in, nl, &dk_inf);
     }
-    if (rc == 0 && (dk_inf.w < DK_X0 + DK_W || dk_inf.h < DK_Y0 + DK_H || DK_IN < wf_cr2_inbuf_min(&dk_inf)
+    if (rc == 0 && (dk_inf.w != dkg.sw || dk_inf.h != dkg.sh || dk_inf.pitch != dkg.pitch || DK_IN < wf_cr2_inbuf_min(&dk_inf)
                     || (uint32_t)dk_inf.pitch * (uint32_t)dk_inf.h > DK_RAW_N))
         rc = WF_CR2_E_SIZE;
     if (rc == 0 && M.nseg && !dk_split_ok(M.split, dk_inf.pitch)) {   /* the tail would catch up with the raw's reads */
@@ -1987,12 +2015,12 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     struct wf_dev_job j;
     memset(&j, 0, sizeof j);
     j.raw = M.raw; j.pitch = dk_inf.pitch;
-    j.ax0 = 72; j.ay0 = 52; j.ax1 = dk_inf.w; j.ay1 = dk_inf.h;   /* EOS M CR2: image data from 72, 52 */
-    j.x0 = DK_X0; j.y0 = DK_Y0; j.w = DK_W; j.h = DK_H; j.cfa = 0;
+    j.ax0 = dkg.ax0; j.ay0 = dkg.ay0; j.ax1 = dk_inf.w; j.ay1 = dk_inf.h;   /* image data from (EOS M 72, 52; 5D2 152, 52) */
+    j.x0 = DK_X0 - dkg.dx; j.y0 = DK_Y0; j.w = dkg.dw; j.h = DK_H; j.cfa = dkg.cfa;   /* 5D2: 5632 wide, the print 16 in */
     int lb = 0, lw = 0;
-    wf_dev_levels(M.scr, &j, 16, 64, &lb, &lw);
-    j.black = lb ? lb : 2048;
-    j.white = lw ? lw : wf_dk_white(WF_DK_EOSM, dk_inf.iso);
+    wf_dev_levels(M.scr, &j, dkg.bx0, dkg.bx1, &lb, &lw);
+    j.black = lb ? lb : dkg.black;
+    j.white = lw ? lw : wf_dk_white(DK_CAM, dk_inf.iso);
     const int *wbl;                              /* Light Auto: Canon's Auto WB of the shot (owner 11-17), else as shot */
     int wk = wf_dk_wb_pick(dk_inf.wb, dk_inf.wb_auto, lk->light == WF_LIGHT_AUTO, &wbl);
     if (wk == WF_DKWB_NOAUTO && !dk_wa_said) {
@@ -2000,7 +2028,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
         wf_log("dark: IMG_%04d: no Auto WB levels in the CR2 (ColorData %d): the as-shot WB (said once a run)",
                dkr->file[i], dk_inf.cd_count);
     }
-    int as = wf_dk_scales(WF_DK_EOSM, wbl, j.black, j.white, dk_inf.iso, j.wb_q8);
+    int as = wf_dk_scales(DK_CAM, wbl, j.black, j.white, dk_inf.iso, j.wb_q8);
     j.roll = src != WF_DEV_LOG;
     j.hue = dk_lgk ? wf_rb_hue : WF_DEV_HUE_A;   /* chain films (B's switch, wf_rawb.h); cans + sRGB base develop: A */
     j.ms = get_ms_clock;
@@ -2014,7 +2042,10 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
         for (int ya = y, ye; ya < yb; ya = ye) {  /* one piece at a time (the split is a multiple of DK_BAND: one call) */
             ye = dk_row_end(ya) < yb ? dk_row_end(ya) : yb;
             uint32_t *d = dk_row(0, ya);
-            wf_dev_rows(M.scr, ya, ye, d, DK_FP);
+            if (dkg.dw == DK_W)
+                wf_dev_rows(M.scr, ya, ye, d, DK_FP);
+            else                                 /* 5D2: Canon's 5616 columns of the 5632 developed */
+                wf_dev_rows_win(M.scr, ya, ye, d, DK_FP, dkg.dx, DK_W);
             wf_dk_thumb_rows(&dk_th, d, DK_FP, ya, ye - ya, dv_print);
         }
         dv.expose = yb * 1000 / DK_H;
@@ -2095,7 +2126,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     dv.print_ready = 2;
     wf_log("dark: F%02d IMG_%04d iso %d: load %d expose %d fix %d dry %d ms, %d KB, wb %s, trim %d, black %d white %d%s, "
            "shoulder %s %dms, look %s", i + 1, dkr->file[i], dk_inf.iso, dk_t[0], dk_t[1], dk_t[2], dk_t[3],
-           (int)(wr.n >> 10), !as ? "daylight" : wk == WF_DKWB_AUTO ? "auto" : "as-shot", wf_dk_trim10(WF_DK_EOSM, dk_inf.iso),
+           (int)(wr.n >> 10), !as ? "daylight" : wk == WF_DKWB_AUTO ? "auto" : "as-shot", wf_dk_trim10(DK_CAM, dk_inf.iso),
            j.black, j.white,
            lw ? "" : " (table)", st.roll ? wf_dev_hue_name(st.hue) : "-", st.ro_ms, wf_status_name(status));
     return DK_OK;
@@ -2331,14 +2362,14 @@ static void dk_task(void)
         int rbt = rc == WF_LL_OK && wf_rawb_rbt_key(&lk, src, cube, rp, rk) == 0;
         if (rbt) {
             got = wf_llb_read(rp, rk, WF_RBT_NKEY, M.tabs, sizeof(struct wf_dev_tabs));
-            if (got == WF_LLB_HIT && (M.tabs->src != src || M.tabs->curve != curve || M.tabs->cam != WF_DEV_EOSM
+            if (got == WF_LLB_HIT && (M.tabs->src != src || M.tabs->curve != curve || M.tabs->cam != DK_DEV
                                       || M.tabs->n < 2 || M.tabs->n > 65))
                 got = WF_LLB_BAD;
         }
         if (got != WF_LLB_HIT && rc == WF_LL_OK && src == WF_DEV_DISP)   /* LUT EI by hand, H / S on the cube's output (as B) */
-            rc = wf_dev_build_disp(M.tabs, WF_DEV_EOSM, cube, lk.lei, lk.hl, lk.sh, &li);
+            rc = wf_dev_build_disp(M.tabs, DK_DEV, cube, lk.lei, lk.hl, lk.sh, &li);
         else if (got != WF_LLB_HIT && rc == WF_LL_OK)
-            rc = wf_dev_build(M.tabs, src, curve, WF_DEV_EOSM, cube,
+            rc = wf_dev_build(M.tabs, src, curve, DK_DEV, cube,
                               src == WF_DEV_CUBE ? lk.lei : 0, src == WF_DEV_CUBE && lk.flut != 0, &li);
         if (rc == WF_LL_OK) {
             static const char *const llb[4] = { "hit", "none", "key", "bad" };
@@ -2488,11 +2519,6 @@ static int dk_start(int num, int again, int film)
         return -2;
     if (!wf_cam_ok || wf_unloading || wf_job_state() || is_movie_mode() || req_kind || wf_rawb_busy())
         return -3;                               /* (a shot's B develop still runs: 30 s) */
-    if (wf_cam() != WF_CAM_EOSM) {
-        dv.msg = "The Darkroom runs on the EOS M first";
-        dv_bump();
-        return -3;
-    }
     if (!wf_worker_up()) {                       /* a boot's first seconds (wf_main.c tries it again): the look stage */
         dv.msg = "Starting: try again in a moment";   /* runs on the worker */
         dv_bump();

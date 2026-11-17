@@ -237,11 +237,7 @@ static const char *const wf_print_key[WF_NPRINTS] = { "scan", "cine", "paper",
    Canon's Auto WB levels of each CR2 (wf_dark.c); a shot (JPEG, RAW develop) keeps the camera's own WB, never changed:
    Canon's Auto levels are only in the CR2 written after it. Day .. Tungsten set the stock's kelvin as before */
 static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Shade", "Tungsten" };
-#ifdef WF_BUILD_5D2
-#define WF_LIGHT_HELP "White balance: Auto (yours), the stock's Day, Cloudy, Shade, Tungsten."
-#else
 #define WF_LIGHT_HELP "Auto: Darkroom prints use Canon's auto WB (shots: yours). Day, Cloudy, Shade, Tungsten."
-#endif
 static const char *const wf_light_key[WF_NLIGHT] = { "auto", "day", "cloudy", "shade", "tungsten" };
 static const char *wf_strength_name[WF_NSTRENGTH] = { "30%", "100%", "125%" };
 static const char *const wf_strength_key[WF_NSTRENGTH] = { "subtle", "normal", "strong" };
@@ -1831,9 +1827,7 @@ static MENU_UPDATE_FUNC(wf_popt_update)
     char b[24];
     int k = (int)(intptr_t)entry->priv - 1;       /* priv = WF_PO_* + 1 */
     MENU_SET_VALUE("%s", wf_popt_text(k, b, sizeof b));
-    if (wf_cam() != WF_CAM_EOSM)
-        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "The Darkroom runs on the EOS M first.");
-    else if (!wf_popt_avail(k))
+    if (!wf_popt_avail(k))
         MENU_SET_WARNING(MENU_WARN_INFO, "The details go under a frame: set Print frame first.");
 }
 static MENU_UPDATE_FUNC(wf_dark_update)
@@ -1845,9 +1839,7 @@ static MENU_UPDATE_FUNC(wf_dark_update)
         MENU_SET_VALUE("%d left", v->left);
     else
         MENU_SET_VALUE(left ? "%d to develop" : "Nothing", left);
-    if (wf_cam() != WF_CAM_EOSM)
-        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "The Darkroom runs on the EOS M first.");
-    else if (left)
+    if (left)
         MENU_SET_WARNING(MENU_WARN_INFO, "About %d min. Prints go to ROLLS/ROLL%03d.", (left * 55 + 59) / 60, r->num);
 }
 static MENU_SELECT_FUNC(wf_rewind_select)

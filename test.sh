@@ -80,7 +80,7 @@ MOD="wf_main.o wf_menu.o wf_shot.o wf_pv.o wf_probe.o wf_loglut.o wf_llk.o wf_ll
  wf_fx.o wf_expsim.o wf_catalog.o wf_logout.o wf_rawb.o wf_roll.o wf_dark.o"
 [ -f $O/wf_expk.o ] && MOD="$MOD wf_expk.o"
 MOD="$MOD wf_dev.o wf_rsrc.o"                                     # RAW develop "B": the develop and the buffer check
-[ $CAM = EOSM ] && MOD="$MOD wf_darkp.o wf_cr2.o wf_jpe.o wf_print.o"   # Roll + Darkroom (DESIGN 3.6, 3.9): linked, idle here
+MOD="$MOD wf_darkp.o wf_cr2.o wf_jpe.o wf_print.o"   # Roll + Darkroom (DESIGN 3.6, 3.9, 3.16): both cameras
 arm-linux-gnueabi-gcc -static -pthread -o $T/wf_test $T/obj/wf_test.o $T/obj/host_ml.o $(for o in $MOD; do echo $O/$o; done) \
   $T/obj/wf_cam_host.o $T/obj/wf_ui_stub.o $T/obj/wf_expoff.o -lm -Wl,--no-enum-size-warning -Wl,--no-wchar-size-warning -Wl,--no-warn-execstack
 set +e
