@@ -261,6 +261,10 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
    tốc độ phim, nấc gần nhất máy nhận (50 thành 100); ISO Auto cũng bị đặt; log "load: ISO
    ..." / "roll: ISO ...". Chỉ lướt qua lon, bật lại máy, tráng cuộn trên kệ / tráng lại:
    ISO không đổi. HUONGDAN bước ag.
+18. (17/11 đêm) Phím tắt (Quick keys, mặc định DOWN ring): DOWN nhanh = vòng xoay chỉnh
+   ISO, DOWN lần nữa = khẩu (M, lens có tiếp điểm), lần nữa = về Canon; hộp nhỏ giữa đáy
+   ghi giá trị. L/R ISO: LEFT / RIGHT = ISO. SET nhanh khi lấy nét tay = Magic Zoom. Giữ
+   DOWN / SET lâu vẫn như cũ (browser / màn Q). HUONGDAN bước ah.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

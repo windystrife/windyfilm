@@ -121,5 +121,14 @@ int  wf_roll_name_parse(const char *s, int *num, int *dev);
  * 200, 400 ..). The ISO of that step in *iso (may be 0). Returns 0 for no speed (<= 0) or no step in lo..hi */
 int  wf_roll_iso(int speed, int lo, int hi, int third, int *iso);
 int  wf_roll_iso_of(int code);                  /* the ISO of a 1/3-stop code, 0 = not one (Auto is code 0) */
+/* the quick keys (owner 11-17, wf_menu.c): one ISO step from code in direction dir (> 0 up) among the 1/3 stops
+ * (third 1) or whole stops (third 0) inside lo..hi; Auto (0): up gives the lowest step, down stays Auto; at an end of
+ * the range: code */
+int  wf_roll_iso_step(int code, int dir, int lo, int hi, int third);
+/* one aperture step from code (> 0) in direction dir (> 0: a bigger f-number) on the 1/3-stop grid (code % 8 = 0, 3, 5)
+ * or the 1/2-stop grid (half 1: 0, 4) inside lo..hi (the lens' widest and smallest; an end off the grid counts too);
+ * at an end: code */
+int  wf_roll_av_step(int code, int dir, int lo, int hi, int half);
+int  wf_roll_av_f10(int code);                  /* the f-number x 10 of an aperture code (8 = f/1.0), 0 = none */
 
 #endif

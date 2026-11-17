@@ -164,6 +164,16 @@ void wfdr_hud(uint8_t *vram, int pitch, int blink, int mode);
 /* the end-of-roll notice (owner 11-15): a box in the middle while a roll is FULL or REWOUND; mode FULL / FADE (dimmed,
    dithered) / CLEAR (its box back to 0). wf_dark.c times it: 5 s when the roll ends, 2.5 s when LiveView comes back */
 void wfdr_notice(uint8_t *vram, int pitch, int mode);
+/* the quick keys' box (owner 11-17, wf_menu.c times it): bottom middle of LiveView, the value big ("ISO 400", "f/2.8",
+   "MAGIC ZOOM"), under it up to two hints, each "[KEY] text" (k given) or plain grey text (k 0). mode FULL / FADE /
+   CLEAR; each call first gives the last box's pixels back (0); vram 0: forget the last box (the screen went to someone
+   else). wfdr_toast_fonts(1 / 0) holds the font pack for it (the UI and the roll HUD share it). wf_dark_toast (wf_dark.c,
+   wf_task) puts it into ML's bitmap: CLEAR also brings Canon's LiveView marks back (redraw) and the roll HUD over them at
+   the next pass; mode -1 forgets the box */
+int  wfdr_toast_fonts(int on);
+void wfdr_toast(uint8_t *vram, int pitch, const char *big, const char *k1, const char *t1, const char *k2, const char *t2,
+                int mode);
+void wf_dark_toast(const char *big, const char *k1, const char *t1, const char *k2, const char *t2, int mode);
 int  wf_clock_hm(void);                          /* the camera clock as h * 100 + m, -1 = unknown (wf_dark.c) */
 
 #endif

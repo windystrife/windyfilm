@@ -20,6 +20,9 @@ const int wf_t_li_wbs_ba = offsetof(struct lens_info, wbs_ba);
 const int wf_t_li_picstyle = offsetof(struct lens_info, raw_picstyle);
 const int wf_t_li_isov = offsetof(struct lens_info, iso);             /* the ISO number (RAW develop's white per ISO) */
 const int wf_t_li_isoa = offsetof(struct lens_info, iso_auto);
+const int wf_t_li_name = offsetof(struct lens_info, name);            /* QKEYS: name[0] = a lens with contacts */
+const int wf_t_li_amin = offsetof(struct lens_info, raw_aperture_min);
+const int wf_t_li_amax = offsetof(struct lens_info, raw_aperture_max);
 const int wf_t_card_fn = offsetof(struct card_info, file_number);
 const int wf_t_card_folder = offsetof(struct card_info, folder_number);   /* the roll's frame numbers (wf_card_nums) */
 const int wf_t_card_size = sizeof(struct card_info);

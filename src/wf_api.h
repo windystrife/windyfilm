@@ -86,6 +86,15 @@ enum { WF_LOAD_OK = 0, WF_LOAD_NOTABLE, WF_LOAD_NOCUBE, WF_LOAD_BUSY, WF_LOAD_UN
 int  wf_load(int id);                     /* make film id the active look: output Film, or V-Log + LUT for a can */
 void wf_iso_film(int id, int roll);       /* owner 11-17: the camera's ISO to film id's speed (wf_task sets it); the
                                              browser after its SET loaded a film, the roll code after a roll load (1) */
+/* owner 11-17: the EOS M quick keys (wf_menu.c, DESIGN 3.17), the Quick keys row: Off / DOWN ring (default) / L/R ISO.
+   wf_main.c's CBR_KEYPRESS hands them the keys they look at (WF_QKEY_*); 0 back = the key is used (a ring turn while
+   the ring sets ISO / aperture, LEFT / RIGHT in L/R ISO), 1 = it goes on as before (DOWN and SET always go on: the
+   core's long presses, the browser and Canon's Quick Control, stay) */
+enum { WF_QK_OFF = 0, WF_QK_DOWN, WF_QK_LR, WF_QK_N };
+enum { WF_QKEY_OTHER = 0, WF_QKEY_DOWN, WF_QKEY_SET, WF_QKEY_LEFT, WF_QKEY_RIGHT, WF_QKEY_RING_DN, WF_QKEY_RING_UP,
+       WF_QKEY_TRASH, WF_QKEY_SHUTTER };
+extern volatile int wf_qk;
+int  wf_qk_key(int k);
 int  wf_loaded(void);                     /* the active film id, 0 = none (output is plain log, Log + LUT or Off) */
 int  wf_avail(int id);                    /* 1 = loadable now (its table is in the pack / its cube is on the card) */
 int  wf_films_state(void);                /* the film tables: 1 read, 0 starting (worker / pack not up yet), -1 the

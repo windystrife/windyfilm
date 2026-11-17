@@ -557,6 +557,20 @@ static void roll_notice(int want, int now)
     nt_up = 1;
 }
 
+/* the quick keys' box (wf_menu.c, DESIGN 3.17; wf_dark.h) */
+void wf_dark_toast(const char *big, const char *k1, const char *t1, const char *k2, const char *t2, int mode)
+{
+    if (mode < 0) {
+        wfdr_toast(0, 0, 0, 0, 0, 0, 0, WF_HUD_CLEAR);
+        return;
+    }
+    wfdr_toast(bmp_vram(), WF_BMPPITCH, big, k1, t1, k2, t2, mode);
+    if (mode == WF_HUD_CLEAR) {
+        redraw();                                /* Canon's own LiveView marks under the box come back */
+        hud_mode = -1;                           /* (the roll HUD paints again after it) */
+    }
+}
+
 /* the HUD over LiveView (DESIGN 3.6, owner 11-14): the roll + film chip, the big counter and the ladder show for
  * HUD_INFO_MS, fade for HUD_FADE_MS, then only a small dim counter stays. They show again when LiveView comes back
  * (or the menu / UI / PLAY goes), after a shot, after a frame counts, and when the roll, its film or its state changes. */

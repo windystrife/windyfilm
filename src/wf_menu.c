@@ -48,6 +48,11 @@
 
 extern int shooting_mode;                         /* Canon mode dial: 3 = M */
 extern int lv;
+extern int gui_state, lv_dispsize;                /* the quick keys (DESIGN 3.17): stills LiveView, nothing on top */
+extern int display_idle(void);
+extern int is_manual_focus(void);
+extern void zoom_overlay_set_countdown(int countdown);
+extern int menu_get_value_from_script(const char *name, const char *entry_name);
 extern int get_global_draw(void);
 extern int get_global_draw_setting(void);
 
@@ -305,6 +310,8 @@ static const char *const wf_popt_nm[WF_PO_N] = { "Frame", "Info", "Date", "Camer
 static volatile int *const wf_popt_v[WF_PO_N] = { &wf_pr_frame, &wf_pr_info, &wf_pr_date, &wf_pr_jpeg };
 static const int wf_popt_n[WF_PO_N] = { WF_PFR_N, WF_PIN_N, WF_PDT_N, WF_PJ_N };
 
+static const char *const wf_qk_cfg[WF_QK_N] = { "off", "down", "lr" };      /* the quick keys (DESIGN 3.17) */
+static const char *wf_qk_name[WF_QK_N] = { "Off", "DOWN ring", "L/R ISO" };
 static const char *const wf_rl_key[2] = { "off", "on" };            /* a JPEG 8-bit roll (wf_dark.h, DESIGN 3.14) */
 static const char *const wf_ds_key[WF_DS_N] = { "on", "off" };   /* Screen Off (DESIGN 3.11): the Darkroom's chip only */
 void wf_dk_scr_step(int d)
@@ -1018,6 +1025,8 @@ void wf_cfg_load(void)
             }
         } else if ((v = wf_cfg_val(l, "shoulder"))) {
             wf_rb_hue = wf_cfg_word(v, wf_hue_key, WF_DEV_HUE_N, WF_DEV_HUE_I);
+        } else if ((v = wf_cfg_val(l, "qkeys"))) {
+            wf_qk = wf_cfg_word(v, wf_qk_cfg, WF_QK_N, WF_QK_DOWN);
         } else if ((v = wf_cfg_val(l, "input"))) {
             ;                                     /* reserved: "jpeg" is the only input path */
         } else if ((v = wf_cfg_val(l, "userwb"))) {
@@ -1055,7 +1064,7 @@ static int wf_cfg_save(void)
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
                      "strength=%s\nhl=%d\nsh=%d\npaper=%s\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\n"
                      "exposure=%s\nexptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\njpeg=%s\njpeg2=%s\ndkscreen=%s\n"
-                     "rolllook=%s\nshoulder=%s\n",
+                     "rolllook=%s\nshoulder=%s\nqkeys=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
@@ -1068,7 +1077,8 @@ static int wf_cfg_save(void)
                      wf_pick(wf_pin_key, WF_PIN_N, wf_pr_info), wf_pick(wf_pdt_key, WF_PDT_N, wf_pr_date),
                      wf_pick(wf_pj_key, WF_PJ_N, wf_pr_jpeg), wf_pick(wf_j2_key, WF_J2_N, wf_pr_jpg2),
                      wf_pick(wf_ds_key, WF_DS_N, wf_dk_scr),
-                     wf_pick(wf_rl_key, 2, wf_roll_look8), wf_pick(wf_hue_key, WF_DEV_HUE_N, wf_rb_hue));
+                     wf_pick(wf_rl_key, 2, wf_roll_look8), wf_pick(wf_hue_key, WF_DEV_HUE_N, wf_rb_hue),
+                     wf_pick(wf_qk_cfg, WF_QK_N, wf_qk));
     struct wf_sg_knobs sk;
     wf_sg_knobs_now(&sk);
     if (n > 0 && n < (int)sizeof b)
@@ -1552,6 +1562,18 @@ static MENU_SELECT_FUNC(wf_exp_select)
     }
 }
 static MENU_SELECT_FUNC(wf_exif_select) { (void)priv; (void)delta; wf_exif_off = !wf_exif_off; wf_dirty(); }
+static MENU_SELECT_FUNC(wf_qk_select) { (void)priv; wf_step_int(&wf_qk, 0, WF_QK_N - 1, delta); }
+static MENU_UPDATE_FUNC(wf_qk_update)
+{
+    if (wf_cam() != WF_CAM_EOSM)
+        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "EOS M only: the 5D2 has its own ISO button and dials.");
+    else if (wf_qk == WF_QK_DOWN)
+        MENU_SET_WARNING(MENU_WARN_INFO, "DOWN: ring = ISO, DOWN again: aperture (M). SET in MF: Magic Zoom.");
+    else if (wf_qk == WF_QK_LR)
+        MENU_SET_WARNING(MENU_WARN_INFO, "LEFT / RIGHT: ISO (not drive / AE lock). DOWN: aperture. SET in MF: Magic Zoom.");
+    else
+        MENU_SET_WARNING(MENU_WARN_INFO, "DOWN, LEFT, RIGHT and SET do what they did before.");
+}
 
 #define WF_NOT_ACTIVE() MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "%s", *wf_status() ? wf_status() : "Hooks not active (ML/LOGS/WINDYFLM.LOG).")
 
@@ -1936,6 +1958,9 @@ static struct menu_entry wf_menu[] = {
               .select = wf_pv_select, .update = wf_pv_update, .help = "The look in LiveView. Needs Overlay > Global Draw." },
             { .name = "Preview exposure", .select = wf_exp_select, .update = wf_exp_update,
               .help = "Smooth: steady LiveView; the shot's exposure is added digitally." },
+            { .name = "Quick keys", .priv = (void *)&wf_qk, .max = WF_QK_N - 1, .choices = wf_qk_name,
+              .select = wf_qk_select, .update = wf_qk_update,
+              .help = "EOS M LiveView: ISO, aperture and Magic Zoom from the keys; a small box shows the value." },
             { .name = "EXIF info", .select = wf_exif_select, .update = wf_exif_update,
               .help = "Writes the shot's film and effects into the JPEG's EXIF comment." },
             WF_RAWB_ENTRY
@@ -2004,6 +2029,331 @@ static void wf_iso_poll(void)
     }
 }
 
+/* ------------------------------------------------------------------ quick keys (owner 11-17, EOS M) */
+/* "làm thêm default set các phím tắt cho EOS M chỉnh iso với khẩu độ nhanh hơn" and "shortcut thêm được vụ magic zoom
+ * luôn lúc MF nữa" (DESIGN 3.17). Only on the EOS M, in stills LiveView with nothing on top (no ML menu, browser, Canon
+ * dialog, PLAY, Canon's 5x / 10x zoom):
+ *   DOWN ring (default): a short DOWN makes the ring set ISO; DOWN again: aperture (M mode, a lens with contacts);
+ *     again: the camera's own. 6 s without a turn, the shutter or another key gives the ring back.
+ *   L/R ISO: LEFT / RIGHT set ISO a third down / up (Canon's drive mode and AE lock keys in LiveView); DOWN: the
+ *     aperture ring.
+ *   both: SET with manual focus (MF, or a lens without contacts) turns ML's Magic Zoom on / off.
+ * The core (patch 0002) offers DOWN and SET to modules before it starts its long-press timers, and a short press of
+ * either did nothing in LiveView (the core holds them for the long press). So the module acts on the press and lets
+ * it go on: a long DOWN still opens the browser (its TRASH gives the ring back) and a long SET still opens Canon's Quick
+ * Control (the screen is Canon's: Magic Zoom off). The GUI task (wf_qk_key) only notes; wf_task (wf_qk_poll) sets ISO
+ * and aperture (both wait for the camera), keeps Magic Zoom's countdown up, logs and draws the box (wfdr_toast). */
+volatile int wf_qk = WF_QK_DOWN;
+enum { QK_CANON = 0, QK_ISO, QK_AV };
+static volatile int qk_ring, qk_t, qk_isod, qk_avd, qk_mz;
+#define QK_RING_MS 6000                          /* the ring goes back this long after its last turn */
+#define QK_SAY_MS  1500
+#define QK_FADE_MS 400
+#define QK_FONT_MS 10000                         /* the font pack stays this long after the last box */
+#define QK_MZ_CD   40                            /* Magic Zoom's countdown (zebra loop passes), set again each pass */
+
+static int qk_on(void) { return wf_cam() == WF_CAM_EOSM && wf_qk != WF_QK_OFF && wf_cam_ok && !wf_unloading; }
+static int qk_idle(void)
+{
+    return lv && !gui_menu_shown() && !wf_ui_is_open() && gui_state == GUISTATE_IDLE && display_idle()
+           && !is_movie_mode() && !is_play_mode() && lv_dispsize == 1;
+}
+static int qk_av_ok(void) { return shooting_mode == SHOOTMODE_M && lens_info.name[0] && lens_info.raw_aperture; }
+static int qk_iso_can(void) { return shooting_mode >= SHOOTMODE_P && shooting_mode <= SHOOTMODE_M; }
+static int qk_mf(void) { return is_manual_focus() || !lens_info.name[0]; }
+
+int wf_qk_key(int k)
+{
+    if (!qk_on())
+        return 1;
+    int now = get_ms_clock();
+    if (k == WF_QKEY_TRASH || !qk_idle()) {      /* a long DOWN (the browser opens), a Canon screen: the camera's ring */
+        qk_ring = QK_CANON;
+        return 1;
+    }
+    switch (k) {
+    case WF_QKEY_DOWN:
+        if (wf_qk == WF_QK_DOWN)
+            qk_ring = qk_ring == QK_CANON ? QK_ISO : qk_ring == QK_ISO && qk_av_ok() ? QK_AV : QK_CANON;
+        else
+            qk_ring = qk_ring == QK_AV ? QK_CANON : QK_AV;
+        qk_t = now;
+        return 1;                                /* on to the core's long-press timer */
+    case WF_QKEY_RING_DN: case WF_QKEY_RING_UP:
+        if (qk_ring == QK_CANON || now - qk_t > QK_RING_MS)
+            return 1;
+        if (qk_ring == QK_ISO)
+            qk_isod += k == WF_QKEY_RING_UP ? 1 : -1;
+        else
+            qk_avd += k == WF_QKEY_RING_UP ? 1 : -1;
+        qk_t = now;
+        return 0;
+    case WF_QKEY_LEFT: case WF_QKEY_RIGHT:
+        if (wf_qk == WF_QK_LR) {
+            qk_isod += k == WF_QKEY_RIGHT ? 1 : -1;
+            return 0;
+        }
+        qk_ring = QK_CANON;
+        return 1;
+    case WF_QKEY_SET:
+        if (qk_mf())
+            qk_mz = !qk_mz;
+        return 1;                                /* on: a long SET still opens Canon's Quick Control */
+    default:                                     /* the shutter, UP (Canon's Av), INFO, MENU, PLAY ...: the camera's ring */
+        qk_ring = QK_CANON;
+        return 1;
+    }
+}
+
+/* wf_task: the box */
+static char qk_big[20], qk_k1[8], qk_t1[40], qk_k2[8], qk_t2[24];
+static int qk_live, qk_end, qk_ringbox, qk_mode = -1, qk_pt, qk_up, qk_fonts, qk_font_t, qk_shown, qk_mz_on;
+static void qk_say(int now, int len, int ring, const char *big, const char *k1, const char *t1, const char *k2,
+                   const char *t2)
+{
+    snprintf(qk_big, sizeof qk_big, "%s", big);
+    snprintf(qk_k1, sizeof qk_k1, "%s", k1 ? k1 : "");
+    snprintf(qk_t1, sizeof qk_t1, "%s", t1 ? t1 : "");
+    snprintf(qk_k2, sizeof qk_k2, "%s", k2 ? k2 : "");
+    snprintf(qk_t2, sizeof qk_t2, "%s", t2 ? t2 : "");
+    qk_live = 1;
+    qk_end = now + len;
+    qk_ringbox = ring;
+    qk_mode = -1;
+}
+static void qk_iso_text(char *b, int n, int c)
+{
+    int v = wf_roll_iso_of(c);
+    if (!c)
+        snprintf(b, n, "ISO AUTO");
+    else
+        snprintf(b, n, "ISO %d", v ? v : raw2iso(c));
+}
+static void qk_av_text(char *b, int n, int c)
+{
+    int f = wf_roll_av_f10(c);
+    if (!f)
+        snprintf(b, n, "f/--");
+    else if (f < 100)
+        snprintf(b, n, "f/%d.%d", f / 10, f % 10);
+    else
+        snprintf(b, n, "f/%d", f / 10);
+}
+static void qk_ring_say(int now)
+{
+    char b[20];
+    int len = QK_RING_MS - (now - qk_t);
+    if (len < 500)
+        len = 500;
+    if (qk_ring == QK_AV) {
+        qk_av_text(b, sizeof b, lens_info.raw_aperture);
+        qk_say(now, len, 1, b, "RING", "Aperture", "DOWN", "Done");
+    } else {
+        qk_iso_text(b, sizeof b, lens_info.raw_iso);
+        qk_say(now, len, 1, b, "RING", "ISO", "DOWN", wf_qk == WF_QK_DOWN && qk_av_ok() ? "Aperture" : "Done");
+    }
+}
+
+static void qk_iso(int now, int d)
+{
+    char b[20];
+    int lo = get_htp() ? 80 : 72, hi = 128, c0 = lens_info.raw_iso, c = c0, dir = d > 0 ? 1 : -1, lr = wf_qk == WF_QK_LR;
+    if (!qk_iso_can()) {
+        wf_log("keys: ISO is set by the camera in this mode (%d)", shooting_mode);
+        qk_say(now, QK_SAY_MS, 0, "ISO", 0, "Set by the camera in this mode", 0, 0);
+        qk_ring = QK_CANON;
+        return;
+    }
+    for (int i = 0; i < d * dir && i < 30; i++)
+        c = wf_roll_iso_step(c, dir, lo, hi, 1);
+    if (c == c0) {
+        qk_iso_text(b, sizeof b, c0);
+        qk_say(now, lr ? QK_SAY_MS : QK_RING_MS, !lr, b, 0, !c0 ? (lr ? "RIGHT: ISO 100" : "Turn up: ISO 100")
+               : dir > 0 ? "The highest the camera takes" : "The lowest the camera takes", 0, 0);
+        return;
+    }
+    int ok = lens_set_rawiso(c), whole = 0;
+    if (!ok) {                                   /* a body that takes whole stops only */
+        int c2 = c0;
+        for (int i = 0; i < d * dir && i < 30; i++)
+            c2 = wf_roll_iso_step(c2, dir, lo, hi, 0);
+        if (c2 != c0 && c2 != c && lens_set_rawiso(c2)) {
+            c = c2;
+            ok = whole = 1;
+        }
+    }
+    if (!ok) {
+        qk_iso_text(b, sizeof b, lens_info.raw_iso);
+        wf_log("keys: ISO %d not taken by the camera (%s)", wf_roll_iso_of(c), b);
+        qk_say(now, QK_SAY_MS, 0, b, 0, "Not taken by the camera", 0, 0);
+        return;
+    }
+    qk_iso_text(b, sizeof b, c);
+    wf_log(whole ? "keys: %s (whole stops)" : "keys: %s", b);
+    if (lr)
+        qk_say(now, QK_SAY_MS, 0, b, "LEFT", "Lower", "RIGHT", "Higher");
+    else
+        qk_ring_say(now);
+}
+
+static void qk_av(int now, int d)
+{
+    char b[20];
+    if (!qk_av_ok()) {
+        qk_ring = QK_CANON;
+        return;
+    }
+    int c0 = lens_info.raw_aperture, dir = d > 0 ? 1 : -1, c = c0, half = (c0 & 7) == 4;
+    int lo = lens_info.raw_aperture_min ? lens_info.raw_aperture_min : 8;
+    int hi = lens_info.raw_aperture_max ? lens_info.raw_aperture_max : 96;
+    for (int i = 0; i < d * dir && i < 30; i++)
+        c = wf_roll_av_step(c, dir, lo, hi, half);
+    if (c == c0) {
+        qk_av_text(b, sizeof b, c0);
+        qk_say(now, QK_RING_MS, 1, b, 0, dir > 0 ? "The smallest the lens has" : "The widest the lens has", 0, 0);
+        return;
+    }
+    int ok = lens_set_rawaperture(c), hs = 0;
+    if (!ok && !half) {                          /* a body set to 1/2 stops */
+        int c2 = c0;
+        for (int i = 0; i < d * dir && i < 30; i++)
+            c2 = wf_roll_av_step(c2, dir, lo, hi, 1);
+        if (c2 != c0 && c2 != c && lens_set_rawaperture(c2)) {
+            c = c2;
+            ok = hs = 1;
+        }
+    }
+    if (!ok) {
+        qk_av_text(b, sizeof b, lens_info.raw_aperture);
+        wf_log("keys: aperture code %d not taken by the camera (%s)", c, b);
+        qk_say(now, QK_SAY_MS, 1, b, 0, "Not taken by the camera", 0, 0);
+        return;
+    }
+    qk_av_text(b, sizeof b, c);
+    wf_log(hs ? "keys: %s (half stops)" : "keys: %s", b);
+    qk_ring_say(now);
+}
+
+static void qk_draw(int now)
+{
+    if (!qk_live && !qk_up)
+        return;
+    int mode = now - qk_end < 0 ? WF_HUD_FULL : now - qk_end < QK_FADE_MS ? WF_HUD_FADE : WF_HUD_CLEAR;
+    if (gui_menu_shown() || wf_ui_is_open())     /* (again right before the pixels) */
+        return;
+    if (mode == WF_HUD_CLEAR) {
+        if (qk_up)
+            wf_dark_toast(0, 0, 0, 0, 0, WF_HUD_CLEAR);
+        qk_live = qk_up = 0;
+        qk_mode = -1;
+        qk_font_t = now;
+        return;
+    }
+    if (!qk_fonts) {
+        wfdr_toast_fonts(1);
+        qk_fonts = 1;
+    }
+    if (mode != qk_mode || now - qk_pt >= 500) {
+        wf_dark_toast(qk_big, *qk_k1 ? qk_k1 : 0, *qk_t1 ? qk_t1 : 0, *qk_k2 ? qk_k2 : 0, *qk_t2 ? qk_t2 : 0, mode);
+        qk_mode = mode;
+        qk_pt = now;
+        qk_up = 1;
+    }
+}
+
+static void wf_qk_poll(void)
+{
+    int now = get_ms_clock();
+    if (qk_fonts && !qk_live && now - qk_font_t > QK_FONT_MS) {
+        wfdr_toast_fonts(0);
+        qk_fonts = 0;
+    }
+    if (!qk_on() || !qk_idle()) {                /* the camera's ring; the screen is someone else's: only forget */
+        qk_ring = QK_CANON;
+        qk_isod = qk_avd = 0;
+        qk_shown = QK_CANON;
+        if (qk_mz_on) {
+            zoom_overlay_set_countdown(0);
+            wf_log("keys: Magic Zoom off (the screen changed)");
+        }
+        qk_mz = qk_mz_on = 0;
+        if (qk_up)
+            wf_dark_toast(0, 0, 0, 0, 0, -1);
+        if (qk_live)
+            qk_font_t = now;
+        qk_live = qk_up = 0;
+        qk_mode = -1;
+        return;
+    }
+    if (qk_ring && now - qk_t > QK_RING_MS)
+        qk_ring = QK_CANON;
+    int r = qk_ring;
+    if (r != qk_shown) {
+        char b[20];
+        if (r == QK_ISO && !qk_iso_can()) {
+            wf_log("keys: ISO is set by the camera in this mode (%d)", shooting_mode);
+            qk_say(now, QK_SAY_MS, 0, "ISO", 0, "Set by the camera in this mode", 0, 0);
+            qk_ring = r = QK_CANON;
+        } else if (r == QK_AV && !qk_av_ok()) {
+            wf_log("keys: the aperture ring needs M mode and a lens with contacts (mode %d)", shooting_mode);
+            qk_say(now, QK_SAY_MS, 0, "APERTURE", 0, lens_info.name[0] ? "The ring sets it in M mode" : "Set it on the lens",
+                   0, 0);
+            qk_ring = r = QK_CANON;
+        } else if (r) {
+            if (r == QK_AV) qk_av_text(b, sizeof b, lens_info.raw_aperture);
+            else qk_iso_text(b, sizeof b, lens_info.raw_iso);
+            wf_log("keys: ring %s (%s)", r == QK_AV ? "aperture" : "ISO", b);
+            qk_ring_say(now);
+        } else {
+            wf_log("keys: ring back to the camera");
+            if (qk_live && qk_ringbox && qk_end - now > 0)
+                qk_end = now;                    /* the box fades */
+        }
+        qk_shown = r;
+    }
+    int d = qk_isod;
+    if (d) {
+        qk_isod -= d;
+        qk_iso(now, d);
+    }
+    int a = qk_avd;
+    if (a) {
+        qk_avd -= a;
+        if (qk_ring == QK_AV)
+            qk_av(now, a);
+    }
+    if (qk_mz != qk_mz_on) {
+        if (qk_mz) {
+            int en = menu_get_value_from_script("Overlay", "Magic Zoom");
+            if (en <= 0 || !get_global_draw()) {
+                qk_mz = 0;
+                wf_log("keys: Magic Zoom needs ML Overlay > %s", en <= 0 ? "Magic Zoom" : "Global Draw");
+                qk_say(now, 2500, 0, "MAGIC ZOOM", 0, en <= 0 ? "Turn on ML Overlay > Magic Zoom first"
+                                                             : "Turn on ML Overlay > Global Draw first", 0, 0);
+            } else {
+                qk_mz_on = 1;
+                wf_log("keys: Magic Zoom on");
+                qk_say(now, 1200, 0, "MAGIC ZOOM", "SET", "Off", 0, 0);
+            }
+        } else {
+            qk_mz_on = 0;
+            zoom_overlay_set_countdown(0);
+            wf_log("keys: Magic Zoom off");
+            qk_say(now, 800, 0, "ZOOM OFF", 0, 0, 0, 0);
+        }
+    }
+    if (qk_mz_on) {
+        if (!qk_mf()) {
+            qk_mz = qk_mz_on = 0;
+            zoom_overlay_set_countdown(0);
+            wf_log("keys: Magic Zoom off (focus on AF again)");
+        } else {
+            zoom_overlay_set_countdown(QK_MZ_CD);
+        }
+    }
+    qk_draw(now);
+}
+
 /* ------------------------------------------------------------------ init / poll / deinit */
 void wf_menu_init(void)
 {
@@ -2027,6 +2377,7 @@ void wf_menu_poll(void)
     ui_was = ui;
     wf_light_poll();
     wf_iso_poll();
+    wf_qk_poll();
     wf_exif_poll();
     if (wf_cfg_dirty && get_ms_clock() - wf_cfg_t >= 1500)
         wf_cfg_save();
@@ -2038,6 +2389,10 @@ void wf_menu_deinit(void)
         wf_cfg_save();                            /* with userwb still in it: a lost restore is redone at next boot */
     if (wf_cam_ok)
         wf_wb_restore("unload");
+    if (qk_mz_on)
+        zoom_overlay_set_countdown(0);            /* Magic Zoom from the quick keys goes with the module */
+    if (qk_fonts)
+        wfdr_toast_fonts(0);
     if (wf_menu_added) {
         menu_remove("Shoot", wf_menu, COUNT(wf_menu));
         wf_menu_added = 0;

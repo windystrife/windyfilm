@@ -2513,7 +2513,7 @@ static void t_cfg(void)
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
             "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=Both\njpeg2=Folder\ndkscreen=Off\nrolllook=ON\nshoulder=D\n"
-            "userwb=1,5600,2,-3\n",
+            "qkeys=LR\nuserwb=1,5600,2,-3\n",
             wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
@@ -2529,6 +2529,7 @@ static void t_cfg(void)
     chk(wf_blind == 0, "blind=OFF read: Blind roll off (%d)", wf_blind);
     chk(wf_roll_look8 == 1, "rolllook=ON read: a JPEG 8-bit roll (%d)", wf_roll_look8);
     chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
+    chk(wf_qk == WF_QK_LR, "qkeys=LR read: Quick keys L/R ISO (%d)", wf_qk);
     chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_BOTH && wf_pr_jpg2 == WF_J2_FOLDER
         && wf_dk_scr == WF_DS_OFF, "print finishes read: frame %d info %d date %d jpeg %d jpeg2 %d dkscreen %d (want 4 2 2 "
         "2 1 1)", wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2, wf_dk_scr);
@@ -2545,6 +2546,7 @@ static void t_cfg(void)
              "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=both\njpeg2=folder\ndkscreen=off\n"
              "rolllook=on\n"
              "shoulder=d\n"
+             "qkeys=lr\n"
              "stage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
@@ -2569,6 +2571,7 @@ static void t_cfg(void)
     b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
     chk(b && !strcmp(b, want), "back to the first file");
     free(b);
+    wf_qk = WF_QK_DOWN;
     wf_roll_look8 = 0;                           /* the other checks: a roll keeps Canon's JPEG */
     put_cfg("film=99999\noutput=nope\nlutei=77\nexptrim=99\ncurve=x\nprint=\nhl=7\nsh=\n");
     wf_cfg_load();
@@ -6878,6 +6881,253 @@ static int k_speed(int iso)                      /* a ready colour film of that 
             return k;
     return -1;
 }
+/* the quick keys (owner 11-17, DESIGN 3.17): EOS M stills LiveView. DOWN ring: DOWN = the ring sets ISO, again aperture
+ * (M, a lens with contacts), again the camera's; L/R ISO: LEFT / RIGHT = ISO, DOWN = aperture; SET in MF = Magic Zoom.
+ * DOWN and SET always go on (the core's long presses); a long DOWN's TRASH, 6 s, the shutter or another key give the
+ * ring back; nothing in the ML menu, a Canon dialog, movie mode or Canon's zoom. The 5D2: all keys go on. */
+#define QK_HALF 1                                 /* ML module.h MODULE_KEY_* */
+#define QK_WL 7
+#define QK_WR 8
+#define QK_SET 9
+#define QK_UP 12
+#define QK_RIGHT 15
+#define QK_LEFT 16
+#define QK_DOWN 19
+#define QK_TRASH 25
+static int qk_quiet(const char *what)             /* every key goes on and no ring / zoom log */
+{
+    log_mark();
+    int n = h_iso_n, a = h_av_n, r = cbr_key(QK_DOWN) == 1 && cbr_key(QK_WR) == 1 && cbr_key(QK_SET) == 1;
+    usleep(300000);
+    r = r && h_iso_n == n && h_av_n == a && !log_has("keys: ring") && !log_has("Magic Zoom");
+    chk(r, "%s: the keys go on, nothing set ('%s')", what, log_line("keys:"));
+    cbr_key(QK_HALF);
+    return r;
+}
+static void t_qkeys(void)
+{
+    struct pk e[] = { { fC, 0, tab_make(0, 0, 0, 0) } };
+    pack_write(e, 1, 0);
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\n", wf_films[fC].id);
+    h_li_set("iso", 88);
+    h_li_set("aperture", 32);
+    h_li_set("amin", 24);
+    h_li_set("amax", 80);
+    h_li_set("name0", 'E');
+    shooting_mode = 3;
+    af_mode = 0;
+    mod_init(1);
+    usleep(300000);
+    if (wf_cam() != WF_CAM_EOSM) {
+        chk(wf_qk == WF_QK_DOWN, "5D2: the row reads DOWN ring (one config for both)");
+        log_mark();
+        int n = h_iso_n;
+        chk(cbr_key(QK_DOWN) == 1 && cbr_key(QK_WR) == 1 && cbr_key(QK_RIGHT) == 1 && cbr_key(QK_SET) == 1,
+            "5D2: the quick keys stay off, every key goes on");
+        usleep(300000);
+        chk(h_iso_n == n && h_mz_n == 0 && !log_has("keys:"), "5D2: no ISO, no Magic Zoom, no keys log");
+        mod_deinit();
+        return;
+    }
+    chk(wf_qk == WF_QK_DOWN, "Quick keys: DOWN ring by default");
+    /* DOWN ring: ISO */
+    log_mark();
+    chk(cbr_key(QK_DOWN) == 1, "DOWN goes on (the core's long press: a long DOWN still opens the browser)");
+    chk(LOGW("keys: ring ISO (ISO 400)", 3000), "DOWN: the ring sets ISO ('%s')", log_line("keys:"));
+    chk(cbr_key(QK_WR) == 0, "a ring turn is used while the ring sets ISO");
+    chk(WAIT(h_li_get("iso") == 91, 3000) && LOGW("keys: ISO 500", 3000), "ring right: ISO 500 (code %d)", h_li_get("iso"));
+    cbr_key(QK_WL);
+    cbr_key(QK_WL);
+    chk(WAIT(h_li_get("iso") == 85, 3000) && LOGW("keys: ISO 320", 3000), "two turns left: ISO 320 (code %d)",
+        h_li_get("iso"));
+    /* DOWN again (M, a lens with contacts): aperture */
+    log_mark();
+    chk(cbr_key(QK_DOWN) == 1 && LOGW("keys: ring aperture (f/2.8)", 3000), "DOWN again in M: the ring sets aperture ('%s')",
+        log_line("keys:"));
+    chk(cbr_key(QK_WR) == 0 && WAIT(h_li_get("aperture") == 35, 3000) && LOGW("keys: f/3.2", 3000),
+        "ring right: f/3.2 (code %d)", h_li_get("aperture"));
+    for (int i = 0; i < 4; i++)
+        cbr_key(QK_WL);
+    chk(WAIT(h_li_get("aperture") == 24, 3000) && LOGW("keys: f/2.0", 3000), "four left: f/2.0, the lens' widest (code %d)",
+        h_li_get("aperture"));
+    int an = h_av_n;
+    cbr_key(QK_WL);
+    usleep(300000);
+    chk(h_av_n == an && h_li_get("aperture") == 24, "past the widest: nothing asked (%d calls)", h_av_n - an);
+    log_mark();
+    chk(cbr_key(QK_DOWN) == 1 && LOGW("keys: ring back to the camera", 3000), "DOWN a third time: the camera's ring");
+    chk(cbr_key(QK_WR) == 1, "a ring turn goes on to Canon again");
+    /* a long DOWN (the core's TRASH, the browser), 6 s, the shutter, UP: the ring goes back */
+    log_mark();
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring ISO", 3000), "DOWN: ISO ring again");
+    log_mark();
+    cbr_key(QK_TRASH);
+    chk(cbr_key(QK_WR) == 1 && LOGW("keys: ring back to the camera", 3000), "a long DOWN (TRASH): the ring back at once");
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring ISO", 3000), "DOWN: ISO ring");
+    log_mark();
+    h_clock_add_ms += 7000;
+    chk(LOGW("keys: ring back to the camera", 3000) && cbr_key(QK_WR) == 1, "6 s without a turn: the ring back");
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring ISO", 3000), "DOWN: ISO ring");
+    log_mark();
+    cbr_key(QK_HALF);
+    chk(cbr_key(QK_WR) == 1 && LOGW("keys: ring back to the camera", 3000), "half-shutter: the ring back");
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring ISO", 3000), "DOWN: ISO ring");
+    log_mark();
+    cbr_key(QK_UP);
+    chk(cbr_key(QK_WR) == 1 && LOGW("keys: ring back to the camera", 3000), "UP (Canon's Av +-): the ring back");
+    /* Av: no aperture step (Canon's ring sets it); a scene mode: no ISO ring */
+    shooting_mode = 2;
+    log_mark();
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring ISO", 3000), "Av: DOWN = ISO ring");
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring back to the camera", 3000) && !log_has("ring aperture"), "Av: DOWN again = the camera's ring");
+    shooting_mode = 9;
+    log_mark();
+    int in = h_iso_n;
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ISO is set by the camera in this mode", 3000) && cbr_key(QK_WR) == 1 && h_iso_n == in,
+        "a scene mode: no ISO ring ('%s')", log_line("keys:"));
+    shooting_mode = 3;
+    /* not stills LiveView with nothing on top */
+    h_menu_shown = 1;
+    qk_quiet("ML menu");
+    h_menu_shown = 0;
+    gui_state = 1;
+    qk_quiet("a Canon dialog (gui_state)");
+    gui_state = 0;
+    h_disp_idle = 0;
+    qk_quiet("not display_idle");
+    h_disp_idle = 1;
+    h_movie = 1;
+    qk_quiet("movie mode");
+    h_movie = 0;
+    lv_dispsize = 5;
+    qk_quiet("Canon's 5x zoom");
+    lv_dispsize = 1;
+    lv = 0;
+    qk_quiet("no LiveView");
+    lv = 1;
+    /* Auto ISO; a body that takes whole stops */
+    h_li_set("iso", 0);
+    log_mark();
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring ISO (ISO AUTO)", 3000), "Auto: the ring shows ISO AUTO");
+    in = h_iso_n;
+    cbr_key(QK_WL);
+    usleep(300000);
+    chk(h_li_get("iso") == 0 && h_iso_n == in, "Auto, turned down: Auto stays, nothing asked");
+    cbr_key(QK_WR);
+    chk(WAIT(h_li_get("iso") == 72, 3000) && LOGW("keys: ISO 100", 3000), "Auto, turned up: ISO 100");
+    h_iso_whole = 1;
+    log_mark();
+    cbr_key(QK_WR);
+    chk(WAIT(h_li_get("iso") == 80, 3000) && LOGW("keys: ISO 200 (whole stops)", 3000), "whole stops only: 100 -> 200 ('%s')",
+        log_line("keys:"));
+    h_iso_whole = 0;
+    h_iso_refuse = 1;
+    log_mark();
+    cbr_key(QK_WR);
+    chk(LOGW("keys: ISO 250 not taken by the camera (ISO 200)", 3000) && h_li_get("iso") == 80, "refused: '%s'",
+        log_line("keys:"));
+    h_iso_refuse = 0;
+    cbr_key(QK_HALF);
+    /* L/R ISO */
+    log_mark();
+    chk(menu_set("Quick keys") == 0 && wf_qk == WF_QK_LR, "the row: L/R ISO (%d)", wf_qk);
+    chk(cbr_key(QK_RIGHT) == 0 && WAIT(h_li_get("iso") == 83, 3000) && LOGW("keys: ISO 250", 3000),
+        "L/R ISO: RIGHT is used, a third up (code %d)", h_li_get("iso"));
+    chk(cbr_key(QK_LEFT) == 0 && WAIT(h_li_get("iso") == 80, 3000), "LEFT a third down (code %d)", h_li_get("iso"));
+    log_mark();
+    chk(cbr_key(QK_DOWN) == 1 && LOGW("keys: ring aperture (f/2.0)", 3000), "L/R ISO: DOWN = the aperture ring ('%s')",
+        log_line("keys:"));
+    chk(cbr_key(QK_WR) == 0 && WAIT(h_li_get("aperture") == 27, 3000) && LOGW("keys: f/2.2", 3000), "ring right: f/2.2");
+    log_mark();
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring back to the camera", 3000) && cbr_key(QK_WR) == 1, "DOWN again: the camera's ring");
+    h_clock_add_ms += 2000;
+    usleep(300000);
+    long n;
+    char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(b && strstr(b, "qkeys=lr\n"), "config: qkeys=lr");
+    free(b);
+    /* Off */
+    chk(menu_set("Quick keys") == 0 && wf_qk == WF_QK_OFF, "the row: Off (%d)", wf_qk);
+    af_mode = 3;
+    log_mark();
+    in = h_iso_n;
+    chk(cbr_key(QK_RIGHT) == 1 && cbr_key(QK_LEFT) == 1 && cbr_key(QK_DOWN) == 1 && cbr_key(QK_WR) == 1
+        && cbr_key(QK_SET) == 1, "Off: every key goes on");
+    usleep(300000);
+    chk(h_iso_n == in && !log_has("keys:"), "Off: nothing set, no log");
+    chk(menu_set("Quick keys") == 0 && wf_qk == WF_QK_DOWN, "the row: DOWN ring again");
+    /* Magic Zoom with manual focus */
+    log_mark();
+    chk(cbr_key(QK_SET) == 1 && LOGW("keys: Magic Zoom on", 3000), "MF: SET turns Magic Zoom on (SET goes on: a long SET is "
+        "Canon's Quick Control)");
+    chk(WAIT(h_mz_cd == 40, 2000), "Magic Zoom: its countdown set (%d)", h_mz_cd);
+    int m0 = h_mz_n;
+    usleep(400000);
+    chk(h_mz_n >= m0 + 3, "kept up every pass (%d in 0.4 s)", h_mz_n - m0);
+    log_mark();
+    chk(cbr_key(QK_SET) == 1 && LOGW("keys: Magic Zoom off", 3000) && WAIT(h_mz_cd == 0, 2000), "SET again: off (%d)", h_mz_cd);
+    m0 = h_mz_n;
+    usleep(300000);
+    chk(h_mz_n == m0, "off: the countdown is left alone");
+    cbr_key(QK_SET);
+    chk(LOGW("keys: Magic Zoom on", 3000), "SET: on");
+    log_mark();
+    gui_state = 1;                                /* a long SET: Canon's Quick Control screen */
+    chk(LOGW("keys: Magic Zoom off (the screen changed)", 3000) && WAIT(h_mz_cd == 0, 2000), "a long SET (Canon's Q "
+        "screen): Magic Zoom off");
+    gui_state = 0;
+    log_mark();
+    cbr_key(QK_SET);
+    chk(LOGW("keys: Magic Zoom on", 3000), "SET: on");
+    af_mode = 0;
+    chk(LOGW("keys: Magic Zoom off (focus on AF again)", 3000) && WAIT(h_mz_cd == 0, 2000), "focus back on AF: off");
+    log_mark();
+    m0 = h_mz_n;
+    chk(cbr_key(QK_SET) == 1, "AF: SET goes on");
+    usleep(300000);
+    chk(!log_has("Magic Zoom") && h_mz_n == m0, "AF: SET does nothing (as before)");
+    af_mode = 3;
+    h_mz_en = 0;
+    log_mark();
+    cbr_key(QK_SET);
+    chk(LOGW("keys: Magic Zoom needs ML Overlay > Magic Zoom", 3000) && h_mz_n == m0, "Magic Zoom off in ML: told, not set");
+    h_mz_en = 1;
+    h_gdraw = 0;
+    log_mark();
+    cbr_key(QK_SET);
+    chk(LOGW("keys: Magic Zoom needs ML Overlay > Global Draw", 3000), "Global Draw off: told");
+    h_gdraw = 1;
+    /* a lens without contacts: manual focus by itself, no aperture ring */
+    h_li_set("name0", 0);
+    af_mode = 0;
+    log_mark();
+    cbr_key(QK_SET);
+    chk(LOGW("keys: Magic Zoom on", 3000), "a lens without contacts counts as MF");
+    cbr_key(QK_SET);
+    chk(LOGW("keys: Magic Zoom off", 3000), "SET: off");
+    log_mark();
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring ISO", 3000), "no contacts: DOWN = ISO ring");
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring back to the camera", 3000) && !log_has("ring aperture"), "no contacts: no aperture ring");
+    h_li_set("name0", 'E');
+    af_mode = 3;
+    log_mark();
+    cbr_key(QK_SET);
+    chk(LOGW("keys: Magic Zoom on", 3000), "SET: on before the unload");
+    mod_deinit();
+    chk(h_mz_cd == 0, "unload: Magic Zoom from the keys goes with the module (%d)", h_mz_cd);
+}
+
 static void t_iso(void)
 {
     int k400 = k_speed(400), k50 = k_speed(50), k250 = k_speed(250);
@@ -7974,6 +8224,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LIGHT") && !strcmp(cs, "awb")) t_light_awb();
     else if (!strcmp(mode, "LIGHT")) t_light();
     else if (!strcmp(mode, "ISO")) t_iso();
+    else if (!strcmp(mode, "QKEYS")) t_qkeys();
     /* test.sh passes "PRINT:chain" as MODE PRINT, CASE chain (until 11-15 that ran t_print a second time) */
     else if (!strcmp(mode, "PRINT") && !strcmp(cs, "chain")) t_print_chain();
     else if (!strcmp(mode, "PRINT")) t_print();

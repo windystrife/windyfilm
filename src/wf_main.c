@@ -369,6 +369,25 @@ void wf_task_yield(int log)
         wf_log_flush();
 }
 
+/* the keys the quick keys look at (wf_menu.c, DESIGN 3.17); -1 = none of theirs */
+static int wf_qk_map(unsigned int key)
+{
+    switch (key) {
+    case MODULE_KEY_PRESS_DOWN: return WF_QKEY_DOWN;
+    case MODULE_KEY_PRESS_SET: return WF_QKEY_SET;
+    case MODULE_KEY_PRESS_LEFT: return WF_QKEY_LEFT;
+    case MODULE_KEY_PRESS_RIGHT: return WF_QKEY_RIGHT;
+    case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_UP: return WF_QKEY_RING_DN;
+    case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_DOWN: return WF_QKEY_RING_UP;
+    case MODULE_KEY_TRASH: return WF_QKEY_TRASH;
+    case MODULE_KEY_PRESS_HALFSHUTTER: case MODULE_KEY_PRESS_FULLSHUTTER: return WF_QKEY_SHUTTER;
+    case MODULE_KEY_PRESS_UP: case MODULE_KEY_INFO: case MODULE_KEY_MENU: case MODULE_KEY_PLAY: case MODULE_KEY_Q:
+    case MODULE_KEY_LV: case MODULE_KEY_REC:
+        return WF_QKEY_OTHER;
+    }
+    return -1;
+}
+
 /* CBR_KEYPRESS (GUI task): the open browser gets every key; else its open key opens it (not in the ML menu, not in
  * Canon playback, where TRASH deletes) */
 static unsigned int wf_keypress(unsigned int key)
@@ -396,6 +415,9 @@ static unsigned int wf_keypress(unsigned int key)
         wf_roll_notice_key(0);                   /* and the key goes on as before */
         break;
     }
+    int qk = wf_qk_map(key);
+    if (qk >= 0 && !wf_qk_key(qk))
+        return 0;                                /* the quick keys (EOS M): a ring turn or LEFT / RIGHT used */
     if (key == WF_KEY_PLAY && !gui_menu_shown() && wf_roll_blocks_play()) {   /* blind roll (docs/DESIGN.md 3.6) */
         NotifyBox(2000, "Roll in camera: develop it in the Darkroom");
         return 0;

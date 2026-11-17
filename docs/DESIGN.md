@@ -1380,6 +1380,60 @@ speed when a film was loaded; WindyFilm never touched the ISO (no `lens_set_rawi
   does not).
 - **Not checked on the camera:** the ISO change itself (Canon's property in M / Av / P, the time it takes).
 
+### 3.17 Quick keys: ISO, aperture and Magic Zoom from the EOS M's keys (owner 2026-11-17, branch `wf-onescreen`)
+
+Owner: "làm thêm default set các phím tắt cho EOS M chỉnh iso với khẩu độ nhanh hơn" and "shortcut thêm được vụ magic
+zoom luôn lúc MF nữa". On the EOS M ISO is only on the Q screen or in Canon's menu, aperture in M needs UP then the
+ring, and there is no zoom key. EOS M only (the 5D2 has an ISO button and two dials: its row says so, the keys go on).
+
+- **What a module sees** (core with patch 0002, `menu.c` `handle_longpress_events`): in stills LiveView with no dialog,
+  DOWN and the ring centre (Q/SET) are offered to modules (`module_offer_key`) before the core starts its long-press
+  timers; a module that lets them go on keeps the long press (DOWN 500 ms: TRASH, the WindyFilm browser; SET 500 ms:
+  Canon's Quick Control). A short DOWN or SET did nothing in LiveView (`longpress_check` fakes the short press only in
+  the ML menu). LEFT / RIGHT / UP, the ring (`WHEEL_*`), INFO, MENU, PLAY, the shutter come through
+  `handle_module_keys` before Canon. No unpress of DOWN / LEFT / RIGHT reaches a module (`BGMT_UNPRESS_UDLR` is not
+  there on the EOS M). Canon's own: ring = shutter (M) / aperture (Av) / shift (P); UP = Av / exposure comp.; LEFT =
+  drive mode; RIGHT = AE lock; DOWN = erase (PLAY).
+- **The row** `Quick keys` (Shoot > WindyFilm, config `qkeys=off|down|lr`): **DOWN ring** (default, takes nothing of
+  Canon's): a short DOWN makes the ring set ISO, DOWN again aperture (M mode with a lens with contacts; in Av the ring
+  sets it already), DOWN again the camera's own. **L/R ISO** (faster, takes Canon's drive mode and AE lock keys in
+  LiveView; drive mode stays on the Q screen): LEFT / RIGHT set ISO a third down / up, DOWN gives the aperture ring.
+  **Off**: the keys do what they did. Both mappings: **SET with manual focus** (MF, or a lens without contacts) turns
+  ML's Magic Zoom on / off.
+- **How:** `wf_main.c` maps the keys (`wf_qk_map`) and `wf_qk_key` (GUI task, `wf_menu.c`) only notes: the ring mode,
+  turns, L/R steps, the zoom toggle; DOWN and SET always go on (their long presses stay). A long DOWN's TRASH, 6 s
+  without a turn, the shutter, UP, LEFT / RIGHT (DOWN ring), INFO / MENU / PLAY / Q give the ring back. `wf_qk_poll`
+  (wf_task) does the rest: ISO by `lens_set_rawiso` one 1/3 stop a click (`wf_roll_iso_step`, Auto: up = 100, down
+  stays Auto; a body that refuses a third: whole stops), aperture by `lens_set_rawaperture` (`wf_roll_av_step`: 1/3
+  grid, or 1/2 when the camera is on half stops; the lens' widest / smallest from `lens_info`), Magic Zoom by keeping
+  `zoom_overlay_set_countdown` up each pass (40 zebra passes; 0 to turn it off). Magic Zoom needs ML's Overlay > Magic
+  Zoom and Global Draw on: else the box says which. Off by itself when the screen is no longer plain LiveView (a long
+  SET's Q screen, the menu, the browser, PLAY), when focus goes back to AF, at unload.
+- **Where:** only in stills LiveView with nothing on top: `lv`, no ML menu, no browser, `gui_state` idle,
+  `display_idle()`, not movie, not PLAY, Canon's zoom off (`lv_dispsize` 1). ISO needs P / Tv / Av / M (else the box:
+  "Set by the camera in this mode").
+- **The box** (`wfdr_toast`, `src/ui/wf_dark_ui.c`, drawn by `wf_dark_toast` in `wf_dark.c` into ML's bitmap): bottom
+  middle (y 356..426, at most 400 wide), clear of the roll HUD and the end-of-roll notice; the value big ("ISO 400",
+  "f/2.8", "MAGIC ZOOM"), under it "[RING] ISO  [DOWN] Aperture" or a grey line. While the ring is ours it stays (6 s
+  after the last turn), else 1.5 s; 0.4 s fade; its pixels back to 0 then a redraw (Canon's marks) and the roll HUD
+  again. The font pack is held while boxes come and 10 s after.
+- **Log:** `keys: ring ISO (ISO 400)`, `keys: ISO 500`, `keys: ISO 200 (whole stops)`, `keys: ISO 250 not taken by the
+  camera (ISO 200)`, `keys: ring aperture (f/2.8)`, `keys: f/3.2`, `keys: ring back to the camera`, `keys: Magic Zoom
+  on` / `off` / `off (the screen changed)` / `off (focus on AF again)`, `keys: Magic Zoom needs ML Overlay > Magic
+  Zoom`, `keys: ISO is set by the camera in this mode (9)`.
+- **Imports** (both `.sym`, W11): `display_idle`, `gui_state`, `lv_dispsize`, `is_manual_focus`,
+  `zoom_overlay_set_countdown`, `menu_get_value_from_script`, `lens_set_rawaperture`, `raw2iso` (with
+  `lens_set_rawiso`, `get_htp` from 3.16).
+- **Checks:** `wf_roll_test` (ISO steps: thirds, whole, Auto, ends, HTP; aperture steps: thirds, halves, the lens'
+  ends; f-numbers); `test.sh` QKEYS (EOS M: the whole DOWN ring cycle, ring turns used / passed, the four ways back,
+  Av, a scene mode, the six not-LiveView cases, Auto ISO, whole stops, a refusal, L/R ISO, Off, Magic Zoom on / off /
+  Q screen / AF / not on in ML / no Global Draw, a lens without contacts, unload; 5D2: every key goes on);
+  `dr_run.sh` (the box's renders, clear of the roll HUD's widest and the notice box, CLEAR gives every pixel back, a
+  narrow box over a wide one).
+- **Not checked on the camera:** which way the ring turns count (right = up here), the ring's events on the EOS M
+  (`WHEEL_LEFT / RIGHT` taken as the ring), how fast Canon takes ISO / aperture while the ring turns, Magic Zoom's
+  countdown rate (40 passes), the box over Canon's LiveView info.
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`

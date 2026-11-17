@@ -147,6 +147,20 @@ static void nt_dump(const char *name, int mode, int hud, int keep)
     if (f) { fwrite(v, 1, sizeof hv, f); fclose(f); }
     printf("hud %s\n", p);
 }
+/* the quick keys' box (owner 11-17, DESIGN 3.17): hud < 0 = the box alone, else the roll HUD in that mode first */
+static void to_dump(const char *name, const char *big, const char *k1, const char *t1, const char *k2, const char *t2,
+                    int mode, int hud)
+{
+    memset(hv, 0, sizeof hv);
+    wfdr_toast(0, 0, 0, 0, 0, 0, 0, WF_HUD_CLEAR);          /* (a fresh screen: no last box to give back) */
+    if (hud >= 0) { wfdr_hud_fonts(1); wfdr_hud(hv, 720, 0, hud); }
+    wfdr_toast(hv, 720, big, k1, t1, k2, t2, mode);
+    char p[700];
+    snprintf(p, sizeof p, "%s/hud_%s.idx", outdir, name);
+    FILE *f = fopen(p, "wb");
+    if (f) { fwrite(hv, 1, sizeof hv, f); fclose(f); }
+    printf("hud %s\n", p);
+}
 static int nt_count(int in, int c)                          /* pixels of colour c (-1 any) inside / outside the box */
 {
     int n = 0;
@@ -413,6 +427,55 @@ int main(int argc, char **argv)
     hud_dump("full_small", 0, WF_HUD_CLEAR, 1);
     roll_of(colour, 36, 7, WF_RS_REWOUND);
     hud_dump("rewound", 0, WF_HUD_FULL, 0);
+
+    /* 10b. the quick keys' box (owner 11-17, DESIGN 3.17): the approval shots; clear of the roll HUD (its widest: a full
+     * 36 roll) and of the end-of-roll notice; CLEAR gives every pixel back */
+    CHECK(wfdr_toast_fonts(1) == 1, "the quick keys' box holds the font pack");
+    to_dump("toast_iso", "ISO 400", "RING", "ISO", "DOWN", "Aperture", WF_HUD_FULL, -1);
+    to_dump("toast_iso_fade", "ISO 400", "RING", "ISO", "DOWN", "Aperture", WF_HUD_FADE, -1);
+    to_dump("toast_av", "f/2.8", "RING", "Aperture", "DOWN", "Done", WF_HUD_FULL, -1);
+    to_dump("toast_lr", "ISO 800", "LEFT", "Lower", "RIGHT", "Higher", WF_HUD_FULL, -1);
+    to_dump("toast_mz", "MAGIC ZOOM", "SET", "Off", 0, 0, WF_HUD_FULL, -1);
+    to_dump("toast_mz_ml", "MAGIC ZOOM", 0, "Turn on ML Overlay > Magic Zoom first", 0, 0, WF_HUD_FULL, -1);
+    to_dump("toast_iso_auto", "ISO AUTO", 0, "Turn up: ISO 100", 0, 0, WF_HUD_FULL, -1);
+    roll_of(bw, 12, 5, WF_RS_LOADED);
+    to_dump("toast_iso_roll", "ISO 400", "RING", "ISO", "DOWN", "Aperture", WF_HUD_FULL, WF_HUD_FULL);
+    to_dump("toast_mz_roll", "MAGIC ZOOM", "SET", "Off", 0, 0, WF_HUD_FULL, WF_HUD_SMALL);
+    {
+        static uint8_t hud_only[480 * 720];
+        roll_of(colour, 36, 36, WF_RS_FULL);
+        memset(hv, 0, sizeof hv);
+        wfdr_hud(hv, 720, 0, WF_HUD_FULL);
+        memcpy(hud_only, hv, sizeof hv);
+        const char *wide[][5] = { { "ISO 12800", "RING", "ISO", "DOWN", "Aperture" },
+                                  { "MAGIC ZOOM", 0, "Turn on ML Overlay > Global Draw first", 0, 0 },
+                                  { "ISO 400", 0, "The highest the camera takes", 0, 0 } };
+        for (int k = 0; k < 3; k++)
+        {
+            memset(hv, 0, sizeof hv);
+            wfdr_toast(0, 0, 0, 0, 0, 0, 0, WF_HUD_CLEAR);
+            wfdr_toast(hv, 720, wide[k][0], wide[k][1], wide[k][2], wide[k][3], wide[k][4], WF_HUD_FULL);
+            int tn = 0, both = 0, innt = 0;
+            for (int i = 0; i < 480 * 720; i++)
+                if (hv[i]) { tn++; if (hud_only[i]) both++; if (NT_BOX(i % 720, i / 720)) innt++; }
+            CHECK(tn > 1500 && both == 0 && innt == 0, "the box '%s': %d pixels, %d on the roll HUD's, %d in the notice's box",
+                  wide[k][0], tn, both, innt);
+            wfdr_toast(hv, 720, 0, 0, 0, 0, 0, WF_HUD_CLEAR);
+            tn = 0;
+            for (int i = 0; i < 480 * 720; i++) if (hv[i]) tn++;
+            CHECK(tn == 0, "CLEAR gives every pixel of the box back (%d left)", tn);
+        }
+        memset(hv, 0, sizeof hv);                           /* a new text first gives the last box back */
+        wfdr_toast(0, 0, 0, 0, 0, 0, 0, WF_HUD_CLEAR);
+        wfdr_toast(hv, 720, "ZOOM OFF", 0, 0, 0, 0, WF_HUD_FULL);
+        memcpy(hud_only, hv, sizeof hv);
+        memset(hv, 0, sizeof hv);
+        wfdr_toast(0, 0, 0, 0, 0, 0, 0, WF_HUD_CLEAR);
+        wfdr_toast(hv, 720, "MAGIC ZOOM", 0, "Turn on ML Overlay > Magic Zoom first", 0, 0, WF_HUD_FULL);
+        wfdr_toast(hv, 720, "ZOOM OFF", 0, 0, 0, 0, WF_HUD_FULL);
+        CHECK(!memcmp(hv, hud_only, sizeof hv), "a narrower box over a wide one: the same as alone (nothing of the wide left)");
+    }
+    CHECK(wfdr_toast_fonts(0) == 0, "the box lets the font pack go");
     wfdr_hud_fonts(0);
     CHECK(host_live_allocs() == 0, "HUD fonts freed: %ld allocations left", host_live_allocs());
 

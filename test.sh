@@ -41,6 +41,7 @@ ALL="$ALL LIGHT:awb"                              # 11-17: Light Auto = Canon's 
 ALL="$ALL ROLL:jpeg"                              # 11-16: Camera JPEG Overwrite + the logo on real RAW+L pairs
 ALL="$ALL ROLL:shelf ROLL:shelfboot"               # 11-17: many rolls waiting (the shelf), develop again into ROLL001B; the shelf at boot
 ALL="$ALL ISO"                                     # 11-17: a film / roll load sets the camera's ISO to the film's speed
+ALL="$ALL QKEYS"                                   # 11-17: the EOS M quick keys (ISO, aperture, Magic Zoom in MF)
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
 B=${OUT:-$R/build/$cam}

@@ -33,6 +33,10 @@ extern int h_change_val[256];
 extern volatile int h_kelvin_n, h_kelvin_last, h_gm_last, h_ba_last;
 extern volatile int h_iso_n, h_iso_last;                 /* lens_set_rawiso calls, the last code asked for */
 extern int h_iso_whole, h_iso_refuse, h_htp;             /* body: whole stops only, takes no ISO, Highlight Tone Priority */
+/* the quick keys: LiveView with nothing on top, manual focus, Magic Zoom's countdown (-1 never set) and Overlay entry,
+ * lens_set_rawaperture calls / a body that refuses the aperture */
+extern int gui_state, lv_dispsize, af_mode;
+extern volatile int h_disp_idle, h_mz_cd, h_mz_n, h_mz_en, h_av_n, h_av_refuse;
 
 /* lens_info fields by name */
 int  h_li_get(const char *field);

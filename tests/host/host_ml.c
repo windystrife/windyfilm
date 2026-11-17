@@ -18,7 +18,7 @@
 
 extern const int wf_t_li_size, wf_t_li_shutter, wf_t_li_aperture, wf_t_li_iso, wf_t_li_iso_auto, wf_t_li_ae,
     wf_t_li_job, wf_t_li_wb_mode, wf_t_li_kelvin, wf_t_li_wbs_gm, wf_t_li_wbs_ba, wf_t_li_picstyle, wf_t_card_fn, wf_t_card_size,
-    wf_t_li_isov, wf_t_li_isoa, wf_t_card_folder;
+    wf_t_li_isov, wf_t_li_isoa, wf_t_card_folder, wf_t_li_name, wf_t_li_amin, wf_t_li_amax;
 
 char __camera_model_short[16] = "EOSM", firmware_version[16] = "2.0.2";
 int pic_quality, shooting_mode = 3, lv = 1;
@@ -592,7 +592,8 @@ static const struct { const char *n; const int *off; int bytes; } h_li_fields[] 
     { "iso_auto", &wf_t_li_iso_auto, 1 }, { "ae", &wf_t_li_ae, 4 }, { "job", &wf_t_li_job, 4 },
     { "wb_mode", &wf_t_li_wb_mode, 4 }, { "kelvin", &wf_t_li_kelvin, 4 }, { "gm", &wf_t_li_wbs_gm, -1 },
     { "ba", &wf_t_li_wbs_ba, -1 }, { "picstyle", &wf_t_li_picstyle, 1 }, { "isov", &wf_t_li_isov, 4 },
-    { "isoa", &wf_t_li_isoa, 4 },
+    { "isoa", &wf_t_li_isoa, 4 }, { "name0", &wf_t_li_name, 1 }, { "amin", &wf_t_li_amin, 1 },
+    { "amax", &wf_t_li_amax, 1 },
 };
 int h_li_get(const char *field)
 {
@@ -676,6 +677,35 @@ int lens_set_rawiso(int iso)
     return 1;
 }
 int get_htp(void) { return h_htp; }
+int raw2iso(int c)                                          /* (the quick keys' text for a code off the 1/3 table) */
+{
+    if (!c) return 0;
+    double v = 100;
+    int e = c - 72;
+    for (; e >= 8; e -= 8) v *= 2;
+    for (; e < 0; e += 8) v /= 2;
+    return (int)(v * (1 + e * 0.0905) + 0.5);
+}
+
+/* the quick keys (owner 11-17, DESIGN 3.17): stills LiveView with nothing on top (gui_state 0 = GUISTATE_IDLE,
+ * display_idle, lv_dispsize 1), manual focus (af_mode 3), ML's Magic Zoom (its countdown, the Overlay entry), the
+ * aperture (into lens_info like ML's property handler, unless h_av_refuse) */
+int gui_state, lv_dispsize = 1, af_mode;
+volatile int h_disp_idle = 1, h_mz_cd = -1, h_mz_n, h_mz_en = 1, h_av_n, h_av_refuse;
+int display_idle(void) { return h_disp_idle; }
+int is_manual_focus(void) { return (af_mode & 0xF) == 3; }
+void zoom_overlay_set_countdown(int x) { h_mz_cd = x; h_mz_n++; }
+int menu_get_value_from_script(const char *name, const char *entry_name)
+{
+    return !strcmp(name, "Overlay") && !strcmp(entry_name, "Magic Zoom") ? h_mz_en : -2147483647 - 1;
+}
+int lens_set_rawaperture(int a)
+{
+    h_av_n++;
+    if (h_av_refuse) return 0;
+    h_li_set("aperture", a);
+    return 1;
+}
 void lens_set_wbs_gm(int v) { h_gm_last = v; h_li_set("gm", v); }
 void lens_set_wbs_ba(int v) { h_ba_last = v; h_li_set("ba", v); }
 int get_expsim(void) { return h_expsim; }

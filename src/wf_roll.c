@@ -507,3 +507,58 @@ int wf_roll_iso_of(int code)
             return iso_v[i];
     return 0;
 }
+
+/* the quick keys (owner 11-17, wf_menu.c, DESIGN 3.17) */
+static int iso_ok(int i, int lo, int hi, int third)
+{
+    return iso_c[i] >= lo && iso_c[i] <= hi && (third || (iso_c[i] - 72) % 8 == 0);
+}
+
+int wf_roll_iso_step(int code, int dir, int lo, int hi, int third)
+{
+    if (!dir || (!code && dir < 0))
+        return code;
+    if (dir > 0) {
+        for (int i = 0; i < ISO_N; i++)
+            if (iso_c[i] > code && iso_ok(i, lo, hi, third))
+                return iso_c[i];
+    } else {
+        for (int i = ISO_N - 1; i >= 0; i--)
+            if (iso_c[i] < code && iso_ok(i, lo, hi, third))
+                return iso_c[i];
+    }
+    return code;
+}
+
+int wf_roll_av_step(int code, int dir, int lo, int hi, int half)
+{
+    if (!dir || code <= 0)
+        return code;
+    int s = dir > 0 ? 1 : -1;
+    for (int c = code + s; c >= lo && c <= hi; c += s) {
+        int m = c & 7;
+        if (c == lo || c == hi || (half ? m == 0 || m == 4 : m == 0 || m == 3 || m == 5))
+            return c;
+    }
+    return code;
+}
+
+/* Canon's f-numbers by stop (code 8 = f/1.0, 8 codes a stop): whole, +1/3, +1/2, +2/3; the eighths between them
+ * (a lens' own end) show as the nearest of these */
+int wf_roll_av_f10(int code)
+{
+    static const short f0[14] = { 10, 14, 20, 28, 40, 56, 80, 110, 160, 220, 320, 450, 640, 910 };
+    static const short f3[14] = { 11, 16, 22, 32, 45, 63, 90, 130, 180, 250, 360, 510, 720, 1000 };
+    static const short f4[14] = { 12, 18, 25, 35, 45, 67, 95, 130, 190, 270, 380, 540, 760, 1100 };
+    static const short f5[14] = { 12, 18, 25, 35, 50, 71, 100, 140, 200, 290, 400, 570, 810, 1100 };
+    if (code < 8)
+        return 0;
+    int s = (code - 8) >> 3, m = (code - 8) & 7;
+    if (m == 7) { s++; m = 0; }
+    else if (m == 1) m = 0;
+    else if (m == 2) m = 3;
+    else if (m == 6) m = 5;
+    if (s >= 14)
+        return 0;
+    return m == 0 ? f0[s] : m == 3 ? f3[s] : m == 4 ? f4[s] : f5[s];
+}

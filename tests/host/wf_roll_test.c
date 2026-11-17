@@ -192,6 +192,29 @@ int main(void)
                 ibad++;
         }
         CHECK(!ibad, "every 1/3 step to itself (%d off)", ibad);
+        /* the quick keys (owner 11-17): one ISO / aperture step, the f-number */
+        CHECK(wf_roll_iso_step(88, 1, 72, 128, 1) == 91 && wf_roll_iso_step(88, -1, 72, 128, 1) == 85,
+              "ISO 400 a third up / down: 500 / 320");
+        CHECK(wf_roll_iso_step(0, 1, 72, 128, 1) == 72 && wf_roll_iso_step(0, -1, 72, 128, 1) == 0
+              && wf_roll_iso_step(0, 1, 80, 128, 1) == 80, "Auto: up = 100 (200 with HTP), down stays Auto");
+        CHECK(wf_roll_iso_step(128, 1, 72, 128, 1) == 128 && wf_roll_iso_step(72, -1, 72, 128, 1) == 72
+              && wf_roll_iso_step(80, -1, 80, 128, 1) == 80, "the ends stay: 12800 up, 100 down, 200 down with HTP");
+        CHECK(wf_roll_iso_step(88, 1, 72, 128, 0) == 96 && wf_roll_iso_step(83, 1, 72, 128, 0) == 88
+              && wf_roll_iso_step(83, -1, 72, 128, 0) == 80, "whole stops: 400 -> 800, 250 -> 400 / 200");
+        CHECK(wf_roll_iso_step(136, -1, 72, 128, 1) == 128 && wf_roll_iso_step(88, 0, 72, 128, 1) == 88,
+              "above the range: down to the top; dir 0: no step");
+        CHECK(wf_roll_av_step(32, 1, 24, 80, 0) == 35 && wf_roll_av_step(35, 1, 24, 80, 0) == 37
+              && wf_roll_av_step(37, 1, 24, 80, 0) == 40 && wf_roll_av_step(32, -1, 24, 80, 0) == 29,
+              "aperture thirds: f/2.8 -> 3.2 -> 3.5 -> 4, f/2.8 -> 2.5");
+        CHECK(wf_roll_av_step(32, 1, 24, 80, 1) == 36 && wf_roll_av_step(36, 1, 24, 80, 1) == 40
+              && wf_roll_av_step(36, -1, 24, 80, 1) == 32, "aperture halves: f/2.8 -> 3.5 -> 4");
+        CHECK(wf_roll_av_step(24, -1, 24, 80, 0) == 24 && wf_roll_av_step(80, 1, 24, 80, 0) == 80
+              && wf_roll_av_step(27, -1, 26, 80, 0) == 26 && wf_roll_av_step(26, 1, 26, 80, 0) == 27
+              && wf_roll_av_step(0, 1, 24, 80, 0) == 0, "the lens' ends stay, an end off the grid counts, no aperture: 0");
+        CHECK(wf_roll_av_f10(32) == 28 && wf_roll_av_f10(35) == 32 && wf_roll_av_f10(37) == 35 && wf_roll_av_f10(36) == 35
+              && wf_roll_av_f10(56) == 80 && wf_roll_av_f10(64) == 110 && wf_roll_av_f10(21) == 18 && wf_roll_av_f10(8) == 10
+              && wf_roll_av_f10(0) == 0 && wf_roll_av_f10(31) == 28 && wf_roll_av_f10(26) == 22,
+              "f-numbers: 2.8 3.2 3.5 3.5(half) 8 11 1.8 1.0, none, eighths to the nearest");
         CHECK(wf_roll_name_parse("ROLL021", &n, &d) == 0 && n == 21 && d == 1, "parse ROLL021: %d %d", n, d);
         CHECK(wf_roll_name_parse("roll021c", &n, &d) == 0 && n == 21 && d == 3, "parse roll021c (any case): %d %d", n, d);
         CHECK(wf_roll_name_parse("ROLL999Z", &n, &d) == 0 && n == 999 && d == 26, "parse ROLL999Z: %d %d", n, d);

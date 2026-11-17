@@ -523,6 +523,17 @@ ag. (17/11 đêm) ISO theo phim: máy ở M, ISO Auto. Trong browser (JPEG) SET 
    cũng bị đặt theo phim), và ở chế độ cảnh / Auto+: log "not taken by the camera". Ghi
    lại: ISO đổi có kịp ngay không, có chế độ nào ISO không đổi hay máy báo lỗi.
 
+ah. (17/11 đêm) Phím tắt (Shoot > WindyFilm > Quick keys = DOWN ring, mặc định). Ở M,
+   LiveView, lens EF-M: bấm nhanh DOWN: hộp nhỏ giữa đáy màn hình "ISO 400 [RING] ISO
+   [DOWN] Aperture"; xoay vòng: ISO đổi 1/3 nấc mỗi nấc xoay (ghi lại xoay phải là lên hay
+   xuống). DOWN lần nữa: vòng chỉnh khẩu ("f/2.8"); lần nữa: vòng về của Canon. Để yên 6 s,
+   bấm nửa cò hay UP: vòng về Canon. Giữ DOWN lâu: browser vẫn mở như cũ. Ở Av: DOWN chỉ
+   có ISO. Đổi hàng sang L/R ISO: LEFT / RIGHT đổi ISO (mất drive mode / khoá AE ở
+   LiveView), DOWN = vòng khẩu. Lấy nét tay (MF, hay lens không tiếp điểm): bấm nhanh SET =
+   Magic Zoom bật / tắt (cần ML Overlay > Magic Zoom ON); giữ SET lâu: màn Q của Canon vẫn
+   mở (Magic Zoom tắt). Ghi lại: hộp có đè thông tin Canon không, Magic Zoom có tắt nhấp
+   nháy không, ISO / khẩu có theo kịp khi xoay nhanh không.
+
 
 6. GỬI LẠI
 ----------

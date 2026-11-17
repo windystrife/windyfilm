@@ -962,6 +962,60 @@ void wfdr_notice(uint8_t *vram, int pitch, int mode)
     wfg_pitch = cp;
 }
 
+/* owner 11-17: the quick keys' box (wf_menu.c, DESIGN 3.17), at the bottom middle of LiveView: clear of the roll HUD
+ * (chip top left, counter bottom right from x 570, ladder on the right edge) and of the end-of-roll notice (y < 340) */
+#define TO_CX 360
+#define TO_Y0 356
+#define TO_Y1 426
+static int to_x0 = -1, to_x1, toast_fonts;
+int wfdr_toast_fonts(int on)
+{
+    if (on && !toast_fonts) { toast_fonts = 1; wff_open(); }
+    else if (!on && toast_fonts) { toast_fonts = 0; wff_close(); }
+    return toast_fonts;
+}
+static int to_hint_w(const char *k, const char *t) { return k ? nt_key_w(k, t ? t : "") : t ? ui_textw(F_13, t) : 0; }
+static int to_hint(int x, int y, const char *k, const char *t, int W, int G, int K)
+{
+    if (k) return nt_key(x, y, k, t ? t : "", W, K);
+    return t ? x + ui_text(F_13, x, y + 2, t, G) : x;
+}
+void wfdr_toast(uint8_t *vram, int pitch, const char *big, const char *k1, const char *t1, const char *k2, const char *t2,
+                int mode)
+{
+    if (!vram) { to_x0 = -1; return; }
+    uint8_t *cv = wfg_cv;
+    int cp = wfg_pitch;
+    wfg_cv = vram;
+    wfg_pitch = pitch;
+    if (to_x0 >= 0) { hud_punch(to_x0, TO_Y0, to_x1, TO_Y1, 1); to_x0 = -1; }
+    if (mode != WF_HUD_CLEAR && big)
+    {
+        int fade = mode == WF_HUD_FADE;
+        int K = MLC(COLOR_BLACK), D = MLC(COLOR_GRAY(30)), G = MLC(COLOR_GRAY(60));
+        int W = fade ? MLC(COLOR_GRAY(55)) : MLC(COLOR_WHITE);
+        int h1 = to_hint_w(k1, t1), h2 = to_hint_w(k2, t2), hw = h1 + h2 + (h1 && h2 ? 24 : 0);
+        int bw = ui_textw(F_ML28, big), w = (bw > hw ? bw : hw) + 40;
+        if (w < 180) w = 180;
+        if (w > 400) w = 400;
+        int x0 = TO_CX - w / 2, x1 = TO_CX + w / 2, y1 = hw ? TO_Y1 : TO_Y0 + 46;
+        wfg_rrect(x0, TO_Y0, x1, y1, 10, D, -1, 0);
+        wfg_rrect(x0 + 2, TO_Y0 + 2, x1 - 2, y1 - 2, 8, K, -1, 0);
+        text_c(F_ML28, TO_CX, TO_Y0 + 6, big, W);
+        if (hw)
+        {
+            int x = TO_CX - hw / 2;
+            if (h1) x = to_hint(x, TO_Y0 + 46, k1, t1, W, G, K) + 24;
+            if (h2) to_hint(x, TO_Y0 + 46, k2, t2, W, G, K);
+        }
+        if (fade) hud_punch(x0, TO_Y0, x1, y1, 0);
+        to_x0 = x0;
+        to_x1 = x1;
+    }
+    wfg_cv = cv;
+    wfg_pitch = cp;
+}
+
 /* the browser's film pick for a develop again ends (wf_ui.c): film, or -1 = none (MENU); the Darkroom comes back */
 void wfdr_pick_done(int film)
 {
