@@ -206,6 +206,7 @@ static char *get_file(const char *path, long *n)
     fclose(f);
     return b;
 }
+static int file_exists(const char *path) { return access(path, F_OK) == 0; }
 static void put_cfg(const char *fmt, ...)
 {
     char b[1024];
@@ -5811,7 +5812,7 @@ static void t_roll_lock(void)
 #ifdef WF_BUILD_5D2
     std_pack();
     mod_init(1);
-    chk(wf_roll_req_swap(wf_films[fA].id, 3) == -4, "5D2: no roll to close and load");
+    chk(wf_roll_req_swap(wf_films[fA].id, 3, 0) == -4, "5D2: no roll to close and load");
     usleep(300000);
     chk(h_uilock_n == 0 && cbr_key(H_KEY_HALFSHUTTER) == 1, "5D2: no UI lock, the shutter keys pass");
     mod_deinit();
@@ -5823,7 +5824,7 @@ static void t_roll_lock(void)
     const int film = wf_films[fA].id, film2 = wf_films[fC].id;
     int rc = wf_roll_req_load(film, 3);
     chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->exp == 3, 5000), "a roll of 3 loads (%d)", rc);
-    chk(wf_roll_req_swap(film2, 6) == -1, "close-and-load refused while the roll still shoots");
+    chk(wf_roll_req_swap(film2, 6, 0) == -1, "close-and-load refused while the roll still shoots");
     chk(roll_shoot(401, 3) && wf_roll_now()->state == WF_RS_FULL && LOGW("roll: shutter blocked (full)", 3000)
         && (icu_uilock & 1), "3 frames: full, the shutter held (%d/3, lock %x)", wf_roll_now()->nshot, icu_uilock);
     usleep(300000);
@@ -5834,19 +5835,19 @@ static void t_roll_lock(void)
     lv = 0;
     chk(cbr_key(H_KEY_HALFSHUTTER) == 1, "no LiveView (Canon's own screens): the key passes, ML's lock holds the shutter");
     lv = 1;
-    chk(wf_roll_req_swap(film2, 7) == -2 && wf_roll_req_swap(9999, 6) == -2, "close-and-load: a bad count / film refused");
-    rc = wf_roll_req_swap(film2, 6);
+    chk(wf_roll_req_swap(film2, 7, 0) == -2 && wf_roll_req_swap(9999, 6, 0) == -2, "close-and-load: a bad count / film refused");
+    rc = wf_roll_req_swap(film2, 6, 0);
     chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->film == film2 && wf_roll_now()->exp == 6
-        && wf_roll_now()->num == 2, 5000) && LOGW("roll: 001 closed for a new roll, 3 frame(s) kept undeveloped", 3000)
-        && LOGW("roll: 002 loaded", 3000), "close-and-load: roll 001 closed (3 kept), roll 002 x6 loaded (%d, %s)", rc,
-        log_line("roll: 00"));
+        && wf_roll_now()->num == 2, 5000) && LOGW("roll: 001 on the shelf (a new roll): 3/3, 3 to develop, rewound", 3000)
+        && LOGW("roll: 002 loaded", 3000) && file_exists("ROLLS/ROLL001/WFROLL.TXT"),
+        "close-and-load: roll 001 on the shelf (3 to develop), roll 002 x6 loaded (%d, %s)", rc, log_line("roll: 00"));
     chk(LOGW("roll: shutter free", 3000) && !(icu_uilock & 1) && cbr_key(H_KEY_HALFSHUTTER) == 1,
         "the new roll: the shutter free, the half-shutter passes");
     chk(roll_shoot(404, 6) && wf_roll_now()->state == WF_RS_FULL && WAIT(icu_uilock & 1, 3000),
         "6 frames: full, held again (%d/6)", wf_roll_now()->nshot);
     /* one screen (owner 11-17): the browser's mode chip sets the full roll aside for JPEG: the shutter free, the look
        built for shots, PLAY Canon's, its 6 frames kept; a new file is no frame; back on Darkroom it is held again; a
-       close takes it off the shelf */
+       close ends the set-aside */
     log_mark();
     chk(wf_roll_shelve(1) == 0 && wf_roll_shelved() && LOGW("roll: 002 set aside", 3000) && LOGW("roll: shutter free", 3000)
         && !(icu_uilock & 1) && wf_look_use() == WF_LU_SHOTS && !wf_roll_blocks_play() && cbr_key(H_KEY_HALFSHUTTER) == 1,
@@ -5857,7 +5858,7 @@ static void t_roll_lock(void)
     chk(wf_roll_now()->nshot == 6 && wf_roll_left(wf_roll_now()) == 6 && wf_roll_now()->state == WF_RS_FULL,
         "a shot while set aside: not a frame (%d/6, %d left)", wf_roll_now()->nshot, wf_roll_left(wf_roll_now()));
     log_mark();
-    chk(wf_roll_shelve(0) == 0 && !wf_roll_shelved() && LOGW("roll: 002 back from the shelf", 3000)
+    chk(wf_roll_shelve(0) == 0 && !wf_roll_shelved() && LOGW("roll: 002 back in use (no longer set aside)", 3000)
         && LOGW("roll: shutter blocked (full)", 3000) && (icu_uilock & 1) && wf_look_use() == WF_LU_NONE,
         "back on Darkroom: held again (lock %x), nothing of the look (%d)", icu_uilock, wf_look_use());
     wf_roll_look8 = 1;                           /* owner 11-17: a Film stage roll in JPEG 8-bit: the look at the shot */
@@ -5865,8 +5866,8 @@ static void t_roll_lock(void)
     wf_roll_look8 = 0;
     chk(wf_look_use() == WF_LU_NONE, "rolllook off again: nothing of the look (%d)", wf_look_use());
     chk(wf_roll_shelve(1) == 0 && wf_roll_req_close() == 0 && WAIT(!wf_roll_open(wf_roll_now()), 5000)
-        && LOGW("roll: 002 off the shelf (close)", 3000) && !wf_roll_shelved() && wf_roll_shelve(1) == -1,
-        "closed while set aside: off the shelf, nothing left to set aside");
+        && LOGW("roll: 002 no longer set aside (close)", 3000) && !wf_roll_shelved() && wf_roll_shelve(1) == -1,
+        "closed while set aside: no longer set aside, nothing left to set aside");
     chk(wf_roll_req_load(film, 3) == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && roll_shoot(411, 3)
         && wf_roll_now()->state == WF_RS_FULL && WAIT(icu_uilock & 1, 3000), "a roll of 3 again: full, held (%d/3)",
         wf_roll_now()->nshot);
@@ -6660,8 +6661,218 @@ static void t_roll_jpeg(void)
 #endif
 }
 
+/* ROLL:shelf - many rolls waiting, develop again (owner 11-17, DESIGN 3.15), on real RAW+L pairs: the browser's
+ * close-and-load puts the full roll 001 on the shelf (ROLLS/ROLL001/WFROLL.TXT, rewound, 3 to develop) and loads roll
+ * 002; the Darkroom develops roll 001 from the shelf while the camera's roll 002 waits full (F02's CR2 gone: skipped);
+ * then develops it again with another film into ROLLS/ROLL001B ("develop 2" in each print's UserComment, the first
+ * prints untouched, the film before back); the camera's roll developed goes on the shelf too. The shelf after a reboot
+ * is ROLL:shelfboot (the module loads once per process: a second init here would find it unloading) */
+static void t_roll_shelf(void)
+{
+#ifdef WF_BUILD_5D2
+    std_pack();
+    mod_init(1);
+    usleep(600000);
+    chk(wf_shelf_now()->n == 0 && wf_dark_start_roll(1, 0, 0) == -3 && wf_roll_req_swap(wf_films[fA].id, 3, 0) == -4,
+        "5D2: no shelf, no Darkroom, no close-and-load (%d rolls)", wf_shelf_now()->n);
+    mod_deinit();
+#else
+    const char *dir = getenv("WF_DARK_CR2");
+    char t[300], t2[300];
+    if (!dir)
+        dir = "/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM";
+    snprintf(t, sizeof t, "%s/%s.CR2", dir, mem_pairs[2]);
+    if (access(t, R_OK) != 0) {
+        chk(1, "SKIPPED: no EOS M RAW+L pairs in %s (WF_DARK_CR2)", dir);
+        return;
+    }
+    snprintf(t2, sizeof t2, "%s/%s.CR2", dir, mem_pairs[1]);
+    std_pack();
+    const int film = wf_films[fC].id, film2 = wf_films[fB].id;
+    const struct wf_film *f2 = wf_film_by_id(film2);
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nbloom=off\nmist=off\n", film);
+    wf_fx_retry_ms = 500;
+    h_set_folder_number(100);
+    h_set_file_number(600);
+    mod_init(1);
+    h_shoot_max = 16 << 20;
+    h_srm_n = 3;
+    wf_pr_frame = 0;
+    wf_pr_info = 1;
+    wf_pr_date = 0;
+    wf_pr_jpeg = WF_PJ_KEEP;
+    chk(LOGW("roll: shelf 0 rolls (empty)", 10000), "an empty card: the shelf empty ('%s')", log_line("roll: shelf"));
+    chk(mem_roll(film, 1, dir, 601), "roll 001: 3 real RAW+L frames, full (%d)", wf_roll_now()->nshot);
+    log_mark();
+    int rc = wf_roll_req_swap(film, 3, 0);
+    chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->num == 2, 5000)
+        && LOGW("roll: 001 on the shelf (a new roll): 3/3, 3 to develop, rewound", 3000)
+        && LOGW("roll: shelf 1 roll (001 3 to develop)", 5000) && file_exists("ROLLS/ROLL001/WFROLL.TXT"),
+        "close-and-load: roll 001 on the shelf, roll 002 loaded (%d, '%s')", rc, log_line("roll: shelf"));
+    const struct wf_shelf *s = wf_shelf_now();
+    chk(s->n == 1 && s->e[0].num == 1 && s->e[0].dev == 1 && s->e[0].left == 3 && s->e[0].state == WF_RS_REWOUND
+        && s->e[0].film == film, "the shelf: roll 001, 3 to develop (%d rolls, left %d)", s->n, s->e[0].left);
+    {                                            /* the shelf copy: roll 001 as it left the camera */
+        long n = 0;
+        char *b = get_file("ROLLS/ROLL001/WFROLL.TXT", &n);
+        struct wf_roll q;
+        chk(b && n == WF_ROLL_FILE && wf_roll_parse(&q, b, (int)n) == 0 && q.num == 1 && q.film == film && q.nshot == 3
+            && q.state == WF_RS_REWOUND && wf_roll_left(&q) == 3 && q.dev == 0 && !strstr(b, "dev="),
+            "ROLLS/ROLL001/WFROLL.TXT: roll 001 rewound, 3 frames to develop, no dev= (%ld B)", n);
+        free(b);
+    }
+    chk(mem_shoot(dir, 604) && wf_roll_now()->state == WF_RS_FULL, "roll 002: 3 frames, full (%d)", wf_roll_now()->nshot);
+
+    remove("DCIM/100CANON/IMG_0602.CR2");        /* F02's CR2 gone from the card */
+    log_mark();
+    int ds = wf_dark_start_roll(1, 0, 0);
+    chk(ds == 0 && LOGW("dark: roll 001 F02 100/IMG_0602.CR2 is gone: skipped", 10000)
+        && LOGW("dark: roll 001 from the shelf: film ", 5000)
+        && strstr(log_line("dark: roll 001 from the shelf"), "2 to develop, prints in ROLLS/ROLL001"),
+        "the shelf roll 001 starts (%d): F02 skipped ('%s')", ds, log_line("dark: roll 001 from the shelf"));
+    int ok = ds == 0 && WAIT(log_has("dark: roll 001 end") && !wf_dark_busy(), 1500000);
+    chk(ok && strstr(log_line("dark: roll 001 end"), "2 developed, 0 failed, 0 left"), "roll 001: 2 developed ('%s')",
+        log_line("dark: roll 001 end"));
+    long n1 = 0, n3 = 0;
+    char *p1 = mem_print(1, 0, 601, &n1), *p3 = mem_print(1, 2, 603, &n3);
+    chk(p1 && p3 && n1 > (1 << 20) && n3 > (1 << 20) && !file_exists("ROLLS/ROLL001/F02_0602.JPG"),
+        "roll 001's prints: F01 %ld KB, F03 %ld KB, no F02", n1 >> 10, n3 >> 10);
+    chk(wf_roll_now()->num == 2 && wf_roll_now()->state == WF_RS_FULL && wf_roll_left(wf_roll_now()) == 3
+        && wf_loaded() == film, "the camera's roll 002 untouched (state %d, %d left), film %d loaded",
+        wf_roll_now()->state, wf_roll_left(wf_roll_now()), wf_loaded());
+    chk(LOGW("roll: shelf 1 roll (001 done 2/3)", 5000), "the shelf: roll 001 developed ('%s')", log_line("roll: shelf"));
+
+    chk(mem_copy(t2, "DCIM/100CANON/IMG_0602.CR2"), "F02's CR2 back on the card");
+    log_mark();
+    ds = wf_dark_start_roll(1, 1, film2);
+    char e[128];
+    snprintf(e, sizeof e, "dark: roll 001 develop 2: film %s, 3 frames, prints in ROLLS/ROLL001B", f2 ? f2->name : "?");
+    chk(ds == 0 && LOGW(e, 10000), "develop again (%d): '%s'", ds, log_line("dark: roll 001 develop"));
+    ok = ds == 0 && WAIT(log_has("dark: roll 001 end") && !wf_dark_busy(), 1500000);
+    snprintf(e, sizeof e, "dark: film %d back", film);
+    chk(ok && strstr(log_line("dark: roll 001 end"), "3 developed, 0 failed, 0 left") && log_has(e) && wf_loaded() == film,
+        "develop 2: 3 developed, film %d back (%d) ('%s')", film, wf_loaded(), log_line("dark: roll 001 end"));
+    for (int i = 0; i < 3; i++) {
+        char pth[64];
+        long n = 0;
+        snprintf(pth, sizeof pth, "ROLLS/ROLL001B/F%02d_%04d.JPG", i + 1, 601 + i);
+        char *b = get_file(pth, &n);
+        chk(b && n > (1 << 20) && memmem(b, (size_t)(n < 65536 ? n : 65536), "| develop 2", 11), "develop 2: %s %ld KB, "
+            "'develop 2' in its UserComment", pth, n >> 10);
+        free(b);
+    }
+    long m1 = 0, m3 = 0, rn = 0;
+    char *q1 = mem_print(1, 0, 601, &m1), *q3 = mem_print(1, 2, 603, &m3), *rt = get_file("ROLLS/ROLL001B/WFROLL.TXT", &rn);
+    chk(q1 && q3 && m1 == n1 && m3 == n3 && !memcmp(q1, p1, (size_t)n1) && !memcmp(q3, p3, (size_t)n3)
+        && !file_exists("ROLLS/ROLL001/F02_0602.JPG"), "the first prints untouched (ROLLS/ROLL001)");
+    snprintf(e, sizeof e, "film=%d\nexp=3\nstate=done\ndev=2\nown=%d\n", film2, film);
+    chk(rt && rn == 1536 && strstr(rt, e), "ROLLS/ROLL001B/WFROLL.TXT: develop 2, film %d, own %d", film2, film);
+    free(p1); free(p3); free(q1); free(q3); free(rt);
+    chk(LOGW("roll: shelf 1 roll (001B done 3/3)", 5000), "the shelf: roll 001's pass 2 ('%s')", log_line("roll: shelf"));
+
+    mem_run("roll 002", 2);                      /* the camera's roll developed: on the shelf as well */
+    chk(LOGW("roll: 002 on the shelf (developed): 3/3, 0 to develop, done", 5000)
+        && LOGW("roll: shelf 2 rolls (002 done 3/3, 001B done 3/3)", 5000), "roll 002 developed: on the shelf ('%s')",
+        log_line("roll: shelf"));
+    h_srm_n = 0;
+    h_shoot_max = 0;
+    mod_deinit();
+#endif
+}
+
+/* ROLL:shelfboot - the shelf at boot is the card's (owner 11-17, DESIGN 3.15): a card with ROLLS/ROLL001 (developed)
+ * and its pass ROLL001B (2 left), ROLL003 (rewound, 3 left), ROLL004 (a folder, no roll file: developed before the
+ * shelf) and the camera's roll 002 developed, no copy yet. Boot: roll 002's copy made ("developed before the shelf"),
+ * the list newest first down from 002 (wrapping: 003 after 001), ROLL004 counted; a new roll skips 003 (on the shelf)
+ * and is 004 (no roll file there); then the list goes down from 004 */
+static void sb_roll(const char *dir, int num, int dev, int film, int film2, int done, int devd)
+{
+    struct wf_roll r;
+    char p[48], t[WF_ROLL_FILE];
+    wf_roll_reset(&r);
+    wf_roll_load(&r, film, 3, 100, 600 + num * 10);
+    r.num = num;
+    wf_roll_seen(&r, 100, 603 + num * 10, roll_cr2_yes, 0);
+    wf_roll_rewind(&r);
+    for (int i = 0; i < done; i++)
+        wf_roll_mark(&r, i, WF_RF_DEV);
+    if (dev >= 2) {
+        wf_roll_again(&r, film2, 0, 0);
+        for (int i = 0; i < devd; i++)
+            wf_roll_mark(&r, i, WF_RF_DEV);
+    }
+    mkdir("ROLLS", 0777);
+    if (!dir) {                                  /* the camera's roll file */
+        wf_roll_text(&r, t, sizeof t);
+        put_file(H_ROLLF, t, sizeof t);
+        return;
+    }
+    snprintf(p, sizeof p, "ROLLS/%s", dir);
+    mkdir(p, 0777);
+    if (num <= 0)
+        return;
+    snprintf(p, sizeof p, "ROLLS/%s/WFROLL.TXT", dir);
+    wf_roll_text(&r, t, sizeof t);
+    put_file(p, t, sizeof t);
+}
+static void t_roll_shelfboot(void)
+{
+    std_pack();
+    const int film = wf_films[fC].id;
+#ifdef WF_BUILD_5D2
+    sb_roll("ROLL003", 3, 1, film, 0, 0, 0);
+    mod_init(1);
+    usleep(600000);
+    chk(wf_shelf_now()->n == 0 && !log_has("roll: shelf"), "5D2: a roll folder on the card, no shelf (%d rolls)",
+        wf_shelf_now()->n);
+    mod_deinit();
+#else
+    const int film2 = wf_films[fB].id;
+    sb_roll("ROLL001", 1, 1, film, 0, 3, 0);     /* developed */
+    sb_roll("ROLL001B", 1, 2, film, film2, 3, 1);   /* its develop 2, stopped after F01 */
+    sb_roll("ROLL003", 3, 1, film, 0, 0, 0);     /* rewound, 3 to develop */
+    sb_roll("ROLL004", 0, 1, film, 0, 0, 0);     /* a folder alone */
+    sb_roll(0, 2, 1, film, 0, 3, 0);             /* the camera's roll 002: developed */
+    h_set_folder_number(100);
+    h_set_file_number(700);
+    mod_init(1);
+    chk(LOGW("roll: 002 on the shelf (developed before the shelf): 3/3, 0 to develop, done", 10000)
+        && file_exists("ROLLS/ROLL002/WFROLL.TXT"), "boot: the camera's developed roll 002 copied to the shelf ('%s')",
+        log_line("roll: 002 on the shelf"));
+    chk(LOGW("roll: shelf 3 rolls (002 done 3/3, 001B 2 to develop, 003 3 to develop)", 5000),
+        "boot: the shelf from the card, newest first down from 002 ('%s')", log_line("roll: shelf "));
+    chk(LOGW("roll: shelf: 1 roll folder without a roll file (developed before the shelf): ROLL004", 3000),
+        "boot: ROLL004 counted, not listed ('%s')", log_line("without a roll file"));
+    const struct wf_shelf *s = wf_shelf_now();
+    chk(s->n == 3 && s->e[1].num == 1 && s->e[1].dev == 2 && s->e[1].film == film2 && s->e[1].own == film
+        && s->e[1].left == 2 && s->e[1].ndev == 1 && s->e[2].num == 3 && s->e[2].state == WF_RS_REWOUND,
+        "the shelf entries: 001B film %d own %d, 2 left; 003 rewound (%d rolls)", s->e[1].film, s->e[1].own, s->n);
+    log_mark();
+    int rc = wf_roll_req_load(film, 3);
+    int seen3 = 0;                               /* never shown loaded under the shelf's number */
+    for (int t = 0; t < 500 && !(wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->num == 4); t++) {
+        seen3 |= wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->num == 3;
+        usleep(10000);
+    }
+    chk(rc == 0 && wf_roll_now()->state == WF_RS_LOADED && wf_roll_now()->num == 4 && !seen3
+        && LOGW("roll: ROLL003 is on the card's shelf already: this roll is 004", 3000) && LOGW("roll: 004 loaded", 3000),
+        "a new roll: not over the shelf's 003, roll %03d ('%s')", wf_roll_now()->num, log_line("on the card's shelf"));
+    chk(LOGW("roll: shelf 3 rolls (003 3 to develop, 002 done 3/3, 001B 2 to develop)", 5000),
+        "the list down from the camera's 004 ('%s')", log_line("roll: shelf "));
+    mod_deinit();
+#endif
+}
+
 static void t_roll(const char *cs)
 {
+    if (!strcmp(cs, "shelf")) {
+        t_roll_shelf();
+        return;
+    }
+    if (!strcmp(cs, "shelfboot")) {
+        t_roll_shelfboot();
+        return;
+    }
     if (!strcmp(cs, "mem")) {
         t_roll_mem();
         return;

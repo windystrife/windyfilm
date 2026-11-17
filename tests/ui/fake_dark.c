@@ -17,6 +17,8 @@ volatile int wf_blind = 1;
 
 static int locked, nswap;
 static int fshelf, rawb_can = 1;
+static struct wf_shelf fshv;                     /* the shelf (owner 11-17): rolls the requests below put on it */
+static int nrescan, st_num, st_again, st_film, nswap_devd;
 volatile int wf_rawb;
 volatile int wf_roll_look8;                      /* a JPEG 8-bit roll (wf_dark.h): the browser sets it */
 void wf_roll_look8_set(int on) { wf_roll_look8 = on != 0; }
@@ -35,6 +37,8 @@ void fake_dark_reset(void)
     req_film = req_exp = nstart = nstop = 0;
     locked = nswap = 0;
     fshelf = 0;
+    memset(&fshv, 0, sizeof fshv);
+    nrescan = st_num = st_again = st_film = nswap_devd = 0;
     wf_rawb = 0;
     wf_roll_look8 = 0;
     rawb_can = 1;
@@ -74,17 +78,49 @@ int wf_roll_req_load(int film, int exp)
 }
 int wf_roll_req_rewind(void) { return wf_roll_rewind(&roll); }
 int wf_roll_req_close(void) { return wf_roll_close(&roll); }
-int wf_roll_req_swap(int film, int exp)
+int wf_roll_req_swap(int film, int exp, int devd)
 {
     if (!(roll.state == WF_RS_FULL || (roll.state == WF_RS_REWOUND && wf_roll_left(&roll) > 0))) return -1;
     if (!wf_roll_ok_exp(exp)) return -2;
-    wf_roll_close(&roll);
+    if (devd) { wf_roll_close(&roll); nswap_devd++; }
+    else wf_roll_rewind(&roll);
+    fake_shelf_add(&roll);                       /* the roll goes on the shelf (newest first) */
+    if (roll.state != WF_RS_DONE) roll.state = WF_RS_EMPTY;   /* and leaves the camera */
     nswap++;
     return wf_roll_req_load(film, exp);
 }
 int wf_roll_hud(char *line, int n) { (void)line; (void)n; return 0; }
 const struct wf_dark_view *wf_dark_view(void) { return &view; }
-int wf_dark_start(void) { nstart++; return wf_roll_left(&roll) ? 0 : -1; }
+int wf_dark_start(void) { nstart++; st_num = 0; return wf_roll_left(&roll) ? 0 : -1; }
+int wf_dark_start_roll(int num, int again, int film)
+{
+    nstart++;
+    st_num = num;
+    st_again = again;
+    st_film = film;
+    for (int k = 0; k < fshv.n; k++)
+        if (fshv.e[k].num == num) return (again ? fshv.e[k].nshot : fshv.e[k].left) ? 0 : -1;
+    return -1;
+}
+int wf_dark_eta_left(const struct wf_dark_view *v, int left) { return left * (v->avg_ms ? v->avg_ms : 45000) / 1000; }
+const struct wf_shelf *wf_shelf_now(void) { return &fshv; }
+void wf_shelf_rescan(void) { nrescan++; }
+struct wf_shelf *fake_shelf(void) { fshv.gen++; return &fshv; }
+void fake_shelf_add(const struct wf_roll *r)
+{
+    if (fshv.n >= WF_SHELF_MAX) fshv.n = WF_SHELF_MAX - 1;
+    memmove(&fshv.e[1], &fshv.e[0], fshv.n * sizeof fshv.e[0]);
+    struct wf_shelf_ent *e = &fshv.e[0];
+    e->num = r->num; e->dev = r->dev < 2 ? 1 : r->dev; e->film = r->film; e->own = r->own ? r->own : r->film;
+    e->exp = r->exp; e->state = r->state; e->nshot = r->nshot; e->left = wf_roll_left(r); e->ndev = wf_roll_ndev(r);
+    fshv.n++;
+    fshv.gen++;
+}
+int fake_nrescan(void) { return nrescan; }
+int fake_start_num(void) { return st_num; }
+int fake_start_again(void) { return st_again; }
+int fake_start_film(void) { return st_film; }
+int fake_nswap_devd(void) { return nswap_devd; }
 void wf_dark_stop(void) { nstop++; view.state = WF_DR_STOPPING; view.gen++; }
 int wf_dark_eta_s(const struct wf_dark_view *v)
 {

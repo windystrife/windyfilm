@@ -1108,9 +1108,15 @@ int main(int argc, char **argv)
     key(MODULE_KEY_PRESS_SET);
     CHECK(wfui_host_swap() && !wfui_host_anim() && wf_roll_now()->state == WF_RS_FULL, "the full roll, SET on SUN200: "
           "close and load? (%d)", wfui_host_swap());
+    shot("shelf_swap");                                             /* owner 11-17: it goes on the shelf */
+    int sw_n = wf_roll_now()->nshot, sw_num = wf_roll_now()->num;
     key(MODULE_KEY_PRESS_SET);
     CHECK(fake_nswap() == 1 && fake_req_film() == id_of("SUN200") && fake_req_exp() == 12 && wfui_host_anim(),
           "SET: closed, a roll of 12 SUN200 (swaps %d, %d x%d)", fake_nswap(), fake_req_film(), fake_req_exp());
+    CHECK(wf_shelf_now()->n == 1 && wf_shelf_now()->e[0].num == sw_num && wf_shelf_now()->e[0].left == sw_n
+          && wf_shelf_now()->e[0].state == WF_RS_REWOUND && !fake_nswap_devd(), "the old roll on the shelf: %d rolls, "
+          "%d with %d to develop (want %d, %d)", wf_shelf_now()->n, wf_shelf_now()->e[0].num, wf_shelf_now()->e[0].left,
+          sw_num, sw_n);
     tick(80);
     CHECK(closed, "not closed after the new roll's animation");
     end_checks();

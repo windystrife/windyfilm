@@ -23,9 +23,11 @@ uint32_t wf_roll_gen(void);                      /* bumped when the roll changes
 int  wf_roll_req_load(int film, int exp);
 int  wf_roll_req_rewind(void);
 int  wf_roll_req_close(void);
-/* close the finished roll (FULL, or REWOUND with frames: they stay on the card, kept undeveloped) and load a new one in
-   one request (the close-and-load question, owner 11-15; the browser's Darkroom mode since 11-17); codes as wf_roll_req_load, -1 = no finished roll */
-int  wf_roll_req_swap(int film, int exp);
+/* the finished roll (FULL, or REWOUND with frames) leaves the camera and a new one loads, in one request (the
+   close-and-load question, owner 11-15; the browser's Darkroom mode since 11-17). Owner 11-17: it goes on the shelf
+   (below) rewound, its frames waiting for the Darkroom; devd = 1 (a Film stage roll developed at the shot: RAW develop /
+   JPEG 8-bit) closes it first (frames K) and shelves it developed. Codes as wf_roll_req_load, -1 = no finished roll */
+int  wf_roll_req_swap(int film, int exp, int devd);
 /* owner 11-15: no shot on a finished roll. 1 (FULL) / 2 (REWOUND with frames to develop) while wf_task holds Canon's
    shutter through ML's UI lock, 0 free (no roll, still shooting, closed, developing, movie mode, recording) */
 int  wf_roll_shutter_locked(void);
@@ -38,6 +40,26 @@ int  wf_roll_hud(char *line, int n);             /* the HUD text ("ROLL 021  Win
    close-and-load, when the roll is developed or closed, by wf_roll_shelve(0) (the chip back on Darkroom) and at boot. */
 int  wf_roll_shelve(int on);                     /* 0 = done, -1 = no roll on the camera (on = 1) */
 int  wf_roll_shelved(void);                      /* 1 = the roll on the camera is set aside */
+/* the shelf (owner 11-17: "next roll" no longer drops a roll; develop again; DESIGN 3.6 "The shelf"): the rolls on the
+   card, each from its roll file in its ROLLS folder (wf_roll.h), newest first (down from the camera's roll number), the
+   camera's own open roll left out (the Darkroom lists it first itself). wf_task lists the card at boot and when asked
+   (Canon idle, no run); a roll leaves the camera onto it (close-and-load, a close, a developed roll). EOS M only: the
+   5D2's list stays empty (no rolls there). */
+#define WF_SHELF_MAX 16                          /* rolls listed; older ones are logged ("not listed") */
+struct wf_shelf_ent {
+    int16_t num, dev;                            /* roll number; its newest develop pass (1 = ROLLS/ROLL021, 2 = ROLL021B) */
+    int16_t film, own;                           /* the pass's film; the roll's own film (own = film on a first pass) */
+    int16_t exp;
+    int8_t  state, nshot, left, ndev;            /* WF_RS_*; frames; still to develop (S); developed (D) */
+};
+struct wf_shelf {
+    int      n;                                  /* entries */
+    int      more;                               /* rolls on the card past the list */
+    uint32_t gen;                                /* bumped when the list is made again */
+    struct wf_shelf_ent e[WF_SHELF_MAX];
+};
+const struct wf_shelf *wf_shelf_now(void);       /* never 0 */
+void wf_shelf_rescan(void);                      /* any task: list the card again (the Darkroom screen asks on entry) */
 
 /* ------------------------------------------------------------------ darkroom (inside wf_task: no task of its own) */
 enum { WF_DR_IDLE = 0, WF_DR_RUN, WF_DR_STOPPING, WF_DR_STOPPED, WF_DR_DONE, WF_DR_FAIL, WF_DR_N };
@@ -71,13 +93,18 @@ struct wf_dark_view {
     int      battery;                            /* % or -1 unknown */
     const char *msg;                             /* why it stopped / failed, "" otherwise */
     uint32_t gen;                                /* bumped on every change worth a redraw */
+    int      num, dev, film;                     /* the run's roll (the last run's after it): number, pass, film */
 };
 const struct wf_dark_view *wf_dark_view(void);   /* never 0 */
 int  wf_dark_start(void);                        /* asks wf_task for a run (it rewinds a loaded roll); 0 = started, -1 =
                                                     nothing to develop, -2 = already running, -3 = not now (Canon busy,
                                                     no worker yet, battery) */
+/* a shelf roll (num, wf_shelf_now): its frames left (again = 0), or develop it again (again = 1) with film (0 = the
+   roll's own) into its next pass's folder, with the PRINT settings of now (owner 11-17); codes as wf_dark_start */
+int  wf_dark_start_roll(int num, int again, int film);
 void wf_dark_stop(void);                         /* MENU: stop after the current band (the frame is done again next run) */
 int  wf_dark_eta_s(const struct wf_dark_view *v);   /* seconds left for the roll (estimate) */
+int  wf_dark_eta_left(const struct wf_dark_view *v, int left);   /* seconds for left frames (the Darkroom's pick) */
 int  wf_dark_src(int output, int flut);          /* EOS M: the WF_DEV_* tables a run builds for look output (WF_OUT_*) +
                                                     Film LUT, as B (Leica Vivid WF_DEV_DISP, cubes WF_DEV_CUBE); 0 = none */
 

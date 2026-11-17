@@ -1122,16 +1122,16 @@ picker screen is gone (owner 11-17: "the original WindyFilm UI looks nicer"): ev
     MENU = Keep the roll (still Darkroom). Nothing else answers it, and MENU there does not close the browser.
   - FULL or REWOUND: no question, it is set aside at once ("Roll 021 waits for the Darkroom: PLAY develops it").
   - Back on Darkroom (the chip), the roll set aside is the camera's roll again (`wf_roll_shelve(0)`).
-- **The shelf** (`src/wf_dark.c`, `wf_roll_shelve` / `wf_roll_shelved`). A roll set aside keeps its frames and its
+- **Set aside** (`src/wf_dark.c`, `wf_roll_shelve` / `wf_roll_shelved`; not the shelf of 3.15). A roll set aside keeps its frames and its
   film for PLAY -> Darkroom, but the camera shoots in the chosen mode: the shutter is not held (`roll_shutter`), the
   look is built (`wf_look_use` no longer returns `WF_LU_NONE` for it), PLAY and image review are Canon's (no blind-roll
   block), no HUD and no end notice. New shots are not frames (`wf_roll_seen` counts a LOADED roll only, and the rewind
   is carried out before the next frame poll). The browser refuses another film while a set-aside roll has frames
   ("Roll 021 waits for the Darkroom: its film stays until then"). RAM only: a roll load / close / close-and-load, the
   roll developed or closed, the chip back on Darkroom and a reboot end it. Log lines `roll: 021 set aside: ...`,
-  `roll: 021 back from the shelf`, `roll: 021 off the shelf (close | a new roll)`.
+  `roll: 021 back in use (no longer set aside)`, `roll: 021 no longer set aside (close | a new roll)`.
 - **The way to a new roll** (owner 11-17, `wf_ui_open_scr(WF_UI_NEW_ROLL)`, `new_roll_view`). The ML menu's "Film
-  roll" and the end-of-roll notice's INFO open the browser in Darkroom mode (a roll set aside comes back from the shelf),
+  roll" and the end-of-roll notice's INFO open the browser in Darkroom mode (a roll set aside comes back into use),
   the roll's film under the cursor and the focus on the Exposures row. Asked while the browser is open (the ML menu),
   it switches the open browser. A finished roll (FULL / REWOUND with frames) leaves the row to the next roll: it is not
   greyed, it reads "next roll", and SET on a film asks to close the roll and load that count (above). The 5D2 opens the
@@ -1282,6 +1282,72 @@ compared, the develop time shown.
   LIGHT (Auto on both, Shade).
 - **Not checked on the camera:** all of it (the pill and tabs on the EOS M / 5D2 screens, the three Film stage modes
   shooting onto a roll, the develop times, the EXIF / print comment text).
+
+### 3.15 The shelf: many rolls waiting, develop again (owner 2026-11-17, branch `wf-onescreen`)
+
+- **Owner's question:** "hỏi cái next roll rồi thì không quay lại darkroom để tráng phim lại được à". Up to here there
+  was one roll: close-and-load closed the old roll (its undeveloped frames left the Darkroom, the files stayed on the
+  card) and a done roll could never be developed again. The owner chose both fixes: many rolls waiting, and develop
+  again.
+- **The shelf** (`src/wf_dark.c` `shelf_put` / `shelf_read` / `shelf_scan`, `wf_shelf_now` / `wf_shelf_rescan` in
+  `wf_dark.h`). A roll that leaves the camera with frames keeps its roll file in its own folder,
+  `ROLLS/ROLLnnn/WFROLL.TXT`, next to its prints. The list comes from the card, so it survives reboots and card swaps:
+  `FIO_FindFirstEx` over `ROLLS/`, each `ROLLnnn[B..Z]` folder's newest pass that has a roll file, newest first counting
+  down from the camera's roll number (999 wraps to 1). `WF_SHELF_MAX` = 16 are listed; older ones are counted and
+  logged. wf_task lists again when Canon is idle and something changed (a roll put on it, a run's end, the Darkroom
+  screen opened). The camera's open roll is never in the list (the Darkroom lists it itself).
+  - A roll goes on it at close-and-load ("a new roll": rewound; "developed at the shot": closed, RAW develop or JPEG
+    8-bit), at Close roll with frames ("closed"), when the camera's roll is developed ("developed"), and at boot for
+    the camera's last done roll without a copy ("developed before the shelf").
+  - Close-and-load writes the copy first; only then does the roll leave the camera (state EMPTY, its number kept: the
+    next roll takes the next number). A failed write leaves the roll in the camera and loads nothing (logged).
+  - A new roll never takes a number whose folder holds a roll file ("roll: ROLL021 is on the card's shelf already:
+    this roll is 022").
+  - Folders without a roll file (rolls developed before the shelf) are not listed (their frame list is gone); the log
+    counts them.
+- **The Darkroom picks the roll** (`src/ui/wf_dark_ui.c`; the old separate Roll picker stays gone). A ROLL row tops
+  the info block: "< ROLL 023 . on the shelf   2/4 >" (in the camera / on the shelf / developed; the dots are drawn,
+  WFFONTS.DAT has no middle dot). LEFT / RIGHT / the ring on it change the roll: the camera's open roll with frames
+  first, then the shelf. UP / DOWN: Screen chip, ROLL, (Film), the PRINT rows. SET starts the roll shown.
+  - A shelf roll with frames left: its film in large type, "12 frames to develop", "Prints go to ROLLS/ROLL023", the
+    time.
+  - A developed roll: "Developed 12/12 . develop again" and a Film row (the roll's own film by default). SET there
+    opens the browser in pick mode: header chip "Film for ROLL 021, develop 2", footer "SET Use this film", the mode
+    chip and the Exposures row off, nothing loaded. SET returns to the Darkroom with that film, MENU / PLAY without
+    one. The browser's can colours are placed again on the way back (`wfc_pal_again`: the Darkroom's print tones use
+    those palette entries). Footer "SET Develop again".
+  - Nothing to develop (no camera roll with frames, empty shelf): "No rolls to develop", "Shoot a roll first"; footer
+    MENU Back only.
+  - PLAY in the browser opens the Darkroom when the camera holds a roll with frames or the shelf has rolls: on the
+    camera's roll, else the newest shelf roll.
+- **Develop again** (`wf_roll_again`, `src/wf_roll.c`): pass dev + 1 (2..26), `own` = the roll's first film, `film` =
+  the one picked, every frame whose CR2 is still on the card to develop (a gone CR2 is kept out and logged). Prints go
+  to `ROLLS/ROLLnnnB` .. `ROLLnnnZ`, not the request's "ROLL001_2": DryOS takes 8.3 names only (8 characters). Each
+  pass has its own roll file; `dev=` / `own=` lines appear from pass 2 on (pass 1's file is as before; a dev above 26
+  is refused). The first prints are never touched. DCIM follows the Camera JPEG setting as for any run.
+- **A shelf roll's run** (`dk_shelf_begin`): its newest pass read back and made ready (FULL / LOADED rewound, a gone
+  CR2 kept out: `wf_roll_shelf_prep`), or its next pass made; its film loaded for the run and the film before put back
+  after it. The camera's own roll is not touched: it stays full and held (the shutter goes free during the run as for
+  any run). One roll per run, memory and timing as before; the pass's roll file is rewritten in place as frames are
+  developed, so a stop resumes later.
+- **Exif:** from pass 2 the UserComment reads "WindyFilm Darkroom: <look> | ROLL 001 F01 | develop 2".
+- **Log lines:** `roll: 001 on the shelf (a new roll): 3/3, 3 to develop, rewound`; `roll: shelf 2 rolls (002 done
+  3/3, 001B done 3/3), 12ms`; `roll: shelf: 3 older rolls not listed (the newest 16 are)`; `roll: shelf: 2 roll
+  folders without a roll file (developed before the shelf): ROLL004 ROLL005`; `dark: roll 001 from the shelf: film X,
+  2 to develop, prints in ROLLS/ROLL001`; `dark: roll 001 develop 2: film X, 3 frames, prints in ROLLS/ROLL001B`;
+  `dark: roll 001 F02 100/IMG_0602.CR2 is gone: skipped`; `dark: film 31 for roll 001 (load 0), film 12 back after
+  the run`; `ui: develop 2 of roll 001 with film 31 <name>`.
+- **Set aside is not the shelf.** The mode chip's set-aside (3.12) keeps the camera's roll in the camera, RAM only.
+  Its log lines now say `back in use (no longer set aside)` / `no longer set aside (close)` (they said "shelf").
+- **5D2:** no Darkroom, so no close-and-load and an empty shelf; the browser offers no Darkroom (no PLAY hint).
+- **Checks:** `wf_roll_test` (names and their parse, shelf prep, develop again, dev=27 refused); ROLL:lock (the
+  close-and-load's shelf line and file); ROLL:shelf (real RAW+L pairs: on the shelf, its copy read back, the shelf
+  roll developed while the camera's roll waits with F02's CR2 gone, develop 2 with a B&W film into ROLL001B with
+  "develop 2" in each print, the first prints byte for byte, the camera's roll developed onto the shelf);
+  ROLL:shelfboot (a card with passes, a folder without a roll file and the camera's developed roll: the list at boot,
+  its order, a new roll's number past a shelf roll); `dr_ui_test.c`
+  section 16 and `ui_test.c` (`shelf_swap`). Approval images `shelf_*.png` in `_windyfilm_docs/onescreen_ui/`.
+- **Not checked on the camera:** all of it (the ROLLS listing on the EOS M's card and its time, the screens).
 
 ## 4. Interfaces
 

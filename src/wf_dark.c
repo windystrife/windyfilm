@@ -37,6 +37,13 @@ extern int   FIO_WriteFile(void *f, const void *buf, size_t n);
 extern void  FIO_CloseFile(void *f);
 extern int   FIO_GetFileSize(const char *name, uint32_t *size);
 extern int64_t FIO_SeekSkipFile(void *f, int64_t pos, int whence);
+struct fio_file;                                 /* DryOS directory entries, opaque (as wf_loglut.c): the shelf's list */
+struct wf_file_info { uint16_t mode; uint32_t size; uint64_t timestamp; char name[0x80]; };
+extern struct fio_file *alloc_fio_file(void);
+extern struct wf_file_info convert_fio_file_info(struct fio_file *f);
+extern void *FIO_FindFirstEx(const char *dir, struct fio_file *f);   /* error: 0 or odd */
+extern int   FIO_FindNextEx(void *d, struct fio_file *f);             /* 0 = next entry */
+extern void  FIO_FindClose(void *d);
 extern int  prop_request_change(unsigned property, const void *addr, size_t len);
 extern void PauseLiveView(void);
 extern int  ResumeLiveView(void);
@@ -86,7 +93,7 @@ static int roll_read_done, roll_have_file, roll_dirty, roll_save_fail_t, roll_sa
 static struct wf_fe roll_save_fe;
 static char roll_txt[WF_ROLL_FILE] __attribute__((aligned(32)));
 volatile int wf_blind = 1;
-static volatile int req_kind, req_film, req_exp;  /* 1 load, 2 rewind, 3 close, 4 close + load (swap) */
+static volatile int req_kind, req_film, req_exp, req_devd;  /* 1 load, 2 rewind, 3 close, 4 close + load (swap) */
 static int poll_F = -1, poll_D = -1, poll_stable, wind_t = -100000;
 static int pq_old = -1, rv_old = -1, prop_t;
 static int hud_on, hud_fonts_on, hud_t, hud_mode = -1, info_t = -100000, hud_sig, hud_job;
@@ -96,13 +103,17 @@ static volatile int dk_go;                        /* wf_dark_start asked: wf_tas
 static int nt_state = -1, nt_req, nt_t, nt_len, nt_mode = -1, nt_pt;   /* the end-of-roll notice (roll_notice) */
 static volatile int nt_up, nt_drop, nt_poke;
 static volatile int sh_k;                         /* the shutter held now (roll_shutter): 0 no, 1 full, 2 rewound */
-static volatile int shelf;                        /* the roll set aside (wf_roll_shelve, wf_dark.h): RAM only */
+static volatile int aside;                        /* the roll set aside (wf_roll_shelve, wf_dark.h): RAM only */
+static struct wf_shelf shv;                       /* the shelf list (wf_dark.h; wf_task writes it, the UI reads it) */
+static volatile int sh_scan = 1;                  /* list the card's ROLLS again at the next idle poll (boot: 1) */
+static struct wf_roll *dkr __attribute__((unused)) = &roll;   /* the roll a darkroom run develops: the camera's, */
+                                                  /* or sh_roll (the 5D2: no darkroom, unused) */
 
 const struct wf_roll *wf_roll_now(void) { return &roll; }
 uint32_t wf_roll_gen(void) { return roll_gen_n; }
 static void roll_changed(void) { roll_gen_n++; wf_gen_bump(); }
 int wf_roll_shooting(void) { return roll.state == WF_RS_LOADED; }
-int wf_roll_shelved(void) { return shelf && wf_roll_open(&roll); }
+int wf_roll_shelved(void) { return aside && wf_roll_open(&roll); }
 int wf_roll_blocks_play(void) { return wf_blind && wf_roll_open(&roll) && !wf_roll_shelved() && !dk_running; }
 
 /* any task (the UI's mode chip); wf_task's next poll applies it (shutter, look, notice) */
@@ -110,15 +121,17 @@ int wf_roll_shelve(int on)
 {
     if (on && !wf_roll_open(&roll))
         return -1;
-    if (!on == !shelf)
+    if (!on == !aside)
         return 0;
-    shelf = on ? 1 : 0;
+    aside = on ? 1 : 0;
     wf_log("roll: %03d %s (%d/%d %s)", roll.num, on ? "set aside: the camera shoots in another mode, PLAY develops it"
-           : "back from the shelf", roll.nshot, roll.exp, wf_roll_state_name(roll.state));
+           : "back in use (no longer set aside)", roll.nshot, roll.exp, wf_roll_state_name(roll.state));
     roll_changed();
     return 0;
 }
 int wf_dark_busy(void) { return dk_running; }
+const struct wf_shelf *wf_shelf_now(void) { return &shv; }
+void wf_shelf_rescan(void) { sh_scan = 1; }
 
 /* what the look's tables (the shot LUT, halation / grain / mist) are built for (owner RAWB9, 11-15: each roll frame took
  * 23..36 s of the in-camera look, the LUT read 21 s and the grain 8..13 s at boot and at each roll load, and the
@@ -197,7 +210,7 @@ int wf_roll_req_close(void)
     req_kind = 3;
     return 0;
 }
-int wf_roll_req_swap(int film, int exp)
+int wf_roll_req_swap(int film, int exp, int devd)
 {
     if (!WF_DARK_CAN)
         return -4;
@@ -209,6 +222,7 @@ int wf_roll_req_swap(int film, int exp)
         return -2;
     req_film = film;
     req_exp = exp;
+    req_devd = devd != 0;
     WF_BARRIER();
     req_kind = 4;
     return 0;
@@ -293,6 +307,156 @@ static int roll_has_cr2(void *ctx, int folder, int file)
     uint32_t sz = 0;
     return roll_cr2_at(folder, file, "CR2", p, sizeof p) > 0 && FIO_GetFileSize(p, &sz) == 0 && sz > 0;
 }
+
+/* ------------------------------------------------------------------ the shelf (owner 11-17, DESIGN 3.15) */
+#if WF_DARK_CAN
+static char sh_txt[WF_ROLL_FILE] __attribute__((aligned(32)));
+static uint8_t sh_pass[1000];                     /* the scan: the newest develop pass of each roll number on the card */
+static struct wf_roll sh_roll, sh_tmp;            /* the shelf roll a run develops; the scan's roll read back */
+
+/* "ROLL021" or "ROLL021B" of a roll (the logs' name for it) */
+static const char *shelf_nm(const struct wf_roll *r, char *b) { wf_roll_name(r->num, r->dev, b); return b; }
+
+/* a roll's shelf copy (wf_roll_dir level 2), written whole: in place when it is there, else created (Canon idle:
+   wf_task's idle poll or a darkroom run), the folders made first. why: the log line's reason (0 = none). 0 = ok */
+static int shelf_put(const struct wf_roll *r, const char *why)
+{
+    char root[16], p[48], nm[12];
+    struct wf_fe e = { 0, 0 };
+    uint32_t sz = 0;
+    p[0] = 0;
+    if (wf_roll_root(wf_dcim_dir(), root, sizeof root) < 0 || wf_roll_text(r, sh_txt, sizeof sh_txt) != WF_ROLL_FILE
+        || wf_roll_dir(r, root, 0, p, sizeof p) < 0 || wf_fmkdir(p, &e) != 0 || wf_roll_dir(r, root, 1, p, sizeof p) < 0
+        || wf_fmkdir(p, &e) != 0 || wf_roll_dir(r, root, 2, p, sizeof p) < 0) {
+        wf_log("roll: %s not on the shelf: folder %s %s %d", shelf_nm(r, nm), p, wf_fe_name(e.step), e.rc);
+        return -1;
+    }
+    void *f = wf_fopen_w(p, FIO_GetFileSize(p, &sz) == 0 ? WF_FO_AT : WF_FO_NEW, 0, &e);
+    int w = f ? FIO_WriteFile(f, sh_txt, WF_ROLL_FILE) : -1;
+    if (f)
+        FIO_CloseFile(f);
+    if (w != WF_ROLL_FILE) {
+        wf_log("roll: %s not on the shelf: %s %s %d", shelf_nm(r, nm), p + 3, f ? "write" : wf_fe_name(e.step),
+               f ? w : e.rc);
+        return -1;
+    }
+    if (why)
+        wf_log("roll: %03d on the shelf (%s): %d/%d, %d to develop, %s", r->num, why, r->nshot, r->exp, wf_roll_left(r),
+               wf_roll_state_name(r->state));
+    sh_scan = 1;
+    return 0;
+}
+
+/* a pass's roll file back from the card into r (the folder names the pass); 0 = ok, -1 none, -2 unreadable */
+static int shelf_read(int num, int dev, struct wf_roll *r)
+{
+    char root[16], p[48];
+    uint32_t sz = 0;
+    r->num = num;
+    r->dev = dev < 2 ? 0 : dev;
+    if (wf_roll_root(wf_dcim_dir(), root, sizeof root) < 0 || wf_roll_dir(r, root, 2, p, sizeof p) < 0
+        || FIO_GetFileSize(p, &sz) != 0 || sz == 0)
+        return -1;
+    uint32_t n = sz < WF_ROLL_FILE ? sz : WF_ROLL_FILE;
+    if (wf_card_read(p, 0, sh_txt, n, 0) != 0 || wf_roll_parse(r, sh_txt, (int)n) != 0 || r->num != num)
+        return -2;
+    r->dev = dev < 2 ? 0 : dev;                  /* the folder wins */
+    return 0;
+}
+
+static int shelf_has(int num) { uint32_t sz = 0; char root[16], p[48]; struct wf_roll t; t.num = num; t.dev = 0;
+    return wf_roll_root(wf_dcim_dir(), root, sizeof root) >= 0 && wf_roll_dir(&t, root, 2, p, sizeof p) >= 0
+           && FIO_GetFileSize(p, &sz) == 0; }
+
+/* the card's ROLLS listed again (wf_task, Canon idle, no run): each ROLLnnn[B..Z] folder's newest pass with a roll
+   file, newest first down from the camera's roll number (the numbers wrap 999 -> 1), WF_SHELF_MAX of them; logged
+   when the list changed (folders without a roll file: rolls developed before the shelf) */
+static void __attribute__((noinline)) shelf_scan(void)
+{
+    static struct wf_shelf ns;
+    char root[16], d[24], lb[100], nf[40];
+    int nofile = 0, nfo = 0, cam = wf_roll_open(&roll) ? roll.num : 0, t0 = get_ms_clock();
+    sh_scan = 0;
+    memset(&ns, 0, sizeof ns);
+    memset(sh_pass, 0, sizeof sh_pass);
+    nf[0] = 0;
+    if (roll.state == WF_RS_DONE && roll.nshot > 0 && roll.num >= 1 && roll.num <= 999 && !shelf_has(roll.num)
+        && roll.dev < 2) {                       /* the camera's last roll, developed before the shelf: its copy now */
+        shelf_put(&roll, "developed before the shelf");
+        sh_scan = 0;
+    }
+    if (wf_roll_root(wf_dcim_dir(), root, sizeof root) >= 0) {
+        snprintf(d, sizeof d, "%sROLLS/", root);
+        struct fio_file *f = alloc_fio_file();
+        void *h = f ? FIO_FindFirstEx(d, f) : 0;
+        if (h && !((uintptr_t)h & 1)) {
+            do {
+                struct wf_file_info fi = convert_fio_file_info(f);
+                int n, v;
+                if ((fi.mode & 0x10) && wf_roll_name_parse(fi.name, &n, &v) == 0 && n <= 999 && v > sh_pass[n])
+                    sh_pass[n] = (uint8_t)v;
+            } while (FIO_FindNextEx(h, f) == 0);
+            FIO_FindClose(h);
+        }
+        if (f)
+            __mem_free(f);
+    }
+    int top = roll.num >= 1 && roll.num <= 999 ? roll.num : 999;
+    for (int k = 0; k < 999; k++) {
+        int n = top - k < 1 ? top - k + 999 : top - k, got = -1;
+        if (!sh_pass[n] || n == cam)             /* (the camera's open roll: the Darkroom lists it itself) */
+            continue;
+        if (ns.n >= WF_SHELF_MAX) {
+            ns.more++;
+            continue;
+        }
+        for (int v = sh_pass[n]; v >= 1 && got != 0; v--)
+            got = shelf_read(n, v, &sh_tmp);
+        if (got != 0) {
+            if (nofile++ < 3)
+                nfo += snprintf(nf + nfo, sizeof nf - nfo, " ROLL%03d", n);   /* (3 x 8 chars: fits) */
+            continue;
+        }
+        if (sh_tmp.nshot <= 0)
+            continue;
+        struct wf_shelf_ent *e = &ns.e[ns.n++];
+        e->num = (int16_t)sh_tmp.num;
+        e->dev = (int16_t)(sh_tmp.dev < 2 ? 1 : sh_tmp.dev);
+        e->film = (int16_t)sh_tmp.film;
+        e->own = (int16_t)(sh_tmp.own ? sh_tmp.own : sh_tmp.film);
+        e->exp = (int16_t)sh_tmp.exp;
+        e->state = (int8_t)sh_tmp.state;
+        e->nshot = (int8_t)sh_tmp.nshot;
+        e->left = (int8_t)wf_roll_left(&sh_tmp);
+        e->ndev = (int8_t)wf_roll_ndev(&sh_tmp);
+    }
+    int same = ns.n == shv.n && ns.more == shv.more;
+    for (int k = 0; same && k < (int)sizeof ns.e; k++)    /* (no memcmp in the module's imports) */
+        same = ((const uint8_t *)ns.e)[k] == ((const uint8_t *)shv.e)[k];
+    ns.gen = shv.gen + 1;
+    shv = ns;
+    if (same && shv.gen > 1)
+        return;
+    int o = 0;
+    lb[0] = 0;
+    for (int k = 0; k < shv.n && o < (int)sizeof lb - 24; k++) {
+        const struct wf_shelf_ent *e = &shv.e[k];
+        char nm[12];
+        wf_roll_name(e->num, e->dev, nm);
+        o += e->left ? snprintf(lb + o, sizeof lb - o, "%s%s %d to develop", k ? ", " : "", nm + 4, e->left)
+                     : snprintf(lb + o, sizeof lb - o, "%s%s done %d/%d", k ? ", " : "", nm + 4, e->ndev, e->nshot);
+    }
+    if (o >= (int)sizeof lb - 24 && o < (int)sizeof lb - 4)
+        snprintf(lb + o, sizeof lb - o, " ..");
+    wf_log("roll: shelf %d roll%s (%s), %dms", shv.n, shv.n == 1 ? "" : "s", shv.n ? lb : "empty", get_ms_clock() - t0);
+    if (shv.more)
+        wf_log("roll: shelf: %d older roll%s not listed (the newest %d are)", shv.more, shv.more == 1 ? "" : "s",
+               WF_SHELF_MAX);
+    if (nofile)
+        wf_log("roll: shelf: %d roll folder%s without a roll file (developed before the shelf):%s%s", nofile,
+               nofile == 1 ? "" : "s", nf, nofile > 3 ? " .." : "");
+}
+#endif
 
 /* RAW+L and image review while a roll is in the camera; Canon's values back afterwards */
 static void roll_props(int idle)
@@ -483,20 +647,43 @@ static void roll_req(void)
     if (!k)
         return;
     const struct wf_film *f = wf_film_by_id(req_film);
-    if (k != 2 && shelf) {                       /* a load, close or close-and-load ends the shelf; a rewind keeps it */
-        shelf = 0;
-        wf_log("roll: %03d off the shelf (%s)", roll.num, k == 3 ? "close" : "a new roll");
+    if (k != 2 && aside) {                       /* a load, close or close-and-load ends the set-aside; a rewind keeps it */
+        aside = 0;
+        wf_log("roll: %03d no longer set aside (%s)", roll.num, k == 3 ? "close" : "a new roll");
     }
-    if (k == 4) {                                /* the browser's close-and-load: the finished roll first */
-        int left = wf_roll_left(&roll);
-        if (wf_roll_close(&roll) == 0)
-            wf_log("roll: %03d closed for a new roll, %d frame(s) kept undeveloped", roll.num, left);
-        k = 1;
+    if (k == 4) {                                /* the browser's close-and-load: the finished roll goes on the shelf */
+        int ok = 0;
+#if WF_DARK_CAN
+        if (req_devd) {                          /* developed at the shot (RAW develop / JPEG 8-bit): it ends here */
+            if (wf_roll_close(&roll) == 0)
+                wf_log("roll: %03d closed for a new roll: %d frame(s) developed at the shot", roll.num, roll.nshot);
+        } else {
+            wf_roll_rewind(&roll);
+        }
+        roll_dirty = 1;
+        ok = shelf_put(&roll, req_devd ? "developed at the shot" : "a new roll") == 0 || req_devd;
+        if (ok && roll.state != WF_RS_DONE)
+            roll.state = WF_RS_EMPTY;            /* it left the camera (its number stays: the new roll is the next) */
+#endif
+        if (!ok)                                 /* never a frame lost: the roll stays, no new one */
+            wf_log("roll: %03d stays in the camera (not on the shelf): the new roll is not loaded", roll.num);
+        k = ok ? 1 : 0;
     }
     if (k == 1) {
+        static struct wf_roll ld;                /* the new roll made aside (after a close-and-load's changes above): */
+        ld = roll;                               /* its number settled by the shelf's card reads before it shows */
         if (wf_card_nums(&D, &F) != 0) {
             wf_log("roll: no file number, load refused");
-        } else if (wf_roll_load(&roll, req_film, req_exp, D, F) == 0) {
+        } else if (wf_roll_load(&ld, req_film, req_exp, D, F) == 0) {
+#if WF_DARK_CAN
+            int n0 = ld.num;
+            for (int t = 0; t < 64 && shelf_has(ld.num); t++)   /* never over a shelf roll */
+                ld.num = ld.num >= 999 ? 1 : ld.num + 1;
+            if (ld.num != n0)
+                wf_log("roll: ROLL%03d is on the card's shelf already: this roll is %03d", n0, ld.num);
+            sh_scan = 1;                         /* the list goes down from the new number (the camera's roll not in it) */
+#endif
+            roll = ld;
             int rc = wf_loaded() == req_film ? WF_LOAD_OK : wf_load(req_film);
             wf_log("roll: %03d loaded, %s x%d at %d/%04d (film load %d)", roll.num, f ? f->name : "?", roll.exp, D, F, rc);
             if (WF_RAWB_CAN && wf_rawb)          /* both modes at once (DESIGN 3.6): B at shot time, the print later */
@@ -515,6 +702,10 @@ static void roll_req(void)
         if (wf_roll_close(&roll) == 0) {
             wf_log("roll: %03d closed, %d frame(s) kept undeveloped", roll.num, left);
             roll_dirty = 1;
+#if WF_DARK_CAN
+            if (roll.nshot > 0)                  /* on the shelf as closed: the Darkroom can develop it again */
+                shelf_put(&roll, "closed");
+#endif
         }
     }
     WF_BARRIER();
@@ -539,9 +730,13 @@ void wf_roll_poll(void)
     int idle = wf_job_state() == 0 && !wf_shot_pending();
     if (idle)
         roll_req();
-    if (shelf && !wf_roll_open(&roll)) {         /* developed (done) or closed: nothing on the shelf any more */
-        shelf = 0;
-        wf_log("roll: %03d %s: off the shelf", roll.num, wf_roll_state_name(roll.state));
+#if WF_DARK_CAN
+    if (idle && sh_scan)
+        shelf_scan();
+#endif
+    if (aside && !wf_roll_open(&roll)) {         /* developed (done) or closed: nothing set aside any more */
+        aside = 0;
+        wf_log("roll: %03d %s: no longer set aside", roll.num, wf_roll_state_name(roll.state));
         roll_changed();
     }
     if (idle && roll.state == WF_RS_LOADED) {    /* new frames: the file number stable over two polls */
@@ -616,6 +811,11 @@ int wf_dark_eta_s(const struct wf_dark_view *v)
         left = roll.nshot;
     int s = (left * (per / 100) - (v->state == WF_DR_RUN ? v->t_frame / 100 : 0)) / 10;
     return s < 0 ? 0 : s;
+}
+int wf_dark_eta_left(const struct wf_dark_view *v, int left)
+{
+    int per = v->avg_ms ? v->avg_ms : 55000;
+    return left > 0 ? left * (per / 100) / 10 : 0;
 }
 
 int wf_clock_hm(void)
@@ -1353,7 +1553,7 @@ static void dk_finish(int i, uint32_t ao, uint32_t al, const char *look, struct 
     char rl[40], dr[200];
     rl[0] = 0;
     if (dk_pin == WF_PIN_ROLL)
-        snprintf(rl, sizeof rl, "ROLL %03d " WF_PF_DOT " %02d/%02d", roll.num, i + 1, roll.exp);
+        snprintf(rl, sizeof rl, "ROLL %03d " WF_PF_DOT " %02d/%02d", dkr->num, i + 1, dkr->exp);
     wf_pf_caption(&s, look, rl, &dk_tx, &c);
     dk_s = s;                                    /* for the camera's JPEG (dk_fit) */
     memcpy(dk_rl, rl, sizeof dk_rl);
@@ -1726,9 +1926,9 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     char cr2[96], jpg[96], out[96], root[16], txt[200], t2[200];
     int t = get_ms_clock(), rc;
     dk_why = "";
-    if (wf_roll_cr2(&roll, i, wf_dcim_dir(), wf_file_prefix(), "CR2", cr2, sizeof cr2) < 0
-        || wf_roll_cr2(&roll, i, wf_dcim_dir(), wf_file_prefix(), "JPG", jpg, sizeof jpg) < 0
-        || wf_roll_root(wf_dcim_dir(), root, sizeof root) < 0 || wf_roll_out(&roll, i, root, out, sizeof out) < 0) {
+    if (wf_roll_cr2(dkr, i, wf_dcim_dir(), wf_file_prefix(), "CR2", cr2, sizeof cr2) < 0
+        || wf_roll_cr2(dkr, i, wf_dcim_dir(), wf_file_prefix(), "JPG", jpg, sizeof jpg) < 0
+        || wf_roll_root(wf_dcim_dir(), root, sizeof root) < 0 || wf_roll_out(dkr, i, root, out, sizeof out) < 0) {
         dk_why = "path";
         return DK_ERR;
     }
@@ -1798,7 +1998,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     if (wk == WF_DKWB_NOAUTO && !dk_wa_said) {
         dk_wa_said = 1;
         wf_log("dark: IMG_%04d: no Auto WB levels in the CR2 (ColorData %d): the as-shot WB (said once a run)",
-               roll.file[i], dk_inf.cd_count);
+               dkr->file[i], dk_inf.cd_count);
     }
     int as = wf_dk_scales(WF_DK_EOSM, wbl, j.black, j.white, dk_inf.iso, j.wb_q8);
     j.roll = src != WF_DEV_LOG;
@@ -1868,7 +2068,10 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
         pk++;
     if (!pre[pk])
         body += pk;
-    snprintf(txt, sizeof txt, "WindyFilm Darkroom: %s | ROLL %03d F%02d", body, roll.num, i + 1);
+    if (dkr->dev >= 2)                           /* a develop again (owner 11-17): its pass; the film is in body */
+        snprintf(txt, sizeof txt, "WindyFilm Darkroom: %s | ROLL %03d F%02d | develop %d", body, dkr->num, i + 1, dkr->dev);
+    else
+        snprintf(txt, sizeof txt, "WindyFilm Darkroom: %s | ROLL %03d F%02d", body, dkr->num, i + 1);
     if (al && wf_dk_comment(M.app1 + ao, al, txt) != 0)
         wf_log("dark: F%02d no UserComment field in Canon's APP1", i + 1);
     struct wf_pf_lay L;                          /* the canvas: = the frame (5184 x 3456) without the finishes */
@@ -1891,7 +2094,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     *bytes = (int)wr.n;
     dv.print_ready = 2;
     wf_log("dark: F%02d IMG_%04d iso %d: load %d expose %d fix %d dry %d ms, %d KB, wb %s, trim %d, black %d white %d%s, "
-           "shoulder %s %dms, look %s", i + 1, roll.file[i], dk_inf.iso, dk_t[0], dk_t[1], dk_t[2], dk_t[3],
+           "shoulder %s %dms, look %s", i + 1, dkr->file[i], dk_inf.iso, dk_t[0], dk_t[1], dk_t[2], dk_t[3],
            (int)(wr.n >> 10), !as ? "daylight" : wk == WF_DKWB_AUTO ? "auto" : "as-shot", wf_dk_trim10(WF_DK_EOSM, dk_inf.iso),
            j.black, j.white,
            lw ? "" : " (table)", st.roll ? wf_dev_hue_name(st.hue) : "-", st.ro_ms, wf_status_name(status));
@@ -1945,18 +2148,107 @@ static void dk_look(const struct wf_look *lk)
     wf_task_yield(1);
 }
 
+static volatile int dk_rnum, dk_ragain, dk_rfilm;   /* wf_dark_start_roll's ask: a shelf roll, develop again, film */
+static int dk_film_prev;                          /* the film loaded before a shelf roll's own (put back after the run) */
+
+/* a run's roll file saved: the camera's (WFROLL.TXT), or a shelf roll's copy in its ROLLS folder */
+static int dk_save(void) { return dkr == &roll ? roll_save() : shelf_put(dkr, 0); }
+
+/* a frame of a shelf roll still to develop: its CR2 on the card? (gone: skipped, logged) */
+static int dk_has_cr2(void *ctx, int folder, int file)
+{
+    const struct wf_roll *r = ctx;
+    if (roll_has_cr2(0, folder, file))
+        return 1;
+    int i = 0;
+    while (i < r->nshot - 1 && !(r->folder[i] == folder && r->file[i] == file))
+        i++;
+    wf_log("dark: roll %03d F%02d %d/IMG_%04d.CR2 is gone: skipped", r->num, i + 1, folder, file);
+    return 0;
+}
+
+/* a shelf roll for this run (dk_rnum): its newest pass read back from the card, made ready (rewound, a gone CR2 kept
+ * out), or its next pass made for a develop again (owner 11-17) with its own folder and roll file; its film loaded
+ * (the film before goes back after the run). "" = ready, else why not */
+static const char *dk_shelf_begin(void)
+{
+    const struct wf_shelf_ent *e = 0;
+    char nm[12];
+    for (int k = 0; k < shv.n; k++)
+        if (shv.e[k].num == dk_rnum)
+            e = &shv.e[k];
+    if (!e || shelf_read(e->num, e->dev, &sh_roll) != 0) {
+        wf_log("dark: roll %03d: its roll file is not on the card (%s)", dk_rnum, e ? "unreadable" : "not on the shelf");
+        return "The roll's file is not on the card";
+    }
+    int n;
+    if (dk_ragain) {
+        int film = dk_rfilm && wf_film_by_id(dk_rfilm) ? dk_rfilm : sh_roll.own ? sh_roll.own : sh_roll.film;
+        if ((n = wf_roll_again(&sh_roll, film, dk_has_cr2, &sh_roll)) <= 0) {
+            wf_log("dark: roll %03d develop again: %s", sh_roll.num, n < 0 ? "the last pass is made" : "no CR2 left");
+            return n < 0 ? "No more develops of this roll" : "Its CR2 files are gone";
+        }
+        const struct wf_film *f = wf_film_by_id(sh_roll.film);
+        wf_log("dark: roll %03d develop %d: film %s, %d frame%s, prints in ROLLS/%s", sh_roll.num, sh_roll.dev,
+               f ? f->name : "?", n, n == 1 ? "" : "s", shelf_nm(&sh_roll, nm));
+    } else {
+        n = wf_roll_shelf_prep(&sh_roll, dk_has_cr2, &sh_roll);
+        const struct wf_film *f = wf_film_by_id(sh_roll.film);
+        wf_log("dark: roll %03d from the shelf: film %s, %d to develop, prints in ROLLS/%s", sh_roll.num,
+               f ? f->name : "?", n, shelf_nm(&sh_roll, nm));
+        if (n <= 0)
+            return "Its CR2 files are gone";
+    }
+    if (shelf_put(&sh_roll, 0) != 0)
+        return "Cannot write the roll file";
+    dkr = &sh_roll;
+    int was = wf_loaded();
+    if (sh_roll.film != was) {
+        int rc = wf_load(sh_roll.film);
+        wf_log("dark: film %d for roll %03d (load %d), film %d back after the run", sh_roll.film, sh_roll.num, rc, was);
+        if (rc != WF_LOAD_OK)
+            return "The film's table is not on the card";
+        dk_film_prev = was;
+    }
+    return "";
+}
+
 /* the run, inside wf_task (wf_dark_poll) */
 static void dk_task(void)
 {
     int t_run = get_ms_clock(), ndone = 0, nerr = 0, paused = 0, ms_sum = 0;
     dk_stopk = 0;
     const char *end_why = "";
-    int st0 = roll.state;
+    dkr = &roll;
+    dk_film_prev = 0;
+    if (dk_rnum) {                               /* a shelf roll (owner 11-17) */
+        const char *why = dk_shelf_begin();
+        if (why[0]) {
+            if (dk_film_prev > 0)
+                wf_load(dk_film_prev);
+            dkr = &roll;
+            dv.frame = -1;
+            dv.phase = WF_DP_NONE;
+            dv.msg = why;
+            dv.state = WF_DR_FAIL;
+            wf_log("dark: roll %03d not developed: %s", dk_rnum, why);
+            sh_scan = 1;
+            roll_changed();
+            dv_bump();
+            WF_BARRIER();
+            dk_running = 0;
+            return;
+        }
+    }
+    dv.num = dkr->num;
+    dv.dev = dkr->dev < 2 ? 1 : dkr->dev;
+    dv.film = dkr->film;
+    int st0 = dkr->state;
     /* a full roll too (RAWB17 and before: a FULL roll stayed FULL, wf_roll_next_dev found nothing, "0 developed, 0 failed,
        3 left" with no reason once the memory was there) */
-    if ((roll.state == WF_RS_LOADED && roll.nshot > 0) || roll.state == WF_RS_FULL) {
-        wf_roll_rewind(&roll);
-        roll_save();
+    if ((dkr->state == WF_RS_LOADED && dkr->nshot > 0) || dkr->state == WF_RS_FULL) {
+        wf_roll_rewind(dkr);
+        dk_save();
     }
     /* RAW develop B gives its tables + scratch (shoot memory) back while the run lives (wf_rawb_poll sees
      * wf_dark_busy) and builds them again after it: that poll is wf_task's, so it runs here, until B holds nothing */
@@ -1972,9 +2264,9 @@ static void dk_task(void)
         wf_log("dark: RAW develop tables given back (%d ms), built again after the run", get_ms_clock() - t_b);
     struct wf_look lk;
     wf_look_now(&lk);
-    dv.total = roll.nshot;
-    dv.done = wf_roll_ndev(&roll);
-    dv.left = wf_roll_left(&roll);
+    dv.total = dkr->nshot;
+    dv.done = wf_roll_ndev(dkr);
+    dv.left = wf_roll_left(dkr);
     dk_pfr = wf_pr_frame > WF_PFR_OFF && wf_pr_frame < WF_PFR_N ? wf_pr_frame : WF_PFR_OFF;   /* the whole run's */
     dk_pin = wf_pr_info > WF_PIN_OFF && wf_pr_info < WF_PIN_N ? wf_pr_info : WF_PIN_OFF;
     dk_pdt = wf_pr_date > WF_PDT_OFF && wf_pr_date < WF_PDT_N ? wf_pr_date : WF_PDT_OFF;
@@ -1985,7 +2277,7 @@ static void dk_task(void)
     if (dk_pfr && (FIO_GetFileSize(DK_LG_PACK, &dk_lgn) != 0 || dk_lgn < 40))
         dk_lgn = 0;                              /* no WFLOGO.DAT: the caption as text alone */
     wf_log("dark: roll %03d start, %d of %d to develop, look output %d, print frame %d info %d date %d jpeg %d logo %dK",
-           roll.num, dv.left, dv.total, lk.output, dk_pfr, dk_pin, dk_pdt, dk_pjp, (int)(dk_lgn >> 10));
+           dkr->num, dv.left, dv.total, lk.output, dk_pfr, dk_pin, dk_pdt, dk_pjp, (int)(dk_lgn >> 10));
     if (dk_pjp == WF_PJ_BOTH)
         wf_log("dark: Camera JPEG Over + print: %s", !dk_pfr ? "frame Off, so as Overwrite (one file)"
                : dk_pj2 == WF_J2_FOLDER ? "the picture over IMG_nnnn.JPG, the print in NNN" WF_J2_SUFFIX "/"
@@ -2077,18 +2369,18 @@ static void dk_task(void)
         char root[16], d[48];
         struct wf_fe e = { 0, 0 };
         d[0] = 0;
-        if (wf_roll_root(wf_dcim_dir(), root, sizeof root) < 0 || wf_roll_dir(&roll, root, 0, d, sizeof d) < 0
-            || wf_fmkdir(d, &e) != 0 || wf_roll_dir(&roll, root, 1, d, sizeof d) < 0 || wf_fmkdir(d, &e) != 0) {
+        if (wf_roll_root(wf_dcim_dir(), root, sizeof root) < 0 || wf_roll_dir(dkr, root, 0, d, sizeof d) < 0
+            || wf_fmkdir(d, &e) != 0 || wf_roll_dir(dkr, root, 1, d, sizeof d) < 0 || wf_fmkdir(d, &e) != 0) {
             wf_log("dark: folder %s: %s %d", d, wf_fe_name(e.step), e.rc);
             end_why = "cannot make the ROLLS folder";
         }
     }
     while (!end_why[0]) {
-        int i = wf_roll_next_dev(&roll);
+        int i = wf_roll_next_dev(dkr);
         if (i < 0) {
-            if (wf_roll_left(&roll) > 0) {       /* frames left that the roll does not hand out: say why, not a blank end */
-                wf_log("dark: roll state %d (at start %d), %d left: no frame to develop", roll.state, st0,
-                       wf_roll_left(&roll));
+            if (wf_roll_left(dkr) > 0) {       /* frames left that the roll does not hand out: say why, not a blank end */
+                wf_log("dark: roll state %d (at start %d), %d left: no frame to develop", dkr->state, st0,
+                       wf_roll_left(dkr));
                 end_why = "no frame to develop";
             }
             break;
@@ -2103,7 +2395,7 @@ static void dk_task(void)
         snprintf(sw, sizeof sw, "before F%02d", i + 1);
         dk_screen(sw);
         dv.frame = i;
-        dv.left = wf_roll_left(&roll);
+        dv.left = wf_roll_left(dkr);
         dk_relit = 0;                            /* Screen On: this frame's re-lights (wf_dark_keep), its first off */
         dk_off_first = -1;
         dk_t0 = get_ms_clock();
@@ -2114,24 +2406,24 @@ static void dk_task(void)
             break;
         }
         if (r == DK_OK) {
-            wf_roll_mark(&roll, i, WF_RF_DEV);
+            wf_roll_mark(dkr, i, WF_RF_DEV);
             ndone++;
             ms_sum += get_ms_clock() - dk_t0;
             dv.avg_ms = ms_sum / ndone;
             dk_hang(i);
         } else {
-            wf_log("dark: F%02d IMG_%04d failed: %s", i + 1, roll.file[i], dk_why);
+            wf_log("dark: F%02d IMG_%04d failed: %s", i + 1, dkr->file[i], dk_why);
             if (r == DK_FATAL) {
                 end_why = dk_why;
                 break;
             }
-            wf_roll_mark(&roll, i, WF_RF_ERR);
+            wf_roll_mark(dkr, i, WF_RF_ERR);
             nerr++;
         }
-        if (roll_save() != 0)
+        if (dk_save() != 0)
             wf_log("dark: roll file not saved");
-        dv.done = wf_roll_ndev(&roll);
-        dv.left = wf_roll_left(&roll);
+        dv.done = wf_roll_ndev(dkr);
+        dv.left = wf_roll_left(dkr);
         roll_changed();
         dv_bump();
         wf_task_yield(1);                        /* the frame's lines to the card (no file of the run is open now) */
@@ -2157,14 +2449,22 @@ static void dk_task(void)
         wf_log("dark: Screen Off: display turned off %d times, woken %d times", dk_offs, dk_wakes);
     if (dk_relit_run)
         wf_log("dark: Screen On: display found off while frames ran, turned on again %d times", dk_relit_run);
-    int left = wf_roll_left(&roll);
+    int left = wf_roll_left(dkr);
     dv.frame = -1;
     dv.phase = WF_DP_NONE;
     dv.left = left;
     dv.msg = end_why;
     dv.state = !left ? WF_DR_DONE : dk_stopk || !end_why[0] ? WF_DR_STOPPED : WF_DR_FAIL;
-    wf_log("dark: roll %03d end: %d developed, %d failed, %d left, %d s%s%s", roll.num, ndone, nerr, left,
+    wf_log("dark: roll %03d end: %d developed, %d failed, %d left, %d s%s%s", dkr->num, ndone, nerr, left,
            (get_ms_clock() - t_run) / 1000, end_why[0] ? ": " : "", end_why);
+    if (dkr == &roll && roll.state == WF_RS_DONE)   /* the camera's roll developed: on the shelf (develop it again) */
+        shelf_put(&roll, "developed");
+    if (dk_film_prev > 0) {                      /* a shelf roll's own film: the one before back */
+        int rc = wf_load(dk_film_prev);
+        wf_log("dark: film %d back (load %d)", dk_film_prev, rc);
+        dk_film_prev = 0;
+    }
+    sh_scan = 1;
     roll_changed();
     dv_bump();
     WF_BARRIER();
@@ -2173,6 +2473,7 @@ static void dk_task(void)
 
 #else
 int wf_dark_start(void) { dv.msg = "The Darkroom runs on the EOS M first"; dv_bump(); return -3; }
+int wf_dark_start_roll(int num, int again, int film) { (void)num; (void)again; (void)film; return wf_dark_start(); }
 void wf_dark_stop(void) {}
 void wf_dark_poll(void) {}
 int wf_dark_wake(int now) { (void)now; return 0; }
@@ -2181,7 +2482,7 @@ int wf_dark_keep(int now, int ui) { (void)now; (void)ui; return 0; }
 #endif
 
 #if WF_DARK_CAN
-int wf_dark_start(void)
+static int dk_start(int num, int again, int film)
 {
     if (dk_running)
         return -2;
@@ -2198,6 +2499,12 @@ int wf_dark_start(void)
         return -3;
     }
     int n = roll.state == WF_RS_LOADED ? roll.nshot : wf_roll_left(&roll);
+    if (num) {                                   /* a shelf roll: its frames left, or all of them again */
+        n = 0;
+        for (int k = 0; k < shv.n; k++)
+            if (shv.e[k].num == num)
+                n = again ? shv.e[k].nshot : shv.e[k].left;
+    }
     if (n <= 0)
         return -1;
     int bat = dk_battery();
@@ -2218,12 +2525,18 @@ int wf_dark_start(void)
     dv.avg_ms = 0;
     dk_t0 = get_ms_clock();
     dk_wake_ms = dk_t0;                          /* Screen Off: the SET that started it is the last key */
+    dk_rnum = num;
+    dk_ragain = again && num;
+    dk_rfilm = film;
     WF_BARRIER();
     dk_running = 1;                              /* the roll is the run's from here (the shutter goes free) */
     dk_go = 1;                                   /* wf_task's next loop runs it: no task to create, none to be refused */
     dv_bump();
     return 0;
 }
+
+int wf_dark_start(void) { return dk_start(0, 0, 0); }
+int wf_dark_start_roll(int num, int again, int film) { return dk_start(num, again, film); }
 
 /* wf_task, right after wf_roll_poll: a run asked for is carried out here, the whole run (minutes) */
 void wf_dark_poll(void)

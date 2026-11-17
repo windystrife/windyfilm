@@ -16,10 +16,17 @@
  *   film=57                 catalogue film id
  *   exp=12                  3 / 6 / 12 / 24 / 36 (3 and 6: owner 11-15, a short test roll)
  *   state=loaded            empty | loaded | full | rewound | done
+ *   dev=2                   only on a develop again (owner 11-17): the develop pass (absent = 1, the first)
+ *   own=57                  only on a develop again: the roll's own film (film= is the one this pass prints with)
  *   seen=100,205            DCIM folder and file number Canon had when the roll was loaded / the last frame
  *   f=100,206,S             one line per frame: folder, IMG number, state S shot / D developed / E failed / K kept
  *   ...
  *   end
+ *
+ * The shelf (owner 11-17, DESIGN 3.6 "The shelf"): every roll that leaves the camera with frames, and every developed
+ * roll, has a copy of its roll file beside its prints, <root>ROLLS/ROLL021/WFROLL.TXT; a develop again prints into a
+ * folder of its own with its own roll file, ROLLS/ROLL021B/ (pass 2), ROLL021C/ (pass 3) .. ROLL021Z: the card's
+ * names are 8.3, so "ROLL021_2" (9 letters) is not one. The list is built from these files (wf_dark.c).
  */
 #ifndef WF_ROLL_H
 #define WF_ROLL_H
@@ -28,6 +35,8 @@
 #define WF_ROLL_MAXEXP  36
 #define WF_ROLL_FILE    1536                     /* bytes of WFROLL.TXT: 36 frame lines of <= 15 chars + header */
 #define WF_ROLL_PATH    "ML/SETTINGS/WFROLL.TXT"
+#define WF_ROLL_SHELF   "WFROLL.TXT"             /* the shelf copy, in the roll's ROLLS folder */
+#define WF_ROLL_MAXDEV  26                       /* develop passes: 1 (ROLL021) .. 26 (ROLL021Z) */
 
 enum { WF_RS_EMPTY = 0, WF_RS_LOADED, WF_RS_FULL, WF_RS_REWOUND, WF_RS_DONE, WF_RS_N };
 #define WF_RF_SHOT  'S'                          /* frame states */
@@ -42,6 +51,8 @@ struct wf_roll {
     int      state;                              /* WF_RS_* */
     int      nshot;                              /* frames on the roll */
     int      seen_folder, seen_file;             /* Canon's DCIM folder / file number last looked at */
+    int      dev;                                /* develop pass: 0 / 1 the first (ROLLS/ROLL021), 2.. a develop again */
+    int      own;                                /* a develop again: the roll's own film (0 = film is it) */
     uint16_t folder[WF_ROLL_MAXEXP];             /* per frame: DCIM folder number (100..999) */
     uint16_t file[WF_ROLL_MAXEXP];               /* per frame: IMG number (1..9999) */
     char     fst[WF_ROLL_MAXEXP];                /* per frame: WF_RF_* */
@@ -67,6 +78,13 @@ void wf_roll_mark(struct wf_roll *r, int i, char st);   /* D / E; the roll becom
 int  wf_roll_close(struct wf_roll *r);           /* give up: frames left -> K, state done; 0 = ok, -1 = no open roll */
 int  wf_roll_can_shoot(const struct wf_roll *r); /* loaded and not full: the HUD counts, PLAY is blocked (blind roll) */
 int  wf_roll_open(const struct wf_roll *r);      /* loaded / full / rewound: a roll is on the camera */
+/* a shelf roll the Darkroom develops (it left the camera, or it was stopped): a loaded / full roll is rewound, a frame
+   still to develop whose CR2 is gone (has_cr2 = 0) becomes K. Returns the frames to develop */
+int  wf_roll_shelf_prep(struct wf_roll *r, int (*has_cr2)(void *ctx, int folder, int file), void *ctx);
+/* develop again (owner 11-17): r (any pass of the roll) becomes its next pass printed with film: dev + 1, own = the
+   roll's own film, every frame S again when its CR2 is there (else K), rewound (done when none is). Returns the frames
+   to develop; -1 = the last pass (WF_ROLL_MAXDEV) was made already, or not a roll with frames */
+int  wf_roll_again(struct wf_roll *r, int film, int (*has_cr2)(void *ctx, int folder, int file), void *ctx);
 
 /* ------------------------------------------------------------------ file text (pure) */
 int  wf_roll_text(const struct wf_roll *r, char *buf, int n);   /* WF_ROLL_FILE bytes into buf (n >= WF_ROLL_FILE); returns
@@ -88,8 +106,13 @@ int  wf_roll_cr2(const struct wf_roll *r, int i, const char *dcim_dir, const cha
 int  wf_roll_jpg2(const char *jpg, int folder, const char *ext, char *dir, int dn, char *out, int n);
 /* card root of a DCIM dir ("B:/DCIM/100CANON" -> "B:/") */
 int  wf_roll_root(const char *dcim_dir, char *out, int n);
-/* the darkroom's output: "<root>ROLLS", "<root>ROLLS/ROLL021", "<root>ROLLS/ROLL021/F01_0206.JPG" */
+/* the darkroom's output: "<root>ROLLS", "<root>ROLLS/ROLL021", "<root>ROLLS/ROLL021/F01_0206.JPG"; a develop again
+   ROLLS/ROLL021B/...; level 2 = the shelf copy "<root>ROLLS/ROLL021/WFROLL.TXT" */
 int  wf_roll_dir(const struct wf_roll *r, const char *root, int level, char *out, int n);
 int  wf_roll_out(const struct wf_roll *r, int i, const char *root, char *out, int n);
+/* a roll's folder name: "ROLL021" (pass 1), "ROLL021B" (pass 2) .. into out (>= 12 bytes) */
+void wf_roll_name(int num, int dev, char *out);
+/* a ROLLS entry's name back: "ROLL021" -> 21, pass 1; "roll021b" -> 21, pass 2; 0 = ok, -1 = not a roll folder */
+int  wf_roll_name_parse(const char *s, int *num, int *dev);
 
 #endif

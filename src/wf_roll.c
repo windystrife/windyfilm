@@ -43,6 +43,7 @@ int wf_roll_load(struct wf_roll *r, int film, int exp, int folder, int file)
     r->exp = exp;
     r->state = WF_RS_LOADED;
     r->nshot = 0;
+    r->dev = r->own = 0;
     r->seen_folder = folder;
     r->seen_file = file;
     for (int i = 0; i < WF_ROLL_MAXEXP; i++) {
@@ -165,6 +166,33 @@ int wf_roll_close(struct wf_roll *r)
     return 0;
 }
 
+int wf_roll_shelf_prep(struct wf_roll *r, int (*has_cr2)(void *ctx, int folder, int file), void *ctx)
+{
+    if (r->state == WF_RS_FULL || (r->state == WF_RS_LOADED && r->nshot > 0))
+        r->state = WF_RS_REWOUND;
+    for (int i = 0; i < r->nshot && i < WF_ROLL_MAXEXP; i++)
+        if (r->fst[i] == WF_RF_SHOT && has_cr2 && !has_cr2(ctx, r->folder[i], r->file[i]))
+            r->fst[i] = WF_RF_KEPT;
+    if (r->state == WF_RS_REWOUND && !wf_roll_left(r))
+        r->state = WF_RS_DONE;
+    return wf_roll_left(r);
+}
+
+int wf_roll_again(struct wf_roll *r, int film, int (*has_cr2)(void *ctx, int folder, int file), void *ctx)
+{
+    int d = r->dev < 2 ? 1 : r->dev;
+    if (d >= WF_ROLL_MAXDEV || r->nshot <= 0 || r->num <= 0)
+        return -1;
+    if (!r->own)
+        r->own = r->film;
+    r->dev = d + 1;
+    r->film = film;
+    for (int i = 0; i < r->nshot && i < WF_ROLL_MAXEXP; i++)
+        r->fst[i] = !has_cr2 || has_cr2(ctx, r->folder[i], r->file[i]) ? WF_RF_SHOT : WF_RF_KEPT;
+    r->state = wf_roll_left(r) ? WF_RS_REWOUND : WF_RS_DONE;
+    return wf_roll_left(r);
+}
+
 /* ------------------------------------------------------------------ text */
 static int put(char *b, int n, int o, const char *s)
 {
@@ -182,6 +210,10 @@ int wf_roll_text(const struct wf_roll *r, char *buf, int n)
     snprintf(t, sizeof t, "WFROLL 1\nroll=%d\nfilm=%d\nexp=%d\nstate=", r->num, r->film, r->exp);
     o = put(buf, WF_ROLL_FILE, o, t);
     o = put(buf, WF_ROLL_FILE, o, wf_roll_state_name(r->state));
+    if (r->dev >= 2) {                            /* a develop again only: the first pass's file is as before */
+        snprintf(t, sizeof t, "\ndev=%d\nown=%d", r->dev, r->own);
+        o = put(buf, WF_ROLL_FILE, o, t);
+    }
     snprintf(t, sizeof t, "\nseen=%d,%d\n", r->seen_folder, r->seen_file);
     o = put(buf, WF_ROLL_FILE, o, t);
     for (int i = 0; i < r->nshot && i < WF_ROLL_MAXEXP; i++) {
@@ -240,6 +272,8 @@ int wf_roll_parse(struct wf_roll *r, const char *buf, int n)
         if (key(&s, le, "roll=")) r->num = num(&s, le, &ok);
         else if (key(&s, le, "film=")) r->film = num(&s, le, &ok);
         else if (key(&s, le, "exp=")) r->exp = num(&s, le, &ok);
+        else if (key(&s, le, "dev=")) r->dev = num(&s, le, &ok);
+        else if (key(&s, le, "own=")) r->own = num(&s, le, &ok);
         else if (key(&s, le, "state=")) {
             int st = -1;
             for (int i = 0; i < WF_RS_N; i++) {
@@ -276,7 +310,8 @@ int wf_roll_parse(struct wf_roll *r, const char *buf, int n)
             ok = 0;                                     /* an unknown line: not ours */
         s = le < e ? le + 1 : e;
     }
-    if (!ok || !have_end || r->num < 0 || r->num > 999 || !wf_roll_ok_exp(r->exp) || r->nshot > r->exp) {
+    if (!ok || !have_end || r->num < 0 || r->num > 999 || !wf_roll_ok_exp(r->exp) || r->nshot > r->exp || r->dev < 0
+        || r->dev > WF_ROLL_MAXDEV || r->own < 0) {
         wf_roll_reset(r);
         return -1;
     }
@@ -376,9 +411,43 @@ int wf_roll_jpg2(const char *jpg, int folder, const char *ext, char *dir, int dn
     return k > 0 && k < n ? k : -1;
 }
 
+void wf_roll_name(int num, int dev, char *out)
+{
+    char s[2] = { dev >= 2 && dev <= WF_ROLL_MAXDEV ? (char)('A' + dev - 1) : 0, 0 };
+    snprintf(out, 12, "ROLL%03d%s", num, s);
+}
+
+int wf_roll_name_parse(const char *s, int *num, int *dev)
+{
+    static const char R4[] = "ROLL";
+    int k = 0, v = 0;
+    for (; k < 4; k++)
+        if ((s[k] & ~32) != R4[k])
+            return -1;
+    for (; k < 7; k++) {
+        if (s[k] < '0' || s[k] > '9')
+            return -1;
+        v = v * 10 + s[k] - '0';
+    }
+    int d = 1, c = s[7] & ~32;
+    if (s[7]) {
+        if (c < 'B' || c > 'A' + WF_ROLL_MAXDEV - 1 || s[8])
+            return -1;
+        d = c - 'A' + 1;
+    }
+    if (v < 1)
+        return -1;
+    *num = v;
+    *dev = d;
+    return 0;
+}
+
 int wf_roll_dir(const struct wf_roll *r, const char *root, int level, char *out, int n)
 {
-    int k = level <= 0 ? snprintf(out, n, "%sROLLS", root) : snprintf(out, n, "%sROLLS/ROLL%03d", root, r->num);
+    char nm[12];
+    wf_roll_name(r->num, r->dev, nm);
+    int k = level <= 0 ? snprintf(out, n, "%sROLLS", root)
+          : level == 1 ? snprintf(out, n, "%sROLLS/%s", root, nm) : snprintf(out, n, "%sROLLS/%s/" WF_ROLL_SHELF, root, nm);
     return k > 0 && k < n ? k : -1;
 }
 
@@ -386,6 +455,8 @@ int wf_roll_out(const struct wf_roll *r, int i, const char *root, char *out, int
 {
     if (i < 0 || i >= r->nshot || i >= WF_ROLL_MAXEXP)
         return -1;
-    int k = snprintf(out, n, "%sROLLS/ROLL%03d/F%02d_%04d.JPG", root, r->num, i + 1, r->file[i]);
+    char nm[12];
+    wf_roll_name(r->num, r->dev, nm);
+    int k = snprintf(out, n, "%sROLLS/%s/F%02d_%04d.JPG", root, nm, i + 1, r->file[i]);
     return k > 0 && k < n ? k : -1;
 }

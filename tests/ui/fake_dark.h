@@ -20,4 +20,12 @@ int  fake_nkeep(void);                      /* the Darkroom tick's Screen On kee
 int  fake_nwake(void);                      /* keys that only woke it (wf_dark_wake = 1) */
 void fake_set_shelf(int on);                /* wf_roll_shelved() (a roll set aside by the mode chip) */
 void fake_set_rawb_can(int c);              /* wf_rawb_can(): RAW develop on this camera (wf_rawb in fake_dark.c) */
+/* the shelf (owner 11-17): wf_shelf_now's list, a roll put on it (newest first), the Darkroom's asks */
+struct wf_shelf *fake_shelf(void);          /* write access (bumps its gen) */
+void fake_shelf_add(const struct wf_roll *r);
+int  fake_nrescan(void);                    /* wf_shelf_rescan calls (the Darkroom asks on entry) */
+int  fake_start_num(void);                  /* the last start: 0 the camera's roll, else wf_dark_start_roll's num */
+int  fake_start_again(void);
+int  fake_start_film(void);
+int  fake_nswap_devd(void);                 /* close-and-loads of a roll developed at the shot */
 #endif

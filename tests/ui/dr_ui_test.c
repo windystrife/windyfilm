@@ -25,6 +25,9 @@ int wfui_host_nr(void);
 const char *wfdr_host_msg(void);
 int wfdr_host_pfoc(void);
 int wfdr_host_stop_ask(void);
+int wfdr_host_sel(void);
+int wfdr_host_afilm(void);
+int wfui_host_pick(void);
 #define FOC_EXP (-1)                                        /* wf_ui.c: the focus on the Exposures row */
 #define M_DARK  2                                           /* wfui_host_mode: Darkroom */
 
@@ -103,6 +106,15 @@ static void roll_of(int film, int exp, int n, int state)
     for (int i = 0; i < n; i++) { r->folder[i] = 100; r->file[i] = 206 + i; r->fst[i] = WF_RF_SHOT; }
     r->nshot = n;
     r->state = state;
+}
+
+/* a shelf roll (owner 11-17): wf_shelf_now's entries, newest first as the core lists them */
+static void shelf_ent(int num, int dev, int film, int own, int exp, int state, int nshot, int left, int ndev)
+{
+    struct wf_shelf *s = fake_shelf();
+    struct wf_shelf_ent *e = &s->e[s->n++];
+    e->num = num; e->dev = dev; e->film = film; e->own = own; e->exp = exp; e->state = state;
+    e->nshot = nshot; e->left = left; e->ndev = ndev;
 }
 
 static uint8_t hv[480 * 720];
@@ -263,14 +275,22 @@ int main(int argc, char **argv)
     shot("dark_screen_off");
     key(MODULE_KEY_WHEEL_LEFT);
     CHECK(wf_dk_scr == WF_DS_ON, "wheel left on the chip: %d (want On)", wf_dk_scr);
+    key(MODULE_KEY_PRESS_DOWN);                              /* the ROLL row (owner 11-17, the shelf) under the chip */
+    CHECK(wfdr_host_pfoc() == WF_PO_N + 1, "DOWN from the chip: focus %d (want the ROLL row, wraps)", wfdr_host_pfoc());
+    key(MODULE_KEY_PRESS_RIGHT);
+    CHECK(wfdr_host_sel() == 21 && fake_nstart() == 0 && wf_pr_frame == 1, "RIGHT on the ROLL row with one roll: roll %d "
+          "started %d frame %d (want 21, nothing else: frame White)", wfdr_host_sel(), fake_nstart(), wf_pr_frame);
     key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfdr_host_pfoc() == 0, "DOWN from the chip: focus %d (want Frame, wraps)", wfdr_host_pfoc());
+    CHECK(wfdr_host_pfoc() == 0, "DOWN from the ROLL row: focus %d (want Frame)", wfdr_host_pfoc());
     key(MODULE_KEY_PRESS_UP);
-    CHECK(wfdr_host_pfoc() == WF_PO_N, "UP from Frame: focus %d (want the chip)", wfdr_host_pfoc());
+    key(MODULE_KEY_PRESS_UP);
+    CHECK(wfdr_host_pfoc() == WF_PO_N, "UP UP from Frame: focus %d (want the chip)", wfdr_host_pfoc());
+    key(MODULE_KEY_PRESS_DOWN);
     key(MODULE_KEY_PRESS_DOWN);
     key(MODULE_KEY_PRESS_LEFT);
     key(MODULE_KEY_PRESS_LEFT);
     CHECK(wf_pr_frame == 4, "LEFT LEFT from White: %d (want Black wide, wraps)", wf_pr_frame);
+    key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_PRESS_UP);
@@ -617,6 +637,106 @@ int main(int argc, char **argv)
     wfui_task_begin();
     wfui_task_end();
     CHECK(host_live_allocs() == 0, "section 15: %ld allocations left", host_live_allocs());
+
+    /* 16. the shelf (owner 11-17): "next roll" no longer drops a roll; the Darkroom's ROLL row picks the camera's roll
+     * or a shelf roll; a developed roll develops again with a film the browser picks (and comes back) */
+    {
+        int film3 = 0;
+        for (int i = 0; i < wf_nfilms && !film3; i++)
+            if (wf_films[i].group == WF_GRP_COLOUR && (wf_films[i].flags & WF_F_READY) && wf_films[i].id != colour
+                && !(wf_films[i].flags & WF_F_SLIDE))
+                film3 = wf_films[i].id;
+        fake_dark_reset();
+        roll_of(colour, 24, 5, WF_RS_LOADED);                       /* the camera: roll 024 shooting, 5 of 24 */
+        fake_roll()->num = 24;
+        shelf_ent(23, 1, bw, bw, 12, WF_RS_REWOUND, 12, 12, 0);     /* shelved with its 12 frames */
+        shelf_ent(21, 1, colour, colour, 12, WF_RS_DONE, 12, 0, 12);   /* developed */
+        shelf_ent(19, 2, film3, colour, 6, WF_RS_REWOUND, 6, 4, 2);   /* a develop 2, stopped with 4 left */
+        fake_view()->state = WF_DR_IDLE;
+        fake_view()->battery = 64;
+        fake_view()->nwire = 0;
+        fake_view()->print_ready = 0;
+        int rs0 = fake_nrescan(), st0 = fake_nstart();
+        open_scr(WF_UI_SCR_DARK);
+        CHECK(fake_nrescan() == rs0 + 1 && wfdr_host_sel() == 24 && wfdr_host_pfoc() == 0, "the shelf: the Darkroom opens "
+              "on the camera's roll (%d), asks for the card's list (%d)", wfdr_host_sel(), fake_nrescan() - rs0);
+        key(MODULE_KEY_PRESS_UP);
+        key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(wfdr_host_pfoc() == WF_PO_N + 1 && wfdr_host_sel() == 23, "UP, RIGHT: the ROLL row on roll 023 (focus %d, "
+              "roll %d)", wfdr_host_pfoc(), wfdr_host_sel());
+        shot("shelf_roll_left");
+        key(MODULE_KEY_PRESS_SET);
+        CHECK(fake_nstart() == st0 + 1 && fake_start_num() == 23 && !fake_start_again(), "SET on roll 023: its frames "
+              "(start %d, again %d)", fake_start_num(), fake_start_again());
+        key(MODULE_KEY_WHEEL_RIGHT);
+        CHECK(wfdr_host_sel() == 21 && wfdr_host_afilm() == colour, "the wheel: roll 021, developed (%d, film %d)",
+              wfdr_host_sel(), wfdr_host_afilm());
+        key(MODULE_KEY_PRESS_DOWN);
+        CHECK(wfdr_host_pfoc() == WF_PO_N + 2, "DOWN on a developed roll: the Film row (%d)", wfdr_host_pfoc());
+        shot("shelf_done_again");
+        key(MODULE_KEY_PRESS_SET);                               /* the browser picks the film */
+        tick(2);
+        CHECK(wfui_host_scr() == WFUI_SCR_BROWSER && wfui_host_pick() && wfui_host_sel_id() == colour && !closed,
+              "SET on the Film row: the browser (%d), picking (%d), on the roll's film (%d)", wfui_host_scr(),
+              wfui_host_pick(), wfui_host_sel_id());
+        key(MODULE_KEY_PRESS_RIGHT);
+        int pf = wfui_host_sel_id();
+        CHECK(pf && pf != colour && fake_req_film() == 0, "RIGHT: another film (%d), nothing loaded", pf);
+        shot("shelf_film_pick");
+        key(MODULE_KEY_PRESS_SET);
+        tick(2);
+        CHECK(wfui_host_scr() == WFUI_SCR_DARK && !wfui_host_pick() && wfdr_host_afilm() == pf && wfdr_host_sel() == 21
+              && wfdr_host_pfoc() == WF_PO_N + 2 && fake_req_film() == 0 && !closed, "SET in the browser: back in the "
+              "Darkroom (%d) on roll %d, film %d (want %d), focus %d", wfui_host_scr(), wfdr_host_sel(),
+              wfdr_host_afilm(), pf, wfdr_host_pfoc());
+        shot("shelf_film_back");
+        key(MODULE_KEY_PRESS_SET);                               /* again, MENU there: back, the film kept */
+        tick(2);
+        key(MODULE_KEY_MENU);
+        tick(2);
+        CHECK(wfui_host_scr() == WFUI_SCR_DARK && wfdr_host_afilm() == pf && !closed, "MENU in the film pick: back (%d), "
+              "film %d kept", wfui_host_scr(), wfdr_host_afilm());
+        key(MODULE_KEY_PRESS_DOWN);
+        key(MODULE_KEY_PRESS_SET);
+        CHECK(fake_start_num() == 21 && fake_start_again() && fake_start_film() == pf, "SET on Frame: develop again of "
+              "roll %d (again %d) with film %d", fake_start_num(), fake_start_again(), fake_start_film());
+        key(MODULE_KEY_PRESS_UP);
+        key(MODULE_KEY_PRESS_UP);
+        key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(wfdr_host_sel() == 19 && wfdr_host_pfoc() == WF_PO_N + 1 && wfdr_host_afilm() == colour, "roll 019: its "
+              "develop 2 goes on (%d, focus %d)", wfdr_host_sel(), wfdr_host_pfoc());
+        shot("shelf_dev2_left");
+        struct wf_dark_view *dv2 = fake_view();
+        dv2->state = WF_DR_DONE; dv2->num = 21; dv2->dev = 2; dv2->film = pf; dv2->done = 12; dv2->left = 0;
+        tick(2);
+        shot("shelf_again_done");
+        key(MODULE_KEY_PRESS_SET);
+        CHECK(wfdr_host_pfoc() == WF_PO_N + 1 && fake_start_num() == 21, "SET on a run's end: the ROLL row (%d)",
+              wfdr_host_pfoc());
+        fake_view()->state = WF_DR_IDLE;
+        close_ui();
+        /* the browser: PLAY with only the shelf (no roll on the camera) opens the Darkroom on its newest roll */
+        fake_dark_reset();
+        shelf_ent(23, 1, bw, bw, 12, WF_RS_REWOUND, 12, 12, 0);
+        shelf_ent(21, 1, colour, colour, 12, WF_RS_DONE, 12, 0, 12);
+        open_scr(0);
+        key(MODULE_KEY_PLAY);
+        tick(2);
+        CHECK(wfui_host_scr() == WFUI_SCR_DARK && wfdr_host_sel() == 23 && !closed, "PLAY with the shelf only: the "
+              "Darkroom (%d) on roll %d", wfui_host_scr(), wfdr_host_sel());
+        close_ui();
+        /* an empty shelf: nothing to develop */
+        fake_dark_reset();
+        fake_view()->battery = 64;
+        open_scr(WF_UI_SCR_DARK);
+        shot("shelf_empty");
+        int st1 = fake_nstart();
+        key(MODULE_KEY_PRESS_SET);
+        CHECK(fake_nstart() == st1 && !strcmp(wfdr_host_msg(), "Nothing to develop"), "an empty shelf, SET: started %d, "
+              "'%s'", fake_nstart() - st1, wfdr_host_msg());
+        close_ui();
+        CHECK(host_live_allocs() == 0, "section 16: %ld allocations left", host_live_allocs());
+    }
 
     printf("peak UI heap %ld bytes\n", host_peak_bytes());
     printf("%s: %d failure(s)\n", fails ? "FAIL" : "PASS", fails);

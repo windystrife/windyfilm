@@ -41,6 +41,8 @@ static const uint8_t group_rgb[WF_NGROUPS][3] = {
     { 132, 96, 168 },                   /* Film stage: violet */
 };
 
+static uint8_t pal_keep[WFUI_CAN_SLOTS][3];    /* the pack's colours as placed (wfc_pal_again) */
+
 static inline unsigned rd16(const uint8_t *p) { return p[0] | (p[1] << 8); }
 static inline uint32_t rd32(const uint8_t *p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }
 
@@ -112,6 +114,9 @@ static int load(void)
     for (int i = 0; i < P.used; i++)
     {
         wfp_set_rgb(C_CAN0 + i, pal[4 * i], pal[4 * i + 1], pal[4 * i + 2]);
+        pal_keep[i][0] = pal[4 * i];
+        pal_keep[i][1] = pal[4 * i + 1];
+        pal_keep[i][2] = pal[4 * i + 2];
         P.remap[i] = C_CAN0 + i;
     }
     for (int i = P.used; i < npal; i++)
@@ -167,6 +172,13 @@ const char *wfc_why(int st)
     return st >= 0 && st < (int)(sizeof n / sizeof n[0]) ? n[st] : "?";
 }
 int wfc_pal_used(void) { return P.st ? WFC_PLAIN_N : P.used; }
+/* the can colours placed again (owner 11-17: the browser comes back after the Darkroom, whose print tones used these
+ * entries: develop again's film pick) */
+void wfc_pal_again(void)
+{
+    if (P.st) { place_plain_colours(); return; }
+    for (int i = 0; i < P.used; i++) wfp_set_rgb(C_CAN0 + i, pal_keep[i][0], pal_keep[i][1], pal_keep[i][2]);
+}
 int wfc_again(void) { return P.st == WFC_E_BUSY || P.st == WFC_E_READ || P.st == WFC_E_MEM; }
 
 static int entry_of(const struct wf_film *f)

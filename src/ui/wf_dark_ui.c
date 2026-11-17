@@ -9,6 +9,9 @@
  *                developed prints slide up to the wire along the top and hang there to dry. MENU stops. Before a run
  *                (and after a stop) the print finishes' rows Frame / Info / Date instead of the dial (UP / DOWN, LEFT /
  *                RIGHT / wheel; DESIGN 3.9) and, while no print is on the easel, a small picture of how they look.
+ *                The ROLL row on top of the info block (owner 11-17, the shelf) picks the roll: the camera's own with
+ *                frames first, then the shelf's (wf_shelf_now), LEFT / RIGHT / the wheel; a developed roll offers a
+ *                develop again, with a Film row (SET: the browser picks a film, wfui_pick_film, and comes back).
  *   HUD         the frame counter drawn over LiveView while a roll shoots, in ML's own colour indices (the UI's palette
  *                entries are not ours outside the UI): wfdr_hud (wf_dark.c calls it from wf_task).
  * Threads: UI task only (wf_ui.c calls wfdr_*); the darkroom state comes from wf_dark_view() (wf_dark.h). */
@@ -27,6 +30,7 @@ static inline int is5d2(void) { return wf_cam() == WF_CAM_5D2; }
 const char *wfdr_dev_why(void)
 {
     const struct wf_roll *r = wf_roll_now();
+    if (wf_shelf_now()->n) return 0;                       /* the shelf: a roll waits, or one to develop again */
     if (!wf_roll_open(r)) return "Load a roll first";
     return wf_roll_left(r) > 0 ? 0 : "No frames to develop";
 }
@@ -127,7 +131,51 @@ static const uint8_t PAPER[3] = { 236, 66, 74 };           /* unexposed paper un
 static int dr_expose_shown = -1, dr_pready = -1;
 static uint32_t dr_gen = 0xFFFFFFFFu;
 static int dr_confirm;                                     /* MENU once while running: "MENU again to stop" */
-static int dr_pfoc;                                        /* the print finishes: the focused row (WF_PO_*) */
+static int dr_pfoc;                                        /* the focused row: WF_PO_* or DR_FOC_* below */
+#define DR_FOC_SCR  WF_PO_N                                /* the Screen chip at the top right */
+#define DR_FOC_ROLL (WF_PO_N + 1)                          /* the ROLL row */
+#define DR_FOC_FILM (WF_PO_N + 2)                          /* the Film row (a develop again) */
+
+/* the rolls the Darkroom can develop (owner 11-17, the shelf): the camera's open roll with frames first, then the shelf
+ * (newest first). The pick is kept by roll number (the list is made again on every draw and key) */
+struct dr_item { int num, dev, film, own, exp, state, nshot, left, ndev, cam; };
+#define DR_NIT (WF_SHELF_MAX + 1)
+static struct dr_item dr_it[DR_NIT];
+static int dr_nit, dr_isel, dr_snum = -1, dr_scam;
+static int dr_afilm;                                       /* develop again: the film picked (0 = the roll's own) */
+static int dr_ret;                                         /* back from the film pick: pick, film and focus kept */
+static int dr_old;                                         /* a run's "developed" from before this visit: shown as idle */
+
+static void dr_list(void)
+{
+    const struct wf_roll *r = wf_roll_now();
+    const struct wf_shelf *s = wf_shelf_now();
+    int n = 0, cam = 0;
+    if (wf_roll_open(r) && r->nshot > 0)
+    {
+        struct dr_item *it = &dr_it[n++];
+        it->num = cam = r->num; it->dev = r->dev < 2 ? 1 : r->dev; it->film = r->film; it->own = r->own ? r->own : r->film;
+        it->exp = r->exp; it->state = r->state; it->nshot = r->nshot; it->left = wf_roll_left(r);
+        it->ndev = wf_roll_ndev(r); it->cam = 1;
+    }
+    for (int k = 0; k < s->n && n < DR_NIT; k++)
+    {
+        const struct wf_shelf_ent *e = &s->e[k];
+        if (e->num == cam) continue;
+        struct dr_item *it = &dr_it[n++];
+        it->num = e->num; it->dev = e->dev; it->film = e->film; it->own = e->own; it->exp = e->exp; it->state = e->state;
+        it->nshot = e->nshot; it->left = e->left; it->ndev = e->ndev; it->cam = 0;
+    }
+    dr_nit = n;
+    dr_isel = 0;
+    for (int k = 0; k < n; k++)
+        if (dr_it[k].num == dr_snum && dr_it[k].cam == dr_scam) dr_isel = k;
+    if (n) { dr_snum = dr_it[dr_isel].num; dr_scam = dr_it[dr_isel].cam; }
+    if (dr_pfoc == DR_FOC_FILM && !(n && !dr_it[dr_isel].left)) dr_pfoc = DR_FOC_ROLL;
+}
+static inline const struct dr_item *dr_cur(void) { return dr_nit ? &dr_it[dr_isel] : 0; }
+static inline int dr_again(void) { return dr_nit && !dr_it[dr_isel].left; }   /* developed: a develop again */
+static int dr_afilm_id(void) { const struct dr_item *it = dr_cur(); return !it ? 0 : dr_afilm ? dr_afilm : it->own; }
 
 /* developed tone of level v (0..1000): shadows to a near black red, highlights to the paper */
 static void tone(int v, int out[3])
@@ -173,8 +221,13 @@ static void dark_enter(void)
     dr_pready = -1;
     dr_gen = 0xFFFFFFFFu;
     dr_confirm = 0;
-    dr_pfoc = 0;
     msg = 0;
+    dr_old = wf_dark_view()->state == WF_DR_DONE;          /* the last run's end: this visit picks a roll again */
+    if (dr_ret) { dr_ret = 0; dr_pfoc = DR_FOC_FILM; return; }   /* back from the film pick */
+    dr_pfoc = 0;
+    dr_snum = -1;                                          /* the camera's roll with frames, else the newest shelf roll */
+    dr_afilm = 0;
+    wf_shelf_rescan();                                     /* the card may be another one */
 }
 
 /* a luma image (lw x lh) drawn into (x, y, w, h) with ramp base / n levels, nearest sampling */
@@ -315,7 +368,8 @@ static const char *phase_text(int ph)
  * UP / DOWN pick one, LEFT / RIGHT / the wheel change it (wf_menu.c keeps them and saves the config) */
 #define DR_RX0 384
 #define DR_RX1 696
-#define DR_RY  208
+#define DR_RY  230                                 /* (owner 11-17: under the ROLL row, the film / Film row and the */
+                                                   /* status line: the PRINT label clear of the status at 172) */
 #define DR_RH  25
 
 static void dr_prows(void)
@@ -381,21 +435,134 @@ static void dr_ppreview(void)
         text_r(F_13, px0 + pw - pw * 7 / 100, py0 + ph - ph * 7 / 100 - ui_texth(F_13), dt, C_GRN);
 }
 
+static void dots_c(int font, int cx, int y, const char *const *s, int n, int gap, int c, int dc);
+/* the ROLL row (owner 11-17, the shelf): "< ROLL 021 . on the shelf >" and "2/4" at the right; LEFT / RIGHT / the
+ * wheel pick another roll while it has the focus */
+#define DR_SY 110
+#define DR_FY 138
+#define DR_IY (DR_RY + (WF_PO_N - 1) * DR_RH + 35)   /* the idle block's two lines under the PRINT rows (340, 362) */
+static void dr_arrows(int y, int x0, int x1, int on)
+{
+    wfg_tri(x1 - 10, y + 5, x1 - 5, y + 10, x1 - 10, y + 15, on ? C_AMBER : C_LINE);
+    wfg_tri(x0 + 10, y + 5, x0 + 5, y + 10, x0 + 10, y + 15, on ? C_AMBER : C_LINE);
+}
+static void dr_rollrow(int foc)
+{
+    const struct dr_item *it = dr_cur();
+    char b[48], c[24];
+    int cx = (DR_RX0 + DR_RX1) / 2;
+    if (foc)
+    {
+        wfg_rrect(DR_RX0, DR_SY - 1, DR_RX1, DR_SY + 19, 6, C_AMBERD, -1, 0);
+        wfg_rrect(DR_RX0, DR_SY - 1, DR_RX0 + 3, DR_SY + 19, 2, C_AMBER, -1, 0);
+    }
+    dr_arrows(DR_SY, DR_RX0 + 4, DR_RX1, foc && dr_nit > 1);
+    if (!it) { text_c(F_15, cx, DR_SY + 1, "No rolls to develop", C_TXT3); return; }
+    const char *s[2] = { b, it->cam ? "in the camera" : it->left ? "on the shelf" : "developed" };
+    snprintf(b, sizeof b, "ROLL %03d", it->num);
+    dots_c(F_15, cx - 8, DR_SY + 1, s, 2, 18, foc ? C_TXT : C_TXT2, foc ? C_AMBER : C_TXT3);
+    if (dr_nit > 1)
+    {
+        snprintf(c, sizeof c, "%d/%d", dr_isel + 1, dr_nit);
+        text_r(F_13, DR_RX1 - 18, DR_SY + 3, c, C_TXT3);
+    }
+}
+/* the Film row of a develop again: the roll's own film, or the one picked in the browser (SET) */
+static void dr_filmrow(int foc)
+{
+    const struct wf_film *f = wf_film_by_id(dr_afilm_id());
+    int y = DR_FY;
+    if (foc)
+    {
+        wfg_rrect(DR_RX0, y - 1, DR_RX1, y + 19, 6, C_AMBERD, -1, 0);
+        wfg_rrect(DR_RX0, y - 1, DR_RX0 + 3, y + 19, 2, C_AMBER, -1, 0);
+    }
+    ui_text(F_15, DR_RX0 + 12, y + 1, "Film", foc ? C_TXT : C_TXT2);
+    int xr = DR_RX1 - 4;
+    if (foc)
+    {
+        static const char *const k[] = { "SET", "Pick", 0 };
+        int w = hints(k, 2000, y + 2, C_TXT2, C_TXT3) - 2000 - 12;
+        hints(k, DR_RX1 - 6 - w, y + 2, C_TXT2, C_TXT3);
+        xr = DR_RX1 - 18 - w;
+    }
+    const char *nm = f ? f->name : "?";
+    int maxw = xr - (DR_RX0 + 64);
+    if (ui_textw(F_15, nm) > maxw && f && f->shortname) nm = f->shortname;
+    text_r(F_15, xr, y + 1, nm, dr_afilm && dr_afilm != dr_cur()->own ? C_AMBER : foc ? C_TXT : C_TXT2);
+}
+/* the idle info block (no run, or a run's end from before): the ROLL row, the film (or the Film row), what it does */
+static void dr_idle(const struct wf_dark_view *v)
+{
+    const struct dr_item *it = dr_cur();
+    int cx = 540;
+    char b[64], nm[12];
+    dr_rollrow(dr_pfoc == DR_FOC_ROLL);
+    if (!it)
+    {
+        text_c(F_15, cx, 172, "Nothing to develop", C_TXT3);
+        dr_prows();
+        text_c(F_15, cx, DR_IY, "Shoot a roll first", C_TXT);
+        text_c(F_13, cx, DR_IY + 22, "WindyFilm in Darkroom mode: SET on a film loads one", C_TXT2);
+        return;
+    }
+    int again = dr_again(), left = again ? it->nshot : it->left;
+    if (again) dr_filmrow(dr_pfoc == DR_FOC_FILM);
+    else
+    {
+        const struct wf_film *f = wf_film_by_id(it->film);
+        text_c(F_ML28, cx, DR_FY, f ? f->name : "?", C_TXT);
+    }
+    if (again)                                             /* "Developed 12/12 . develop again" */
+    {
+        const char *s[2] = { b, "develop again" };
+        if (it->ndev) snprintf(b, sizeof b, "Developed %d/%d", it->ndev, it->nshot);
+        else snprintf(b, sizeof b, "Closed, %d frame%s", it->nshot, it->nshot == 1 ? "" : "s");
+        dots_c(F_15, cx, 172, s, 2, 18, C_AMBER, C_AMBER);
+    }
+    else
+    {
+        if (it->dev >= 2) snprintf(b, sizeof b, "Develop %d: %d frame%s to develop", it->dev, left, left == 1 ? "" : "s");
+        else snprintf(b, sizeof b, "%d frame%s to develop", left, left == 1 ? "" : "s");
+        text_c(F_15, cx, 172, b, C_AMBER);
+    }
+    dr_prows();                                            /* the print finishes (no run: they can change) */
+    if (!dr_old && (v->state == WF_DR_STOPPED || v->state == WF_DR_FAIL))
+        text_c(F_15, cx, DR_IY, v->msg && *v->msg ? v->msg : "Stopped", v->state == WF_DR_FAIL ? C_WARN : C_TXT);
+    else if (it->cam)
+        text_c(F_15, cx, DR_IY, "Paper and chemistry ready", C_TXT);
+    else
+    {
+        wf_roll_name(it->num, again ? it->dev + 1 : it->dev, nm);
+        snprintf(b, sizeof b, "Prints go to ROLLS/%s", nm);
+        text_c(F_15, cx, DR_IY, b, C_TXT);
+    }
+    int m = (wf_dark_eta_left(v, left) + 59) / 60;
+    snprintf(b, sizeof b, "About %d min for the roll", m < 1 ? 1 : m);
+    text_c(F_13, cx, DR_IY + 22, b, C_TXT2);
+}
+
 static void dr_right(const struct wf_dark_view *v, int now)
 {
+    if (v->state == WF_DR_IDLE || v->state == WF_DR_STOPPED || v->state == WF_DR_FAIL || (dr_old && v->state == WF_DR_DONE))
+    {
+        dr_idle(v);
+        return;
+    }
     const struct wf_roll *r = wf_roll_now();
-    const struct wf_film *f = wf_film_by_id(r->film);
+    int vn = v->num ? v->num : r->num, vf = v->num ? v->film : r->film, vt = v->num ? v->total : r->nshot;
+    const struct wf_film *f = wf_film_by_id(vf);
     int cx = 540;
-    char b[64];
-    snprintf(b, sizeof b, "ROLL %03d", r->num);
+    char b[64], nm[12];
+    snprintf(b, sizeof b, "ROLL %03d", vn);
     spaced_c(F_13, cx, 122, b, C_TXT3, 3);
     text_c(F_ML28, cx, 138, f ? f->name : "?", C_TXT);
-    int left = v->state == WF_DR_IDLE ? wf_roll_left(r) : v->left;
+    int left = v->left;
     int eta = wf_dark_eta_s(v);
     if (v->state == WF_DR_RUN || v->state == WF_DR_STOPPING)
     {
         if (v->frame < 0) snprintf(b, sizeof b, "Getting ready");   /* the look's effects first (WF_DP_MIX) */
-        else snprintf(b, sizeof b, "Frame %d of %d", v->frame + 1, r->nshot);
+        else snprintf(b, sizeof b, "Frame %d of %d", v->frame + 1, vt);
         text_c(F_15, cx, 172, b, C_AMBER);
         dr_dial(cx, 250, 58, v->t_frame, v->prog, 1);
         text_c(F_15, cx, 318, v->state == WF_DR_STOPPING ? "Stopping after this step" : phase_text(v->phase), C_TXT);
@@ -407,33 +574,20 @@ static void dr_right(const struct wf_dark_view *v, int now)
         wfg_rrect(cx - 100, 362, cx + 100, 365, 2, C_TRACK, -1, 0);
         wfg_rrect(cx - 100, 362, cx - 100 + 200 * v->prog / 1000, 365, 2, C_AMBER, -1, 0);
     }
-    else if (v->state == WF_DR_DONE)
+    else                                                   /* WF_DR_DONE */
     {
-        text_c(F_15, cx, 172, "Roll developed", C_GRN);
+        text_c(F_15, cx, 172, v->num && v->dev >= 2 ? "Roll developed again" : "Roll developed", C_GRN);
         dr_dial(cx, 250, 58, 0, 1000, 0);
-        snprintf(b, sizeof b, "%d prints in ROLLS/ROLL%03d", wf_roll_ndev(r), r->num);
+        wf_roll_name(vn, v->num ? v->dev : 1, nm);
+        snprintf(b, sizeof b, "%d prints in ROLLS/%s", v->num ? v->done : wf_roll_ndev(r), nm);
         text_c(F_15, cx, 318, b, C_TXT);
         text_c(F_13, cx, 340, "Copy them from the card's ROLLS folder", C_TXT2);
-    }
-    else
-    {
-        int m = (eta + 59) / 60;
-        snprintf(b, sizeof b, "%d frame%s to develop", left, left == 1 ? "" : "s");
-        text_c(F_15, cx, 172, b, C_AMBER);
-        dr_prows();                                        /* the print finishes (no run: they can change) */
-        if (v->state == WF_DR_STOPPED || v->state == WF_DR_FAIL)
-            text_c(F_15, cx, 318, v->msg && *v->msg ? v->msg : "Stopped", v->state == WF_DR_FAIL ? C_WARN : C_TXT);
-        else
-            text_c(F_15, cx, 318, "Paper and chemistry ready", C_TXT);
-        snprintf(b, sizeof b, "About %d min for the roll", m < 1 ? 1 : m);
-        text_c(F_13, cx, 340, b, C_TXT2);
     }
 }
 
 /* Screen Off (owner 11-16, DESIGN 3.11): the screen's one control for it, a chip at the top right. Idle: UP from the
  * first print row (or DOWN from the last) focuses it; LEFT / RIGHT / the wheel switch it. While a run lives it is the
  * only control: always focused, the same keys. The icon is an LCD on its foot: lit for On, an empty outline for Off. */
-#define DR_FOC_SCR WF_PO_N                                 /* dr_pfoc of the chip (after the print rows) */
 static int dr_chip(int xr, int foc)                        /* right-aligned at xr; returns its width */
 {
     int off = wf_dk_scr == WF_DS_OFF, pad = foc ? 20 : 12;
@@ -462,7 +616,7 @@ static void dr_top(const struct wf_dark_view *v)
     clock_text(ck, sizeof ck);
     int run = v->state == WF_DR_RUN || v->state == WF_DR_STOPPING;
     int xr = WFUI_W - 12;
-    xr -= dr_chip(xr, run || (v->state != WF_DR_DONE && dr_pfoc == DR_FOC_SCR)) + 16;
+    xr -= dr_chip(xr, run || ((v->state != WF_DR_DONE || dr_old) && dr_pfoc == DR_FOC_SCR)) + 16;
     if (ck[0]) xr -= text_r(F_15, xr, 8, ck, C_TXT2) + 14;
     if (v->battery >= 0)
     {
@@ -482,14 +636,18 @@ static void dr_footer(const struct wf_dark_view *v)
     static const char *const k_run[] = { "MENU", "Stop", 0 };
     static const char *const k_conf[] = { "MENU", "Stop now", "SET", "Go on", 0 };
     static const char *const k_idle[] = { "SET", "Start", "MENU", "Back", 0 };
-    static const char *const k_done[] = { "MENU", "Close", 0 };
+    static const char *const k_done[] = { "SET", "Another roll", "MENU", "Close", 0 };
+    static const char *const k_film[] = { "SET", "Pick the film", "MENU", "Back", 0 };
+    static const char *const k_again[] = { "SET", "Develop again", "MENU", "Back", 0 };
+    static const char *const k_none[] = { "MENU", "Back", 0 };   /* an empty shelf: SET has nothing to start */
     const char *const *k = v->state == WF_DR_RUN ? (dr_confirm ? k_conf : k_run)
-                         : v->state == WF_DR_DONE ? k_done : k_idle;
+                         : v->state == WF_DR_DONE && !dr_old ? k_done : dr_pfoc == DR_FOC_FILM ? k_film
+                         : !dr_nit ? k_none : dr_again() ? k_again : k_idle;
     hints(k, 16, 455, C_TXT2, C_TXT3);
     int run = v->state == WF_DR_RUN || v->state == WF_DR_STOPPING;
     const char *h = run && wf_dk_scr == WF_DS_OFF ? "Screen Off: any key wakes it for 10 s"
                   : run ? "Keep the camera on"
-                  : v->state == WF_DR_DONE ? "" : "The shutter is locked while the darkroom works";
+                  : v->state == WF_DR_DONE && !dr_old ? "" : "The shutter is locked while the darkroom works";
     text_r(F_13, WFUI_W - 16, 455, h, C_TXT3);
 }
 
@@ -501,6 +659,8 @@ static void dark_render(int now)
         dr_pal_dev(v->print_ready == 2 || v->state == WF_DR_DONE ? 1000 : v->print_ready ? v->expose : 0);
         dr_pready = v->print_ready;
     }
+    if (dr_old && v->state != WF_DR_DONE) dr_old = 0;      /* a new run: its own end shows */
+    dr_list();
     wfg_background(0, WFUI_H);
     dr_top(v);
     dr_wire(v, now);
@@ -524,7 +684,10 @@ static int dark_key(int key, int now)
     }
     int lr = key == MODULE_KEY_PRESS_LEFT || key == MODULE_KEY_WHEEL_LEFT || key == MODULE_KEY_WHEEL_UP
           || key == MODULE_KEY_PRESS_RIGHT || key == MODULE_KEY_WHEEL_RIGHT || key == MODULE_KEY_WHEEL_DOWN;
-    if (lr && (run || (v->state != WF_DR_DONE && dr_pfoc == DR_FOC_SCR)))
+    int neg = key == MODULE_KEY_PRESS_LEFT || key == MODULE_KEY_WHEEL_LEFT || key == MODULE_KEY_WHEEL_UP;
+    int idle = !run && (v->state != WF_DR_DONE || dr_old);  /* the rows work (a run's end: SET goes back to them) */
+    dr_list();
+    if (lr && (run || (idle && dr_pfoc == DR_FOC_SCR)))
     {
         wf_dk_scr_step(1);                                 /* two values: either way switches */
         return 0;
@@ -533,24 +696,52 @@ static int dark_key(int key, int now)
     {
     case MODULE_KEY_PRESS_SET: case MODULE_KEY_JOY_CENTER:
         if (run) { dr_confirm = 0; break; }
-        if (v->state != WF_DR_DONE)
+        if (!idle) { dr_old = 1; dr_pfoc = DR_FOC_ROLL; break; }   /* "Another roll": the ROLL row */
+        if (dr_pfoc == DR_FOC_FILM)                        /* develop again: the browser picks the film */
         {
-            int rc = wf_dark_start();
+            const struct dr_item *it = dr_cur();
+            dr_ret = 1;
+            wfui_pick_film(dr_afilm_id(), it->num, it->dev + 1);
+            break;
+        }
+        {
+            const struct dr_item *it = dr_cur();
+            int rc = !it ? -1 : it->cam ? wf_dark_start() : wf_dark_start_roll(it->num, dr_again(), dr_again() ? dr_afilm : 0);
             if (rc == -1) say("Nothing to develop", now);
             else if (rc == -3) say("Not now: the camera is busy", now);
+            else if (rc == 0) dr_old = 0;
         }
         break;
-    case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:  /* the print finishes + the Screen chip (no run, not done) */
-        if (!run && v->state != WF_DR_DONE)
-            dr_pfoc = (dr_pfoc + (key == MODULE_KEY_PRESS_UP ? WF_PO_N : 1)) % (WF_PO_N + 1);
+    case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:  /* chip, ROLL, [Film], the print finishes (no run) */
+        if (idle)
+        {
+            int st[WF_PO_N + 3], n = 0, i = 0;
+            st[n++] = DR_FOC_SCR;
+            st[n++] = DR_FOC_ROLL;
+            if (dr_again()) st[n++] = DR_FOC_FILM;
+            for (int k = 0; k < WF_PO_N; k++) st[n++] = k;
+            while (i < n - 1 && st[i] != dr_pfoc) i++;
+            dr_pfoc = st[(i + (key == MODULE_KEY_PRESS_UP ? n - 1 : 1)) % n];
+        }
         break;
     case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_UP:
     case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_DOWN:
-        if (!run && v->state != WF_DR_DONE)
-            wf_popt_step(dr_pfoc, key == MODULE_KEY_PRESS_LEFT || key == MODULE_KEY_WHEEL_LEFT || key == MODULE_KEY_WHEEL_UP
-                                  ? -1 : 1);
+        if (!idle) break;
+        if (dr_pfoc == DR_FOC_ROLL)                        /* another roll */
+        {
+            if (dr_nit > 1)
+            {
+                dr_isel = (dr_isel + (neg ? dr_nit - 1 : 1)) % dr_nit;
+                dr_snum = dr_it[dr_isel].num;
+                dr_scam = dr_it[dr_isel].cam;
+                dr_afilm = 0;
+            }
+        }
+        else if (dr_pfoc >= 0 && dr_pfoc < WF_PO_N)
+            wf_popt_step(dr_pfoc, neg ? -1 : 1);
         break;
     case MODULE_KEY_MENU: case MODULE_KEY_TRASH: case MODULE_KEY_PLAY: case MODULE_KEY_LV:
+        if (!run && dr_pfoc == DR_FOC_FILM && key == MODULE_KEY_MENU) { dr_pfoc = DR_FOC_ROLL; break; }
         if (!run) return 1;
         if (v->state == WF_DR_STOPPING) break;
         if (!dr_confirm) { dr_confirm = 1; say("MENU again to stop (this frame is done again next time)", now); break; }
@@ -771,6 +962,12 @@ void wfdr_notice(uint8_t *vram, int pitch, int mode)
     wfg_pitch = cp;
 }
 
+/* the browser's film pick for a develop again ends (wf_ui.c): film, or -1 = none (MENU); the Darkroom comes back */
+void wfdr_pick_done(int film)
+{
+    if (film > 0) dr_afilm = film;
+}
+
 /* =================================================================== dispatch (wf_ui.c) */
 void wfdr_enter(int scr)
 {
@@ -808,5 +1005,7 @@ int wfdr_dark(int scr) { return scr == WFUI_SCR_DARK && dr_dark; }
 #ifdef WF_HOST
 const char *wfdr_host_msg(void) { return msg ? msg : ""; }
 int wfdr_host_pfoc(void) { return dr_pfoc; }
+int wfdr_host_sel(void) { dr_list(); return dr_nit ? dr_it[dr_isel].num : 0; }
+int wfdr_host_afilm(void) { return dr_afilm_id(); }
 int wfdr_host_stop_ask(void) { return dr_confirm; }
 #endif

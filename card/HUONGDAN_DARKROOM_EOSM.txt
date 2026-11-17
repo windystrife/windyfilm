@@ -14,6 +14,12 @@ Thay đổi 15/11 (sau log RAWB9):
 - (15/11 tối) Cuộn bằng lon Film stage (âm bản x print stock) và các hàng knob (11 hàng từ 16/11): mục 4
   "CUỘN PHIM FILM STAGE", thử ở 5s.
 
+Thay đổi 17/11 tối (thẻ RAWB25 nếu chủ duyệt, nhánh wf-onescreen):
+- Kệ cuộn: nạp cuộn mới không còn bỏ cuộn cũ. Cuộn đã hết / đã tua lại mà còn kiểu chưa
+  tráng được đặt lên kệ (ROLLS/ROLL001/WFROLL.TXT); Darkroom tráng sau. Thử ở bước ad.
+- Tráng lại: cuộn đã tráng xong tráng lại được từ CR2, đổi phim được; bản in mới vào
+  thư mục mới ROLLS/ROLL001B (không đè bản in cũ). Thử ở bước ae; trường hợp biên ở af.
+
 Thay đổi 17/11 chiều (thẻ RAWB24, nhánh wf-onescreen, từ RAWB23):
 - Screen On: module giữ màn hình sáng suốt lúc tráng (thẻ RAWB23 bị tắt màn hình giữa
   chừng một kiểu). Mỗi giây module xem màn hình, tắt thì bật lại; log mỗi kiểu một dòng
@@ -76,10 +82,11 @@ bộ code Darkroom là code mới của WindyFilm (không dùng code Film Roll).
 - Cuộn đang chụp dở mà đã có kiểu: không nạp cuộn khác được ("This roll has frames:
   PLAY develops it"); hàng Exposures mờ, ghi "on the roll".
 - Cuộn đã hết (hoặc đã tua lại) mà chưa tráng: hàng Exposures ghi "next roll" (số kiểu
-  của cuộn sau). Chọn phim rồi SET: máy hỏi "Roll 001 has 12 undeveloped frames. Close
-  it and load the new roll? (the RAW/JPG files stay on the card)". SET: đóng cuộn cũ
-  (các kiểu chưa tráng bị bỏ, file RAW / JPG vẫn còn trên thẻ) và nạp cuộn mới. MENU:
-  huỷ. Không có hàng chờ nhiều cuộn.
+  của cuộn sau). Chọn phim rồi SET: máy hỏi "Load the new roll?" và "Roll 001 (12 frames)
+  goes on the shelf: the Darkroom develops it later." SET (Shelve and load): cuộn cũ lên
+  kệ, giữ nguyên các kiểu chưa tráng, rồi nạp cuộn mới. MENU: huỷ. Kệ giữ nhiều cuộn
+  (liệt kê 16 cuộn mới nhất), đọc từ thẻ nên tắt máy hay đổi thẻ vẫn còn (mục 4 "KỆ CUỘN
+  VÀ TRÁNG LẠI").
 - Chip sang JPEG / RAW develop khi cuộn đã có kiểu: máy hỏi "End the roll now" (SET:
   cuộn tua lại, để riêng chờ Darkroom, máy chụp tiếp ở chế độ đã chọn) hay "Keep the
   roll" (MENU). Cuộn chưa có kiểu thì được lấy ra luôn.
@@ -154,6 +161,27 @@ không có CR2 thì không được đếm.
   đặt Camera JPEG = Overwrite, xem "ĐÈ LÊN JPEG CỦA MÁY" bên dưới; CR2 thì không bao giờ).
 - Trong bản in, EXIF của Canon được giữ; UserComment ghi
   "WindyFilm Darkroom: <phim / look> | ROLL 001 F01".
+
+KỆ CUỘN VÀ TRÁNG LẠI (17/11 tối)
+- Trên cùng khối thông tin bên phải có hàng ROLL: "< ROLL 023 . on the shelf   2/4 >".
+  Lên / xuống tới hàng này, trái / phải hoặc bánh xe để đổi cuộn: cuộn trong máy ("in the
+  camera") trước, rồi các cuộn trên kệ, mới nhất trước ("on the shelf" = còn kiểu chưa
+  tráng, "developed" = đã tráng xong). SET: tráng cuộn đang hiện.
+- Cuộn trên kệ: tên phim, "12 frames to develop", "Prints go to ROLLS/ROLL023". Darkroom
+  tự nạp phim của cuộn để tráng, xong trả lại phim trước đó. Cuộn trong máy nằm yên (đã
+  hết thì vẫn khoá nút chụp sau khi tráng xong cuộn kia).
+- Cuộn đã tráng: "Developed 12/12 . develop again" và hàng Film (mặc định phim của cuộn).
+  SET trên hàng Film: mở browser để chọn phim (đầu màn hình "Film for ROLL 021, develop
+  2"); SET "Use this film" quay lại Darkroom với phim đó, MENU quay lại không đổi. Rồi SET
+  (Develop again): tráng lại cả cuộn từ CR2 với phim đã chọn và cài đặt PRINT hiện tại.
+- Bản in lần tráng thứ 2 vào ROLLS/ROLL021B, lần 3 ROLL021C ... tới Z (thẻ trong máy chỉ
+  nhận tên tối đa 8 ký tự, nên không dùng ROLL021_2). Bản in lần đầu không bị đụng tới.
+  DCIM theo Camera JPEG như mọi lần tráng. UserComment ghi thêm "| develop 2".
+- CR2 nào đã bị xoá khỏi thẻ thì kiểu đó bị bỏ qua (log "... IMG_0602.CR2 is gone: skipped").
+- Không có cuộn trong máy, kệ trống: "No rolls to develop" / "Shoot a roll first".
+- Cuộn tráng trước bản này không có ROLLS/ROLLnnn/WFROLL.TXT nên không lên kệ (đã mất danh
+  sách kiểu), trừ cuộn cuối cùng còn ghi trong máy; log đếm chúng ("roll folders without a
+  roll file").
 
 VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như cũ)
 - Trên màn hình Darkroom (lúc chưa tráng / đã dừng) có khối PRINT 4 dòng (dòng thứ 4
@@ -454,6 +482,35 @@ ac. (17/11, RAWB25) Over + print (hai file trong DCIM): Camera JPEG = Over + pri
    thẻ có thư mục DCIM/100WFILM. Xem PLAY có hiện thư mục đó không (nếu cần, chọn thư mục
    trong menu Canon rồi chọn lại 100CANON). Chụp thêm 1 tấm: nó phải vào 100CANON, số file
    nối tiếp như thường. Ghi lại cả hai cách, cách nào máy hiện đúng.
+ad. (17/11 tối, RAWB25) Kệ cuộn: nạp cuộn 3 kiểu, chụp hết (cuộn A). Trong browser chọn phim
+   khác, SET: phải hiện "Load the new roll?", tên phim mới, và "Roll 00n (3 frames) goes on
+   the shelf: the Darkroom develops it later." SET (Shelve and load): cuộn mới nạp (cuộn B,
+   số tiếp theo); log có "roll: 00n on the shelf (a new roll): 3/3, 3 to develop, rewound"
+   và "roll: shelf 1 roll (00n 3 to develop), N ms". Chụp hết cuộn B (nút chụp khoá như
+   thường). Tắt máy, bật lại: log lại có "roll: shelf 1 roll (00n 3 to develop)", cuộn B
+   vẫn trong máy. PLAY: Darkroom mở trên cuộn B ("in the camera"); lên hàng ROLL, phải:
+   cuộn A "on the shelf", "3 frames to develop", "Prints go to ROLLS/ROLL00n". SET: tráng
+   cuộn A (log "dark: roll 00n from the shelf: film ..., 3 to develop"); bản in vào
+   ROLLS/ROLL00n. Xong: cuộn B vẫn 3 kiểu chưa tráng, nút chụp vẫn khoá; log "dark: film ...
+   back" nếu phim hai cuộn khác nhau. Ghi lại: số ms cuối dòng "roll: shelf", kệ có mất
+   cuộn nào sau khi bật lại máy không.
+ae. (17/11 tối, RAWB25) Tráng lại: trong Darkroom, hàng ROLL tới cuộn A (giờ ghi "developed",
+   "Developed 3/3 . develop again"). Xuống hàng Film, SET: browser mở, đầu màn hình "Film
+   for ROLL 00n, develop 2", màu các lon phải đúng (không đỏ). Chọn phim khác (B&W chẳng
+   hạn), SET "Use this film": quay lại Darkroom, hàng Film ghi phim mới (màu cam). Thử một
+   lần MENU trong browser: quay lại, phim không đổi. SET (Develop again): log "dark: roll 00n
+   develop 2: film ..., 3 frames, prints in ROLLS/ROLL00nB". Trên đầu đọc thẻ:
+   ROLLS/ROLL00nB có 3 bản in phim mới và WFROLL.TXT (có dòng dev=2); ROLLS/ROLL00n y như
+   trước (cỡ, giờ sửa). EXIF UserComment của bản in mới có "| develop 2". Nếu Camera JPEG
+   khác Keep, DCIM theo đúng cài đặt đó như mọi lần tráng. Tráng lại lần nữa: ROLL00nC.
+af. (17/11 tối, RAWB25) Trường hợp biên: (1) trên máy tính xoá một CR2 của một cuộn trên kệ
+   (chỉ CR2, giữ JPG), cắm thẻ lại, tráng cuộn đó: kiểu đó bị bỏ qua, log "... IMG_nnnn.CR2
+   is gone: skipped", các kiểu khác in bình thường. (2) Close roll khi cuộn trong máy còn
+   kiểu: cuộn lên kệ (log "on the shelf (closed)"), hàng ROLL ghi "Closed, n frames .
+   develop again"; SET tráng nó, bản in vào ROLL00nB. (3) Thẻ không có cuộn nào (thẻ mới),
+   browser chế độ Darkroom, PLAY: không vào, báo "Load a roll first"; menu ML "Darkroom" mở
+   được màn hình: "No rolls to develop", "Shoot a roll first", chân màn hình chỉ có MENU
+   Back. Ghi lại chữ nào hiện sai hay lệch.
 
 
 6. GỬI LẠI

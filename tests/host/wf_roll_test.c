@@ -15,7 +15,7 @@ static int has_cr2(void *ctx, int folder, int file) { (void)ctx; (void)folder; r
 static int same(const struct wf_roll *a, const struct wf_roll *b)
 {
     if (a->num != b->num || a->film != b->film || a->exp != b->exp || a->state != b->state || a->nshot != b->nshot
-        || a->seen_folder != b->seen_folder || a->seen_file != b->seen_file)
+        || a->seen_folder != b->seen_folder || a->seen_file != b->seen_file || a->dev != b->dev || a->own != b->own)
         return 0;
     for (int i = 0; i < a->nshot; i++)
         if (a->folder[i] != b->folder[i] || a->file[i] != b->file[i] || a->fst[i] != b->fst[i])
@@ -156,6 +156,72 @@ int main(void)
     for (int i = 0; i < 36; i++) big.fst[i] = WF_RF_KEPT;
     big.state = WF_RS_DONE;
     roundtrip(&big, "36 frames, longest numbers");
+
+    /* the shelf (owner 11-17, DESIGN 3.15): a pass's 8.3 name, a roll made ready from the shelf (a CR2 gone: kept), a
+       develop again (dev= / own= in its file, its own folder), the last pass */
+    {
+        char nm[12];
+        int n = 0, d = 0;
+        wf_roll_name(21, 0, nm);
+        CHECK(!strcmp(nm, "ROLL021"), "name, pass 1: %s", nm);
+        wf_roll_name(21, 1, nm);
+        CHECK(!strcmp(nm, "ROLL021"), "name, dev 1 = pass 1: %s", nm);
+        wf_roll_name(21, 2, nm);
+        CHECK(!strcmp(nm, "ROLL021B"), "name, pass 2: %s", nm);
+        wf_roll_name(999, WF_ROLL_MAXDEV, nm);
+        CHECK(!strcmp(nm, "ROLL999Z"), "name, pass 26: %s", nm);
+        CHECK(wf_roll_name_parse("ROLL021", &n, &d) == 0 && n == 21 && d == 1, "parse ROLL021: %d %d", n, d);
+        CHECK(wf_roll_name_parse("roll021c", &n, &d) == 0 && n == 21 && d == 3, "parse roll021c (any case): %d %d", n, d);
+        CHECK(wf_roll_name_parse("ROLL999Z", &n, &d) == 0 && n == 999 && d == 26, "parse ROLL999Z: %d %d", n, d);
+        CHECK(wf_roll_name_parse("ROLL021A", &n, &d) == -1 && wf_roll_name_parse("ROLL000", &n, &d) == -1
+              && wf_roll_name_parse("ROLL21", &n, &d) == -1 && wf_roll_name_parse("ROLL021BB", &n, &d) == -1
+              && wf_roll_name_parse("ROLLS", &n, &d) == -1 && wf_roll_name_parse("ROLL0211", &n, &d) == -1
+              && wf_roll_name_parse("FILM021", &n, &d) == -1, "parse: not a pass name");
+
+        struct wf_roll a, b2;
+        wf_roll_reset(&a);
+        CHECK(wf_roll_load(&a, 57, 6, 100, 600) == 0, "a roll of 6");
+        a.num = 21;
+        wf_roll_seen(&a, 100, 606, has_cr2, 0);
+        CHECK(a.state == WF_RS_FULL && a.nshot == 6, "full at 6 (%d, state %d)", a.nshot, a.state);
+        no_cr2_file = 603;
+        CHECK(wf_roll_shelf_prep(&a, has_cr2, 0) == 5 && a.state == WF_RS_REWOUND && a.fst[2] == WF_RF_KEPT
+              && a.fst[3] == WF_RF_SHOT, "shelf prep: rewound, F03's CR2 gone: kept, 5 to develop (state %d)", a.state);
+        no_cr2_file = -1;
+        roundtrip(&a, "a shelf roll");
+        CHECK(wf_roll_dir(&a, "B:/", 2, p, sizeof p) > 0 && !strcmp(p, "B:/ROLLS/ROLL021/WFROLL.TXT"), "shelf file %s", p);
+        wf_roll_text(&a, buf, sizeof buf);
+        CHECK(!strstr(buf, "dev=") && !strstr(buf, "own="), "pass 1: no dev= / own= (the file as before)");
+        for (int i = 0; i < 6; i++)
+            if (a.fst[i] == WF_RF_SHOT)
+                wf_roll_mark(&a, i, WF_RF_DEV);
+        CHECK(a.state == WF_RS_DONE && wf_roll_shelf_prep(&a, has_cr2, 0) == 0 && a.state == WF_RS_DONE,
+              "developed: nothing left (state %d)", a.state);
+        no_cr2_file = 605;
+        CHECK(wf_roll_again(&a, 88, has_cr2, 0) == 5 && a.dev == 2 && a.own == 57 && a.film == 88
+              && a.state == WF_RS_REWOUND && a.fst[2] == WF_RF_SHOT && a.fst[4] == WF_RF_KEPT && wf_roll_ndev(&a) == 0,
+              "develop again: pass 2, film 88 (own 57), every frame with its CR2 again, F05 gone: kept (dev %d own %d)",
+              a.dev, a.own);
+        no_cr2_file = -1;
+        CHECK(wf_roll_text(&a, buf, sizeof buf) == WF_ROLL_FILE && strstr(buf, "\ndev=2\nown=57\n")
+              && wf_roll_parse(&b2, buf, WF_ROLL_FILE) == 0 && b2.dev == 2 && b2.own == 57 && b2.film == 88
+              && same(&a, &b2), "pass 2 reads back (dev %d own %d)", b2.dev, b2.own);
+        CHECK(wf_roll_dir(&a, "B:/", 1, p, sizeof p) > 0 && !strcmp(p, "B:/ROLLS/ROLL021B"), "pass 2 folder %s", p);
+        CHECK(wf_roll_out(&a, 0, "B:/", p, sizeof p) > 0 && !strcmp(p, "B:/ROLLS/ROLL021B/F01_0601.JPG"), "pass 2 out %s", p);
+        CHECK(wf_roll_again(&a, 57, has_cr2, 0) == 6 && a.dev == 3 && a.own == 57 && a.film == 57,
+              "pass 3 from a stopped pass 2: all 6, the roll's own film kept as own (dev %d)", a.dev);
+        a.dev = WF_ROLL_MAXDEV;
+        CHECK(wf_roll_again(&a, 57, has_cr2, 0) == -1 && a.dev == WF_ROLL_MAXDEV, "no pass after Z");
+        wf_roll_text(&a, buf, sizeof buf);
+        char *dv = strstr(buf, "dev=26");
+        CHECK(dv && wf_roll_parse(&b2, buf, WF_ROLL_FILE) == 0 && b2.dev == 26, "pass 26 reads back");
+        if (dv)
+            dv[5] = '7';
+        CHECK(wf_roll_parse(&b2, buf, WF_ROLL_FILE) == -1, "dev=27: not ours");
+        struct wf_roll e0;
+        wf_roll_reset(&e0);
+        CHECK(wf_roll_again(&e0, 57, has_cr2, 0) == -1, "no develop again of an empty roll");
+    }
 
     printf("RESULT roll %d / %d\n", checks - fails, fails);
     return fails != 0;

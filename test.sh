@@ -39,6 +39,7 @@ ALL="$ALL STAGE:v1"                                # 11-16: a version 1 stage pa
 ALL="$ALL ROLL:mem"                               # 11-16: RAWB17 "no memory": the camera's one SRM chunk, the frame split, real RAW+L pairs
 ALL="$ALL LIGHT:awb"                              # 11-17: Light Auto = Canon's Auto WB in the Darkroom (CR2 ColorData)
 ALL="$ALL ROLL:jpeg"                              # 11-16: Camera JPEG Overwrite + the logo on real RAW+L pairs
+ALL="$ALL ROLL:shelf ROLL:shelfboot"               # 11-17: many rolls waiting (the shelf), develop again into ROLL001B; the shelf at boot
 MODES=${MODES:-$ALL}
 cam=$(echo $CAM | tr A-Z a-z)
 B=${OUT:-$R/build/$cam}

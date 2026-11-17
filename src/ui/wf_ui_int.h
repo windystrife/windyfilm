@@ -92,6 +92,7 @@ const char *wfc_why(int st);            /* a WFC_E_* code in words ("ok", "not o
 int  wfc_glow(const struct wf_film *f, uint8_t rgb[3]);   /* 1 = from the pack, 0 = group colour */
 void wfc_draw(const struct wf_film *f, int size, int x, int y, int bg);   /* pack image or the plain can */
 int  wfc_pal_used(void);                /* can colours in use: the pack's, or the plain cans' (WFC_PLAIN_N) */
+void wfc_pal_again(void);               /* place them again (the browser back after the Darkroom) */
 int  wfc_again(void);                   /* 1 = the pack failed for a reason that may pass (card busy, memory) */
 enum { WFC_OK = 0, WFC_E_NOFILE, WFC_E_HEADER, WFC_E_SIZES, WFC_E_MEM, WFC_E_READ, WFC_E_BUSY };
 #define WFC_PLAIN_N     (4 + WF_NGROUPS * 3)                            /* plain can colours: caps, label, 3 per group */
@@ -122,5 +123,10 @@ void wfdr_leave(int scr);
 const char *wfdr_dev_why(void);
 int  wfdr_dev_hint(int x, int y);
 int  wfdr_dev_hint_w(void);
+/* develop again's film (owner 11-17): the Darkroom's Film row opens the browser to pick one (film = the one now, num /
+   dev = the roll and the pass it makes, for its header); the browser's SET / MENU end it with wfdr_pick_done (film, or
+   -1 = none) and switch back to the Darkroom */
+void wfui_pick_film(int film, int num, int dev);
+void wfdr_pick_done(int film);
 
 #endif
