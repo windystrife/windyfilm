@@ -650,7 +650,7 @@ Stocks keep their Windy names, and there are no brand logos.
     and show the end-of-roll notice at once, so the press is answered. Whether Canon's half-press AF still runs under
     `UILOCK_SHUTTER` is a camera check.
   - With no roll on the camera nothing changes: no UI lock call, no key taken (host test).
-  - EOS M only (the 5D2 has no roll yet: `wf_roll_req_swap` returns -4 there).
+  - EOS M only (the 5D2 has no roll yet: `wf_roll_req_swap` returns -4 there). Both cameras from `dark-5d2` (3.16).
 - **End / close.** "End roll now" (menu) ends the roll early (the roll is rewound: no more frames); starting the darkroom rewinds a loaded roll first.
 - **A full or rewound roll keeps** (until the Darkroom develops it or Close roll): the film loaded and locked (another
   film is refused; the same film plays the load animation); Canon's own JPEG on any later shot (`WF_LU_NONE`; with RAW
@@ -986,7 +986,7 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     short buffers.
   - `tests/ui/dr_ui_test.c` 3b: the PRINT rows (Camera JPEG the fourth, Keep / Overwrite / Over + print) and the easel
     sketch.
-  - The 5D2 has no Darkroom: `wf_print.o` and WFPRINT.DAT are EOS M only.
+  - The 5D2 has no Darkroom: `wf_print.o` and WFPRINT.DAT are EOS M only (both cameras from `dark-5d2`, 3.16).
 
 ### 3.10 Paper finish (owner 2026-11-16, both cameras and the Darkroom web core)
 
@@ -1106,7 +1106,8 @@ picker screen is gone (owner 11-17: "the original WindyFilm UI looks nicer"): ev
   picked on the chip with no roll yet (`mode_dk`, UI only, not kept across a reboot), else `wf_rawb`. The ML menu's
   entries stay and stay in step (the chip writes `wf_rawb`; the menu's changes show on the chip).
 - **Cameras.** Darkroom is EOS M only. RAW develop needs `wf_rawb_can()` (EOS M today). The chip shows only when a
-  mode besides JPEG exists: the 5D2 has no chip and its header is unchanged.
+  mode besides JPEG exists: the 5D2 has no chip and its header is unchanged. (From `dark-5d2`, 3.16: the chip and all
+  three modes on both cameras.)
 - **Darkroom mode.** An "Exposures 3 / 6 / 12 / 24 / 36" row heads the rows (cassette icon, the chosen count in a pill;
   default 24); with a roll that has frames it shows the roll's count, greyed, "on the roll" (LEFT / RIGHT say "The roll
   in the camera keeps its count"). SET on a can loads a roll of it (`wf_roll_req_load`) by the Roll picker's rules: the
@@ -1339,7 +1340,8 @@ compared, the develop time shown.
   the run`; `ui: develop 2 of roll 001 with film 31 <name>`.
 - **Set aside is not the shelf.** The mode chip's set-aside (3.12) keeps the camera's roll in the camera, RAM only.
   Its log lines now say `back in use (no longer set aside)` / `no longer set aside (close)` (they said "shelf").
-- **5D2:** no Darkroom, so no close-and-load and an empty shelf; the browser offers no Darkroom (no PLAY hint).
+- **5D2:** no Darkroom, so no close-and-load and an empty shelf; the browser offers no Darkroom (no PLAY hint). Branch
+  `dark-5d2` turns all of it on for the 5D2 (3.16).
 - **Checks:** `wf_roll_test` (names and their parse, shelf prep, develop again, dev=27 refused); ROLL:lock (the
   close-and-load's shelf line and file); ROLL:shelf (real RAW+L pairs: on the shelf, its copy read back, the shelf
   roll developed while the camera's roll waits with F02's CR2 gone, develop 2 with a B&W film into ROLL001B with
@@ -1348,6 +1350,72 @@ compared, the develop time shown.
   its order, a new roll's number past a shelf roll); `dr_ui_test.c`
   section 16 and `ui_test.c` (`shelf_swap`). Approval images `shelf_*.png` in `_windyfilm_docs/onescreen_ui/`.
 - **Not checked on the camera:** all of it (the ROLLS listing on the EOS M's card and its time, the screens).
+
+### 3.16 The Darkroom on the 5D Mark II (owner 2026-11-17, branch `dark-5d2`)
+
+- **Owner:** "5d mark II sao ko thấy darkroom để chọn". Up to RAWB25 the 5D2 had no Darkroom: no Darkroom on the mode
+  chip, a roll load refused (-4), the ML menu's Darkroom entries greyed ("The Darkroom runs on the EOS M first").
+  Branch `dark-5d2` is cut from `wf-onescreen` cedbfb0 (RAWB25) and turns on the same code on the 5D2, as far as host
+  tests on the owner's own 5D2 RAW+L pairs prove it (`F:\MagicLatern\_test mau film\5D2`: Day 10, 141 pairs; 100EOS5D).
+- **The 5D2 frame in its CR2** (`src/wf_darkp.h` `struct wf_dk_geom`, `WF_DK_GEOM_5D2`; `wf_dk_geom(cam)`; the EOS M's
+  numbers moved into `WF_DK_GEOM_EOSM`, unchanged):
+  - sensor image 5792 x 3804, pitch 10136 B (ML packed 14-bit), black 1024 from the masked columns 16..143, image data
+    from column 158 / row 52;
+  - Canon's L JPEG is 5616 x 3744 at (168, 56) (by correlation on every pair), GBRG there; the print is that size;
+  - `wf_dev` develops widths that are a multiple of 32, so the develop is 5632 wide from column 152 and the print takes
+    columns 16..5631 of each developed row (`wf_dev_rows_win`, new in `src/wf_dev.c`); `WF_DV_M` reads 8 columns past
+    the window, still inside the row's 10136 bytes;
+  - ColorData 1250 (5D2): the as-shot WB levels at index 63, Canon's Auto WB at 68 (Light Auto, 3.13).
+- **Levels and trim** (`src/wf_darkp.c`):
+  - white `wf_dk_white`: 13300 for ISO 160 / 320 / 640 / 1250, else 16000, from the clip pile-ups in the owner's pairs
+    (1250: 13264..13318; every other ISO 15761..16383, 2500 and 5000 included). 160 / 320 / 640 have no pairs and are
+    taken as 1250;
+  - trim `wf_dk_trim10`: +0.7 EV at every ISO, the median (+0.74) of B's fit against Canon's L JPEG over 55 pairs. The
+    per-ISO medians follow the scenes more than the ISO: left out one pair at a time, the single median misses by
+    0.27 EV on average, a per-ISO table by 0.35;
+  - the result against Canon's own JPEG (`tools/dr_dark_check.sh` CAM=5D2, all 141 Day 10 pairs): the fit left after
+    the trim has median +0.11 EV; the mid-tone offset (the median of linear Y where Canon's Y is 30..220) has median
+    -0.20 EV, 10th / 90th percentile -0.64 / +0.36 (the EOS M's 34 Day09 pairs: +0.23). Not tuned further: the spread
+    follows the scenes more than the ISO.
+- **Memory** (`src/wf_dark.c`). The 5D2's SRM chunk is 38,720 KB (0x25D0000; host model `tests/host/host_ml.c`): the raw
+  (37,654 KB) fits with about 1 MB left. The UYVY frame (41,067 KB) goes to shoot memory, in one block or split
+  (`dk_split_rows`: the head from shoot memory, the rest over the raw's used rows), as on the EOS M. The halation state
+  needs 6,819 KB of contiguous shoot memory on the 5D2 (EOS M 5.7 MB); without it `dark: look ready` shows a `-` after
+  halation (wanted, not built) and the prints go without it. A 5D2 build logs at each run's start: `dark: 5D2 memory: biggest shoot block N KB
+  (frame 41067 KB in one block, split head N KB)`: the first camera run says which path it takes.
+- **Roll frames** (`src/wf_cam_5d2.c`). With a roll in the camera (`wf_look_use() == WF_LU_NONE`) both halves stay
+  Canon's JPEG, logged `yuv TOP plain: roll frame: Canon's JPEG, no look (the Darkroom prints it)` (and BOT), as
+  `wf_cam_eosm.c` does. Before this the 5D2 hook gave roll frames the look (found by ROLL:dark on the 5D2).
+- **UI** (`src/ui/wf_ui.c`, `src/wf_menu.c`):
+  - the mode chip has JPEG / RAW develop / Darkroom on both cameras (`mode_ok`); PLAY opens the Darkroom on the 5D2 too
+    (`dev_key`);
+  - 5D2 footers: Darkroom mode "SET Load roll, L/R Film, UP/DN Row, DIAL Value, JOY Edit, PICT Group, MENU Exit"; with a
+    roll it drops L/R for "[PLAY] Darkroom"; editing a row shows only the row's keys (no PLAY); the pill with the chip
+    "SET Film / Film stage, L/R Section / mode, DOWN Rows, PICT Group, INFO Info, MENU Exit"; the film pick of a develop
+    again "PICT Group"; the chip footer names PICT for TAP;
+  - the 5D2 Info page's key help: "SET load the film, or a roll", "PLAY Darkroom (a roll on)";
+  - the ML menu: the Darkroom entries lose the 5D2 warning; the Light help is one text on both.
+- **Unchanged and shared with the EOS M:** roll, close-and-load and the shelf (3.15), develop again, the finishes (3.9,
+  frame / caption / date / logo at 5616 x 3744), Camera JPEG Keep / Overwrite / Over + print, Screen On / Off (3.11),
+  the end-of-roll notice and the shutter lock (`UILOCK_SHUTTER` is 0x0001 in the 5D2's ML too), the run inside wf_task
+  (W13). The battery is the 5D2's percentage (`GetBatteryLevel`): a run starts at 30 % and stops below 15 %.
+- **Cards:** the 5D2 card gets WFPRINT.DAT and WFLOGO.DAT too (`tools/mk_card.sh`); `card/HUONGDAN_DARKROOM_5D2.txt`
+  holds the first camera run's steps and the log lines to send back.
+- **Checks:**
+  - `CAM=5D2 tools/dr_dark_check.sh`: 141 Day 10 pairs plus the finishes on three 100EOS5D pairs (landscape,
+    Orientation 6, 8), 3111 / 0. Frame Off + date Off is the plain print byte for byte; frames, captions, dates and
+    the logo are checked on all three; the biggest logo maps are 110,292 B, under `DK_LG_B` (192 KB).
+  - `CAM=5D2 test.sh` 1742 / 0. Every ROLL mode and LIGHT:awb now runs on the 5D2: ROLL:dark found the roll-frame
+    bug. ROLL:mem and ROLL:jpeg run on the 5D2's pairs, its SRM chunk and a 7 MB shoot cap.
+  - EOS M `test.sh` 2138 / 0; EOS M `dr_dark_check.sh` 1078 / 0.
+  - `tests/ui/run.sh`, `dr_run.sh` and `CAM=5D2 dr_run.sh` PASS. `ui_test.c` walks the 5D2 browser: chip to
+    Darkroom, Exposures by the dial, SET loads a roll, JOY edit, Info, PLAY to the Darkroom, the ML menu's Film roll.
+  - Approval images: `_windyfilm_docs/dark5d2_ui/`.
+- **Not checked on the camera:** all of it. The risks the first run answers: whether the frame gets one shoot block or
+  the split, and whether halation finds its 6.8 MB; the time per frame (the screen's estimate is still the EOS M's
+  55 s); the display and keys while LiveView is paused, and a run started without LiveView (viewfinder); the end-of-roll
+  notice, drawn only over LiveView (with the viewfinder only the shutter lock shows the roll is full); the battery
+  percentage during a run.
 
 ## 4. Interfaces
 
@@ -1416,7 +1484,7 @@ Own format, decided by the UI side. Glyphs from Ubuntu Sans (Ubuntu Font Licence
 Drawn by our own renderer, which needs none of ML's 7 dynamic font slots. Title and film name use ML's `argnor23` /
 `argnor28` through `rbf_draw_string` / `font_large` etc.
 
-### 4.6 `ML/DATA/WFPRINT.DAT` (core reads, EOS M only)
+### 4.6 `ML/DATA/WFPRINT.DAT` (core reads; the Darkroom's cameras: EOS M, and the 5D2 from `dark-5d2`)
 
 The Darkroom's print caption font (section 3.9): `tools/mk_wffont.py WFPRINT.DAT --print-only`, run by `build.sh`.
 "WFPF" v1, two fonts (84 px wght 500, 62 px wght 400), ASCII 32..126 plus 127 = U+00B7, 4-bit coverage, kern pairs,
@@ -1502,7 +1570,7 @@ The layout, 720x480 (the ML bitmap):
 
 ## 6. Build and tests
 
-- `build.sh CAM=EOSM|5D2` -> `build/<cam>/windyflm.mo` plus the card files (WFFILMS.DAT, WFCANS.DAT, WFFONTS.DAT; EOS M also
+- `build.sh CAM=EOSM|5D2` -> `build/<cam>/windyflm.mo` plus the card files (WFFILMS.DAT, WFCANS.DAT, WFFONTS.DAT,
   WFPRINT.DAT; cubes are separate).
   - Flags as the port's: `-Os -march=armv5t -marm -mlong-calls -mfloat-abi=soft -ffast-math
     -fsingle-precision-constant`; kernels `-O2`; asm `-mcpu=arm946e-s -marm`.

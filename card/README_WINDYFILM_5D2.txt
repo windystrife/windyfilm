@@ -7,6 +7,12 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT và WFSTAGE.DAT) là dữ liệu dẫn xuất
 (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ có Darkroom (17/11 tối, nhánh dark-5d2, từ RAWB25): Darkroom chạy trên 5D2 như trên
+EOS M. Chip chế độ thêm nấc Darkroom (hàng Exposures, nạp cuộn), PLAY vào Darkroom, viền /
+ngày / logo trên bản in, Camera JPEG (Keep / Overwrite / Over + print), Screen On / Off,
+kệ cuộn và tráng lại. Thẻ có thêm ML/DATA/WFPRINT.DAT và WFLOGO.DAT. Lần đầu trên máy
+thật: thử theo HUONGDAN_DARKROOM_5D2.txt (bộ nhớ, thời gian, màn hình, khoá chụp).
+
 Thẻ RAWB25 (17/11 tối, nhánh wf-onescreen): module dựng lại cùng mã với thẻ EOS M
 RAWB25. Over + print, kệ cuộn và tráng lại đều là của Darkroom (5D2 không có). Trên 5D2
 chỉ khác: menu ML "Camera JPEG" có thêm nấc "Over + print", vẫn xám ("The Darkroom runs
@@ -169,8 +175,9 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
    - SET (hoặc nhấn joystick) trên nút đổi section; section đang chọn chữ trắng. TAP /
      PICT chỉ đổi tab trong section, bộ đếm đếm trong section. Đổi đi rồi đổi lại: về
      đúng tab và phim lần trước.
-   - Chip: JPEG / RAW develop (không có Darkroom, không có hàng Exposures). Ở Film
-     stage chip ghi "JPEG 8-bit"; dưới tên phim có 2 dòng EXIF.
+   - Chip: JPEG / RAW develop (thẻ có Darkroom: thêm nấc Darkroom với hàng Exposures,
+     xem HUONGDAN_DARKROOM_5D2.txt). Ở Film stage chip ghi "JPEG 8-bit"; dưới tên phim
+     có 2 dòng EXIF.
    - Chụp một ảnh lon Film stage ở JPEG 8-bit và một ảnh cùng phim ở RAW develop: EXIF
      có thêm "| Mode ... | Dev n.n s", log có "dev time: ... N ms".
    - INFO mở trang Info (chữ "Info", tên phim, góc phải "FILM STAGE" hay "FILM"; dưới
@@ -354,7 +361,7 @@ Sửa bằng bánh xe, hoặc nhấn joystick ("JOY Edit") rồi trái / phải.
   "| Film exp +1", "| Push 1/3", "| Exp comp", "| Printer R+6 G0 B0", "| Interlayer 50%",
   "| Bleach bypass 50%", "| Print bleach 25%", "| Neutral neg 100%", "| Neutral print 50%"
   khi khác mặc định.
-- 5D2 không có Darkroom (cuộn phim chỉ có trên EOS M).
+- Darkroom trên 5D2 (từ thẻ dark-5d2): HUONGDAN_DARKROOM_5D2.txt.
 
 
 7. FILM STAGE: LẦN CHẠY ĐẦU
