@@ -16,6 +16,27 @@
 
 enum { WF_DK_EOSM = 0, WF_DK_5D2 = 1 };
 
+/* the Darkroom's frame in a camera's CR2 (DESIGN 3.6, 3.18). EOS M: the Day09 pairs (CORE-NOTES 10). 5D2: the owner's
+ * Day 10 + 100EOS5D RAW+L pairs (11-17): sensor image 5792 x 3804 (pitch 10136, 4 components, slices 2 x 1936 + 1920),
+ * Canon's L JPEG 5616 x 3744 at (168, 56) by correlation on every pair, GBRG there, black 1024 in the masked columns, the
+ * image data from column 158 / row 52 (row 0 is a bright line). wf_dev develops widths that are a multiple of 32, so the
+ * 5D2 develop covers 5632 columns from 152 and the print takes columns 16 .. 5631 of each developed row (wf_dev_rows_win):
+ * its reads reach 8 columns past the window (WF_DV_M), so the window ends at 5784 and the row's bytes (pitch 10136) hold
+ * them; columns 152 .. 157 are masked (dark) and only feed develop columns the print never takes. */
+struct wf_dk_geom {
+    int w, h;                                    /* the print = Canon's L JPEG */
+    int x0, y0;                                  /* its corner in the CR2's sensor image */
+    int dw, dx;                                  /* the develop's width (a multiple of 32), the print's first column in it */
+    int ax0, ay0;                                /* image data from here (wf_dev_job ax0 / ay0; ax1 / ay1 = the CR2's size) */
+    int cfa;                                     /* Bayer phase at (x0 - dx, y0) (wf_dev_job cfa) */
+    int bx0, bx1;                                /* masked columns for the black (wf_dev_levels) */
+    int black;                                   /* the black when those columns say nothing */
+    int sw, sh, pitch;                           /* the CR2's sensor image (ML packed 14-bit): the raw buffer */
+};
+#define WF_DK_GEOM_EOSM { 5184, 3456, 84, 64, 5184, 0, 72, 52, 0, 16, 64, 2048, 5280, 3528, 9240 }
+#define WF_DK_GEOM_5D2  { 5616, 3744, 168, 56, 5632, 16, 152, 52, 2, 16, 144, 1024, 5792, 3804, 10136 }
+const struct wf_dk_geom *wf_dk_geom(int cam);    /* WF_DK_EOSM / WF_DK_5D2 (anything else: the EOS M's) */
+
 int wf_dk_white(int cam, int iso);
 
 /* the WB levels of a print (owner 11-17: "light = auto -> auto WB, Day / Cloudy / Shade / Tungsten as before"):

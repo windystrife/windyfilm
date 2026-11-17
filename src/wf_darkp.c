@@ -3,10 +3,15 @@
 #include "wf_darkp.h"
 
 /* ------------------------------------------------------------------ levels and scales */
+static const struct wf_dk_geom wf_dk_geoms[2] = { WF_DK_GEOM_EOSM, WF_DK_GEOM_5D2 };
+const struct wf_dk_geom *wf_dk_geom(int cam) { return &wf_dk_geoms[cam == WF_DK_5D2 ? 1 : 0]; }
+
 int wf_dk_white(int cam, int iso)
 {
+    /* 5D2: the clip pile-ups in the owner's Day 10 + 100EOS5D CR2s (11-17): ISO 1250 13264..13318, every other ISO
+     * 15761..16383 (2500 and 5000 too: 16268..16332). 160 / 320 / 640 have no pairs: taken as 1250 (1/3 stop down) */
     if (cam == WF_DK_5D2)
-        return 15600;                            /* 5D2: the pile-up of the shot itself normally wins (camera run owed) */
+        return iso == 160 || iso == 320 || iso == 640 || iso == 1250 ? 13300 : 16000;
     /* EOS M: the clip pile-ups measured in the Day09 / 1114 CR2s; the 1/3-stop ISOs clip lower */
     return iso == 100 ? 13582 : iso == 160 || iso == 320 ? 12636 : iso == 200 ? 15303 : 15200;
 }
@@ -17,11 +22,14 @@ static const uint16_t wf_dk_p10[10] = { 4096, 4390, 4705, 5043, 5405, 5793, 6208
 /* exposure trims, 0.1 EV per ISO: B's WB / exposure fit against Canon's own L JPEG minus the fixed scene scale (0.18 at
  * 3.3 EV below the clip), the median per ISO of tools/dr_dark_check.sh over the 34 Day09 EOS M pairs (11-14): ISO 100
  * +0.21 (n 4), 160 +0.33 (n 3), 200 +0.30 (n 6, spread -0.08..+0.82), 320 +0.14 (n 21, spread -0.40..+0.23). Other ISOs
- * take the nearest row (no pairs yet). The 5D2 has no pairs: 0 until its camera run. */
+ * take the nearest row (no pairs yet). 5D2: one trim for every ISO, the median of the same fit over the owner's 55 RAW+L
+ * pairs (Day 10 + 100EOS5D, 11-17; ISO 100..6400): +0.74. The per-ISO medians (200 +0.71 n 16, 1600 +0.90 n 10, 2000 +1.06
+ * n 6, 3200 +0.46 n 5, ...) follow the scenes more than the ISO: left out one pair at a time, the single median misses by
+ * 0.27 EV on average and a per-ISO table (n >= 3) by 0.35. */
 struct wf_dk_trim { uint16_t iso; int8_t t10; };
 static const struct wf_dk_trim wf_dk_trims[2][8] = {
     { { 100, 2 }, { 160, 3 }, { 200, 3 }, { 320, 1 }, { 0, 0 } },
-    { { 100, 0 }, { 0, 0 } },
+    { { 100, 7 }, { 0, 0 } },
 };
 
 int wf_dk_trim10(int cam, int iso)

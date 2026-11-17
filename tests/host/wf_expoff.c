@@ -34,3 +34,4 @@ const int wf_t_me_priv = offsetof(struct menu_entry, priv);
 const int wf_t_me_select = offsetof(struct menu_entry, select);
 const int wf_t_me_children = offsetof(struct menu_entry, children);
 const int wf_t_me_help = offsetof(struct menu_entry, help);           /* MIST:levels: the Mist entry's help line */
+int wf_t_me_shidden(const void *e) { return ((const struct menu_entry *)e)->shidden; }   /* a bit field: no offsetof */

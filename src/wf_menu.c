@@ -242,11 +242,7 @@ static const char *const wf_print_key[WF_NPRINTS] = { "scan", "cine", "paper",
    Canon's Auto WB levels of each CR2 (wf_dark.c); a shot (JPEG, RAW develop) keeps the camera's own WB, never changed:
    Canon's Auto levels are only in the CR2 written after it. Day .. Tungsten set the stock's kelvin as before */
 static const char *wf_light_name[WF_NLIGHT] = { "Auto", "Day", "Cloudy", "Shade", "Tungsten" };
-#ifdef WF_BUILD_5D2
-#define WF_LIGHT_HELP "White balance: Auto (yours), the stock's Day, Cloudy, Shade, Tungsten."
-#else
 #define WF_LIGHT_HELP "Auto: Darkroom prints use Canon's auto WB (shots: yours). Day, Cloudy, Shade, Tungsten."
-#endif
 static const char *const wf_light_key[WF_NLIGHT] = { "auto", "day", "cloudy", "shade", "tungsten" };
 static const char *wf_strength_name[WF_NSTRENGTH] = { "30%", "100%", "125%" };
 static const char *const wf_strength_key[WF_NSTRENGTH] = { "subtle", "normal", "strong" };
@@ -1565,7 +1561,7 @@ static MENU_SELECT_FUNC(wf_exif_select) { (void)priv; (void)delta; wf_exif_off =
 static MENU_SELECT_FUNC(wf_qk_select) { (void)priv; wf_step_int(&wf_qk, 0, WF_QK_N - 1, delta); }
 static MENU_UPDATE_FUNC(wf_qk_update)
 {
-    if (wf_cam() != WF_CAM_EOSM)
+    if (wf_cam() != WF_CAM_EOSM)                  /* (hidden on the 5D2: wf_menu_init) */
         MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "EOS M only: the 5D2 has its own ISO button and dials.");
     else if (wf_qk == WF_QK_DOWN)
         MENU_SET_WARNING(MENU_WARN_INFO, "DOWN: ring = ISO, DOWN again: aperture (M). SET in MF: Magic Zoom.");
@@ -1853,9 +1849,7 @@ static MENU_UPDATE_FUNC(wf_popt_update)
     char b[24];
     int k = (int)(intptr_t)entry->priv - 1;       /* priv = WF_PO_* + 1 */
     MENU_SET_VALUE("%s", wf_popt_text(k, b, sizeof b));
-    if (wf_cam() != WF_CAM_EOSM)
-        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "The Darkroom runs on the EOS M first.");
-    else if (!wf_popt_avail(k))
+    if (!wf_popt_avail(k))
         MENU_SET_WARNING(MENU_WARN_INFO, "The details go under a frame: set Print frame first.");
 }
 static MENU_UPDATE_FUNC(wf_dark_update)
@@ -1867,9 +1861,7 @@ static MENU_UPDATE_FUNC(wf_dark_update)
         MENU_SET_VALUE("%d left", v->left);
     else
         MENU_SET_VALUE(left ? "%d to develop" : "Nothing", left);
-    if (wf_cam() != WF_CAM_EOSM)
-        MENU_SET_WARNING(MENU_WARN_NOT_WORKING, "The Darkroom runs on the EOS M first.");
-    else if (left)
+    if (left)
         MENU_SET_WARNING(MENU_WARN_INFO, "About %d min. Prints go to ROLLS/ROLL%03d.", (left * 55 + 59) / 60, r->num);
 }
 static MENU_SELECT_FUNC(wf_rewind_select)
@@ -2362,6 +2354,10 @@ void wf_menu_init(void)
         wf_wb_saved = 0;                          /* unsupported body: never touch its white balance */
     wf_light_req = 1;
     prop_add_handler(WF_PROP_PS_OF_USER1, (void *)wf_ps_base_prop);   /* Canon reports the value at once */
+    if (wf_cam() != WF_CAM_EOSM)                  /* the quick keys are the EOS M's (DESIGN 3.17): no row on the 5D2 */
+        for (struct menu_entry *c = wf_menu[0].children; c && c->priv != MENU_EOL_PRIV; c++)
+            if (c->name && !strcmp(c->name, "Quick keys"))
+                c->shidden = 1;
     menu_add("Shoot", wf_menu, COUNT(wf_menu));
     wf_menu_added = 1;
 }

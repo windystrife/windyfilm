@@ -158,8 +158,9 @@ static int disp_seen = 1;                                   /* the display read 
  * frames asks first (Close it and switch: rewound, set aside for the Darkroom / Keep the roll), a finished one is set
  * aside at once, an empty one comes out. Focus: the top bar is one stop above the rows (UP from the first row, DOWN
  * from the last); LEFT / RIGHT pick the pill or the chip there, SET / the ring / the joystick press toggle or step it.
- * The 5D2 gets the pill (no chip: no RAW develop, no rolls). The film stage's two EXIF lines under the film name and
- * the INFO page show what the develop writes (wf_exif_text + wf_exif_tail). */
+ * The 5D2 has the same pill, chip and rolls (DESIGN 3.18, 11-17): its keys in the footers and the help (DIAL for the
+ * ring, PICT for TAP, the joystick press edits a row). The film stage's two EXIF lines under the film name and the INFO
+ * page show what the develop writes (wf_exif_text + wf_exif_tail). */
 enum { M_JPEG = 0, M_RAW, M_DARK, M_N };
 static const char *const mode_name[M_N] = { "JPEG", "RAW develop", "Darkroom" };
 #define FOC_TOP  (-2)                           /* focus on the top bar: the section pill or the mode chip (tsub) */
@@ -208,7 +209,7 @@ static inline int is5d2(void) { return wf_cam() == WF_CAM_5D2; }
 
 static int mode_ok(int m)
 {
-    return m == M_JPEG || (m == M_RAW && wf_rawb_can()) || (m == M_DARK && wf_cam() != WF_CAM_5D2);
+    return m == M_JPEG || (m == M_RAW && wf_rawb_can()) || m == M_DARK;
 }
 static int chip_on(void) { return !pick && (mode_ok(M_RAW) || mode_ok(M_DARK)); }
 static int roll_in(void) { const struct wf_roll *r = wf_roll_now(); return wf_roll_open(r) && !wf_roll_shelved(); }
@@ -234,7 +235,7 @@ static int mode_now(void)
 }
 static const char *mname(int m) { return m == M_JPEG && sec_now() ? "JPEG 8-bit" : mode_name[m]; }
 static inline int dkm(void) { return mode_now() == M_DARK; }
-/* the Exposures row and SET = a roll: Film in Darkroom mode, Film stage in every mode (EOS M) */
+/* the Exposures row and SET = a roll: Film in Darkroom mode, Film stage in every mode */
 static int rollrows(void) { return !pick && mode_ok(M_DARK) && (sec_now() || dkm()); }
 /* a roll still shooting with frames keeps its count (the Exposures row shows it, greyed); a finished one (full, rewound)
  * leaves the row to the next roll: SET on a can then asks to close it and load that count (the close-and-load question) */
@@ -670,10 +671,9 @@ static void step_row(int d)
     if (wf_row_step_for(focus, d, id)) dirty = 1;
 }
 
-/* PLAY with a roll on the camera: the Darkroom (owner 11-15, EOS M) while it has frames to develop, else why not */
+/* PLAY with a roll on the camera: the Darkroom (owner 11-15) while it has frames to develop, else why not */
 static void dev_key(void)
 {
-    if (is5d2()) return;
     const char *why = wfdr_dev_why();
     if (why) { say(why); return; }
     wf_log("ui: browser -> Darkroom");
@@ -732,7 +732,7 @@ static void act(int k)
     case MODULE_KEY_TOUCH_1_FINGER: edit = 0; next_tab(); break;
     case MODULE_KEY_INFO:         info = !info; dirty = 1; break;
     case MODULE_KEY_PLAY:                                   /* a roll on the camera or Darkroom mode: the Darkroom */
-        if (!is5d2() && (wf_roll_open(wf_roll_now()) || rollrows() || wf_shelf_now()->n)) { dev_key(); break; }
+        if (wf_roll_open(wf_roll_now()) || rollrows() || wf_shelf_now()->n) { dev_key(); break; }
         close_req = 1;                                      /* it closes, as before */
         break;
     case MODULE_KEY_MENU:
@@ -1190,19 +1190,31 @@ static void draw_footer(void)
                                           "TAP", "Group", "INFO", "Info", "MENU", "Exit", 0 };   /* the top bar */
     static const char *const k_pill5[] = { "SET", "Film / Film stage", "DOWN", "Rows", "PICT", "Group", "INFO", "Info",
                                            "MENU", "Exit", 0 };
-    const char *k_chip[] = { "SET", mname(mode_next(1)), "L/R", "Section / mode", "DOWN", "Rows", "TAP", "Group",
-                             "INFO", "Info", "MENU", "Exit", 0 };      /* SET names the mode it goes to (11-17) */
+    const char *k_chip[] = { "SET", mname(mode_next(1)), "L/R", "Section / mode", "DOWN", "Rows",
+                             is5d2() ? "PICT" : "TAP", "Group", "INFO", "Info", "MENU", "Exit", 0 };   /* SET names the
+                                                                         mode it goes to (11-17) */
+    static const char *const k_pill5c[] = { "SET", "Film / Film stage", "L/R", "Section / mode", "DOWN", "Rows",
+                                            "PICT", "Group", "INFO", "Info", "MENU", "Exit", 0 };   /* 5D2, with the chip */
+    static const char *const k_5d2d[] = { "SET", "Load roll", "L/R", "Film", "UP/DN", "Row", "DIAL", "Value",
+                                          "JOY", "Edit", "PICT", "Group", "MENU", "Exit", 0 };   /* 5D2: the Darkroom mode */
+    static const char *const k_5d2dp[] = { "SET", "Load roll", "UP/DN", "Row", "DIAL", "Value", "JOY", "Edit",
+                                           "PICT", "Group", "MENU", "Exit", 0 };   /* room for "[PLAY] Darkroom" */
     static const char *const k_info[] = { "INFO", "Close", "MENU", "Exit", 0 };
     static const char *const k_darkp[] = { "SET", "Load roll", "L/R", "Film", "UP/DN", "Row", "RING", "Value",
                                            "TAP", "Group", "MENU", "Exit", 0 };   /* room for "[PLAY] Darkroom" */
     static const char *const k_ask[] = { "SET", "Yes", "MENU", "No", 0 };
     static const char *const k_pick[] = { "SET", "Use this film", "L/R", "Film", "UP/DN", "Row", "TAP", "Group",
                                           "MENU", "Back", 0 };   /* the Darkroom's develop again picks its film */
+    static const char *const k_pick5[] = { "SET", "Use this film", "L/R", "Film", "UP/DN", "Row", "PICT", "Group",
+                                           "MENU", "Back", 0 };
     int ask = leave_to >= 0 || sw_film || sec_to >= 0;
-    int play = !is5d2() && !ask && !info && !pick && (wf_roll_open(wf_roll_now()) || wf_shelf_now()->n);
-    const char *const *k = ask ? k_ask : info ? k_info : pick && focus != FOC_TOP ? k_pick
-                         : focus == FOC_TOP ? (tsub && chip_on() ? k_chip : is5d2() ? k_pill5 : k_pill)
-                         : is5d2() ? (edit ? k_5d2e : k_5d2) : rollrows() ? (play ? k_darkp : k_dark) : k_eosm;
+    int play = !ask && !info && !pick && (wf_roll_open(wf_roll_now()) || wf_shelf_now()->n);
+    const char *const *k = ask ? k_ask : info ? k_info : pick && focus != FOC_TOP ? (is5d2() ? k_pick5 : k_pick)
+                         : focus == FOC_TOP ? (tsub && chip_on() ? k_chip : is5d2() ? (chip_on() ? k_pill5c : k_pill5)
+                                               : k_pill)
+                         : is5d2() ? (edit ? k_5d2e : rollrows() ? (play ? k_5d2dp : k_5d2d) : k_5d2)
+                         : rollrows() ? (play ? k_darkp : k_dark) : k_eosm;
+    if (is5d2() && edit) play = 0;                          /* the row's editing keys only */
     hints(k, 14, 455, C_TXT2, C_TXT3);
     if (play)                                               /* owner 11-15: "[PLAY] Darkroom" while a roll is on the */
         wfdr_dev_hint(706 - wfdr_dev_hint_w(), 455);         /* camera, dim without frames (no roll: as before) */
@@ -1325,8 +1337,8 @@ static void info_keys(int y)
         "RING", "value", "SET", "load the film, or a roll", "TAP", "next group (1 finger)", "INFO", "this page",
         "PLAY", "Darkroom (a roll on)", "MENU", "close, or 2-finger tap", "Half-shutter", "close, shoot" };
     static const char *const h_5d2[] = { "L/R", "film, or section / mode", "UP/DN", "row, or the top bar",
-        "DIAL", "value", "SET", "load the film", "JOY", "edit a row (L/R)", "PICT", "next group",
-        "INFO", "this page", "MENU", "close, or TRASH", "Half-shutter", "close, shoot" };
+        "DIAL", "value", "SET", "load the film, or a roll", "JOY", "edit a row (L/R)", "PICT", "next group",
+        "PLAY", "Darkroom (a roll on)", "MENU", "close, or TRASH", "Half-shutter", "close, shoot" };
     const char *const *h = is5d2() ? h_5d2 : h_eosm;
     for (int c = 0; c < 3; c++)
     {

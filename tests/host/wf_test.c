@@ -2825,11 +2825,42 @@ static void t_light(void)
     chk(r1 && h_gm_last == 1 && h_ba_last == -2, "unload: the user's WB back");
 }
 
+/* ------------------------------------------------------------------ the Darkroom's camera
+ * Its RAW+L pairs (WF_DARK_CR2: a landscape and two portraits, Orientation 6 / 8, Canon's L JPEG beside each CR2; read
+ * only, never committed): EOS M the Day09 pairs, 5D2 the owner's 100EOS5D pairs (11-17, ISO 200 daylight). The CR2's raw
+ * block (ML packed 14-bit, pitch x rows), the camera's SRM chunk (srm_malloc_suite, host_ml.c H_SRM_SZ), the model the
+ * logo's lettering names. */
+#ifdef WF_BUILD_5D2
+#define DK_T_DIR   "/mnt/f/MagicLatern/_test mau film/5D2/100EOS5D"
+#define DK_T_CAM   "5D2"
+#define DK_T_RAW   (10136u * 3804u)
+#define DK_T_SRMK  "+38720K"
+#define DK_T_MODEL "Canon EOS 5D Mark II"
+#define DK_T_SHOOT (7 << 20)                     /* ROLL:mem's biggest shoot block: halation's 6.7 MB fits, the 7.5 MB head not */
+static const char *const mem_pairs[3] = { "IMG_8380", "IMG_8419", "IMG_8381" };   /* landscape, Orientation 6, 8 */
+#else
+#define DK_T_DIR   "/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM"
+#define DK_T_CAM   "EOS M"
+#define DK_T_RAW   (9240u * 3528u)
+#define DK_T_SRMK  "+31888K"
+#define DK_T_MODEL "Canon EOS M"
+#define DK_T_SHOOT (6 << 20)                     /* ROLL:mem's biggest shoot block: halation's 5.7 MB fits, the 7 MB head not */
+static const char *const mem_pairs[3] = { "IMG_0208", "IMG_0206", "IMG_0212" };   /* landscape, Orientation 6, 8 */
+#endif
+static const char *dk_t_dir(void)                /* the pairs' folder, "" = none here (the modes that need it skip) */
+{
+    static char t[300];
+    const char *dir = getenv("WF_DARK_CR2");
+    if (!dir)
+        dir = DK_T_DIR;
+    snprintf(t, sizeof t, "%s/%s.CR2", dir, mem_pairs[2]);
+    return access(t, R_OK) == 0 ? dir : "";
+}
+
 /* ------------------------------------------------------------------ LIGHT:awb */
 /* Light Auto = Auto WB (owner 11-17): the Darkroom develops a CR2 with Canon's Auto WB levels of the shot (ColorData
  * short 68..71), whatever WB was set on the camera (the as-shot levels, 63..66); Day / Cloudy / Tungsten keep the as-shot
  * ones (the camera was set to them at the shot); a CR2 without Auto levels: as shot. The camera's WB is never touched. */
-#ifndef WF_BUILD_5D2
 /* a CR2 head (little endian) down to ColorData: IFD0 -> EXIF (0x8769) -> MakerNote (0x927C) -> ColorData (0x4001, cnt
  * shorts at 96), no raw IFD (the parse returns "no raw strip" after the WB fields). Returns the size */
 static uint32_t awb_head(uint8_t *b, uint32_t cnt, const int *as, const int *au)
@@ -2861,12 +2892,8 @@ static int awb_ratio_ok(const int32_t *m, const int *lv)
     int32_t q0 = (int32_t)(((int64_t)m[0] << 12) / m[1]), q2 = (int32_t)(((int64_t)m[2] << 12) / m[1]);
     return q0 >= r0 - 2 && q0 <= r0 + 2 && q2 >= r2 - 2 && q2 <= r2 + 2;
 }
-#endif
 static void t_light_awb(void)
 {
-#ifdef WF_BUILD_5D2
-    chk(1, "5D2: no Darkroom, no CR2 develop: Light Auto stays the camera's WB (the name: LIGHT)");
-#else
     static uint8_t b[96 + 2 * 1312];
     static const int as[4] = { 1935, 1024, 1024, 1792 };     /* IMG_0208 (Day09): shot on Daylight */
     static const int au[4] = { 2236, 1024, 1024, 1502 };     /* .. Canon's Auto WB of the same scene */
@@ -2900,16 +2927,22 @@ static void t_light_awb(void)
         "ColorData 582: as shot only, Light Auto falls back to it (pick %d)", wk);
     wk = wf_dk_wb_pick(as, 0, 1, &use);
     chk(wk == WF_DKWB_NOAUTO && use == as, "no Auto levels at all: as shot");
+    n = awb_head(b, 1250, as, au);                            /* the 5D2's layout (ColorData 4, 1250 entries) */
+    rc = wf_cr2_parse(b, n, n, &inf);
+    wk = wf_dk_wb_pick(inf.wb, inf.wb_auto, 1, &use);
+    ok = wf_dk_scales(WF_DK_5D2, use, 1024, 16000, 200, m);
+    chk(inf.cd_count == 1250 && !memcmp(inf.wb, as, sizeof as) && !memcmp(inf.wb_auto, au, sizeof au) && wk == WF_DKWB_AUTO
+        && ok && awb_ratio_ok(m, au), "ColorData 1250 (5D2): as shot 63..66, auto 68..71, Light Auto picks the auto ones "
+        "(pick %d)", wk);
 
-    /* the owner's CR2 (Day09, shot on Daylight): the head as the Darkroom reads it */
-    const char *dir = getenv("WF_DARK_CR2");
-    if (!dir)
-        dir = "/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM";
+    /* the owner's CR2: the head as the Darkroom reads it (EOS M: Day09 IMG_0208, shot on Daylight; 5D2: 100EOS5D
+       IMG_8380, ISO 200 Auto WB) */
+    const char *dir = dk_t_dir();
     char t[300];
-    snprintf(t, sizeof t, "%s/IMG_0208.CR2", dir);
-    FILE *f = fopen(t, "rb");
+    snprintf(t, sizeof t, "%s/%s.CR2", dir, mem_pairs[0]);
+    FILE *f = *dir ? fopen(t, "rb") : 0;
     if (!f) {
-        chk(1, "SKIPPED: no IMG_0208.CR2 in %s (WF_DARK_CR2)", dir);
+        chk(1, "SKIPPED: no %s.CR2 (WF_DARK_CR2)", mem_pairs[0]);
         return;
     }
     static uint8_t h[256 << 10];
@@ -2920,10 +2953,16 @@ static void t_light_awb(void)
     fclose(f);
     rc = wf_cr2_parse(h, (uint32_t)got, (uint32_t)fs, &inf);
     wk = wf_dk_wb_pick(inf.wb, inf.wb_auto, 1, &use);
-    chk(rc == WF_CR2_OK && !memcmp(inf.wb, as, sizeof as) && !memcmp(inf.wb_auto, au, sizeof au) && wk == WF_DKWB_AUTO,
-        "IMG_0208: as shot %d %d %d %d, auto %d %d %d %d, Light Auto picks the auto ones (rc %d)", inf.wb[0], inf.wb[1],
-        inf.wb[2], inf.wb[3], inf.wb_auto[0], inf.wb_auto[1], inf.wb_auto[2], inf.wb_auto[3], rc);
+#ifdef WF_BUILD_5D2
+    static const int cas[4] = { 2013, 1024, 1024, 1920 }, cau[4] = { 2013, 1024, 1024, 1920 };   /* IMG_8380: shot on AWB */
+    const int ncd = 1250;
+#else
+    const int *cas = as, *cau = au, ncd = 1312;
 #endif
+    chk(rc == WF_CR2_OK && inf.cd_count == ncd && !memcmp(inf.wb, cas, sizeof as) && !memcmp(inf.wb_auto, cau, sizeof au)
+        && wk == WF_DKWB_AUTO, "%s: ColorData %d, as shot %d %d %d %d, auto %d %d %d %d, Light Auto picks the auto ones "
+        "(rc %d)", mem_pairs[0], inf.cd_count, inf.wb[0], inf.wb[1], inf.wb[2], inf.wb[3], inf.wb_auto[0], inf.wb_auto[1],
+        inf.wb_auto[2], inf.wb_auto[3], rc);
 }
 
 /* ------------------------------------------------------------------ PRINT */
@@ -5687,6 +5726,7 @@ static int hs_pv_diff(int k, int flags)
  * file number + CR2; PLAY is blocked while a roll is in the camera (Blind roll). The darkroom run itself is
  * tools/dr_dark_check.sh (the chain) and a camera run (memory). */
 extern const int wf_t_me_size, wf_t_me_name, wf_t_me_priv, wf_t_me_select, wf_t_me_children;
+int wf_t_me_shidden(const void *e);
 static uint8_t *menu_named(const char *nm)
 {
     uint8_t *top = h_menu;
@@ -5731,10 +5771,6 @@ static char *roll_file_wait(const char *want, long *n, int ms)   /* wf_task writ
  * roll file read at boot. One boot per case (the module loads once per boot) */
 static void t_roll_save(const char *cs)
 {
-#ifdef WF_BUILD_5D2
-    (void)cs;
-    chk(1, "5D2: no roll");
-#else
     long n = 0;
     char *b;
     std_pack();
@@ -5794,7 +5830,6 @@ static void t_roll_save(const char *cs)
     mod_deinit();
     h_fio_cpath[0] = 0;
     h_fio_odd_fd = 0;
-#endif
 }
 /* ROLL:lock - the shutter held on a finished roll (owner 11-15): a roll of 3, the close-and-load request, the new roll
  * free, a roll of 6 full again, unload lets go */
@@ -5813,14 +5848,6 @@ static int roll_shoot(int from, int n)
 }
 static void t_roll_lock(void)
 {
-#ifdef WF_BUILD_5D2
-    std_pack();
-    mod_init(1);
-    chk(wf_roll_req_swap(wf_films[fA].id, 3, 0) == -4, "5D2: no roll to close and load");
-    usleep(300000);
-    chk(h_uilock_n == 0 && cbr_key(H_KEY_HALFSHUTTER) == 1, "5D2: no UI lock, the shutter keys pass");
-    mod_deinit();
-#else
     std_pack();
     h_set_folder_number(100);
     h_set_file_number(400);
@@ -5878,7 +5905,6 @@ static void t_roll_lock(void)
     log_mark();
     mod_deinit();
     chk(log_has("roll: shutter free") && !(icu_uilock & 1), "unload: the shutter free (lock %x)", icu_uilock);
-#endif
 }
 /* ROLL:dark / ROLL:boot - the owner's RAWB9 (11-15): every roll frame took the in-camera look (23..36 s), the Darkroom
  * never started ("dark: no task (5)": DryOS's table full, the UI task on its last slot), and at boot the roll came only
@@ -5907,10 +5933,6 @@ static void dump_frame(const char *path, const uint32_t *p, int w, int h)   /* 1
 }
 static void t_roll_dark(const char *cs)
 {
-#ifdef WF_BUILD_5D2
-    (void)cs;
-    chk(1, "5D2: no roll");
-#else
     std_pack();
     const int film = wf_films[fC].id;
     put_cfg("film=%d\noutput=film\ngrain=normal\nhalation=bloom\nmist=w4\n", film);   /* Mist in: owner 11-15 */
@@ -5947,7 +5969,7 @@ static void t_roll_dark(const char *cs)
     chk(WAIT(look_table_ready(), 10000), "table published");
     log_mark();
     int sb = shot(in, out, FW, FH);
-    chk(sb == 0 && ndiff(out, in, NW) > 0 && LOGW("shot #1 ", 5000) && strstr(log_line("shot #"), " + mist "),
+    chk(sb == 0 && ndiff(out, in, NW) > 0 && LOGW("shot #1 ", 5000) && log_has(" + mist 0."),   /* (5D2: 2 lines) */
         "no roll: a shot gets the look, Mist in ('%s')", log_line("shot #"));
     dump_frame("frame_canon.ppm", in, FW, FH);
     dump_frame("frame_look_noroll.ppm", out, FW, FH);
@@ -6002,13 +6024,12 @@ static void t_roll_dark(const char *cs)
     chk(WAIT(h_task_slots == 1, 2000), "the UI task gave its slot back");
     h_task_slots = -1;
     mod_deinit();
-#endif
 }
 /* ROLL:mem - the owner's RAWB17 EOS M (11-16): every Darkroom roll develop ended "no memory" ("dark: srm chunks
  * 46000064+31888K", "dark: memory raw 6000064 frame 0 (srm)", "0 developed, 3 left"): ONE SRM chunk of 31,888 KB (the
  * raw fits, 53 KB left) and no 35 MB block of shoot memory for the frame. Here srm_malloc_suite gives that layout
  * (h_srm_n chunks side by side, the camera's uncached alias) and shoot memory has no block over h_shoot_max; three real
- * EOS M RAW+L pairs (WF_DARK_CR2: a landscape and two portraits, Orientation 6 / 8; read only, never committed) through
+ * RAW+L pairs of the camera (dk_t_dir: a landscape and two portraits, Orientation 6 / 8; read only, never committed) through
  * the whole run in the module, with the owner's print finishes (frame 1, info 1, date 2). Each roll is shot to its end
  * (FULL, as the owner's): the run rewinds it (RAWB17 left a FULL roll FULL: "0 developed, 0 failed, 3 left", no reason).
  *   short: no shoot memory at all: still "no memory", now with the "memory short" lines naming what was short;
@@ -6016,10 +6037,11 @@ static void t_roll_dark(const char *cs)
  *   split: the camera's one chunk, shoot blocks up to 16 MB: the frame split (head from shoot memory, tail over the
  *          spent raw), each print = the one-block print byte for byte after Canon's APP1 (only our comment there names
  *          the roll); grain off (its seed is per shot), halation + bloom + mist on;
- *   chunks: no shoot block over 6 MB and the shoot suite in 640 KB chunks: the head in 12 pieces (bands and thumbnail
- *          runs cross them), each print = the one-block print byte for byte;
- *   owner: the owner's look (film table, halation + bloom, grain, mist), one chunk, shoot blocks up to 6 MB only: the
- *          head from a shoot suite's chunks, 3 of 3 developed. */
+ *   chunks: no shoot block over DK_T_SHOOT (EOS M 6 MB, 5D2 7 MB: halation's state fits, the head not) and the shoot
+ *          suite in 640 KB chunks: the head in 12 (EOS M) / 13 (5D2) pieces (bands and thumbnail runs cross them), each
+ *          print = the one-block print byte for byte;
+ *   owner: the owner's look (film table, halation + bloom, grain, mist), one chunk, shoot blocks up to DK_T_SHOOT only:
+ *          the head from a shoot suite's chunks, 3 of 3 developed. */
 static int mem_copy(const char *src, const char *dst)
 {
     FILE *a = fopen(src, "rb"), *b = a ? fopen(dst, "wb") : 0;
@@ -6032,7 +6054,6 @@ static int mem_copy(const char *src, const char *dst)
     if (b) fclose(b);
     return ok;
 }
-static const char *const mem_pairs[3] = { "IMG_0208", "IMG_0206", "IMG_0212" };   /* landscape, Orientation 6, 8 */
 static int mem_shoot(const char *dir, int from)
 {
     int ok = 1;
@@ -6106,8 +6127,9 @@ static void mem_prints(const char *what, int num, int from, char **keep, long *k
         char *b = mem_print(num, i, from + i, &n);
         int w = 0, h = 0, eoi = b && n > 2 && (unsigned char)b[n - 2] == 0xFF && (unsigned char)b[n - 1] == 0xD9;
         int dims = b && mem_dims((unsigned char *)b, n, &w, &h);
-        chk(b && n > (1 << 20) && eoi && dims && w > 5184 && h > 3456 && mem_after_app1((unsigned char *)b, n) > 0,
-            "%s: F%02d print %ld KB, %dx%d (a frame round the 5184 x 3456 picture), APP1 + EOI", what, i + 1, n >> 10, w, h);
+        chk(b && n > (1 << 20) && eoi && dims && w > FW && h > FH && mem_after_app1((unsigned char *)b, n) > 0,
+            "%s: F%02d print %ld KB, %dx%d (a frame round the %d x %d picture), APP1 + EOI", what, i + 1, n >> 10, w, h, FW,
+            FH);
         if (keep) {
             keep[i] = b;
             keepn[i] = n;
@@ -6128,18 +6150,23 @@ static void mem_same(const char *what, int num, int from, char **ref, const long
         free(b);
     }
 }
+/* the head's pieces when a shoot suite gives chunks of csz bytes (dk_split: whole rows of each, 32-byte aligned) */
+static int mem_pieces(int K, int csz)
+{
+    int rows = (csz - 31) / (FW * 2);
+    return rows > 0 ? (K + rows - 1) / rows : 0;
+}
+static int mem_k(const char *ms)                 /* the K of "frame split at row K" */
+{
+    const char *kp = strstr(ms, "frame split at row ");
+    return kp ? atoi(kp + 19) : 0;
+}
 static void t_roll_mem(void)
 {
-#ifdef WF_BUILD_5D2
-    chk(1, "5D2: no darkroom");
-#else
-    const char *dir = getenv("WF_DARK_CR2");
+    const char *dir = dk_t_dir();
     char t[300];
-    if (!dir)
-        dir = "/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM";
-    snprintf(t, sizeof t, "%s/%s.CR2", dir, mem_pairs[2]);
-    if (access(t, R_OK) != 0) {
-        chk(1, "SKIPPED: no EOS M RAW+L pairs in %s (WF_DARK_CR2)", dir);
+    if (!*dir) {
+        chk(1, "SKIPPED: no %s RAW+L pairs (WF_DARK_CR2)", DK_T_CAM);
         return;
     }
     std_pack();
@@ -6161,10 +6188,10 @@ static void t_roll_mem(void)
     h_srm_n = 1;
     h_shoot_fail = 1;
     mem_run("short", 1);
-    chk(log_has("dark: srm chunks ") && strstr(log_line("dark: srm chunks"), "+31888K"), "short: the camera's chunk ('%s')",
+    chk(log_has("dark: srm chunks ") && strstr(log_line("dark: srm chunks"), DK_T_SRMK), "short: the camera's chunk ('%s')",
         log_line("dark: srm chunks"));
     snprintf(t, sizeof t, "dark: memory short: raw %d KB ok, frame %d KB in one block none",
-             (int)((9240u * 3528u + 4096u) >> 10), (int)((5184u * 2u * 3456u) >> 10));
+             (int)((DK_T_RAW + 4096u) >> 10), (int)(((uint32_t)FW * 2u * FH) >> 10));
     chk(log_has(t) && strstr(log_line("memory short: split head "), "biggest shoot block 0 KB") != 0,
         "short: the lines name what was short ('%s' / '%s')", log_line("memory short: raw"), log_line("memory short: split"));
     chk(!log_has("no frame to develop"), "short: a full roll is rewound for the run");
@@ -6190,7 +6217,7 @@ static void t_roll_mem(void)
     long refn[3] = { 0, 0, 0 };
     mem_prints("full", 1, 501, ref, refn);
 
-    /* split: the camera's layout (one 31,888 KB chunk), shoot blocks up to 16 MB */
+    /* split: the camera's layout (one SRM chunk: EOS M 31,888 KB, 5D2 38,720 KB), shoot blocks up to 16 MB */
     h_srm_n = 1;
     chk(mem_roll(film, 2, dir, 504), "roll 002: the same 3 pairs again (%d)", wf_roll_now()->nshot);
     h_lvp = h_disp_pause_off = 1;                /* the camera's pause: LiveView off, the display off with it (RAWB18) */
@@ -6201,10 +6228,7 @@ static void t_roll_mem(void)
         "('%s')", log_line("dark: screen at the end"));
     h_lvp = h_disp_pause_off = 0;
     const char *ms = log_line("frame split at row ");
-    int K = 0;
-    const char *kp = strstr(ms, "frame split at row ");
-    if (kp)
-        K = atoi(kp + 19);
+    int K = mem_k(ms);
     chk(K > 0 && K % 64 == 0 && K <= 1024 && strstr(ms, "from shoot (1 piece"), "split: the head of %d rows from one shoot "
         "block ('%s')", K, ms);
     chk(strstr(log_line("dark: roll 002 end"), "3 developed, 0 failed, 0 left") != 0, "split: 3 of 3 ('%s')",
@@ -6217,7 +6241,7 @@ static void t_roll_mem(void)
     /* chunks: no shoot block for the head (6 MB at most: halation's 5.7 MB fits, a 7 MB head does not) and the shoot
        suite scattered in 640 KB chunks: the head in 12 pieces of 63 rows, so the encoder's 16-row bands and the
        thumbnails' runs cross pieces; each print = the one-block print byte for byte after APP1 */
-    h_shoot_max = 6 << 20;
+    h_shoot_max = DK_T_SHOOT;
     h_shoot_chunk = 640 << 10;
     chk(mem_roll(film, 3, dir, 507), "roll 003: 3 frames (%d)", wf_roll_now()->nshot);
     h_lvp = h_disp_pause_off = h_disp_stuck = 1; /* and a display that does not come back: the run goes on dark */
@@ -6230,8 +6254,10 @@ static void t_roll_mem(void)
         log_line("dark: screen at the end"));
     h_lvp = h_disp_pause_off = h_disp_stuck = 0;
     h_disp = 1;
-    chk(strstr(log_line("frame split at row "), "from shoot chunks (12 pieces") != 0, "chunks: the head in 12 pieces ('%s')",
-        log_line("frame split at row "));
+    K = mem_k(log_line("frame split at row "));
+    snprintf(t, sizeof t, "from shoot chunks (%d pieces", mem_pieces(K, 640 << 10));
+    chk(K > 0 && strstr(log_line("frame split at row "), t) != 0 && mem_pieces(K, 640 << 10) >= 10, "chunks: the head of %d "
+        "rows in %d pieces ('%s')", K, mem_pieces(K, 640 << 10), log_line("frame split at row "));
     chk(strstr(log_line("dark: roll 003 end"), "3 developed, 0 failed, 0 left") != 0, "chunks: 3 of 3 ('%s')",
         log_line("dark: roll 003 end"));
     mem_same("chunks", 3, 507, ref, refn);
@@ -6239,12 +6265,14 @@ static void t_roll_mem(void)
         free(ref[i]);
     h_shoot_chunk = 0;
 
-    /* owner: the owner's look with grain, shoot blocks up to 6 MB (a 7 MB head in two chunks of the suite) */
+    /* owner: the owner's look with grain, shoot blocks up to DK_T_SHOOT (the head in two chunks of the suite) */
     wf_grain = 2;
     chk(mem_roll(film, 4, dir, 510), "roll 004: 3 frames (%d)", wf_roll_now()->nshot);
     mem_run("owner", 4);
-    chk(strstr(log_line("frame split at row "), "from shoot chunks (2 pieces") != 0, "owner: the head from a shoot suite's "
-        "chunks ('%s')", log_line("frame split at row "));
+    K = mem_k(log_line("frame split at row "));
+    snprintf(t, sizeof t, "from shoot chunks (%d pieces", mem_pieces(K, DK_T_SHOOT));
+    chk(K > 0 && strstr(log_line("frame split at row "), t) != 0 && mem_pieces(K, DK_T_SHOOT) == 2, "owner: the head from a "
+        "shoot suite's chunks ('%s')", log_line("frame split at row "));
     chk(strstr(log_line("dark: look ready"), "halation + bloom normal, grain") && !strstr(log_line("dark: look ready"), " -"),
         "owner: the owner's look built ('%s')", log_line("dark: look ready"));
     chk(strstr(log_line("dark: roll 004 end"), "3 developed, 0 failed, 0 left") != 0, "owner: 3 of 3 ('%s')",
@@ -6253,7 +6281,6 @@ static void t_roll_mem(void)
     h_srm_n = 0;
     h_shoot_max = 0;
     mod_deinit();
-#endif
 }
 
 /* ROLL:jpeg - Camera JPEG Overwrite and the logo (owner 11-16) on the three real pairs, the whole run in the module
@@ -6395,11 +6422,21 @@ static double sc_area(int x, int y, int dw, int dh)
     return s / ((b - a) * (d - c));
 }
 
+/* the log line of a print fitted into Canon's size (wf_dark.c dk_fit): frame fr, Info = roll, the shot's orientation */
+static const char *jp_fitline(char *b, size_t n, int i, int fr, int orient)
+{
+    struct wf_pf_lay P;
+    b[0] = 0;
+    if (!wf_pf_fit(&P, fr, WF_PIN_ROLL, FW, FH, orient, FW, FH))
+        return b;
+    int pw = P.iw, ph = P.ih;
+    wf_pf_pad(&P, FW, FH);
+    snprintf(b, n, "dark: F%02d camera JPEG: the print fitted %dx%d, picture %dx%d at %d,%d, logo", i + 1, FW, FH, pw, ph,
+             P.ix, P.iy);
+    return b;
+}
 static void t_roll_jpeg(void)
 {
-#ifdef WF_BUILD_5D2
-    chk(1, "5D2: no darkroom");
-#else
     {   /* Camera JPEG Overwrite with a frame (owner 11-17): the print fitted into 5184 x 3456 (wf_pf_fit / wf_pf_pad)
            and its picture's area resample (wf_pf_scale) */
         struct wf_pf_lay P;
@@ -6457,13 +6494,10 @@ static void t_roll_jpeg(void)
         free(mem);
         sc_img = 0;
     }
-    const char *dir = getenv("WF_DARK_CR2");
-    char t[300];
-    if (!dir)
-        dir = "/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM";
-    snprintf(t, sizeof t, "%s/%s.CR2", dir, mem_pairs[2]);
-    if (access(t, R_OK) != 0) {
-        chk(1, "SKIPPED: no EOS M RAW+L pairs in %s (WF_DARK_CR2)", dir);
+    const char *dir = dk_t_dir();
+    char fl1[120], fl2[120];
+    if (!*dir) {
+        chk(1, "SKIPPED: no %s RAW+L pairs (WF_DARK_CR2)", DK_T_CAM);
         return;
     }
     std_pack();
@@ -6614,23 +6648,23 @@ static void t_roll_jpeg(void)
     mem_run("frame", 3);
     chk(strstr(log_line("dark: roll 003 end"), "3 developed, 0 failed, 0 left") != 0, "frame: 3 of 3 ('%s')",
         log_line("dark: roll 003 end"));
-    chk(log_has("dark: F01 logo Canon ") && log_has("+ lettering Canon EOS M") && log_has("dark: F02 logo Canon "),
+    chk(log_has("dark: F01 logo Canon ") && log_has("+ lettering " DK_T_MODEL) && log_has("dark: F02 logo Canon "),
         "frame: the logo drawn ('%s')", log_line("dark: F01 logo"));
-    chk(log_has("dark: F01 caption ") && strstr(log_line("dark: F01 caption"), "Canon EOS M") == 0,
+    chk(log_has("dark: F01 caption ") && strstr(log_line("dark: F01 caption"), DK_T_MODEL) == 0,
         "frame: line 1 without the model the lettering names ('%s')", log_line("dark: F01 caption"));
     for (int i = 0; i < 2; i++) {
         char d[64], e[80];
         long n = 0;
         snprintf(d, sizeof d, "DCIM/100CANON/IMG_%04d.JPG", 507 + i);
-        snprintf(e, sizeof e, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the print fitted 5184x3456", i + 1,
-                 507 + i);
+        snprintf(e, sizeof e, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the print fitted %dx%d", i + 1,
+                 507 + i, FW, FH);
         char *b = get_file(d, &n);
         long pn = 0;
         char *pb = mem_print(3, i, 507 + i, &pn);
         int w = 0, h = 0, eoi = b && n > 2 && (unsigned char)b[n - 2] == 0xFF && (unsigned char)b[n - 1] == 0xD9;
         uint32_t tl = 0;
         const unsigned char *tp = b ? jp_thumb((unsigned char *)b, n, &tl) : 0;
-        chk(b && eoi && mem_dims((unsigned char *)b, n, &w, &h) && w == 5184 && h == 3456 && log_has(e)
+        chk(b && eoi && mem_dims((unsigned char *)b, n, &w, &h) && w == FW && h == FH && log_has(e)
             && memmem(b, (size_t)(n < 65536 ? n : 65536), "WindyFilm Darkroom", 18) && tp && tl > 1000 && pb && pn != n,
             "frame: IMG_%04d.JPG the print fitted %dx%d (%ld B, the roll print %ld B), our comment + thumbnail (%u B) "
             "('%s')", 507 + i, w, h, n, pn, tl, log_line(e));
@@ -6644,8 +6678,7 @@ static void t_roll_jpeg(void)
         free(b);
         free(pb);
     }
-    chk(log_has("dark: F01 camera JPEG: the print fitted 5184x3456, picture 4320x2880 at 432,96, logo")
-        && log_has("dark: F02 camera JPEG: the print fitted 5184x3456, picture 4560x3040 at 104,208, logo")
+    chk(log_has(jp_fitline(fl1, sizeof fl1, 0, WF_PFR_WHITE, 1)) && log_has(jp_fitline(fl2, sizeof fl2, 1, WF_PFR_WHITE, 6))
         && log_has("dark: F01 camera JPEG caption "), "frame: the print laid out again round the picture scaled down "
         "('%s', '%s')", log_line("dark: F01 camera JPEG: the print"), log_line("dark: F02 camera JPEG: the print"));
     chk(log_has("dark: F03 camera JPEG IMG_0509.JPG not there: not overwritten") && access("DCIM/100CANON/IMG_0509.JPG",
@@ -6661,7 +6694,7 @@ static void t_roll_jpeg(void)
                 h = (unsigned char)b[o + 5] << 8 | (unsigned char)b[o + 6];
                 w = (unsigned char)b[o + 7] << 8 | (unsigned char)b[o + 8];
             }
-        chk(dims && w > 5184 && h > 3456, "frame: F%02d print %dx%d (framed)", i + 1, w, h);
+        chk(dims && w > FW && h > FH, "frame: F%02d print %dx%d (framed)", i + 1, w, h);
         free(b);
     }
     const char *ow = getenv("WF_OW_OUT");
@@ -6678,8 +6711,8 @@ static void t_roll_jpeg(void)
         mem_run("frame black", 4);
         for (int i = 0; i < 3; i++) {
             char e[80];
-            snprintf(e, sizeof e, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the print fitted 5184x3456", i + 1,
-                     510 + i);
+            snprintf(e, sizeof e, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the print fitted %dx%d", i + 1,
+                     510 + i, FW, FH);
             snprintf(s, sizeof s, "DCIM/100CANON/IMG_%04d.JPG", 510 + i);
             snprintf(d, sizeof d, "%s/ow_black_F%02d.JPG", ow, i + 1);
             okb &= log_has(e) && mem_copy(s, d);
@@ -6707,16 +6740,16 @@ static void t_roll_jpeg(void)
         chk(log_has(pass ? "dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print in NNNWFILM/WFP_nnnn.JPG"
                          : "dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print beside it as "
                            "WFP_nnnn.JPG"), "%s: the run says where ('%s')", what, log_line("dark: Camera JPEG Over"));
-        chk(log_has("dark: F02 camera JPEG: the print fitted 5184x3456, picture 4560x3040 at 104,208, logo"),
-            "%s: F02 (portrait) fitted ('%s')", what, log_line("dark: F02 camera JPEG: the print"));
+        chk(log_has(jp_fitline(fl2, sizeof fl2, 1, wf_pr_frame, 6)), "%s: F02 (portrait) fitted ('%s')", what,
+            log_line("dark: F02 camera JPEG: the print"));
         for (int i = 0; i < 3; i++) {
             char a[64], c[64], e1[96], e2[96], e3[64], t1[64], t2[64];
             snprintf(a, sizeof a, "DCIM/100CANON/IMG_%04d.JPG", from + i);
             snprintf(c, sizeof c, "%s/WFP_%04d.JPG", d2, from + i);
-            snprintf(e1, sizeof e1, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the picture 5184x3456,", i + 1,
-                     from + i);
-            snprintf(e2, sizeof e2, "dark: F%02d camera JPEG %sWFP_%04d.JPG written: the print fitted 5184x3456,", i + 1,
-                     pass ? "100WFILM/" : "", from + i);
+            snprintf(e1, sizeof e1, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the picture %dx%d,", i + 1,
+                     from + i, FW, FH);
+            snprintf(e2, sizeof e2, "dark: F%02d camera JPEG %sWFP_%04d.JPG written: the print fitted %dx%d,", i + 1,
+                     pass ? "100WFILM/" : "", from + i, FW, FH);
             snprintf(e3, sizeof e3, "dark: F%02d camera JPEG: 2 of 2 files in DCIM, ", i + 1);
             long na = 0, nc = 0, np = 0;
             char *ba = get_file(a, &na), *bc = get_file(c, &nc), *bp = mem_print(rn, i, from + i, &np);
@@ -6725,7 +6758,7 @@ static void t_roll_jpeg(void)
             const unsigned char *pa = ba ? jp_thumb((unsigned char *)ba, na, &ta) : 0;
             const unsigned char *pc = bc ? jp_thumb((unsigned char *)bc, nc, &tc) : 0;
             int da = ba && mem_dims((unsigned char *)ba, na, &wa, &ha), dc = bc && mem_dims((unsigned char *)bc, nc, &wc, &hc);
-            chk(da && dc && wa == 5184 && ha == 3456 && wc == 5184 && hc == 3456 && bp && na != nc && np != na && np != nc
+            chk(da && dc && wa == FW && ha == FH && wc == FW && hc == FH && bp && na != nc && np != na && np != nc
                 && memmem(bc, (size_t)(nc < 65536 ? nc : 65536), "WindyFilm Darkroom", 18) && pa && pc && ta > 1000
                 && tc > 1000 && (ta != tc || memcmp(pa, pc, ta)) && log_has(e1) && log_has(e2) && log_has(e3),
                 "%s: F%02d IMG_%04d.JPG the picture %dx%d (%ld B), %s %dx%d (%ld B), print %ld B, thumbnails %u / %u B "
@@ -6758,7 +6791,6 @@ static void t_roll_jpeg(void)
     h_srm_n = 0;
     h_shoot_max = 0;
     mod_deinit();
-#endif
 }
 
 /* ROLL:shelf - many rolls waiting, develop again (owner 11-17, DESIGN 3.15), on real RAW+L pairs: the browser's
@@ -6769,21 +6801,10 @@ static void t_roll_jpeg(void)
  * is ROLL:shelfboot (the module loads once per process: a second init here would find it unloading) */
 static void t_roll_shelf(void)
 {
-#ifdef WF_BUILD_5D2
-    std_pack();
-    mod_init(1);
-    usleep(600000);
-    chk(wf_shelf_now()->n == 0 && wf_dark_start_roll(1, 0, 0) == -3 && wf_roll_req_swap(wf_films[fA].id, 3, 0) == -4,
-        "5D2: no shelf, no Darkroom, no close-and-load (%d rolls)", wf_shelf_now()->n);
-    mod_deinit();
-#else
-    const char *dir = getenv("WF_DARK_CR2");
-    char t[300], t2[300];
-    if (!dir)
-        dir = "/mnt/f/MagicLatern/_research/raw-path/cr2/Day09_EOSM";
-    snprintf(t, sizeof t, "%s/%s.CR2", dir, mem_pairs[2]);
-    if (access(t, R_OK) != 0) {
-        chk(1, "SKIPPED: no EOS M RAW+L pairs in %s (WF_DARK_CR2)", dir);
+    const char *dir = dk_t_dir();
+    char t2[300];
+    if (!*dir) {
+        chk(1, "SKIPPED: no %s RAW+L pairs (WF_DARK_CR2)", DK_T_CAM);
         return;
     }
     snprintf(t2, sizeof t2, "%s/%s.CR2", dir, mem_pairs[1]);
@@ -6880,7 +6901,6 @@ static void t_roll_shelf(void)
     h_srm_n = 0;
     h_shoot_max = 0;
     mod_deinit();
-#endif
 }
 
 /* ROLL:shelfboot - the shelf at boot is the card's (owner 11-17, DESIGN 3.15): a card with ROLLS/ROLL001 (developed)
@@ -6922,14 +6942,6 @@ static void t_roll_shelfboot(void)
 {
     std_pack();
     const int film = wf_films[fC].id;
-#ifdef WF_BUILD_5D2
-    sb_roll("ROLL003", 3, 1, film, 0, 0, 0);
-    mod_init(1);
-    usleep(600000);
-    chk(wf_shelf_now()->n == 0 && !log_has("roll: shelf"), "5D2: a roll folder on the card, no shelf (%d rolls)",
-        wf_shelf_now()->n);
-    mod_deinit();
-#else
     const int film2 = wf_films[fB].id;
     sb_roll("ROLL001", 1, 1, film, 0, 3, 0);     /* developed */
     sb_roll("ROLL001B", 1, 2, film, film2, 3, 1);   /* its develop 2, stopped after F01 */
@@ -6964,7 +6976,6 @@ static void t_roll_shelfboot(void)
     chk(LOGW("roll: shelf 3 rolls (003 3 to develop, 002 done 3/3, 001B 2 to develop)", 5000),
         "the list down from the camera's 004 ('%s')", log_line("roll: shelf "));
     mod_deinit();
-#endif
 }
 
 /* ISO - owner 11-17 ("lúc set film sao vụ iso ko nhận đúng theo film roll nữa"): the browser's SET that loads a film
@@ -7015,7 +7026,9 @@ static void t_qkeys(void)
     af_mode = 0;
     mod_init(1);
     usleep(300000);
+    uint8_t *qrow = menu_named("Quick keys");
     if (wf_cam() != WF_CAM_EOSM) {
+        chk(qrow && wf_t_me_shidden(qrow), "5D2: the Quick keys row hidden (the 5D2 has its own ISO button and dials)");
         chk(wf_qk == WF_QK_DOWN, "5D2: the row reads DOWN ring (one config for both)");
         log_mark();
         int n = h_iso_n;
@@ -7027,6 +7040,7 @@ static void t_qkeys(void)
         return;
     }
     chk(wf_qk == WF_QK_DOWN, "Quick keys: DOWN ring by default");
+    chk(qrow && !wf_t_me_shidden(qrow), "EOS M: the Quick keys row shown");
     /* DOWN ring: ISO */
     log_mark();
     chk(cbr_key(QK_DOWN) == 1, "DOWN goes on (the core's long press: a long DOWN still opens the browser)");
@@ -7281,15 +7295,13 @@ static void t_iso(void)
     chk(WAIT(h_iso_n == 7, 3000) && LOGW("load: ISO 400 not taken by the camera (ISO stays 250)", 3000)
         && h_li_get("iso") == 83, "a body that takes no ISO: said, the ISO stays 250 ('%s')", log_line("load: ISO"));
     h_iso_refuse = 0;
-#ifndef WF_BUILD_5D2
-    log_mark();
+    log_mark();                                  /* a roll load (both cameras: the 5D2 has rolls since dark-5d2) */
     int rc = wf_roll_req_load(i50, 3);
     chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && LOGW("roll: 001 loaded", 3000)
         && LOGW("roll: ISO 100 (film speed 50, the nearest the camera takes)", 3000) && h_li_get("iso") == 72,
         "a roll of the 50 film: loaded, ISO 100 (%d, code %d, '%s')", rc, h_li_get("iso"), log_line("roll: ISO"));
     usleep(600000);
     chk(h_iso_n == 8, "one ISO set for the roll load (%d calls)", h_iso_n);
-#endif
     mod_deinit();
 }
 
@@ -7334,10 +7346,6 @@ static void t_roll(const char *cs)
     chk(h_uilock_n == 0 && !log_has("roll: shutter") && !log_has("roll: image quality") && cbr_key(H_KEY_HALFSHUTTER) == 1
         && cbr_key(H_KEY_FULLSHUTTER) == 1, "no roll: as before (no UI lock (%d calls), no RAW+L, the shutter keys pass)",
         h_uilock_n);
-#ifdef WF_BUILD_5D2
-    chk(wf_roll_req_load(wf_films[fA].id, 12) == -4, "5D2: a roll load is refused (the darkroom comes to the EOS M first)");
-    chk(menu_named("RAW develop") != 0, "5D2: the RAW develop entry is there (B on the 5D2, raw-develop 6b51b75)");
-#else
     const int film = wf_films[fA].id;
     log_mark();
     wf_rawb = 1;
@@ -7448,7 +7456,6 @@ static void t_roll(const char *cs)
     }
     chk(b && n == 1536 && strstr(b, "state=done"), "roll file: 1536 bytes, state=done (%ld)", n);
     free(b);
-#endif
     mod_deinit();
 }
 

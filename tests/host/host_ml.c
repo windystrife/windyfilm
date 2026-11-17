@@ -333,10 +333,14 @@ void *GetFirstChunkFromSuite(void *s) { return s; }
 void *GetNextMemoryChunk(void *s, void *c) { (void)s; return c ? ((struct h_suite *)c)->next : 0; }
 void *GetMemoryAddressOfMemoryChunk(void *c) { return ((struct h_suite *)c)->p; }
 int GetSizeOfMemoryChunk(void *c) { return ((struct h_suite *)c)->size; }
-/* SRM: h_srm_n chunks of the EOS M's SRM_BUFFER_SIZE (0x1F24000 = 31,888 KB) side by side, as the camera's uncached alias
-   (bit 30 set, like the owner's 0x46000064); the module reads them through CACHEABLE() = the mapping below bit 30.
-   0 chunks = none (every mode but ROLL:mem) */
+/* SRM: h_srm_n chunks of the camera's SRM_BUFFER_SIZE (EOS M 0x1F24000 = 31,888 KB, 5D2 0x25D0000 = 38,720 KB) side by
+   side, as the camera's uncached alias (bit 30 set, like the owner's 0x46000064); the module reads them through
+   CACHEABLE() = the mapping below bit 30. 0 chunks = none (every mode but the Darkroom's ROLL modes) */
+#ifdef WF_BUILD_5D2
+#define H_SRM_SZ 0x25D0000
+#else
 #define H_SRM_SZ 0x1F24000
+#endif
 static uint8_t *h_srm_map;
 void *srm_malloc_suite(int n)
 {
@@ -767,8 +771,9 @@ void NotifyBox(int timeout, const char *fmt, ...)
 
 /* ------------------------------------------------------------------ Roll + Darkroom (src/wf_dark.c, DESIGN 3.6)
  * Linked so the module links as on the camera. srm_malloc_suite gives no chunk unless h_srm_n is set (ROLL:mem: the
- * owner's EOS M layout, one 31,888 KB chunk); tools/dr_check.sh and tools/dr_dark_check.sh test the roll and the develop. */
+ * owner's EOS M layout, one 31,888 KB chunk; the 5D2's chunk is 38,720 KB); tools/dr_check.sh and tools/dr_dark_check.sh test the roll and the develop. */
 int image_review_time = 2, battery_level_bars = 3;
+int GetBatteryLevel(void) { return 80; }         /* the 5D2's battery in percent (the EOS M reads battery_level_bars) */
 void LoadCalendarFromRTC(void *tm) { memset(tm, 0, 9 * sizeof(int)); }
 /* LiveView pause and the display (the owner's RAWB18 EOS M: the screen went dark while the Darkroom ran). Off unless
  * h_lvp: then PauseLiveView turns lv off (and the display too with h_disp_pause_off), ResumeLiveView turns both on;

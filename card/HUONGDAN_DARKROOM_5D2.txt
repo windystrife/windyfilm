@@ -1,0 +1,138 @@
+HƯỚNG DẪN THỬ ROLL + DARKROOM TRÊN 5D MARK II (lần đầu)
+=========================================================
+17/11/2026 tối, nhánh dark-5d2. Darkroom trước giờ chỉ có trên EOS M; thẻ này bật nó
+trên 5D2. CHƯA chạy trên máy 5D2 thật lần nào. Trên máy tính, mọi bước (nạp cuộn, chụp,
+tráng, viền / ngày / logo, Camera JPEG, kệ cuộn, tráng lại) đã chạy qua với CR2 + JPG
+của chính anh (100EOS5D, Day 10). Lần chụp này để đo bộ nhớ, thời gian, màn hình và
+phím trên máy thật.
+
+Ý tưởng như EOS M: chụp một cuộn (3 / 6 / 12 / 24 / 36 kiểu RAW + L, không xem lại ảnh),
+rồi "tráng" cả cuộn trong máy: Darkroom đọc từng CR2 trên thẻ, develop bằng phim của
+cuộn và ghi bản in JPEG riêng (ROLLS/ROLL001/F01_8380.JPG). CR2 không bao giờ bị sửa;
+WB của máy không bị đổi.
+
+
+0. LƯU Ý TRƯỚC
+--------------
+- Đừng chép đè lên thẻ đang dùng để chụp thật.
+- Pin: 5D2 báo pin theo %. Darkroom chỉ bắt đầu khi pin còn từ 30 % trở lên, và tự
+  dừng khi pin xuống dưới 15 % ("Battery low"). Nên sạc đầy trước.
+- Thẻ nên còn trống ít nhất 2 GB (mỗi kiểu: CR2 khoảng 25 MB + JPEG L của Canon + bản in
+  khoảng 4-5 MB, có viền thì lớn hơn).
+- Bản in cỡ 5616 x 3744 như JPEG L của Canon (có viền thì khung lớn hơn).
+
+
+1. CÀI LÊN THẺ
+--------------
+- Thẻ đã cài Magic Lantern cho 5D2 (boot được). Xoá nội dung cũ, chép TẤT CẢ trong thư
+  mục này vào gốc thẻ.
+- autoexec.bin và ML/modules/5D2_212.sym luôn đi cặp, đừng thay lẻ.
+- Đừng chép filmroll.mo vào thẻ này.
+- Thẻ bây giờ có thêm ML/DATA/WFPRINT.DAT (chữ trên viền) và WFLOGO.DAT (logo), như EOS M.
+- Kiểm tra file: MD5SUMS.txt.
+
+
+2. PHÍM TRÊN 5D2
+----------------
+Màn hình giống EOS M, chỉ khác tên phím (chân màn hình ghi đúng phím của 5D2):
+- Joystick trái / phải / lên / xuống: như các nút mũi tên của EOS M.
+- Bấm joystick (JOY): sửa một dòng (trái / phải đổi giá trị), bấm lại để thôi.
+- Bánh xe sau (DIAL): đổi giá trị (thay vòng xoay của EOS M).
+- PICT (nút Picture Style): đổi nhóm phim Colour / Cine / B&W / Film LUT / Film stage
+  (thay chạm 1 ngón của EOS M).
+- PLAY: vào Darkroom khi trong máy có cuộn đã chụp (hoặc kệ có cuộn).
+- MENU: thoát / quay lại. Trong Darkroom đang tráng: MENU hai lần để dừng.
+
+
+3. NẠP CUỘN
+-----------
+- Mở browser WindyFilm. Lên tới thanh trên cùng, phải sang chip chế độ góc trên phải,
+  SET đổi JPEG -> RAW develop -> Darkroom. Ở Darkroom có thêm hàng Exposures.
+- Hoặc menu ML Shoot > WindyFilm > "Film roll": browser mở sẵn ở chế độ Darkroom, con trỏ
+  ở hàng Exposures.
+- Xuống hàng Exposures, DIAL: 3 / 6 / 12 / 24 / 36 kiểu (3 và 6 để thử nhanh).
+- Trái / phải chọn phim, SET: nạp cuộn (hoạt ảnh "Roll loaded"), rồi về màn hình chụp.
+- Cuộn đã có kiểu: chân màn hình có "[PLAY] Darkroom".
+- Cuộn đã hết mà chọn phim khác + SET: máy hỏi đưa cuộn cũ lên kệ rồi nạp cuộn mới.
+- Mục "Blind roll" (mặc định On): có cuộn thì tắt xem lại ảnh sau khi chụp và khoá PLAY.
+
+
+4. CHỤP
+-------
+- Module tự đặt RAW + L khi có cuộn, trả lại như cũ khi cuộn hết / đóng. Đừng tự đổi chất
+  lượng ảnh trong lúc chụp cuộn.
+- JPEG lúc chụp là JPEG gốc của Canon (không màu phim). Màu phim nằm trên bản in Darkroom.
+- LiveView: góc trên trái "ROLL 001 <phim>", góc dưới phải bộ đếm "5/12".
+- Đủ kiểu: bảng "END OF ROLL" trên LiveView; nút chụp khoá cho tới khi tráng, Close roll
+  hoặc nạp cuộn mới. Bấm nửa cò vẫn lấy nét được.
+- Ngắm kính (không LiveView): bộ đếm và bảng END OF ROLL chỉ vẽ trên LiveView. Khoá chụp
+  vẫn phải có (đây là chỗ cần thử, bước e).
+
+
+5. TRÁNG (DARKROOM)
+-------------------
+- Vào: PLAY trong browser khi có cuộn, hoặc menu ML "Darkroom". SET (hoặc bấm joystick):
+  bắt đầu. LiveView tạm dừng trong lúc tráng.
+- Ngay sau SET: "Mixing the chemistry" (dựng bảng phim, halation, grain) rồi tới kiểu 1.
+- Mỗi kiểu: Loading the negative -> Exposing the paper -> In the fixer -> Washing.
+- Thời gian trên màn hình ("About 9 min") vẫn ước theo EOS M; trên 5D2 chưa đo.
+- Nút góc trên phải: Screen On (màn hình sáng suốt lúc tráng) / Screen Off (tắt, bấm phím
+  bất kỳ sáng 10 giây).
+- Khối PRINT: Frame (Off / White / Black / White wide / Black wide), Info (Off / On / On +
+  roll), Date, Camera JPEG (Keep / Overwrite / Over + print). Lên / xuống chọn dòng,
+  trái / phải hoặc DIAL đổi giá trị.
+- Hàng ROLL trên cùng: cuộn trong máy, rồi các cuộn trên kệ. Cuộn đã tráng: "develop
+  again" + hàng Film (SET chọn phim khác). Bản in lần 2 vào ROLLS/ROLL001B.
+- Không mở nắp thẻ, không tắt máy khi đang tráng.
+
+
+6. NHỮNG GÌ CẦN THỬ (theo thứ tự)
+---------------------------------
+a. Bộ nhớ + thời gian: LiveView bật, nạp cuộn 3 kiểu phim màu (vd Portra 160), PRINT để
+   Frame Off, Date Off, Camera JPEG Keep. Chụp 3 tấm: 1 ngang, 1 dọc xoay phải, 1 dọc xoay
+   trái. Vào Darkroom, SET, ghi thời gian thực tế bằng đồng hồ ngoài.
+   Log cần gửi (ML/LOGS/WINDYFLM.LOG, các dòng bắt đầu bằng):
+     dark: 5D2 memory: biggest shoot block ...
+     dark: srm chunks ...
+     dark: memory raw ...        (hoặc "frame split at row ...", hoặc "memory short: ...")
+     dark: look ready ...        (có dấu "-" sau halation / bloom / grain = thiếu bộ nhớ)
+     dark: screen at the start: display .. LiveView ..
+     dark: F01 IMG_xxxx iso ...: load .. expose .. fix .. dry .. ms ...   (mỗi kiểu một dòng)
+     dark: roll 001 end: ...
+b. Như a. nhưng tắt LiveView trước khi vào Darkroom (ngắm kính). Darkroom có chạy, màn hình
+   có hiện không? Log "dark: screen at the start: ..." và "dark: screen at the end: ...".
+c. Screen Off: nút góc trên phải = Screen Off, tráng cuộn 3 kiểu. Màn hình phải tắt; bấm
+   một phím: sáng 10 giây rồi tắt lại; tráng vẫn chạy. Log "dark: display off ...".
+d. Screen On: cả lần tráng màn hình sáng. Log mỗi kiểu "dark: F01 screen: relit N".
+e. Khoá chụp: cuộn 3 kiểu, chụp đủ 3. Tấm thứ 4 không chụp được, cả lúc LiveView lẫn lúc
+   ngắm kính. Bấm nửa cò vẫn lấy nét. Log "roll: shutter blocked (full), UI lock 1"; vào
+   Darkroom SET thì "roll: shutter free". Ngắm kính: có thấy gì báo hết cuộn không?
+f. Kiểu của cuộn: trong lúc có cuộn, JPEG trên thẻ là JPEG gốc Canon. Log mỗi tấm hai
+   dòng "yuv TOP plain: roll frame: Canon's JPEG, no look ..." và "yuv BOT plain: ...".
+g. Viền + logo + ngày: Frame White, Info On + roll, Date 'YY MM DD, tráng cuộn 3 kiểu (có
+   tấm dọc). Mở bản in trong ROLLS/ROLL00n trên máy tính: viền, 3 dòng chữ, logo Canon,
+   số ngày màu cam. Log "dark: F01 frame White ...", "dark: F01 logo Canon ...".
+h. Camera JPEG = Overwrite (Frame Off), rồi Over + print (Frame White): xem file trong DCIM
+   bằng PLAY của máy (phải mở được), và WFP_nnnn.JPG cạnh IMG_nnnn.JPG (Over + print).
+i. Kệ + tráng lại: nạp cuộn A 3 kiểu, chụp đủ; trong browser chọn phim khác, SET: máy hỏi
+   đưa cuộn A lên kệ; SET. Vào Darkroom: hàng ROLL tới cuộn A, tráng. Rồi tráng lại cuộn A
+   với một phim B&W: bản in vào ROLLS/ROLL00nB.
+j. Light Auto: hàng Light = Auto, tráng một cuộn chụp dưới đèn vàng trong nhà. Bản in phải
+   theo Auto WB của Canon; WB của máy giữ nguyên sau khi tráng.
+k. Pin: % trên đầu màn hình Darkroom so với Menu > Battery info của máy.
+l. Tắt máy bật lại giữa cuộn: cuộn (ROLL, bộ đếm) phải còn.
+
+
+7. GỬI LẠI
+----------
+- ML/LOGS/WINDYFLM.LOG (cả file).
+- Thời gian thực tế từng lần tráng (đồng hồ ngoài), và cuộn mấy kiểu.
+- Thư mục ROLLS/ (bản in) và 2-3 cặp CR2 + JPG gốc tương ứng.
+- Ảnh chụp màn hình máy (bằng điện thoại) chỗ nào thấy lạ, nhất là bước b, c, e.
+
+
+8. NẾU CÓ LỖI
+-------------
+- Treo: tháo pin, gửi WINDYFLM.LOG. Bản in đang dở bị xoá và làm lại lần sau.
+- Darkroom báo "no memory": gửi log (các dòng "dark: memory short ..." cho biết thiếu gì).
+- Muốn tắt hẳn: menu ML Modules, tắt windyflm, khởi động lại máy.

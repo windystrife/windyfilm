@@ -178,6 +178,9 @@ int main(int argc, char **argv)
     host_init(argv[3], 0x03FF0000u, 0x03000000u);
     wf_ui_init();
     fake_reset();
+    const char *cam = getenv("WF_UI_CAM");      /* dr_run.sh CAM=5D2: the same screens with the 5D2's keys (DESIGN 3.18) */
+    if (cam && !strcmp(cam, "5D2"))
+        fake_set_cam(WF_CAM_5D2);
     fake_set_card(argv[2]);
     fake_dark_reset();
     int colour = first_of(WF_GRP_COLOUR, 0), bw = first_of(WF_GRP_BW, 0);
