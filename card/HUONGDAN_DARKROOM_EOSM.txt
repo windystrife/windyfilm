@@ -14,6 +14,13 @@ Thay đổi 15/11 (sau log RAWB9):
 - (15/11 tối) Cuộn bằng lon Film stage (âm bản x print stock) và các hàng knob (11 hàng từ 16/11): mục 4
   "CUỘN PHIM FILM STAGE", thử ở 5s.
 
+Thay đổi 17/11 (thẻ RAWB23, nhánh wf-onescreen):
+- Không còn Roll picker: cuộn nạp ngay trong browser (chip Darkroom ở góc trên phải,
+  hàng Exposures, SET trên lon). Thử ở bước y.
+- Nút "Film | Film stage" ở góc trên trái; cuộn Film stage chụp được ở JPEG 8-bit, RAW
+  develop và Darkroom; INFO mở trang Info (có thời gian tráng lần cuối). Thử ở bước z.
+- Light Auto = Auto WB của Canon khi WindyFilm tráng; WB của máy không bị đổi. Bước x.
+
 Ý tưởng: chụp một cuộn phim (3 / 6 / 12 / 24 / 36 kiểu RAW + L, không xem lại ảnh), rồi
 "tráng" cả cuộn trong máy: Darkroom đọc từng file CR2 trên thẻ, develop bằng RAW
 develop B của WindyFilm với phim của cuộn, ghi ra một JPEG "bản in" riêng. Toàn
@@ -316,12 +323,71 @@ w. (16/11, RAWB22) Screen Off: chọn nút góc trên phải = Screen Off, trán
    không phím nào được thì thử nửa nút chụp), màn hình có tự sáng lại giữa chừng không,
    thời gian tráng và % pin trước / sau so với một cuộn Screen On. Xong thì đặt lại Screen
    On nếu muốn.
-x. (17/11) Light Auto: WB của máy (menu Canon) đặt Daylight, hàng Light = Auto,
-   cuộn 3 kiểu chụp trong nhà dưới đèn vàng. Tráng: bản in phải cân màu như Auto WB của
-   Canon (không vàng như JPG Daylight trong DCIM); log mỗi kiểu có "wb auto". Rồi Light
-   = Day, cuộn 3 kiểu cùng cảnh: bản in theo WB lúc chụp ("wb as-shot"). WB trong menu
-   Canon không bị đổi vì Light Auto. Ghi lại nếu bản in Auto WB lệch màu so với ảnh
-   chụp thử bằng AWB của Canon.
+x. (17/11, RAWB23) Light Auto = Auto WB khi WindyFilm tráng, WB của máy giữ nguyên:
+   WB của máy (menu Canon) đặt Daylight, hàng Light = Auto, cuộn Darkroom 3 kiểu chụp
+   trong nhà dưới đèn vàng. Tráng: bản in phải cân màu như Auto WB của Canon (không vàng
+   như JPG Daylight trong DCIM); log mỗi kiểu có "wb auto". Mở menu Canon: WB vẫn là
+   Daylight (Light Auto không đổi WB của máy, kể cả khi đang chụp hay đang tráng). Rồi
+   Light = Day, cuộn 3 kiểu cùng cảnh: bản in theo WB lúc chụp ("wb as-shot"). Đặt lại
+   Light = Auto: WB trong menu Canon trở về Daylight như trước. Ghi lại nếu bản in Auto
+   WB lệch màu so với ảnh chụp thử bằng AWB của Canon, hoặc nếu WB của máy bị đổi.
+y. (17/11, RAWB23) Chip chế độ ở góc trên phải browser: JPEG / RAW develop / Darkroom.
+   Mở browser, bấm lên từ hàng đầu tới thanh trên cùng, phải = chip; trái / phải / bánh
+   xe / SET đổi chế độ.
+   1. Section Film, chip JPEG hoặc RAW develop: không có hàng Exposures. Chip Darkroom:
+      hàng Exposures (3 / 6 / 12 / 24 / 36) hiện trên cùng các hàng, SET trên một lon
+      nạp cuộn với số kiểu đó; chip ghi "Darkroom 0/12" rồi đếm lên khi chụp. Khi cuộn
+      đang chụp dở, số trên hàng Exposures xám (không đổi được).
+   2. Cuộn Darkroom (section Film) đã chụp 2 kiểu, đổi chip sang JPEG: máy hỏi "End the
+      roll now and shoot JPEG?", dòng vàng "The 2 frames shot go to the Darkroom: PLAY
+      develops them". MENU = Keep the roll (vẫn Darkroom, cuộn còn nguyên). SET = End the
+      roll now: cuộn chờ Darkroom, PLAY tráng được 2 kiểu đó.
+   3. Ghi lại nếu chip đổi chế độ mà không hỏi khi cuộn đã có kiểu, hoặc số đếm trên
+      chip sai so với số kiểu đã chụp.
+z. (17/11, RAWB23) Nút "Film | Film stage" ở góc trên trái browser (trên thanh trên cùng,
+   trái = nút, phải = chip; xuống = về các hàng).
+   1. SET trên nút đổi section; section đang chọn chữ trắng. Film: tab Colour / Cine /
+      B&W / Film LUT. Film stage: tab Vision3 / Vision / ECN/EXR / Fuji / B&W. TAP chỉ
+      đổi tab trong section, bộ đếm đếm trong section. Đổi đi rồi đổi lại: về đúng tab
+      và phim lần trước. Ở Film stage chip ghi "JPEG 8-bit" thay cho "JPEG", hàng
+      Exposures có ở mọi chế độ và SET trên lon luôn nạp cuộn.
+   2. Cuộn Film stage JPEG 8-bit: chip = JPEG 8-bit, Exposures 3, SET trên một lon, chụp
+      3 kiểu. Ảnh JPEG có màu phim ngay lúc chụp; log mỗi kiểu có "dev time: JPEG 8-bit
+      N ms". Dưới tên phim trong browser có 2 dòng EXIF; EXIF (UserComment) của ảnh có
+      thêm "| Mode JPEG 8-bit | Dev n.n s".
+   3. Cuộn Film stage RAW develop: cùng phim, chip = RAW develop, cuộn 3 kiểu (RAW+L).
+      Mỗi kiểu được tráng lúc chụp; log "dev time: RAW develop N ms"; EXIF có "| Mode RAW
+      develop | Dev n.n s".
+   4. Cuộn Film stage Darkroom: chip = Darkroom, cuộn 3 kiểu, chụp xong vào Darkroom
+      (PLAY) tráng. Log "dev time: Darkroom N ms"; EXIF bản in có "| Mode Darkroom".
+   5. INFO trên browser mở trang Info (chữ "Info", tên phim, góc phải "FILM STAGE" hay
+      "FILM"); INFO lần nữa đóng lại (MENU thoát browser). Dưới tên phim: các chip (loại
+      phim / ISO / 35mm) và 2 dòng mô tả (phim Film stage: ví dụ "500-speed tungsten cine
+      negative, 3200 K." rồi tên đầy đủ của phim). Trong bảng: Table (phim Film stage: mã
+      âm bản, ví dụ G08) và Daylight (phim T: "3200 K (tungsten)"). Dưới bảng là bảng phím
+      3 cột (L/R, UP/DN, RING, SET, TAP, INFO, PLAY, MENU, Half-shutter), rồi 1 dòng ghi
+      chú; không chữ nào đè lên nhau hay lên thanh phím dưới cùng. Dòng "Mode" theo chip (có
+      cuộn: "RAW develop, roll 3 exp"). Dòng "Last develop": sau bước 2 phải là "n.n s
+      (JPEG 8-bit)", sau bước 3 "n.n s (RAW develop)", sau bước 4 "n.n s (Darkroom)".
+      Ghi lại ba thời gian đó: đây là số để so JPEG 8-bit với RAW develop.
+   6. Đổi chip giữa chừng cuộn Film stage: cuộn đi tiếp, không hỏi; thông báo "Roll 00n
+      goes on: the next frames ..." (get the look at the shot / develop at the shot / for
+      the Darkroom).
+   7. Rời Film stage khi cuộn đang chụp dở (ví dụ 2 / 12 kiểu), SET trên nút để sang
+      Film. Hộp hỏi "Close it and switch to Film?", chữ theo chế độ hiện tại của cuộn:
+      - JPEG 8-bit hoặc RAW develop: dòng vàng "The 2 frames are already developed. The
+        roll just ends here.", dưới là "The files stay on the card." SET: thông báo
+        "Roll 00n ended: 2 frames developed". Không có chữ "PLAY develops".
+      - Darkroom: dòng vàng "The 2 frames shot wait for the Darkroom: PLAY develops
+        them". SET: "Roll 00n ended: 2 frames wait for the Darkroom (PLAY)"; sau đó PLAY
+        tráng được cuộn đó.
+      - MENU (Keep the roll): ở lại Film stage, cuộn còn nguyên; MENU lúc này không đóng
+        browser.
+   8. Hộp đổi cuộn: cuộn Film stage đã chụp đủ, SET trên một lon khác: "Close it and load
+      the new roll?". Cuộn JPEG 8-bit / RAW develop: dòng trên là "Roll 00n: 3 frames,
+      already developed."; cuộn Darkroom chưa tráng: "Roll 00n has 3 undeveloped frames."
+   Ghi lại chữ nào sai chế độ (ví dụ cuộn RAW develop mà vẫn ghi "PLAY develops"), hay
+   số kiểu sai.
 
 
 6. GỬI LẠI

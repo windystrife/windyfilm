@@ -7,6 +7,11 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT và WFSTAGE.DAT) là dữ liệu dẫn xuất
 (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB23 (17/11, nhánh wf-onescreen): browser có nút "Film | Film stage" ở góc trên
+trái (Film: Colour / Cine / B&W / Film LUT; Film stage: Vision3 / Vision / ECN/EXR /
+Fuji / B&W), chip chế độ ở góc trên phải (JPEG / RAW develop; 5D2 không có Darkroom
+nên không có cuộn), INFO mở trang Info. Thêm Light Shade. Xem mục 2 và mục 3 bước 6.
+
 Thẻ RAWB19 (16/11 tối, nhánh paper-finish, từ main-staging RAWB17): thêm hàng Paper
 (giấy in: Glossy / Matte / Warm / Cool), xem mục 2 và bước 7b. Paper Glossy (mặc định)
 cho ảnh y hệt RAWB17.
@@ -149,6 +154,21 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
 3. Light Day / Cloudy / Shade / Tungsten rồi về Auto: WB trở lại như cũ.
 4. Các phím của trình chọn phim; màu giao diện khi LiveView ở phía sau.
 5. EXIF (UserComment) của ảnh có dòng "WindyFilm: ...".
+6. (17/11, RAWB23) Thanh trên cùng của browser: bấm lên từ hàng đầu tới đó, trái = nút
+   "Film | Film stage", phải = chip chế độ, xuống = về các hàng.
+   - SET (hoặc nhấn joystick) trên nút đổi section; section đang chọn chữ trắng. TAP /
+     PICT chỉ đổi tab trong section, bộ đếm đếm trong section. Đổi đi rồi đổi lại: về
+     đúng tab và phim lần trước.
+   - Chip: JPEG / RAW develop (không có Darkroom, không có hàng Exposures). Ở Film
+     stage chip ghi "JPEG 8-bit"; dưới tên phim có 2 dòng EXIF.
+   - Chụp một ảnh lon Film stage ở JPEG 8-bit và một ảnh cùng phim ở RAW develop: EXIF
+     có thêm "| Mode ... | Dev n.n s", log có "dev time: ... N ms".
+   - INFO mở trang Info (chữ "Info", tên phim, góc phải "FILM STAGE" hay "FILM"; dưới
+     đó các chip loại phim / ISO / 35mm và 2 dòng mô tả phim; trong bảng có Table và
+     Daylight; dưới cùng là bảng phím với tên phím của 5D2: DIAL, JOY, PICT, MENU hay
+     TRASH); INFO lần nữa đóng lại. Dòng "Last develop" ghi thời gian và chế độ của ảnh vừa chụp:
+     ghi lại số của JPEG 8-bit và của RAW develop để so.
+   - Light Auto: WB trong menu Canon không bị đổi (chụp vài ảnh rồi mở menu xem).
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

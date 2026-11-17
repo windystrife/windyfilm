@@ -7,6 +7,13 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
 dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB23 (17/11, nhánh wf-onescreen, từ dk-screen = RAWB22): một màn hình cho mọi
+chế độ. Browser có chip chế độ ở góc trên phải (JPEG / RAW develop / Darkroom; Darkroom
+thêm hàng Exposures, SET trên lon nạp cuộn, Roll picker bỏ) và nút "Film | Film stage"
+ở góc trên trái. Cuộn Film stage chụp được ở JPEG 8-bit, RAW develop và Darkroom; INFO
+mở trang Info. Light Auto = Auto WB của Canon khi Darkroom tráng, WB của máy giữ nguyên;
+thêm Light Shade. Xem mục 2 và mục 3 bước 7-10; HUONGDAN_DARKROOM_EOSM.txt bước x-z.
+
 Thẻ RAWB22 (16/11 khuya, nhánh dk-screen, từ dr-logo = RAWB21): Darkroom thêm nút
 "Screen On / Screen Off" ở góc trên bên phải: Screen Off tắt màn hình lúc tráng để đỡ
 tốn pin, bấm phím bất kỳ thì sáng lại 10 giây. Xem HUONGDAN_DARKROOM_EOSM.txt ("TẮT MÀN
@@ -189,6 +196,28 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
    của User Def. 1, c = Contrast), EXIF có "In Canon Film 1". Rồi Picture Style
    Neutral (Contrast 0), Input curve Canon Neutral: "in-neutral ... c0". Chụp
    RAW+L cùng lúc để so với RAW.
+7. (17/11, RAWB23) Chip chế độ ở góc trên phải: bấm lên tới thanh trên cùng, phải =
+   chip, trái / phải / bánh xe / SET đổi JPEG / RAW develop / Darkroom. Chỉ Darkroom
+   (section Film) có hàng Exposures; chip ghi số kiểu của cuộn ("Darkroom 2/12").
+   Cuộn Darkroom có kiểu mà đổi chip: máy hỏi "End the roll now" (SET) / "Keep the
+   roll" (MENU). Chi tiết: HUONGDAN bước y.
+8. (17/11, RAWB23) Nút "Film | Film stage" ở góc trên trái: SET đổi section, TAP chỉ
+   đổi tab trong section, đổi lại thì về đúng phim cũ. Film stage: chip ghi "JPEG
+   8-bit", hàng Exposures luôn có. Chụp một cuộn 3 kiểu cùng phim ở mỗi chế độ JPEG
+   8-bit, RAW develop, Darkroom: log có "dev time: <chế độ> N ms", EXIF có "| Mode
+   <chế độ> | Dev n.n s". Chi tiết: HUONGDAN bước z.
+9. (17/11, RAWB23) INFO mở trang Info, INFO lần nữa đóng lại. Dưới tên phim có các chip
+   (loại phim / ISO / 35mm) và 2 dòng mô tả phim như trong browser; trong bảng có Table và
+   Daylight; dưới bảng là bảng phím 3 cột. Dòng "Last develop" ghi
+   thời gian tráng lần cuối và chế độ: so "(JPEG 8-bit)" với "(RAW develop)" của cùng
+   phim, ghi lại hai số đó. Rời Film stage khi cuộn có kiểu: cuộn JPEG 8-bit / RAW
+   develop ghi "already developed. The roll just ends here." rồi "Roll 00n ended: N
+   frames developed"; cuộn Darkroom ghi "wait for the Darkroom: PLAY develops them".
+   Hộp đổi cuộn (cuộn đã đủ, SET trên lon khác) cũng theo chế độ: "already developed"
+   hay "undeveloped frames".
+10. (17/11, RAWB23) Light Auto: WB của máy đặt Daylight, Light = Auto, cuộn Darkroom
+   dưới đèn vàng: bản in cân màu như Auto WB của Canon, log "wb auto"; sau đó WB trong
+   menu Canon vẫn là Daylight. HUONGDAN bước x.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ
