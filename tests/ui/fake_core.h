@@ -10,6 +10,7 @@ void fake_set_film_grey(int id, int mask); /* and for film id under the browser'
 void fake_set_missing(int id);             /* film id not on the card */
 void fake_set_status(const char *s);
 void fake_set_dev(int ms, int path);       /* wf_dev_last: the last develop's ms and WF_PATH_* */
+int  fake_iso_reqs(void);                  /* wf_iso_film calls (the browser's SET that loaded a film) */
 void fake_set_films_state(int s);          /* wf_films_state(): 1 tables read, 0 starting, -1 worker failed, -2 no pack */
 void fake_set_card(const char *dir);       /* root that ML/DATA/... paths are read from */
 int  fake_row_value(int row);

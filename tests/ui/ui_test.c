@@ -161,8 +161,11 @@ static void close_ui(int k, unsigned want)
 /* SET on the selected film: the load animation runs, then the browser closes by itself */
 static void load_and_close(int want_id)
 {
+    int same = wf_loaded() == want_id, n0 = fake_iso_reqs();
     CHECK(key(MODULE_KEY_PRESS_SET) == 0, "SET not consumed");
     CHECK(wf_loaded() == want_id, "SET did not load %d (loaded %d)", want_id, wf_loaded());
+    CHECK(fake_iso_reqs() == n0 + !same, "ISO from the film: %d asks for a %s (owner 11-17: only a load sets it)",
+          fake_iso_reqs() - n0, same ? "film picked again" : "load");
     CHECK(wfui_host_anim() && !closed, "no load animation after SET");
     tick(40);
     CHECK(!closed, "closed before the animation ended");

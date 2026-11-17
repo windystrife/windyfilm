@@ -84,6 +84,8 @@ int  wf_row_step_for(int row, int delta, int id);
 
 enum { WF_LOAD_OK = 0, WF_LOAD_NOTABLE, WF_LOAD_NOCUBE, WF_LOAD_BUSY, WF_LOAD_UNKNOWN };
 int  wf_load(int id);                     /* make film id the active look: output Film, or V-Log + LUT for a can */
+void wf_iso_film(int id, int roll);       /* owner 11-17: the camera's ISO to film id's speed (wf_task sets it); the
+                                             browser after its SET loaded a film, the roll code after a roll load (1) */
 int  wf_loaded(void);                     /* the active film id, 0 = none (output is plain log, Log + LUT or Off) */
 int  wf_avail(int id);                    /* 1 = loadable now (its table is in the pack / its cube is on the card) */
 int  wf_films_state(void);                /* the film tables: 1 read, 0 starting (worker / pack not up yet), -1 the

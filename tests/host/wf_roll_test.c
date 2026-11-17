@@ -170,6 +170,28 @@ int main(void)
         CHECK(!strcmp(nm, "ROLL021B"), "name, pass 2: %s", nm);
         wf_roll_name(999, WF_ROLL_MAXDEV, nm);
         CHECK(!strcmp(nm, "ROLL999Z"), "name, pass 26: %s", nm);
+        /* the film's speed (owner 11-17): Canon's step nearest by ratio, the body's range, whole stops */
+        int iv = 0;
+        CHECK(wf_roll_iso(400, 72, 128, 1, &iv) == 88 && iv == 400, "ISO 400: code 88 (%d)", iv);
+        CHECK(wf_roll_iso(250, 72, 128, 1, &iv) == 83 && iv == 250, "ISO 250: code 83 (%d)", iv);
+        CHECK(wf_roll_iso(50, 72, 128, 1, &iv) == 72 && iv == 100, "ISO 50: 100, the lowest (%d)", iv);
+        CHECK(wf_roll_iso(64, 80, 128, 1, &iv) == 80 && iv == 200, "ISO 64 with HTP: 200, its lowest (%d)", iv);
+        CHECK(wf_roll_iso(250, 72, 128, 0, &iv) == 80 && iv == 200, "ISO 250, whole stops: 200 (%d)", iv);
+        CHECK(wf_roll_iso(300, 72, 128, 0, &iv) == 88 && iv == 400, "ISO 300, whole stops: 400 (4/3 < 3/2) (%d)", iv);
+        CHECK(wf_roll_iso(180, 72, 128, 1, &iv) == 80 && iv == 200, "ISO 180: 200 (200/180 < 180/160) (%d)", iv);
+        CHECK(wf_roll_iso(3200, 72, 120, 1, &iv) == 112 && iv == 3200, "ISO 3200 on the 5D2 (%d)", iv);
+        CHECK(wf_roll_iso(25600, 72, 120, 1, &iv) == 120 && iv == 6400, "ISO 25600 on the 5D2: 6400, its top (%d)", iv);
+        CHECK(wf_roll_iso(99999, 72, 128, 1, &iv) == 128 && iv == 12800, "a huge speed: the EOS M's top (%d)", iv);
+        CHECK(wf_roll_iso(0, 72, 128, 1, &iv) == 0 && iv == 0 && wf_roll_iso(-5, 72, 128, 1, 0) == 0, "no speed: 0");
+        CHECK(wf_roll_iso(400, 130, 128, 1, &iv) == 0 && iv == 0, "no step in lo..hi: 0");
+        CHECK(wf_roll_iso_of(83) == 250 && wf_roll_iso_of(0) == 0 && wf_roll_iso_of(84) == 0, "the ISO of a code");
+        int ibad = 0;
+        for (int c = 72; c <= 136; c++) {
+            int s = wf_roll_iso_of(c);
+            if (s && (wf_roll_iso(s, 72, 136, 1, &iv) != c || iv != s))
+                ibad++;
+        }
+        CHECK(!ibad, "every 1/3 step to itself (%d off)", ibad);
         CHECK(wf_roll_name_parse("ROLL021", &n, &d) == 0 && n == 21 && d == 1, "parse ROLL021: %d %d", n, d);
         CHECK(wf_roll_name_parse("roll021c", &n, &d) == 0 && n == 21 && d == 3, "parse roll021c (any case): %d %d", n, d);
         CHECK(wf_roll_name_parse("ROLL999Z", &n, &d) == 0 && n == 999 && d == 26, "parse ROLL999Z: %d %d", n, d);

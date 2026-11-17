@@ -643,6 +643,7 @@ static void load_sel(void)
     int r = wf_load(f->id);
     if (r == WF_LOAD_OK)
     {
+        wf_iso_film(f->id, 0);                              /* owner 11-17: the camera's ISO to the film's speed */
         anim_start(f, 0);
         return;
     }

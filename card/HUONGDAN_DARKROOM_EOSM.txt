@@ -513,6 +513,15 @@ af. (17/11 tối, RAWB25) Trường hợp biên: (1) trên máy tính xoá một
    browser chế độ Darkroom, PLAY: không vào, báo "Load a roll first"; menu ML "Darkroom" mở
    được màn hình: "No rolls to develop", "Shoot a roll first", chân màn hình chỉ có MENU
    Back. Ghi lại chữ nào hiện sai hay lệch.
+ag. (17/11 đêm) ISO theo phim: máy ở M, ISO Auto. Trong browser (JPEG) SET trên một lon
+   ISO 400: ISO của máy thành 400, log "load: ISO 400 (film speed, was Auto ISO)". SET lon
+   ISO 50: ISO 100 ("film speed 50, the nearest the camera takes"). Đổi ISO tay sang 1600,
+   chỉ di con trỏ qua các lon rồi MENU thoát: ISO vẫn 1600. SET lại đúng lon đang nạp:
+   ISO vẫn 1600 (không nạp lại). Nạp một cuộn Darkroom: log "roll: ISO ... (film speed)".
+   Tắt máy bật lại (cuộn còn trong máy): ISO giữ như lúc tắt, không bị đặt lại. Tráng một
+   cuộn trên kệ hay tráng lại bằng phim khác: ISO không đổi. Thử thêm ở Av và P (ISO Auto
+   cũng bị đặt theo phim), và ở chế độ cảnh / Auto+: log "not taken by the camera". Ghi
+   lại: ISO đổi có kịp ngay không, có chế độ nào ISO không đổi hay máy báo lỗi.
 
 
 6. GỬI LẠI

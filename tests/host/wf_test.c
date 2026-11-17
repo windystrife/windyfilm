@@ -6725,6 +6725,7 @@ static void t_roll_shelf(void)
 
     remove("DCIM/100CANON/IMG_0602.CR2");        /* F02's CR2 gone from the card */
     log_mark();
+    int iso_n0 = h_iso_n;                        /* the Darkroom's own film changes set no ISO (owner 11-17) */
     int ds = wf_dark_start_roll(1, 0, 0);
     chk(ds == 0 && LOGW("dark: roll 001 F02 100/IMG_0602.CR2 is gone: skipped", 10000)
         && LOGW("dark: roll 001 from the shelf: film ", 5000)
@@ -6752,6 +6753,8 @@ static void t_roll_shelf(void)
     snprintf(e, sizeof e, "dark: film %d back", film);
     chk(ok && strstr(log_line("dark: roll 001 end"), "3 developed, 0 failed, 0 left") && log_has(e) && wf_loaded() == film,
         "develop 2: 3 developed, film %d back (%d) ('%s')", film, wf_loaded(), log_line("dark: roll 001 end"));
+    chk(h_iso_n == iso_n0, "the shelf roll and the develop again with film %d: the ISO untouched (%d calls)", film2,
+        h_iso_n - iso_n0);
     for (int i = 0; i < 3; i++) {
         char pth[64];
         long n = 0;
@@ -6847,6 +6850,7 @@ static void t_roll_shelfboot(void)
     chk(s->n == 3 && s->e[1].num == 1 && s->e[1].dev == 2 && s->e[1].film == film2 && s->e[1].own == film
         && s->e[1].left == 2 && s->e[1].ndev == 1 && s->e[2].num == 3 && s->e[2].state == WF_RS_REWOUND,
         "the shelf entries: 001B film %d own %d, 2 left; 003 rewound (%d rolls)", s->e[1].film, s->e[1].own, s->n);
+    chk(h_iso_n == 0 && !log_has(": ISO "), "boot with a roll in the camera: the ISO untouched (%d calls)", h_iso_n);
     log_mark();
     int rc = wf_roll_req_load(film, 3);
     int seen3 = 0;                               /* never shown loaded under the shelf's number */
@@ -6861,6 +6865,85 @@ static void t_roll_shelfboot(void)
         "the list down from the camera's 004 ('%s')", log_line("roll: shelf "));
     mod_deinit();
 #endif
+}
+
+/* ISO - owner 11-17 ("lúc set film sao vụ iso ko nhận đúng theo film roll nữa"): the browser's SET that loads a film
+ * (wf_load + wf_iso_film) and a roll load set the camera's ISO to the film's speed at the nearest step the body takes.
+ * Nothing at boot, nothing for a bare wf_load (the Darkroom's own film changes); Auto ISO gives way; HTP's floor; a body
+ * on whole stops; a body that takes none (a scene mode) */
+static int k_speed(int iso)                      /* a ready colour film of that box speed with a Scan table, -1 */
+{
+    for (int k = 0; k < wf_nfilms; k++)
+        if (wf_films[k].iso == iso && colour_film(k) && (wf_films[k].prints & 1))
+            return k;
+    return -1;
+}
+static void t_iso(void)
+{
+    int k400 = k_speed(400), k50 = k_speed(50), k250 = k_speed(250);
+    chk(k400 >= 0 && k50 >= 0 && k250 >= 0, "catalogue films of speed 400 / 50 / 250 (%d %d %d)", k400, k50, k250);
+    if (k400 < 0 || k50 < 0 || k250 < 0)
+        return;
+    struct pk e[] = { { k400, 0, tab_make(0, 0, 0, 0) }, { k50, 0, tab_make(0, 0, 0, 0) }, { k250, 0, tab_make(0, 0, 0, 0) } };
+    pack_write(e, 3, 0);
+    const int i400 = wf_films[k400].id, i50 = wf_films[k50].id, i250 = wf_films[k250].id;
+    h_li_set("iso", 0);                          /* Auto ISO */
+    h_set_folder_number(100);
+    h_set_file_number(300);
+    mod_init(1);
+    usleep(1200000);
+    chk(h_iso_n == 0 && !log_has(": ISO "), "boot: the ISO untouched (%d calls)", h_iso_n);
+    chk(WAIT(wf_load(i400) == WF_LOAD_OK, 5000), "film %d (ISO 400) loads", i400);
+    usleep(600000);
+    chk(h_iso_n == 0 && h_li_get("iso") == 0, "a bare wf_load (the Darkroom's own film changes): no ISO (%d calls)",
+        h_iso_n);
+    log_mark();
+    wf_iso_film(i400, 0);
+    chk(WAIT(h_iso_n == 1, 3000) && h_li_get("iso") == 88 && LOGW("load: ISO 400 (film speed, was Auto ISO)", 3000),
+        "SET on the 400 film: ISO 400 from Auto (code %d, '%s')", h_li_get("iso"), log_line("load: ISO"));
+    log_mark();
+    chk(wf_load(i50) == WF_LOAD_OK, "film %d (ISO 50) loads", i50);
+    wf_iso_film(i50, 0);
+    chk(WAIT(h_iso_n == 2, 3000) && h_li_get("iso") == 72
+        && LOGW("load: ISO 100 (film speed 50, the nearest the camera takes)", 3000),
+        "the 50 film: ISO 100, the lowest (code %d, '%s')", h_li_get("iso"), log_line("load: ISO"));
+    h_htp = 1;
+    log_mark();
+    wf_iso_film(i50, 0);
+    chk(WAIT(h_iso_n == 3, 3000) && h_li_get("iso") == 80
+        && LOGW("load: ISO 200 (film speed 50, the nearest the camera takes)", 3000),
+        "Highlight Tone Priority: ISO 200 is the floor (code %d, '%s')", h_li_get("iso"), log_line("load: ISO"));
+    h_htp = 0;
+    h_iso_whole = 1;
+    log_mark();
+    chk(wf_load(i250) == WF_LOAD_OK, "film %d (ISO 250) loads", i250);
+    wf_iso_film(i250, 0);
+    chk(WAIT(h_iso_n == 5, 3000) && h_li_get("iso") == 80
+        && LOGW("load: ISO 200 (film speed 250; the camera takes whole stops only)", 3000),
+        "a body on whole stops: 250 refused, ISO 200 (%d calls, code %d, '%s')", h_iso_n, h_li_get("iso"),
+        log_line("load: ISO"));
+    h_iso_whole = 0;
+    log_mark();
+    wf_iso_film(i250, 0);
+    chk(WAIT(h_iso_n == 6, 3000) && h_li_get("iso") == 83 && LOGW("load: ISO 250 (film speed)", 3000),
+        "1/3 stops again: ISO 250 (code %d)", h_li_get("iso"));
+    h_iso_refuse = 1;
+    log_mark();
+    chk(wf_load(i400) == WF_LOAD_OK, "film %d loads again", i400);
+    wf_iso_film(i400, 0);
+    chk(WAIT(h_iso_n == 7, 3000) && LOGW("load: ISO 400 not taken by the camera (ISO stays 250)", 3000)
+        && h_li_get("iso") == 83, "a body that takes no ISO: said, the ISO stays 250 ('%s')", log_line("load: ISO"));
+    h_iso_refuse = 0;
+#ifndef WF_BUILD_5D2
+    log_mark();
+    int rc = wf_roll_req_load(i50, 3);
+    chk(rc == 0 && WAIT(wf_roll_now()->state == WF_RS_LOADED, 5000) && LOGW("roll: 001 loaded", 3000)
+        && LOGW("roll: ISO 100 (film speed 50, the nearest the camera takes)", 3000) && h_li_get("iso") == 72,
+        "a roll of the 50 film: loaded, ISO 100 (%d, code %d, '%s')", rc, h_li_get("iso"), log_line("roll: ISO"));
+    usleep(600000);
+    chk(h_iso_n == 8, "one ISO set for the roll load (%d calls)", h_iso_n);
+#endif
+    mod_deinit();
 }
 
 static void t_roll(const char *cs)
@@ -7890,6 +7973,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "PACK")) t_pack(cs, argc > 3 ? argv[3] : 0);
     else if (!strcmp(mode, "LIGHT") && !strcmp(cs, "awb")) t_light_awb();
     else if (!strcmp(mode, "LIGHT")) t_light();
+    else if (!strcmp(mode, "ISO")) t_iso();
     /* test.sh passes "PRINT:chain" as MODE PRINT, CASE chain (until 11-15 that ran t_print a second time) */
     else if (!strcmp(mode, "PRINT") && !strcmp(cs, "chain")) t_print_chain();
     else if (!strcmp(mode, "PRINT")) t_print();

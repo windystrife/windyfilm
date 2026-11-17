@@ -160,6 +160,9 @@ int wf_load(int id)
 }
 
 int wf_loaded(void) { return loaded; }
+static int iso_reqs;
+void wf_iso_film(int id, int roll) { (void)id; (void)roll; iso_reqs++; }
+int fake_iso_reqs(void) { return iso_reqs; }
 const char *wf_status(void) { return status; }
 int wf_films_state(void) { return films_state; }
 void fake_set_films_state(int s) { films_state = s; gen++; }

@@ -31,6 +31,8 @@ extern volatile int h_nchanges;                  /* prop_request_change calls */
 extern uint32_t h_change_prop[256];
 extern int h_change_val[256];
 extern volatile int h_kelvin_n, h_kelvin_last, h_gm_last, h_ba_last;
+extern volatile int h_iso_n, h_iso_last;                 /* lens_set_rawiso calls, the last code asked for */
+extern int h_iso_whole, h_iso_refuse, h_htp;             /* body: whole stops only, takes no ISO, Highlight Tone Priority */
 
 /* lens_info fields by name */
 int  h_li_get(const char *field);

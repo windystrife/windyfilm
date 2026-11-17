@@ -460,3 +460,50 @@ int wf_roll_out(const struct wf_roll *r, int i, const char *root, char *out, int
     int k = snprintf(out, n, "%sROLLS/%s/F%02d_%04d.JPG", root, nm, i + 1, r->file[i]);
     return k > 0 && k < n ? k : -1;
 }
+
+/* ------------------------------------------------------------------ the film's speed (owner 11-17) */
+/* Canon's 1/3-stop ISO steps and their raw codes (ML's lens.c tables hold every 1/8 code; Canon's dial stops at these) */
+static const uint16_t iso_v[] = { 100, 125, 160, 200, 250, 320, 400, 500, 640, 800, 1000, 1250, 1600, 2000, 2500, 3200,
+                                  4000, 5000, 6400, 8000, 10000, 12800, 16000, 20000, 25600 };
+static const uint8_t iso_c[] = { 72, 75, 77, 80, 83, 85, 88, 91, 93, 96, 99, 101, 104, 107, 109, 112,
+                                 115, 117, 120, 123, 125, 128, 131, 133, 136 };
+#define ISO_N ((int)(sizeof iso_c / sizeof *iso_c))
+
+int wf_roll_iso(int speed, int lo, int hi, int third, int *iso)
+{
+    if (iso)
+        *iso = 0;
+    if (speed <= 0)
+        return 0;
+    if (speed > 25600)
+        speed = 25600;
+    int best = -1;
+    for (int i = 0; i < ISO_N; i++) {
+        int c = iso_c[i], v = iso_v[i];
+        if (c < lo || c > hi || (!third && (c - 72) % 8))
+            continue;
+        if (best < 0) {
+            best = i;
+            continue;
+        }
+        /* nearer by ratio: max(s, v) / min(s, v) < max(s, b) / min(s, b), cross-multiplied (25600^2 fits 32 bits);
+           a tie keeps the lower step */
+        uint32_t b = iso_v[best], s = (uint32_t)speed, u = (uint32_t)v;
+        uint32_t lv = (s > u ? s : u) * (s > b ? b : s), lb = (s > b ? s : b) * (s > u ? u : s);
+        if (lv < lb)
+            best = i;
+    }
+    if (best < 0)
+        return 0;
+    if (iso)
+        *iso = iso_v[best];
+    return iso_c[best];
+}
+
+int wf_roll_iso_of(int code)
+{
+    for (int i = 0; i < ISO_N; i++)
+        if (iso_c[i] == code)
+            return iso_v[i];
+    return 0;
+}

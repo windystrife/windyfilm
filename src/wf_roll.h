@@ -115,4 +115,11 @@ void wf_roll_name(int num, int dev, char *out);
 /* a ROLLS entry's name back: "ROLL021" -> 21, pass 1; "roll021b" -> 21, pass 2; 0 = ok, -1 = not a roll folder */
 int  wf_roll_name_parse(const char *s, int *num, int *dev);
 
+/* ------------------------------------------------------------------ the film's speed (pure, owner 11-17) */
+/* Canon's raw ISO code for a film's box speed (ISO 100 = 72, 8 codes a stop): the step nearest by ratio among those
+ * from lo to hi (raw codes); third 1: the 1/3 stops 100, 125, 160 .. 12800 .. 25600, third 0: whole stops only (100,
+ * 200, 400 ..). The ISO of that step in *iso (may be 0). Returns 0 for no speed (<= 0) or no step in lo..hi */
+int  wf_roll_iso(int speed, int lo, int hi, int third, int *iso);
+int  wf_roll_iso_of(int code);                  /* the ISO of a 1/3-stop code, 0 = not one (Auto is code 0) */
+
 #endif

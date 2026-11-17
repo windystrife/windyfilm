@@ -662,6 +662,20 @@ void lens_set_kelvin(int k)
     h_li_set("wb_mode", 9);
     h_li_set("kelvin", k);
 }
+/* ISO from the film (owner 11-17): the code goes into lens_info like ML's property handler puts it, unless the body
+ * refuses it: h_iso_whole = whole stops only (the 5D2's C.Fn I-3), h_iso_refuse = none (a scene mode) */
+volatile int h_iso_n, h_iso_last;
+int h_iso_whole, h_iso_refuse, h_htp;
+int lens_set_rawiso(int iso)
+{
+    h_iso_n++;
+    h_iso_last = iso;
+    if (h_iso_refuse || (h_iso_whole && iso && (iso - 72) % 8))
+        return 0;
+    h_li_set("iso", iso);
+    return 1;
+}
+int get_htp(void) { return h_htp; }
 void lens_set_wbs_gm(int v) { h_gm_last = v; h_li_set("gm", v); }
 void lens_set_wbs_ba(int v) { h_ba_last = v; h_li_set("ba", v); }
 int get_expsim(void) { return h_expsim; }

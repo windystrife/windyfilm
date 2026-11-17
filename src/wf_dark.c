@@ -686,6 +686,8 @@ static void roll_req(void)
             roll = ld;
             int rc = wf_loaded() == req_film ? WF_LOAD_OK : wf_load(req_film);
             wf_log("roll: %03d loaded, %s x%d at %d/%04d (film load %d)", roll.num, f ? f->name : "?", roll.exp, D, F, rc);
+            if (rc == WF_LOAD_OK)
+                wf_iso_film(req_film, 1);        /* owner 11-17: the camera's ISO to the film's speed (wf_menu.c) */
             if (WF_RAWB_CAN && wf_rawb)          /* both modes at once (DESIGN 3.6): B at shot time, the print later */
                 wf_log("roll: RAW develop stays on (frames get B now, a print later)");
             poll_F = F;

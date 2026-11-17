@@ -257,6 +257,10 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 16. (17/11, RAWB25) Trường hợp biên: CR2 của một kiểu bị xoá thì kiểu đó bị bỏ qua (log
    "is gone: skipped"); Close roll thì cuộn lên kệ; thẻ không có cuộn nào thì Darkroom
    ghi "No rolls to develop". HUONGDAN bước af.
+17. (17/11 đêm) ISO theo phim: SET nạp một lon (hay nạp một cuộn) thì ISO của máy thành
+   tốc độ phim, nấc gần nhất máy nhận (50 thành 100); ISO Auto cũng bị đặt; log "load: ISO
+   ..." / "roll: ISO ...". Chỉ lướt qua lon, bật lại máy, tráng cuộn trên kệ / tráng lại:
+   ISO không đổi. HUONGDAN bước ag.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

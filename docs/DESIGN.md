@@ -1349,6 +1349,37 @@ compared, the develop time shown.
   section 16 and `ui_test.c` (`shelf_swap`). Approval images `shelf_*.png` in `_windyfilm_docs/onescreen_ui/`.
 - **Not checked on the camera:** all of it (the ROLLS listing on the EOS M's card and its time, the screens).
 
+### 3.16 ISO from the film (owner 2026-11-17, branch `wf-onescreen`)
+
+Owner: "lúc set film sao vụ iso ko nhận đúng theo film roll nữa??". The old Film Roll set the camera's ISO to the film's
+speed when a film was loaded; WindyFilm never touched the ISO (no `lens_set_rawiso` anywhere before this).
+
+- **When:** the browser's SET that loads a film (JPEG, RAW develop, both cameras) and a roll load (the EOS M's
+  Darkroom rolls and Film stage rolls, `roll_req` in `wf_dark.c`). Never while browsing (the cursor on a can), never at
+  boot (the film or the roll restored from the config / roll file), never for the Darkroom's own film changes (a shelf
+  roll, a develop again, the film back after the run: those are bare `wf_load` calls). SET on the film already loaded
+  is no load (the animation only), so it sets nothing.
+- **What:** `wf_iso_film(id, roll)` (wf_api.h) asks; `wf_task` sets it (`wf_iso_poll` in `wf_menu.c`) because
+  `lens_set_rawiso` waits for the camera (`lens_wait_readytotakepic`, `prop_request_change_wait`). The speed is the
+  film's box speed (`wf_films[].iso`; the Film stage films carry their real speed since 4f92b21, Double-X EI 250).
+  `wf_roll_iso` (wf_roll.c, pure) picks Canon's step nearest by ratio: 1/3 stops (100, 125, 160 ...), from 100 (200
+  with Highlight Tone Priority, `get_htp`) to 12800 on the EOS M and 6400 on the 5D2 (its expansion range is a C.Fn
+  that may be off). A body set to whole stops (the 5D2's C.Fn I-3) refuses a third: the nearest whole stop then.
+- **Auto ISO gives way:** a film has one speed, as on the old Film Roll. The log says it (`, was Auto ISO`); Auto is
+  back from the Canon menu, and the next load sets the film's speed again.
+- **Log:** `load: ISO 400 (film speed)` / `roll: ISO 400 (film speed)`; `ISO 100 (film speed 50, the nearest the camera
+  takes)`; `ISO 200 (film speed 250; the camera takes whole stops only)`; `ISO 400 not taken by the camera (ISO stays
+  250)` (a scene mode, Auto+); `film N has no speed, ISO left as it is`.
+- **Not here:** white balance (Light keeps its own rules, 3.13); Push / pull and Film exp (Film stage knobs) do not
+  change the ISO set: the box speed only.
+- **Imports:** `lens_set_rawiso` and `get_htp` are in both cards' `.sym` (W11).
+- **Checks:** `wf_roll_test` (steps, floor, HTP, whole stops, ceilings, every 1/3 step to itself); the ISO mode of
+  `test.sh` on both cameras (boot untouched, a bare `wf_load` untouched, Auto to 400, 50 to 100, HTP 200, whole stops
+  250 to 200, a body that takes none; EOS M: a roll load); ROLL:shelf (the shelf roll and the develop again set no
+  ISO); ROLL:shelfboot (boot with a roll in: no ISO); `ui_test.c` (SET that loads asks once, SET on the loaded film
+  does not).
+- **Not checked on the camera:** the ISO change itself (Canon's property in M / Av / P, the time it takes).
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`

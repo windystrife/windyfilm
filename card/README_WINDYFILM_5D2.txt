@@ -179,6 +179,10 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
      TRASH); INFO lần nữa đóng lại. Dòng "Last develop" ghi thời gian và chế độ của ảnh vừa chụp:
      ghi lại số của JPEG 8-bit và của RAW develop để so.
    - Light Auto: WB trong menu Canon không bị đổi (chụp vài ảnh rồi mở menu xem).
+7. (17/11 đêm) ISO theo phim: SET nạp một lon thì ISO của máy thành tốc độ phim, nấc gần
+   nhất máy nhận (50 thành 100, trần 6400); ISO Auto cũng bị đặt; log "load: ISO ...".
+   Nếu C.Fn I-3 (bước ISO) đặt 1 stop: lon 250 cho ISO 200, log "whole stops only". Chỉ
+   lướt qua lon hay bật lại máy: ISO không đổi.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

@@ -1947,6 +1947,63 @@ static struct menu_entry wf_menu[] = {
     },
 };
 
+/* ------------------------------------------------------------------ ISO: the film's speed (owner 11-17) */
+/* "lúc set film sao vụ iso ko nhận đúng theo film roll nữa": a film loaded with SET in the browser, or a roll loaded,
+ * sets the camera's ISO to the film's box speed at the nearest step the body takes (wf_roll_iso: 1/3 stops, whole stops
+ * when the body refuses the third, from 100 (200 with Highlight Tone Priority) to 12800 on the EOS M, 6400 on the 5D2).
+ * Only then: never while browsing, at boot (the film or the roll restored) or for the Darkroom's own film changes (a
+ * shelf roll, a develop again, the film back after: bare wf_load calls). Auto ISO gives way: a film has one speed
+ * (DESIGN 3.16). White balance is not touched here. wf_task runs it: lens_set_rawiso waits for the camera
+ * (lens_wait_readytotakepic, prop_request_change_wait). */
+static volatile int wf_iso_req, wf_iso_id;        /* 1 a film load, 2 a roll load; the film */
+void wf_iso_film(int id, int roll)
+{
+    wf_iso_id = id;
+    WF_BARRIER();
+    wf_iso_req = roll ? 2 : 1;
+}
+
+static void wf_iso_poll(void)
+{
+    int why = wf_iso_req;
+    if (!why || !wf_cam_ok || wf_unloading)
+        return;
+    wf_iso_req = 0;
+    const char *p = why == 2 ? "roll" : "load";
+    int k = wf_cat_index(wf_iso_id), s = k >= 0 ? wf_films[k].iso : 0;
+    if (s <= 0) {
+        wf_log("%s: film %d has no speed, ISO left as it is", p, wf_iso_id);
+        return;
+    }
+    int lo = get_htp() ? 80 : 72, hi = wf_cam() == WF_CAM_EOSM ? 128 : 120;
+    int was = lens_info.raw_iso, iso = 0, whole = 0;
+    int c = wf_roll_iso(s, lo, hi, 1, &iso), ok = c && lens_set_rawiso(c);
+    if (c && !ok) {                               /* a body set to whole stops (the 5D2's C.Fn I-3) */
+        int iso2 = 0, c2 = wf_roll_iso(s, lo, hi, 0, &iso2);
+        if (c2 && c2 != c && lens_set_rawiso(c2)) {
+            c = c2;
+            iso = iso2;
+            ok = whole = 1;
+        }
+    }
+    const char *wa = was ? "" : ", was Auto ISO";
+    if (!ok) {
+        int now = lens_info.raw_iso, v = wf_roll_iso_of(now);
+        if (!now)
+            wf_log("%s: ISO %d not taken by the camera (ISO stays Auto)", p, iso);
+        else if (v)
+            wf_log("%s: ISO %d not taken by the camera (ISO stays %d)", p, iso, v);
+        else
+            wf_log("%s: ISO %d not taken by the camera (ISO code stays %d)", p, iso, now);
+    } else if (whole) {
+        wf_log("%s: ISO %d (film speed %d; the camera takes whole stops only%s)", p, iso, s, wa);
+    } else if (iso != s) {
+        wf_log("%s: ISO %d (film speed %d, the nearest the camera takes%s)", p, iso, s, wa);
+    } else {
+        wf_log("%s: ISO %d (film speed%s)", p, iso, wa);
+    }
+}
+
 /* ------------------------------------------------------------------ init / poll / deinit */
 void wf_menu_init(void)
 {
@@ -1969,6 +2026,7 @@ void wf_menu_poll(void)
     }
     ui_was = ui;
     wf_light_poll();
+    wf_iso_poll();
     wf_exif_poll();
     if (wf_cfg_dirty && get_ms_clock() - wf_cfg_t >= 1500)
         wf_cfg_save();
