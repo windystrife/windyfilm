@@ -7,6 +7,18 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
 dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB25 (17/11 tối, nhánh wf-onescreen, từ RAWB24): Darkroom thêm ba thứ.
+- Camera JPEG = Over + print (nấc thứ ba sau Keep / Overwrite): có viền thì IMG_nnnn.JPG
+  trong DCIM là ảnh màu phim không viền 5184x3456, cạnh nó thêm WFP_nnnn.JPG là cả bản
+  in (viền, chữ, ngày, logo) thu vào 5184x3456. Frame Off: như Overwrite. Máy Canon gộp
+  sai hai file cùng số thì dùng dự phòng jpeg2=folder (HUONGDAN mục "ĐÈ LÊN JPEG CỦA MÁY").
+- Kệ cuộn: nạp cuộn mới không còn bỏ cuộn cũ. Cuộn còn kiểu chưa tráng lên kệ
+  (ROLLS/ROLLnnn/WFROLL.TXT, còn nguyên sau khi tắt máy); Darkroom chọn cuộn ở hàng ROLL.
+- Tráng lại: cuộn đã tráng tráng lại được từ CR2, đổi phim được (hàng Film mở browser
+  chọn phim); bản in mới vào ROLLS/ROLLnnnB (rồi C ... Z), bản in cũ không bị đụng,
+  EXIF có "| develop 2".
+Xem mục 3 bước 13-16; HUONGDAN_DARKROOM_EOSM.txt bước ac-af.
+
 Thẻ RAWB24 (17/11 chiều, nhánh wf-onescreen, từ RAWB23): Darkroom sửa hai chỗ.
 - Screen On: module giữ màn hình sáng suốt lúc tráng (thẻ RAWB23 bị tắt màn hình giữa
   chừng một kiểu). Log mỗi kiểu có dòng "dark: Fnn screen: relit N".
@@ -231,6 +243,20 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 12. (17/11, RAWB24) Camera JPEG = Overwrite, Frame Black / White: PLAY trên máy thấy cả
    bản in (viền, chữ, ngày, logo) cỡ 5184x3456; ROLLS có bản đủ cỡ; CR2 không đổi.
    HUONGDAN bước ab.
+13. (17/11, RAWB25) Camera JPEG = Over + print, Frame Black: mỗi kiểu có hai file trong
+   DCIM, IMG_nnnn.JPG (ảnh màu phim, không viền) và WFP_nnnn.JPG (bản in có viền), cả hai
+   5184x3456; CR2 không đổi. Ghi lại PLAY trên máy hiện hai tấm thế nào (số ảnh đếm,
+   tấm nào ẩn hay bị gộp). HUONGDAN bước ac.
+14. (17/11, RAWB25) Kệ cuộn: cuộn đã chụp hết, SET trên lon khác: hộp ghi "goes on the
+   shelf", SET (Shelve and load) nạp cuộn mới. Tắt bật máy: log "roll: shelf 1 roll
+   (...)". PLAY > Darkroom, hàng ROLL chọn cuộn trên kệ, tráng được; cuộn trong máy vẫn
+   nguyên. HUONGDAN bước ad.
+15. (17/11, RAWB25) Tráng lại: cuộn đã tráng, hàng Film chọn phim khác, SET: bản in vào
+   ROLLS/ROLL00nB (WFROLL.TXT có dev=2), ROLLS/ROLL00n y như trước, EXIF UserComment có
+   "| develop 2". HUONGDAN bước ae.
+16. (17/11, RAWB25) Trường hợp biên: CR2 của một kiểu bị xoá thì kiểu đó bị bỏ qua (log
+   "is gone: skipped"); Close roll thì cuộn lên kệ; thẻ không có cuộn nào thì Darkroom
+   ghi "No rolls to develop". HUONGDAN bước af.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

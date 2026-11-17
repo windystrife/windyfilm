@@ -7,6 +7,12 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT và WFSTAGE.DAT) là dữ liệu dẫn xuất
 (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB25 (17/11 tối, nhánh wf-onescreen): module dựng lại cùng mã với thẻ EOS M
+RAWB25. Over + print, kệ cuộn và tráng lại đều là của Darkroom (5D2 không có). Trên 5D2
+chỉ khác: menu ML "Camera JPEG" có thêm nấc "Over + print", vẫn xám ("The Darkroom runs
+on the EOS M first") như Keep / Overwrite. Chế độ chọn phim cho tráng lại nằm trong
+browser nhưng chỉ mở từ Darkroom, nên browser trên 5D2 không đổi. Thử như RAWB23.
+
 Thẻ RAWB24 (17/11 chiều, nhánh wf-onescreen): module dựng lại cùng mã với thẻ EOS M
 RAWB24. Hai chỗ sửa là của Darkroom (5D2 không có). Trên 5D2 chỉ khác: màn hình sáng
 lại thì browser lấy lại màu giao diện ngay. Thử như RAWB23.

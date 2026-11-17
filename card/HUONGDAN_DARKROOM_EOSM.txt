@@ -14,7 +14,9 @@ Thay đổi 15/11 (sau log RAWB9):
 - (15/11 tối) Cuộn bằng lon Film stage (âm bản x print stock) và các hàng knob (11 hàng từ 16/11): mục 4
   "CUỘN PHIM FILM STAGE", thử ở 5s.
 
-Thay đổi 17/11 tối (thẻ RAWB25 nếu chủ duyệt, nhánh wf-onescreen):
+Thay đổi 17/11 tối (thẻ RAWB25, nhánh wf-onescreen, từ RAWB24):
+- Camera JPEG = Over + print: ảnh màu phim đè IMG_nnnn.JPG, bản in có viền thêm thành
+  WFP_nnnn.JPG cạnh nó, cả hai trong DCIM (mục "ĐÈ LÊN JPEG CỦA MÁY"). Thử ở bước ac.
 - Kệ cuộn: nạp cuộn mới không còn bỏ cuộn cũ. Cuộn đã hết / đã tua lại mà còn kiểu chưa
   tráng được đặt lên kệ (ROLLS/ROLL001/WFROLL.TXT); Darkroom tráng sau. Thử ở bước ad.
 - Tráng lại: cuộn đã tráng xong tráng lại được từ CR2, đổi phim được; bản in mới vào
