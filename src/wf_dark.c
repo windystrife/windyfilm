@@ -639,7 +639,7 @@ int wf_clock_ymd(void)
 }
 
 /* print finishes (wf_dark.h, DESIGN 3.9): the settings; a run takes them at its start */
-volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg;
+volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2;
 volatile int wf_dk_scr;                          /* Screen Off (wf_dark.h, DESIGN 3.11): read live, a run follows a change */
 volatile int wf_roll_look8;                      /* a JPEG 8-bit roll (wf_dark.h, DESIGN 3.14): config rolllook=, read live */
 void wf_roll_look8_set(int on)
@@ -700,7 +700,9 @@ static int dk_wa_said;                           /* Light Auto on a CR2 without 
 static uint32_t dk_lgn;                          /* WFLOGO.DAT's size at the run's start, 0 = none */
 static int dk_lg_said;                           /* WFLOGO.DAT too big / bad: said once a run */
 static int dk_pjp;                               /* this run's Camera JPEG (wf_pr_jpeg at its start): WF_PJ_OVER = each
-                                                    print also replaces the shot's own JPEG */
+                                                    print also replaces the shot's own JPEG; WF_PJ_BOTH = with a frame
+                                                    the picture there and the print in a second JPEG */
+static int dk_pj2;                               /* and where that second JPEG goes (wf_pr_jpg2: WF_J2_*) */
 
 static int dk_battery(void)
 {
@@ -975,8 +977,8 @@ static void dk_free(void)
 }
 
 /* the print finishes' scratch this run needs (dk_finish): the date stamp's glow map, or the font pack + the caption band +
- * a 16-row buffer + the logo's maps (the larger: the stamp is drawn first); with Overwrite also the print fitted to
- * Canon's size (dk_fit: its band, row buffer, maps and the picture's scale buffers) */
+ * a 16-row buffer + the logo's maps (the larger: the stamp is drawn first); with Overwrite (+ print) also the print
+ * fitted to Canon's size (dk_fit: its band, row buffer, maps and the picture's scale buffers) */
 static uint32_t dk_fin_need(void)
 {
     uint32_t n = 0;
@@ -989,7 +991,7 @@ static uint32_t dk_fin_need(void)
             if (k > n)
                 n = k;
         }
-        if (dk_pjp == WF_PJ_OVER && wf_pf_fit(&L, dk_pfr, dk_pin, DK_W, DK_H, o, DK_W, DK_H)) {   /* dk_fit's */
+        if (dk_pjp != WF_PJ_KEEP && wf_pf_fit(&L, dk_pfr, dk_pin, DK_W, DK_H, o, DK_W, DK_H)) {   /* dk_fit's */
             uint32_t k = WF_PF_MAXB + ((wf_pf_band_bytes(&L) + 3) & ~3u) + (uint32_t)DK_W * 2 * 16
                          + (dk_lgn ? DK_LG_B : 0) + wf_pf_scale_bytes(L.iw);
             if (k > n)
@@ -1548,49 +1550,37 @@ static int dk_fit(int i, const char *look, int orient, struct wf_pf_lay *P, uint
     return 0;
 }
 
-/* Camera JPEG Overwrite (owner 11-16: shoot fast, the darkroom's print goes over the camera's JPEG later, the ROLLS copy
- * stays): only once the roll print (out, pw) reads back right. A temp file IMG_nnnn.WFT next to the JPEG: frame Off =
- * the print's bytes, a frame = the print fitted into Canon's 5184 x 3456 (dk_fit, a second encode: Canon's playback
- * keeps the size it made; no room = the picture alone at that size), read back, then renamed over the JPEG. Never the
- * CR2. Each step logged; whatever fails, the camera's JPEG stays (or, renamed away, the .WFT holds the print). Returns
- * DK_STOP when stopped, else DK_OK: the print is done. */
-static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr *pw, uint8_t *app1, uint32_t al,
-                     const struct wf_pf_lay *L, uint32_t *rowbuf, const char *look)
+/* one DCIM file of Camera JPEG (owner 11-16, 11-17), only once the roll print (out, pw) reads back right: a temp file
+ * next to dst (dst's name, .WFT), read back, then renamed onto dst (wf_frename: an older dst removed first). kind:
+ * DK_CJ_COPY = the roll print's bytes (frame Off), DK_CJ_PIC = the picture alone at Canon's 5184 x 3456 (the date
+ * stamp is in it), DK_CJ_FIT = the print fitted into 5184 x 3456 (dk_fit, a second encode: Canon's playback keeps the
+ * size it made; no fit / no room: the picture alone, or with need_fit nothing). Both encodes set the Exif size back to
+ * Canon's and carry their own Exif thumbnail. Never the CR2. nm names dst in the log, verb says what happened to it.
+ * Returns DK_OK written, DK_ERR not (logged: whatever fails, dst stays as it was, or, renamed away, the .WFT holds it),
+ * DK_STOP when stopped in the encode */
+enum { DK_CJ_COPY, DK_CJ_PIC, DK_CJ_FIT };
+static int dk_dcim_put(int i, const char *dst, const char *nm, const char *verb, int kind, int need_fit,
+                       const char *out, const struct dk_wr *pw, uint8_t *app1, uint32_t al, const struct wf_pf_lay *L,
+                       uint32_t *rowbuf, const char *look)
 {
-    int t0 = get_ms_clock(), n = 0;
+    int t0 = get_ms_clock(), n = 0, v = 0, fit = 0;
     char tmp[96];
     struct wf_fe e = { 0, 0 };
     uint32_t sz = 0;
-    while (jpg[n])
+    while (dst[n])
         n++;
-    if (n < 5 || n >= (int)sizeof tmp || jpg[n - 4] != '.') {
-        wf_log("dark: F%02d camera JPEG: path %s", i + 1, jpg);
-        return DK_OK;
+    if (n < 5 || n >= (int)sizeof tmp || dst[n - 4] != '.') {
+        wf_log("dark: F%02d camera JPEG: path %s", i + 1, dst);
+        return DK_ERR;
     }
-    memcpy(tmp, jpg, (size_t)n - 3);
+    memcpy(tmp, dst, (size_t)n - 3);
     memcpy(tmp + n - 3, "WFT", 4);
-    int hasj = FIO_GetFileSize(jpg, &sz) == 0, hast = FIO_GetFileSize(tmp, &sz) == 0;
-    if (!hasj) {                                 /* RAW only, or a run before renamed it away and stopped */
-        wf_log("dark: F%02d camera JPEG IMG_%04d.JPG not there: not overwritten%s", i + 1, roll.file[i],
-               hast ? " (its .WFT holds a print)" : "");
-        return DK_OK;
-    }
-    if (!al) {
-        wf_log("dark: F%02d camera JPEG has no Exif: not overwritten", i + 1);
-        return DK_OK;
-    }
-    int v = dk_verify(out, pw, app1, al);
-    if (v) {
-        wf_log("dark: F%02d roll print did not read back (%d): camera JPEG kept", i + 1, v);
-        return DK_OK;
-    }
-    if (hast && wf_fremove(tmp, &e) != 0) {
-        wf_log("dark: F%02d old %s not removed (%s %d): camera JPEG kept", i + 1, tmp, wf_fe_name(e.step), e.rc);
-        return DK_OK;
+    if (FIO_GetFileSize(tmp, &sz) == 0 && wf_fremove(tmp, &e) != 0) {
+        wf_log("dark: F%02d old %s not removed (%s %d): %s kept", i + 1, tmp, wf_fe_name(e.step), e.rc, nm);
+        return DK_ERR;
     }
     struct dk_wr w;
-    int rc = DK_OK, copy = !L->frame, fit = 0;
-    if (copy) {                                  /* the canvas is the picture: the print's bytes */
+    if (kind == DK_CJ_COPY) {                    /* the canvas is the picture: the print's bytes */
         void *f = FIO_OpenFile(out, 0), *o = WF_FH_OK(f) ? wf_fopen_w(tmp, WF_FO_NEW, 0, &e) : 0;
         memset(&w, 0, sizeof w);
         w.f = o;
@@ -1611,52 +1601,122 @@ static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr
         if (WF_FH_OK(f))
             FIO_CloseFile(f);
         if (!o || w.err) {
-            wf_log("dark: F%02d camera JPEG: temp copy failed (%s): kept", i + 1, !o ? wf_fe_name(e.step) : w.err == 2
-                   ? "read" : "write");
+            wf_log("dark: F%02d camera JPEG: temp copy failed (%s): %s kept", i + 1,
+                   !o ? wf_fe_name(e.step) : w.err == 2 ? "read" : "write", nm);
             wf_fremove(tmp, &e);
-            return DK_OK;
+            return DK_ERR;
         }
         v = dk_verify(tmp, pw, app1, al);
-    } else {                                     /* the print fitted into 5184 x 3456, the Exif size back to Canon's */
+    } else {                                     /* 5184 x 3456, the Exif size back to Canon's */
         struct wf_pf_lay P;
         uint8_t *band = 0;
         uint32_t *rb = rowbuf;
-        fit = dk_fit(i, look, L->orient, &P, &band, &rb) == 0;
-        if (!fit) {                              /* the picture alone, as before */
+        fit = kind == DK_CJ_FIT && dk_fit(i, look, L->orient, &P, &band, &rb) == 0;
+        if (!fit && need_fit) {                  /* the picture alone is the other file already */
+            wf_log("dark: F%02d camera JPEG %s not written: the print did not fit", i + 1, nm);
+            return DK_ERR;
+        }
+        if (!fit) {                              /* the picture alone */
             wf_pf_layout(&P, WF_PFR_OFF, 0, DK_W, DK_H, 1);
             band = 0;
             rb = rowbuf;
         }
         int dims = wf_dk_dims(app1, al, DK_W, DK_H);
-        rc = dk_encode(i, tmp, &P, app1, al, band, rb, 1, &w, fit ? wf_pf_scale_row : dk_row, fit ? (void *)&dk_sc : 0);
+        int rc = dk_encode(i, tmp, &P, app1, al, band, rb, 1, &w, fit ? wf_pf_scale_row : dk_row,
+                           fit ? (void *)&dk_sc : 0);
         if (rc == DK_STOP) {
-            wf_log("dark: F%02d camera JPEG kept (stopped)", i + 1);
+            wf_log("dark: F%02d camera JPEG %s kept (stopped)", i + 1, nm);
             return DK_STOP;
         }
         if (rc != DK_OK) {
-            wf_log("dark: F%02d camera JPEG: picture encode failed (%s): kept", i + 1, dk_why);
+            wf_log("dark: F%02d camera JPEG: %s encode failed (%s): %s kept", i + 1, fit ? "print" : "picture", dk_why,
+                   nm);
             dk_why = "";
-            return DK_OK;
+            return DK_ERR;
         }
         if (dims)
             wf_log("dark: F%02d camera JPEG: Exif size not set back", i + 1);
         v = dk_verify(tmp, &w, app1, al);
     }
     if (v) {
-        wf_log("dark: F%02d camera JPEG: temp file did not read back (%d): kept", i + 1, v);
+        wf_log("dark: F%02d camera JPEG: temp file did not read back (%d): %s kept", i + 1, v, nm);
         wf_fremove(tmp, &e);
-        return DK_OK;
+        return DK_ERR;
     }
-    if (wf_frename(tmp, jpg, &e) != 0) {
-        int still = FIO_GetFileSize(jpg, &sz) == 0;
+    int had = FIO_GetFileSize(dst, &sz) == 0;
+    if (wf_frename(tmp, dst, &e) != 0) {
+        int still = FIO_GetFileSize(dst, &sz) == 0;
         wf_log("dark: F%02d camera JPEG: rename failed (%s %d): %s", i + 1, wf_fe_name(e.step), e.rc,
-               still ? "JPEG kept" : "print left in the .WFT file");
-        if (still)
+               still ? "the file kept" : had ? "print left in the .WFT file" : "nothing written");
+        if (still || !had)
             wf_fremove(tmp, &e);
+        return DK_ERR;
+    }
+    wf_log("dark: F%02d camera JPEG %s %s: %s, %d KB, %dms", i + 1, nm, verb, kind == DK_CJ_COPY ? "the print" : fit
+           ? "the print fitted 5184x3456" : "the picture 5184x3456", (int)(w.n >> 10), get_ms_clock() - t0);
+    return DK_OK;
+}
+
+/* Camera JPEG (owner 11-16: shoot fast, the darkroom's print goes over the camera's JPEG later, the ROLLS copy stays).
+ * Overwrite: the shot's JPEG becomes the print (frame Off: its bytes; a frame: the print fitted into 5184 x 3456).
+ * Over + print (owner 11-17: "the film-look JPEG and the framed JPEG, both in the main DCIM folder"): with a frame the
+ * shot's JPEG becomes the picture alone at 5184 x 3456 (as Overwrite was up to RAWB23) and a second JPEG holds the
+ * print fitted into 5184 x 3456: WFP_nnnn.JPG beside it (config jpeg2=prefix) or NNNWFILM/WFP_nnnn.JPG (jpeg2=folder),
+ * DESIGN 3.9 says why; frame Off = Overwrite, one file. A JPEG missing (RAW only) or without Canon's Exif: nothing.
+ * Returns DK_STOP when stopped, else DK_OK: the print is done. */
+static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr *pw, uint8_t *app1, uint32_t al,
+                     const struct wf_pf_lay *L, uint32_t *rowbuf, const char *look)
+{
+    int t0 = get_ms_clock(), b = 0, n = 0;
+    char tmp[96], d2[96], dir2[64];
+    struct wf_fe e = { 0, 0 };
+    uint32_t sz = 0;
+    while (jpg[n])
+        n++;
+    for (b = n; b > 0 && jpg[b - 1] != '/';)
+        b--;
+    if (n < 5 || n >= (int)sizeof tmp || jpg[n - 4] != '.') {
+        wf_log("dark: F%02d camera JPEG: path %s", i + 1, jpg);
         return DK_OK;
     }
-    wf_log("dark: F%02d camera JPEG IMG_%04d.JPG overwritten: %s, %d KB, %dms", i + 1, roll.file[i],
-           copy ? "the print" : fit ? "the print fitted 5184x3456" : "the picture 5184x3456", (int)(w.n >> 10),
+    memcpy(tmp, jpg, (size_t)n - 3);
+    memcpy(tmp + n - 3, "WFT", 4);
+    if (FIO_GetFileSize(jpg, &sz) != 0) {        /* RAW only, or a run before renamed it away and stopped */
+        wf_log("dark: F%02d camera JPEG %s not there: not overwritten%s", i + 1, jpg + b,
+               FIO_GetFileSize(tmp, &sz) == 0 ? " (its .WFT holds a print)" : "");
+        return DK_OK;
+    }
+    if (!al) {
+        wf_log("dark: F%02d camera JPEG has no Exif: not overwritten", i + 1);
+        return DK_OK;
+    }
+    int v = dk_verify(out, pw, app1, al);
+    if (v) {
+        wf_log("dark: F%02d roll print did not read back (%d): camera JPEG kept", i + 1, v);
+        return DK_OK;
+    }
+    int two = dk_pjp == WF_PJ_BOTH && L->frame;
+    int r1 = dk_dcim_put(i, jpg, jpg + b, "overwritten", !L->frame ? DK_CJ_COPY : two ? DK_CJ_PIC : DK_CJ_FIT, 0, out,
+                         pw, app1, al, L, rowbuf, look);
+    if (r1 == DK_STOP || !two)
+        return r1 == DK_STOP ? DK_STOP : DK_OK;
+    int k = wf_roll_jpg2(jpg, dk_pj2 == WF_J2_FOLDER, "JPG", dir2, sizeof dir2, d2, sizeof d2);
+    if (k < 0) {
+        wf_log("dark: F%02d camera JPEG: no second name for %s: the print stays in ROLLS only", i + 1, jpg + b);
+        return DK_OK;
+    }
+    if (dk_pj2 == WF_J2_FOLDER && wf_fmkdir(dir2, &e) != 0) {
+        wf_log("dark: F%02d camera JPEG: folder %s not made (%s %d): the print stays in ROLLS only", i + 1, dir2,
+               wf_fe_name(e.step), e.rc);
+        return DK_OK;
+    }
+    int c = k;                                   /* the log's name: WFP_nnnn.JPG, or NNNWFILM/WFP_nnnn.JPG */
+    for (int sl = dk_pj2 == WF_J2_FOLDER ? 2 : 1; c > 0 && (d2[c - 1] != '/' || --sl > 0);)
+        c--;
+    int r2 = dk_dcim_put(i, d2, d2 + c, "written", DK_CJ_FIT, 1, out, pw, app1, al, L, rowbuf, look);
+    if (r2 == DK_STOP)
+        return DK_STOP;
+    wf_log("dark: F%02d camera JPEG: %d of 2 files in DCIM, %dms", i + 1, (r1 == DK_OK) + (r2 == DK_OK),
            get_ms_clock() - t0);
     return DK_OK;
 }
@@ -1824,7 +1884,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
     rc = dk_encode(i, out, &L, al ? M.app1 + ao : 0, al, band, rowbuf, 0, &wr, dk_row, 0);
     if (rc != DK_OK)
         return rc;
-    if (dk_pjp == WF_PJ_OVER)                    /* stopped in it: the print is done, the run stops at the next frame */
+    if (dk_pjp != WF_PJ_KEEP)                    /* stopped in it: the print is done, the run stops at the next frame */
         dk_camjpg(i, jpg, out, &wr, M.app1 + ao, al, &L, rowbuf, t2);
     dk_t[3] = get_ms_clock() - t;
     wf_dev_note(lk, WF_PATH_DARK, dk_t[0] + dk_t[1] + dk_t[2] + dk_t[3]);   /* the whole print, dry included (11-17) */
@@ -1918,13 +1978,19 @@ static void dk_task(void)
     dk_pfr = wf_pr_frame > WF_PFR_OFF && wf_pr_frame < WF_PFR_N ? wf_pr_frame : WF_PFR_OFF;   /* the whole run's */
     dk_pin = wf_pr_info > WF_PIN_OFF && wf_pr_info < WF_PIN_N ? wf_pr_info : WF_PIN_OFF;
     dk_pdt = wf_pr_date > WF_PDT_OFF && wf_pr_date < WF_PDT_N ? wf_pr_date : WF_PDT_OFF;
-    dk_pjp = wf_pr_jpeg == WF_PJ_OVER ? WF_PJ_OVER : WF_PJ_KEEP;
+    dk_pjp = wf_pr_jpeg > WF_PJ_KEEP && wf_pr_jpeg < WF_PJ_N ? wf_pr_jpeg : WF_PJ_KEEP;
+    dk_pj2 = wf_pr_jpg2 == WF_J2_FOLDER ? WF_J2_FOLDER : WF_J2_PREFIX;
     dk_pf_said = dk_lg_said = dk_wa_said = 0;
     dk_lgn = 0;
     if (dk_pfr && (FIO_GetFileSize(DK_LG_PACK, &dk_lgn) != 0 || dk_lgn < 40))
         dk_lgn = 0;                              /* no WFLOGO.DAT: the caption as text alone */
     wf_log("dark: roll %03d start, %d of %d to develop, look output %d, print frame %d info %d date %d jpeg %d logo %dK",
            roll.num, dv.left, dv.total, lk.output, dk_pfr, dk_pin, dk_pdt, dk_pjp, (int)(dk_lgn >> 10));
+    if (dk_pjp == WF_PJ_BOTH)
+        wf_log("dark: Camera JPEG Over + print: %s", !dk_pfr ? "frame Off, so as Overwrite (one file)"
+               : dk_pj2 == WF_J2_FOLDER ? "the picture over IMG_nnnn.JPG, the print in NNN" WF_J2_SUFFIX "/"
+                 WF_J2_LETTERS "nnnn.JPG" : "the picture over IMG_nnnn.JPG, the print beside it as " WF_J2_LETTERS
+                 "nnnn.JPG");
     dk_look(&lk);
     dk_disp_ons = dk_disp_miss = 0;
     int d0 = display_is_on(), lv0 = lv;

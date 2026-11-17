@@ -106,7 +106,7 @@ const char *wf_popt_name(int k) { static const char *const n[WF_PO_N] = { "Frame
 int wf_popt_avail(int k) { return k != WF_PO_INFO || (wf_pr_frame > 0 && wf_pr_frame < 5); }
 void wf_popt_step(int k, int d)
 {
-    static const int n[WF_PO_N] = { 5, 3, 4, 2 };
+    static const int n[WF_PO_N] = { 5, 3, 4, 3 };
     volatile int *v = k == WF_PO_FRAME ? &wf_pr_frame : k == WF_PO_INFO ? &wf_pr_info : k == WF_PO_JPEG ? &wf_pr_jpeg
                                                                                               : &wf_pr_date;
     if (k < 0 || k >= WF_PO_N || !d) return;
@@ -116,7 +116,7 @@ const char *wf_popt_text(int k, char *b, int n)
 {
     if (k == WF_PO_FRAME) return pfr_name[wf_pr_frame % 5];
     if (k == WF_PO_INFO) return pin_name[wf_pr_info % 3];
-    if (k == WF_PO_JPEG) return wf_pr_jpeg ? "Overwrite" : "Keep";
+    if (k == WF_PO_JPEG) return wf_pr_jpeg == 2 ? "Over + print" : wf_pr_jpeg ? "Overwrite" : "Keep";
     int y = clock_ymd / 10000 % 100, m = clock_ymd / 100 % 100, d = clock_ymd % 100;
     switch (wf_pr_date) {
     case 1: snprintf(b, n, "'%02d %02d %02d", y, m, d); return b;

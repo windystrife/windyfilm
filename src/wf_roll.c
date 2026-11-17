@@ -337,6 +337,45 @@ int wf_roll_cr2(const struct wf_roll *r, int i, const char *dcim_dir, const char
     return k > 0 && k < n ? k : -1;
 }
 
+static int digits(const char *s, int n)
+{
+    for (int i = 0; i < n; i++)
+        if (s[i] < '0' || s[i] > '9')
+            return 0;
+    return 1;
+}
+
+int wf_roll_jpg2(const char *jpg, int folder, const char *ext, char *dir, int dn, char *out, int n)
+{
+    static const char our[] = WF_J2_LETTERS, fo[] = WF_J2_SUFFIX;
+    int L = 0, b, fs, same = 1;
+    while (jpg[L])
+        L++;
+    for (b = L; b > 0 && jpg[b - 1] != '/';)
+        b--;                                     /* the file name: IMG_0208.JPG */
+    if (L - b != 12 || jpg[b + 8] != '.' || !digits(jpg + b + 4, 4) || b < 10)
+        return -1;
+    for (fs = b - 1; fs > 0 && jpg[fs - 1] != '/';)
+        fs--;                                    /* the folder: 100CANON */
+    if (b - 1 - fs != 8 || !digits(jpg + fs, 3))
+        return -1;
+    for (int k = 0; k < 4; k++)
+        same &= jpg[b + k] == our[k];
+    if (same)
+        return -1;
+    int dl = folder ? fs + 3 : b - 1;
+    if (dl + (folder ? 5 : 0) >= dn)
+        return -1;
+    for (int k = 0; k < dl; k++)
+        dir[k] = jpg[k];
+    for (int k = 0; folder && k < 5; k++)
+        dir[dl++] = fo[k];
+    dir[dl] = 0;
+    char num[5] = { jpg[b + 4], jpg[b + 5], jpg[b + 6], jpg[b + 7], 0 };
+    int k = snprintf(out, n, "%s/%s%s.%s", dir, our, num, ext);
+    return k > 0 && k < n ? k : -1;
+}
+
 int wf_roll_dir(const struct wf_roll *r, const char *root, int level, char *out, int n)
 {
     int k = level <= 0 ? snprintf(out, n, "%sROLLS", root) : snprintf(out, n, "%sROLLS/ROLL%03d", root, r->num);

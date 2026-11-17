@@ -878,10 +878,12 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     as on the camera body. The lettering takes the caption's line 1 tone.
   - The maps are area-resampled (Q12 taps, at most 10x down) into scratch, then screened by the band code like the
     caption. The 16-px grid and the picture's own blocks are unchanged (the logo is in the border only).
-- **Camera JPEG** (owner 2026-11-16, RAWB21): Keep (default) / Overwrite. Shoot RAW+L quickly; at the Darkroom the
+- **Camera JPEG** (owner 2026-11-16, RAWB21): Keep (default) / Overwrite / Over + print (2026-11-17). Shoot RAW+L
+  quickly; at the Darkroom the
   print also replaces the shot's own JPEG in DCIM, so the camera's playback and a card reader show the print. The roll
   copy in `ROLLS/ROLL00n/` is always written first.
-  - Config `jpeg=keep|overwrite`; ML menu "Camera JPEG" under "Darkroom"; the fourth PRINT row on the Darkroom screen
+  - Config `jpeg=keep|overwrite|both` (+ `jpeg2=prefix|folder`, below); ML menu "Camera JPEG" under "Darkroom"; the
+    fourth PRINT row on the Darkroom screen
     (icon: an arrow into a sheet). Snapshot at start: `... jpeg j logo nK` in the start line.
   - Order per frame: roll print written, read back and checked; then `IMG_nnnn.WFT` in the same DCIM folder; read
     back and checked; then renamed over `IMG_nnnn.JPG` (`wf_frename`). The CR2 is never touched. Any step failing
@@ -906,8 +908,45 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     print (`wf_dk_xthumb_*`, `src/wf_darkp.c`): the band rows are averaged into 160 x 120 while encoding, encoded at
     q90 down to q40 until it fits the slot (the IFD1 JPEG to the APP1's end when only zeros follow), our JFIF APP0
     dropped, the rest zero-filled; the APP1 is rewritten in place at offset 2. Too big at q40 = Canon's kept.
+  - **Over + print** (owner 2026-11-17: "the film-look JPEG and the framed JPEG, both in the main DCIM folder"). With
+    a frame, `IMG_nnnn.JPG` becomes the picture alone at 5184 x 3456, date stamp in it (Overwrite's file up to RAWB23),
+    and a second JPEG holds the print fitted into 5184 x 3456 (Overwrite's file since RAWB24). Frame Off = Overwrite,
+    one file. Each file goes the same way (`dk_dcim_put`): roll print checked first, then a .WFT of the target's name
+    beside it, read back, renamed onto it; the CR2 is never touched. The picture first, then the print (`dk_fit`
+    needs only the pack area, which the picture's encode does not touch); a stop in the first skips the second. A
+    print that cannot be fitted is not written a second time as the picture. The second encode costs about as much as
+    the first (~35 s a frame on the EOS M, logged per file).
+  - **The second file's name** (`wf_roll_jpg2`, `src/wf_roll.c`).
+    - DCF (JEITA CP-3461 / CIPA DC-009): `DCIM/` holds DCF folders `NNNxxxxx` (number 100..999 + five letters
+      A-Z 0-9 _); a DCF file name is four free letters + a four-digit file number + extension. The file number is
+      the key: the files of one number in one folder are one DCF object (Canon's RAW+JPEG pair is `IMG_nnnn.CR2` +
+      `IMG_nnnn.JPG`), and neither folder numbers nor file numbers are meant to repeat.
+    - What this ML tree knows of Canon's numbering (`src/fio-ml.c`, `src/fileprefix.c`): the folder number
+      (`PROP_FOLDER_NUMBER_A/B/C`), the next file number (`PROP_FILE_NUMBER_A/B/C`), the five letters of Canon's
+      folders (`PROP_DCIM_DIR_SUFFIX`, "CANON"; `get_dcim_dir` = number + those letters) and the four letters of its
+      files (`PROP_FILE_PREFIX`, "IMG_"; ML's `file_prefix_set` changes them and the numbers carry on). So Canon's
+      numbers do not depend on the letters, and Canon only ever writes its own letters into its own folder.
+    - `WFP_nnnn.JPG` beside the shot (config `jpeg2=prefix`, the default): the shot's folder and number, our
+      letters ("WindyFilm Print", DCF-legal). It can never meet a Canon file: nnnn is used already, Canon's counter
+      is past it, and Canon writes `IMG_` (refused when Canon's own prefix is `WFP_`). The pair keeps its names, and
+      the file is in the main folder as the owner asked. The risk: it repeats a file number, so Canon's playback
+      may count it into the `IMG_nnnn` object. It might show only one of the two JPEGs, pair the CR2 with ours, or
+      erase all three together. Without the camera we cannot know, so the card guide tests it first (HUONGDAN step
+      ac).
+    - The fallback (`jpeg2=folder`): `NNNWFILM/WFP_nnnn.JPG`, a folder of the shot's folder number with our five
+      letters, made by the run (`wf_fmkdir`). No file number repeats inside a folder. Canon's recording folder is
+      unchanged (its number + its own letters), and its next new folder is still the highest + 1. The cost: two
+      folders share one number, which DCF does not allow either, so playback may show it, skip it or merge it, and
+      the files are not in the main folder.
+    - Not taken:
+      - A higher folder number (`101WFILM`). The folder number is a camera property, and a camera may pick the
+        highest folder at card mount. New shots could then land away from the roll's folder (`wf_roll_cr2`), mixed
+        with our files.
+      - A new file number in the shot's folder. It would take the numbers Canon uses next, or need a write to
+        `PROP_FILE_NUMBER`.
+      - A folder outside DCF. Playback never shows it, and `ROLLS/` is that already.
   - Not checked on the camera yet: that Canon's playback opens an overwritten JPEG and shows its thumbnail (qemu has
-    no playback). The roll copy is the safe one.
+    no playback), and how it lists `WFP_nnnn.JPG` beside the pair. The roll copy is the safe one.
 - **Memory.** Nothing new is allocated: the pack (<= 512 KB), the caption band (<= about 3.7 MB) and the row buffer
   (about 197 KB) use `M.raw`, which is free scratch in the DRY phase. The stamp's map (about 148 KB) uses `M.raw` too.
   Fonts / text are static (about 1 KB BSS). The logo pack (<= 384 KB) is read beside the fonts in the 512 KB pack
@@ -919,8 +958,11 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
   `dark: F07 logo Canon 529x111 + lettering Canon EOS M, .. KB`, `dark: F07 print Exif thumbnail 160x120 q90 .. B`,
   `dark: F07 camera JPEG: the print fitted 5184x3456, picture 4320x2880 at 432,96, logo`, `dark: F07 camera JPEG
   caption ...`, `dark: F07 camera JPEG IMG_0208.JPG overwritten: the print fitted 5184x3456, .. KB, ..ms` (or `the
-  print` with Frame Off, `the picture 5184x3456` when it could not be fitted); every refusal names the step and says
-  "camera JPEG kept".
+  print` with Frame Off, `the picture 5184x3456` when it could not be fitted); every refusal names the step and the
+  file kept. Over + print: `dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print beside it as
+  WFP_nnnn.JPG` at the start, then per frame `... IMG_0208.JPG overwritten: the picture 5184x3456, .. KB, ..ms`,
+  `... WFP_0208.JPG written: the print fitted 5184x3456, .. KB, ..ms` (`100WFILM/WFP_0208.JPG` with the fallback)
+  and `dark: F07 camera JPEG: 2 of 2 files in DCIM, ..ms`.
 - **Checks.**
   - `tests/host/wf_dark_test.c`: layouts for every frame / info / orientation, Exif parsing in both byte orders,
     caption and date text, the pack, band text, stamp place and colour, frame-Off identity. A `finish` mode prints
@@ -937,8 +979,13 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     frame / info / orientation, `wf_pf_scale` within 1.25 of the exact area mean (two roundings), chroma flat, half
     size and short memory refused; `WF_OW_OUT=dir` keeps these DCIM files and adds a black frame roll (the owner's
     preview images); no .WFT left, CR2s unchanged, a missing JPEG is logged and
-    skipped, both files carry our Exif thumbnail.
-  - `tests/ui/dr_ui_test.c` 3b: the PRINT rows (Camera JPEG the fourth) and the easel sketch.
+    skipped, both files carry our Exif thumbnail. Over + print (black frame, then `jpeg2=folder` with a white frame):
+    each `IMG_nnnn.JPG` the picture at 5184 x 3456 and `WFP_nnnn.JPG` (beside it, or in `100WFILM/`) the print
+    fitted, different bytes and thumbnails, the three log lines, no .WFT, the CR2s unchanged. `tests/host/
+    wf_roll_test.c`: `wf_roll_jpg2` names, temps, Canon's other prefixes, our own prefix refused, non-DCF names and
+    short buffers.
+  - `tests/ui/dr_ui_test.c` 3b: the PRINT rows (Camera JPEG the fourth, Keep / Overwrite / Over + print) and the easel
+    sketch.
   - The 5D2 has no Darkroom: `wf_print.o` and WFPRINT.DAT are EOS M only.
 
 ### 3.10 Paper finish (owner 2026-11-16, both cameras and the Darkroom web core)

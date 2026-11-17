@@ -2511,7 +2511,7 @@ static void t_cfg(void)
     const char *code1 = wf_flut_code[1];
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
-            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=Overwrite\ndkscreen=Off\nrolllook=ON\nshoulder=D\n"
+            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=Both\njpeg2=Folder\ndkscreen=Off\nrolllook=ON\nshoulder=D\n"
             "userwb=1,5600,2,-3\n",
             wf_films[fA].id, code1);
     mod_init(1);
@@ -2528,9 +2528,9 @@ static void t_cfg(void)
     chk(wf_blind == 0, "blind=OFF read: Blind roll off (%d)", wf_blind);
     chk(wf_roll_look8 == 1, "rolllook=ON read: a JPEG 8-bit roll (%d)", wf_roll_look8);
     chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
-    chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_OVER && wf_dk_scr == WF_DS_OFF,
-        "print finishes read: frame %d info %d date %d jpeg %d dkscreen %d (want 4 2 2 1 1)", wf_pr_frame, wf_pr_info,
-        wf_pr_date, wf_pr_jpeg, wf_dk_scr);
+    chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_BOTH && wf_pr_jpg2 == WF_J2_FOLDER
+        && wf_dk_scr == WF_DS_OFF, "print finishes read: frame %d info %d date %d jpeg %d jpeg2 %d dkscreen %d (want 4 2 2 "
+        "2 1 1)", wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2, wf_dk_scr);
     chk(WAIT(h_kelvin_last == 3200, 5000), "Light Tungsten applied at start (%dK)", h_kelvin_last);
     wf_row_step(WF_ROW_GRAIN, 1);
     h_clock_add_ms += 2000;
@@ -2541,7 +2541,8 @@ static void t_cfg(void)
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\npaper=glossy\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\n"
              "exposure=%s\n"
-             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=overwrite\ndkscreen=off\nrolllook=on\n"
+             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=both\njpeg2=folder\ndkscreen=off\n"
+             "rolllook=on\n"
              "shoulder=d\n"
              "stage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
@@ -6592,6 +6593,62 @@ static void t_roll_jpeg(void)
         }
         chk(okw && okb, "previews in %s: white %d, black %d", ow, okw, okb);
     }
+    /* both (owner 11-17, "Over + print"): a black frame + details + the logo; each IMG_nnnn.JPG = the picture alone at
+     * 5184 x 3456 (Overwrite up to RAWB23), WFP_nnnn.JPG beside it = the print fitted into 5184 x 3456; then jpeg2=folder
+     * with a white frame: the second JPEG in 100WFILM/ (the run makes it); no .WFT left, the CR2s untouched */
+    wf_pr_frame = WF_PFR_BLACK;
+    wf_pr_jpeg = WF_PJ_BOTH;
+    wf_pr_jpg2 = WF_J2_PREFIX;
+    for (int pass = 0, rn = ow ? 5 : 4; pass < 2; pass++, rn++) {
+        int from = 513 + pass * 3;
+        const char *d2 = pass ? "DCIM/100WFILM" : "DCIM/100CANON", *what = pass ? "both folder" : "both";
+        char e[96];
+        if (pass) {
+            wf_pr_jpg2 = WF_J2_FOLDER;
+            wf_pr_frame = WF_PFR_WHITE;
+        }
+        chk(mem_roll(film, rn, dir, from), "roll %03d: 3 frames (%d)", rn, wf_roll_now()->nshot);
+        mem_run(what, rn);
+        snprintf(e, sizeof e, "dark: roll %03d end", rn);
+        chk(strstr(log_line(e), "3 developed, 0 failed, 0 left") != 0, "%s: 3 of 3 ('%s')", what, log_line(e));
+        chk(log_has(pass ? "dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print in NNNWFILM/WFP_nnnn.JPG"
+                         : "dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print beside it as "
+                           "WFP_nnnn.JPG"), "%s: the run says where ('%s')", what, log_line("dark: Camera JPEG Over"));
+        chk(log_has("dark: F02 camera JPEG: the print fitted 5184x3456, picture 4560x3040 at 104,208, logo"),
+            "%s: F02 (portrait) fitted ('%s')", what, log_line("dark: F02 camera JPEG: the print"));
+        for (int i = 0; i < 3; i++) {
+            char a[64], c[64], e1[96], e2[96], e3[64], t1[64], t2[64];
+            snprintf(a, sizeof a, "DCIM/100CANON/IMG_%04d.JPG", from + i);
+            snprintf(c, sizeof c, "%s/WFP_%04d.JPG", d2, from + i);
+            snprintf(e1, sizeof e1, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the picture 5184x3456,", i + 1,
+                     from + i);
+            snprintf(e2, sizeof e2, "dark: F%02d camera JPEG %sWFP_%04d.JPG written: the print fitted 5184x3456,", i + 1,
+                     pass ? "100WFILM/" : "", from + i);
+            snprintf(e3, sizeof e3, "dark: F%02d camera JPEG: 2 of 2 files in DCIM, ", i + 1);
+            long na = 0, nc = 0, np = 0;
+            char *ba = get_file(a, &na), *bc = get_file(c, &nc), *bp = mem_print(rn, i, from + i, &np);
+            int wa = 0, ha = 0, wc = 0, hc = 0;
+            uint32_t ta = 0, tc = 0;
+            const unsigned char *pa = ba ? jp_thumb((unsigned char *)ba, na, &ta) : 0;
+            const unsigned char *pc = bc ? jp_thumb((unsigned char *)bc, nc, &tc) : 0;
+            int da = ba && mem_dims((unsigned char *)ba, na, &wa, &ha), dc = bc && mem_dims((unsigned char *)bc, nc, &wc, &hc);
+            chk(da && dc && wa == 5184 && ha == 3456 && wc == 5184 && hc == 3456 && bp && na != nc && np != na && np != nc
+                && memmem(bc, (size_t)(nc < 65536 ? nc : 65536), "WindyFilm Darkroom", 18) && pa && pc && ta > 1000
+                && tc > 1000 && (ta != tc || memcmp(pa, pc, ta)) && log_has(e1) && log_has(e2) && log_has(e3),
+                "%s: F%02d IMG_%04d.JPG the picture %dx%d (%ld B), %s %dx%d (%ld B), print %ld B, thumbnails %u / %u B "
+                "('%s', '%s')", what, i + 1, from + i, wa, ha, na, c, wc, hc, nc, np, ta, tc, log_line(e1), log_line(e2));
+            snprintf(t1, sizeof t1, "DCIM/100CANON/IMG_%04d.WFT", from + i);
+            snprintf(t2, sizeof t2, "%s/WFP_%04d.WFT", d2, from + i);
+            chk(access(t1, F_OK) != 0 && access(t2, F_OK) != 0, "%s: F%02d no .WFT left", what, i + 1);
+            free(ba);
+            free(bc);
+            free(bp);
+        }
+        chk(jp_cr2s(dir, from), "%s: CR2s untouched", what);
+    }
+    chk(access("DCIM/100CANON/WFP_0516.JPG", F_OK) != 0 && access("DCIM/100WFILM/WFP_0513.JPG", F_OK) != 0,
+        "both: each second JPEG only where its jpeg2 put it");
+    wf_pr_jpg2 = WF_J2_PREFIX;
     wf_pr_frame = 0;
     wf_pr_info = 1;
     wf_pr_date = 0;

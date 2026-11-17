@@ -240,12 +240,17 @@ int main(int argc, char **argv)
     CHECK(wfdr_host_pfoc() == 2 && wf_pr_date == 1, "Date: focus %d value %d (want '26 11 15)", wfdr_host_pfoc(), wf_pr_date);
     CHECK(fake_nstart() == 0 && !closed, "the finish rows started or closed something");
     shot("dark_print_white_info_date");
-    key(MODULE_KEY_PRESS_DOWN);                              /* Camera JPEG (owner 11-16): Keep / Overwrite */
+    key(MODULE_KEY_PRESS_DOWN);                              /* Camera JPEG (owner 11-16): Keep / Overwrite / Over + print */
     CHECK(wfdr_host_pfoc() == 3 && wf_pr_jpeg == 0, "DOWN from Date: focus %d jpeg %d (want Camera JPEG, Keep)",
           wfdr_host_pfoc(), wf_pr_jpeg);
     key(MODULE_KEY_PRESS_RIGHT);
     CHECK(wf_pr_jpeg == 1, "RIGHT on Camera JPEG: %d (want Overwrite)", wf_pr_jpeg);
     shot("dark_print_jpeg_overwrite");
+    key(MODULE_KEY_PRESS_RIGHT);                             /* (owner 11-17: the picture and the framed print in DCIM) */
+    CHECK(wf_pr_jpeg == 2, "RIGHT again on Camera JPEG: %d (want Over + print)", wf_pr_jpeg);
+    shot("dark_print_jpeg_both");
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wf_pr_jpeg == 1, "wheel left on Camera JPEG: %d (want Overwrite)", wf_pr_jpeg);
     key(MODULE_KEY_WHEEL_LEFT);
     CHECK(wf_pr_jpeg == 0, "wheel left on Camera JPEG: %d (want Keep)", wf_pr_jpeg);
     key(MODULE_KEY_PRESS_DOWN);                              /* the Screen chip at the top right (owner 11-16) */

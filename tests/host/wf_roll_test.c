@@ -91,6 +91,28 @@ int main(void)
     CHECK(wf_roll_cr2(&r, 0, "B:/DCIM/101CANON/", "IMG_", "JPG", p, sizeof p) > 0
           && !strcmp(p, "B:/DCIM/100CANON/IMG_0206.JPG"), "frame's own folder: %s", p);
     CHECK(wf_roll_cr2(&r, 1, "B:/DCIM/100CANON", "IMG_", "CR2", p, sizeof p) == -1, "no frame 2");
+    {                                            /* Camera JPEG Over + print's second file (owner 11-17) */
+        char d[64];
+        CHECK(wf_roll_jpg2("B:/DCIM/100CANON/IMG_0206.JPG", 0, "JPG", d, sizeof d, p, sizeof p) == 29
+              && !strcmp(p, "B:/DCIM/100CANON/WFP_0206.JPG") && !strcmp(d, "B:/DCIM/100CANON"), "jpg2 beside: %s in %s",
+              p, d);
+        CHECK(wf_roll_jpg2("B:/DCIM/100CANON/IMG_0206.JPG", 0, "WFT", d, sizeof d, p, sizeof p) > 0
+              && !strcmp(p, "B:/DCIM/100CANON/WFP_0206.WFT"), "jpg2 temp: %s", p);
+        CHECK(wf_roll_jpg2("B:/DCIM/101CANON/_MG_9999.JPG", 1, "JPG", d, sizeof d, p, sizeof p) > 0
+              && !strcmp(p, "B:/DCIM/101WFILM/WFP_9999.JPG") && !strcmp(d, "B:/DCIM/101WFILM"), "jpg2 folder: %s in %s",
+              p, d);
+        CHECK(wf_roll_jpg2("A:/DCIM/100EOS5D/ABCD0012.JPG", 0, "JPG", d, sizeof d, p, sizeof p) > 0
+              && !strcmp(p, "A:/DCIM/100EOS5D/WFP_0012.JPG"), "jpg2 Canon's own prefix: %s", p);
+        CHECK(wf_roll_jpg2("B:/DCIM/100CANON/WFP_0206.JPG", 0, "JPG", d, sizeof d, p, sizeof p) == -1,
+              "jpg2: Canon's letters ours");
+        CHECK(wf_roll_jpg2("B:/DCIM/100CANON/IMG_02X6.JPG", 0, "JPG", d, sizeof d, p, sizeof p) == -1
+              && wf_roll_jpg2("B:/DCIM/100CANON/IMG_206.JPG", 0, "JPG", d, sizeof d, p, sizeof p) == -1
+              && wf_roll_jpg2("B:/DCIM/CANON100/IMG_0206.JPG", 1, "JPG", d, sizeof d, p, sizeof p) == -1
+              && wf_roll_jpg2("B:/DCIM/100CAN/IMG_0206.JPG", 0, "JPG", d, sizeof d, p, sizeof p) == -1
+              && wf_roll_jpg2("IMG_0206.JPG", 0, "JPG", d, sizeof d, p, sizeof p) == -1, "jpg2: not a DCF name");
+        CHECK(wf_roll_jpg2("B:/DCIM/100CANON/IMG_0206.JPG", 0, "JPG", d, 16, p, sizeof p) == -1
+              && wf_roll_jpg2("B:/DCIM/100CANON/IMG_0206.JPG", 1, "JPG", d, sizeof d, p, 29) == -1, "jpg2: no room");
+    }
     CHECK(wf_roll_root("B:/DCIM/100CANON", p, sizeof p) == 3 && !strcmp(p, "B:/"), "root %s", p);
     CHECK(wf_roll_root("A:/DCIM/100EOS5D", p, sizeof p) == 3 && !strcmp(p, "A:/"), "root 5D2 %s", p);
     CHECK(wf_roll_root("B:/X/100CANON", p, sizeof p) == -1, "no DCIM");

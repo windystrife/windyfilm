@@ -77,6 +77,15 @@ int  wf_roll_parse(struct wf_roll *r, const char *buf, int n);  /* 0 = ok (r fil
 /* the CR2 of frame i: "<dcim>/<folder>CANON/<prefix><nnnn>.CR2" made from Canon's current DCIM dir (its last component
  * names the folder: the number is replaced by the frame's) */
 int  wf_roll_cr2(const struct wf_roll *r, int i, const char *dcim_dir, const char *prefix, const char *ext, char *out, int n);
+/* the second camera JPEG of Camera JPEG "Over + print" (owner 11-17, DESIGN 3.9 "Camera JPEG"): from the shot's own
+ * JPEG ".../DCIM/100CANON/IMG_0208.JPG", ext in place of its extension. folder 0 (config jpeg2=prefix): the shot's
+ * folder and file number with our letters, ".../DCIM/100CANON/WFP_0208.<ext>", dir ".../DCIM/100CANON"; folder 1
+ * (jpeg2=folder): a folder of the same number with our letters, ".../DCIM/100WFILM/WFP_0208.<ext>", dir
+ * ".../DCIM/100WFILM". The length; -1 = not a DCF name (4 letters + 4 digits + "." + 3 in an NNN + 5 letters folder),
+ * Canon's letters are ours (the two files would be one name), or no room */
+#define WF_J2_LETTERS "WFP_"
+#define WF_J2_SUFFIX  "WFILM"
+int  wf_roll_jpg2(const char *jpg, int folder, const char *ext, char *dir, int dn, char *out, int n);
 /* card root of a DCIM dir ("B:/DCIM/100CANON" -> "B:/") */
 int  wf_roll_root(const char *dcim_dir, char *out, int n);
 /* the darkroom's output: "<root>ROLLS", "<root>ROLLS/ROLL021", "<root>ROLLS/ROLL021/F01_0206.JPG" */

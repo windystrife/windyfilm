@@ -189,7 +189,7 @@ VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như
   lại trên máy / đầu đọc thẻ là thấy bản in. Bản in trong ROLLS/ROLL00n/ vẫn luôn có.
 - Thứ tự mỗi kiểu: ghi bản in vào ROLLS, đọc lại kiểm tra; ghi file tạm IMG_nnnn.WFT cạnh
   JPG trong DCIM, đọc lại kiểm tra; rồi mới đổi tên đè lên IMG_nnnn.JPG. CR2 không bao
-  giờ bị đụng. Bước nào lỗi thì JPG của Canon giữ nguyên, log ghi rõ "camera JPEG kept".
+  giờ bị đụng. Bước nào lỗi thì JPG của Canon giữ nguyên, log ghi rõ bước lỗi và "... kept".
 - Frame Off: file trong DCIM giống hệt bản in trong ROLLS. Có viền (17/11): file trong
   DCIM là CẢ bản in (viền, dòng chữ thông số, ngày, logo Canon + chữ EOS M) thu vào đúng
   cỡ 5184x3456 như Canon (máy Canon có thể không mở được ảnh khác cỡ). Khung được sắp lại
@@ -202,6 +202,19 @@ VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như
   viền: "the print fitted 5184x3456", trước đó một dòng "camera JPEG: the print fitted
   5184x3456, picture 4320x2880 at 432,96, logo"; "the picture 5184x3456" = thiếu bộ nhớ,
   chỉ phần ảnh). Không có JPG (chụp chỉ RAW): "not there: not overwritten".
+- (17/11) Giá trị thứ ba "Over + print": có viền thì IMG_nnnn.JPG trong DCIM là ẢNH màu phim
+  không viền (5184x3456, có ngày nếu bật Date; như Overwrite tới RAWB23), và thêm một file
+  thứ hai cùng thư mục, cùng số: WFP_nnnn.JPG = cả bản in thu vào 5184x3456 (như Overwrite
+  từ RAWB24). Frame Off: như Overwrite (một file). Mỗi file đi đúng thứ tự trên (ROLLS, file
+  .WFT, đọc lại, đổi tên); CR2 không bao giờ bị đụng. Mã hóa thêm một lần: mỗi kiểu lâu hơn
+  khoảng 35 giây. Log mỗi kiểu: "camera JPEG IMG_0208.JPG overwritten: the picture
+  5184x3456, NN KB, NNNNNms", "camera JPEG WFP_0208.JPG written: the print fitted 5184x3456,
+  NN KB, NNNNNms" và "camera JPEG: 2 of 2 files in DCIM, NNNNNms".
+- Dự phòng cho tên file thứ hai: máy Canon xếp ảnh theo số file, nên WFP_0208 cùng số với
+  cặp IMG_0208 có thể bị máy gộp, ẩn đi hay hiện lẫn. Nếu vậy: mở ML/SETTINGS/WINDYFLM.CFG
+  bằng máy tính, sửa (hoặc thêm) dòng "jpeg2=prefix" thành "jpeg2=folder". File thứ hai sẽ
+  vào thư mục riêng cùng số với thư mục của máy: DCIM/100WFILM/WFP_0208.JPG (máy vẫn chụp
+  vào 100CANON). Đổi lại "jpeg2=prefix" để về như cũ.
 - CHƯA THỬ ĐƯỢC trên máy thật: máy Canon có mở và hiện ảnh thu nhỏ của file đã đè hay
   không (giả lập không có phần xem lại của Canon). Lần đầu thử nên dùng cuộn ngắn.
 
@@ -419,6 +432,28 @@ ab. (17/11, RAWB24) Bản in có viền trong DCIM: Camera JPEG = Overwrite, Fra
    như lúc chụp (cỡ và giờ sửa không đổi). Rồi Frame White, cuộn 3 kiểu mới, xem lại như
    trên (viền trắng). Ghi lại: tấm nào máy không mở được hay ảnh thu nhỏ sai; chữ / logo
    có nhòe hay lệch không. Xong thì đặt lại Camera JPEG = Keep nếu muốn.
+ac. (17/11, RAWB25) Over + print (hai file trong DCIM): Camera JPEG = Over + print (phải
+   thêm một nấc sau Overwrite), Frame Black, Info On + roll, cuộn 3 kiểu RAW+L (có 1 tấm
+   dọc). Log đầu cuộn có "dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG,
+   the print beside it as WFP_nnnn.JPG". Tráng xong, PLAY trên máy: mỗi kiểu phải có HAI
+   ảnh, ảnh màu phim không viền (IMG_nnnn) và bản in có viền, chữ, ngày, logo (WFP_nnnn).
+   Máy Canon có thể gộp hai file cùng số, nên ghi lại kỹ:
+   1. Số ảnh máy đếm trong PLAY (ví dụ 15/15) trước và sau khi tráng: tăng 3 hay 6.
+   2. IMG_nnnn còn hiện là RAW+L không; WFP_nnnn hiện riêng là JPEG không.
+   3. INFO trên từng ảnh: số file (ví dụ 100-0208) và cỡ ảnh của cả hai tấm.
+   4. Có tấm nào bị ẩn, hiện thay chỗ tấm kia, hay máy báo lỗi không. KHÔNG thử xóa ảnh
+      trên máy (máy có thể xóa cả CR2 cùng số).
+   Log mỗi kiểu có ba dòng: "camera JPEG IMG_.... overwritten: the picture 5184x3456",
+   "camera JPEG WFP_.... written: the print fitted 5184x3456" và "camera JPEG: 2 of 2
+   files in DCIM"; ghi lại thời gian mỗi kiểu (dòng "dry" dài hơn Overwrite khoảng 35
+   giây). Trên đầu đọc thẻ: trong DCIM/100CANON có IMG_nnnn.CR2, IMG_nnnn.JPG, WFP_nnnn.JPG;
+   CR2 y như lúc chụp; không còn file .WFT. Frame Off + Over + print: như Overwrite, không
+   có WFP_.
+   Nếu máy ẩn hay gộp sai WFP_: đổi sang dự phòng jpeg2=folder (mục "ĐÈ LÊN JPEG CỦA MÁY"),
+   tráng lại một cuộn 3 kiểu. Log đầu cuộn ghi "the print in NNNWFILM/WFP_nnnn.JPG"; trên
+   thẻ có thư mục DCIM/100WFILM. Xem PLAY có hiện thư mục đó không (nếu cần, chọn thư mục
+   trong menu Canon rồi chọn lại 100CANON). Chụp thêm 1 tấm: nó phải vào 100CANON, số file
+   nối tiếp như thường. Ghi lại cả hai cách, cách nào máy hiện đúng.
 
 
 6. GỬI LẠI
