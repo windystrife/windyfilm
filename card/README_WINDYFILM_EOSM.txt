@@ -7,6 +7,13 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
 dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB24 (17/11 chiều, nhánh wf-onescreen, từ RAWB23): Darkroom sửa hai chỗ.
+- Screen On: module giữ màn hình sáng suốt lúc tráng (thẻ RAWB23 bị tắt màn hình giữa
+  chừng một kiểu). Log mỗi kiểu có dòng "dark: Fnn screen: relit N".
+- Camera JPEG = Overwrite có viền: file IMG_nnnn.JPG trong DCIM là CẢ bản in (viền, chữ,
+  ngày, logo) thu vào đúng 5184x3456; bản đủ cỡ vẫn ở ROLLS, CR2 không bị đụng.
+Xem mục 3 bước 11-12; HUONGDAN_DARKROOM_EOSM.txt bước aa-ab.
+
 Thẻ RAWB23 (17/11, nhánh wf-onescreen, từ dk-screen = RAWB22): một màn hình cho mọi
 chế độ. Browser có chip chế độ ở góc trên phải (JPEG / RAW develop / Darkroom; Darkroom
 thêm hàng Exposures, SET trên lon nạp cuộn, Roll picker bỏ) và nút "Film | Film stage"
@@ -218,6 +225,12 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 10. (17/11, RAWB23) Light Auto: WB của máy đặt Daylight, Light = Auto, cuộn Darkroom
    dưới đèn vàng: bản in cân màu như Auto WB của Canon, log "wb auto"; sau đó WB trong
    menu Canon vẫn là Daylight. HUONGDAN bước x.
+11. (17/11, RAWB24) Screen On: tráng một cuộn Darkroom 3 kiểu trở lên, không chạm vào
+   máy: màn hình phải sáng suốt cả cuộn. Log mỗi kiểu có "dark: Fnn screen: relit N"
+   (N lần Canon tắt màn hình và module bật lại). HUONGDAN bước aa.
+12. (17/11, RAWB24) Camera JPEG = Overwrite, Frame Black / White: PLAY trên máy thấy cả
+   bản in (viền, chữ, ngày, logo) cỡ 5184x3456; ROLLS có bản đủ cỡ; CR2 không đổi.
+   HUONGDAN bước ab.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

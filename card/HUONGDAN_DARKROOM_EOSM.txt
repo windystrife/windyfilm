@@ -14,6 +14,13 @@ Thay đổi 15/11 (sau log RAWB9):
 - (15/11 tối) Cuộn bằng lon Film stage (âm bản x print stock) và các hàng knob (11 hàng từ 16/11): mục 4
   "CUỘN PHIM FILM STAGE", thử ở 5s.
 
+Thay đổi 17/11 chiều (thẻ RAWB24, nhánh wf-onescreen, từ RAWB23):
+- Screen On: module giữ màn hình sáng suốt lúc tráng (thẻ RAWB23 bị tắt màn hình giữa
+  chừng một kiểu). Mỗi giây module xem màn hình, tắt thì bật lại; log mỗi kiểu một dòng
+  "dark: F01 screen: relit N". Thử ở bước aa.
+- Camera JPEG = Overwrite có viền: file trong DCIM là cả bản in thu vào 5184x3456 (mục
+  "ĐÈ LÊN JPEG CỦA MÁY"). Thử ở bước ab.
+
 Thay đổi 17/11 (thẻ RAWB23, nhánh wf-onescreen):
 - Không còn Roll picker: cuộn nạp ngay trong browser (chip Darkroom ở góc trên phải,
   hàng Exposures, SET trên lon). Thử ở bước y.
@@ -392,6 +399,26 @@ z. (17/11, RAWB23) Nút "Film | Film stage" ở góc trên trái browser (trên 
       already developed."; cuộn Darkroom chưa tráng: "Roll 00n has 3 undeveloped frames."
    Ghi lại chữ nào sai chế độ (ví dụ cuộn RAW develop mà vẫn ghi "PLAY develops"), hay
    số kiểu sai.
+aa. (17/11, RAWB24) Screen On giữ màn hình sáng: nút góc trên phải = Screen On, cuộn
+   Darkroom 3 kiểu trở lên (RAW+L). Vào Darkroom, SET tráng rồi KHÔNG chạm vào máy cho
+   tới khi tráng xong cả cuộn. Màn hình phải sáng suốt cả cuộn, không tối hẳn giữa
+   chừng. Log sau mỗi kiểu có một dòng "dark: F01 screen: relit N": N là số lần module
+   thấy màn hình bị tắt và bật lại trong kiểu đó (N = 0: Canon không tắt lần nào); có
+   thêm ", first off at T ms" = lần tắt đầu, T ms sau lúc bắt đầu kiểu. Canon có tắt
+   thì cuối cuộn có "dark: Screen On: display found off while frames ran, turned on
+   again M times". Ghi lại: màn hình có tối hẳn lần nào không; có nháy (tắt rồi sáng
+   ngay) không, ở kiểu nào; số N của từng kiểu.
+ab. (17/11, RAWB24) Bản in có viền trong DCIM: Camera JPEG = Overwrite, Frame Black,
+   Info On + roll, Date bật, cuộn 3 kiểu RAW+L (có 1 tấm dọc). Tráng xong, PLAY trên máy:
+   mỗi tấm hiện CẢ bản in (viền đen, dòng chữ thông số, ngày, logo Canon), cỡ 5184x3456,
+   máy mở được, không báo lỗi; phần thừa hai bên (tấm dọc: trên dưới) cùng màu viền.
+   Lưới ảnh nhỏ cũng là bản in có viền. Log mỗi kiểu có "camera JPEG: the print fitted
+   5184x3456, picture ..." và "overwritten: the print fitted 5184x3456, NN KB" (nếu ghi
+   "the picture 5184x3456" là thiếu bộ nhớ, chỉ phần ảnh: ghi lại). Trên đầu đọc thẻ:
+   bản trong ROLLS/ROLL00n/ là bản in đủ cỡ (ví dụ 5408x4144); file CR2 trong DCIM y
+   như lúc chụp (cỡ và giờ sửa không đổi). Rồi Frame White, cuộn 3 kiểu mới, xem lại như
+   trên (viền trắng). Ghi lại: tấm nào máy không mở được hay ảnh thu nhỏ sai; chữ / logo
+   có nhòe hay lệch không. Xong thì đặt lại Camera JPEG = Keep nếu muốn.
 
 
 6. GỬI LẠI

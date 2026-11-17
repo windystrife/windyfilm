@@ -7,6 +7,10 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT và WFSTAGE.DAT) là dữ liệu dẫn xuất
 (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB24 (17/11 chiều, nhánh wf-onescreen): module dựng lại cùng mã với thẻ EOS M
+RAWB24. Hai chỗ sửa là của Darkroom (5D2 không có). Trên 5D2 chỉ khác: màn hình sáng
+lại thì browser lấy lại màu giao diện ngay. Thử như RAWB23.
+
 Thẻ RAWB23 (17/11, nhánh wf-onescreen): browser có nút "Film | Film stage" ở góc trên
 trái (Film: Colour / Cine / B&W / Film LUT; Film stage: Vision3 / Vision / ECN/EXR /
 Fuji / B&W), chip chế độ ở góc trên phải (JPEG / RAW develop; 5D2 không có Darkroom
