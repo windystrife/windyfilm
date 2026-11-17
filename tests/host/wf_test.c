@@ -64,7 +64,8 @@
  *                      APP1; the owner's look with the head from shoot chunks (pairs: WF_DARK_CR2, skipped without)
  *   ROLL jpeg          owner 11-16: Camera JPEG Keep (our Exif thumbnail in the prints) / Overwrite (frame Off: the
  *                      print's bytes; a frame: the picture at 5184 x 3456; a missing JPEG skipped), the CR2s untouched,
- *                      no temp file left; the logo pack (WF_LOGO_DAT) drawn with the frame
+ *                      no temp file left; the logo pack (WF_LOGO_DAT) drawn with the frame; owner 11-17 (playback
+ *                      still Canon's): each overwritten JPEG holds only our two pictures, the CR2 Canon's own
  *   LOG [big]        the module's log: appended across boots, time stamps, a busy card (lines wait, nothing removed,
  *                      the refusal logged), ring full (lines counted), a short write (no line twice); big: a log over
  *                      512 KB becomes WINDYFLM.OLD at boot
@@ -6262,7 +6263,11 @@ static void t_roll_mem(void)
  *   frame: a white frame + info + roll + date and the logo pack on the card (WF_LOGO_DAT: test.sh makes it from our own
  *          tests/host/logo_test.svg, keyed "Canon"), Overwrite: the logo lines; each IMG_nnnn.JPG a 5184 x 3456 JPEG of
  *          the picture (Canon's size, our comment, our thumbnail); one JPEG gone before the run: that frame printed,
- *          no JPEG made for it; the CR2s untouched, no .WFT left. */
+ *          no JPEG made for it; the CR2s untouched, no .WFT left.
+ *   pictures (owner 11-17: "sao jpg nó overwrite rồi mà preview vẫn là ảnh chưa qua xử lí", Canon's colours in
+ *          playback even after a power cycle; DESIGN 3.9 "Playback of an overwritten RAW+L pair"): every overwritten
+ *          IMG_nnnn.JPG (copy, frame, both) holds only our two pictures and nothing of Canon's (jp_pics); the CR2
+ *          beside it still carries Canon's own thumbnail (copy), so Canon's previews of the frame are only there. */
 static int jp_same(const char *a, const char *b)  /* two files byte for byte */
 {
     long na = 0, nb = 0;
@@ -6315,6 +6320,65 @@ static const unsigned char *jp_thumb(const unsigned char *b, long n, uint32_t *l
             break;
         }
     return b + 2 + off;
+}
+/* the pictures in a DCIM JPEG after Overwrite (owner 11-17, playback still Canon's): two image starts only (the main
+ * image's SOI and IFD1's thumbnail), no APP2 (MPF: a second picture), nothing after the main image's EOI, the thumbnail
+ * 160 x 120 with Y 2x1 like Canon's, and nothing of the pair's own JPEG c: neither its thumbnail nor the first 4 KB of
+ * its scan anywhere in the file (a real EOS M JPEG holds exactly those two pictures: tools/jpg_pictures.py). 0 = all
+ * hold, else the first that failed. */
+static const char *jp_pics(const unsigned char *b, long n, const unsigned char *c, long cn)
+{
+    if (!b || n < 65536 || !c || cn < 65536)
+        return "a file missing";
+    int st = 0;
+    for (long o = 0; o + 2 < n; o++)
+        st += b[o] == 0xFF && b[o + 1] == 0xD8 && b[o + 2] == 0xFF;
+    if (st != 2)
+        return "not two image starts";
+    long o = 2, sos = 0;
+    while (o + 4 <= n && b[o] == 0xFF) {
+        if (b[o + 1] == 0xE2)
+            return "an APP2";
+        if (b[o + 1] == 0xDA) {
+            sos = o;
+            break;
+        }
+        o += 2 + (b[o + 2] << 8 | b[o + 3]);
+    }
+    if (!sos)
+        return "no SOS";
+    long e = sos;
+    while (e + 1 < n && !(b[e] == 0xFF && b[e + 1] == 0xD9))
+        e++;
+    if (e + 2 != n)
+        return "bytes after the EOI";
+    uint32_t tl = 0, tc = 0;
+    const unsigned char *t = jp_thumb(b, n, &tl), *tq = jp_thumb(c, cn, &tc);
+    if (!t || !tq || tl < 1000 || tc < 1000)
+        return "no thumbnail";
+    int tw = 0, th = 0, ty = 0;
+    for (uint32_t i = 2; i + 12 < tl && t[i] == 0xFF; i += 2 + (uint32_t)(t[i + 2] << 8 | t[i + 3]))
+        if (t[i + 1] == 0xC0) {
+            th = t[i + 5] << 8 | t[i + 6];
+            tw = t[i + 7] << 8 | t[i + 8];
+            ty = t[i + 11];
+            break;
+        }
+    if (tw != 160 || th != 120 || ty != 0x21)
+        return "the thumbnail not 160 x 120 Y 2x1";
+    if (memmem(b, (size_t)n, tq, tc))
+        return "Canon's thumbnail in it";
+    long cs = 2;
+    while (cs + 4 <= cn && c[cs] == 0xFF && c[cs + 1] != 0xDA)
+        cs += 2 + (c[cs + 2] << 8 | c[cs + 3]);
+    if (cs + 4 > cn)
+        return "no scan in Canon's JPEG";
+    cs += 2 + (c[cs + 2] << 8 | c[cs + 3]);
+    if (cs + 4096 > cn)
+        return "no scan in Canon's JPEG";
+    if (memmem(b, (size_t)n, c + cs, 4096))
+        return "Canon's scan in it";
+    return 0;
 }
 /* the fitted print's resample (wf_pf_scale) on a 600 x 400 test picture: its rows, and the exact area mean of an output
    pixel's source area (doubles) */
@@ -6513,11 +6577,29 @@ static void t_roll_jpeg(void)
     chk(strstr(log_line("dark: roll 002 start"), "jpeg 1") && strstr(log_line("dark: roll 002 end"),
         "3 developed, 0 failed, 0 left"), "copy: 3 of 3 ('%s')", log_line("dark: roll 002 end"));
     for (int i = 0; i < 3; i++) {
-        char d[64], p[64], e[80];
+        char d[64], p[64], e[80], s[300], r[64];
         snprintf(d, sizeof d, "DCIM/100CANON/IMG_%04d.JPG", 504 + i);
         snprintf(p, sizeof p, "ROLLS/ROLL002/F%02d_%04d.JPG", i + 1, 504 + i);
         snprintf(e, sizeof e, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the print,", i + 1, 504 + i);
         chk(jp_same(d, p) && log_has(e), "copy: IMG_%04d.JPG = its roll print byte for byte ('%s')", 504 + i, log_line(e));
+        /* the pictures (owner 11-17): ours only in the JPEG; Canon's thumbnail still in the CR2 (its previews) */
+        snprintf(s, sizeof s, "%s/%s.JPG", dir, mem_pairs[i]);
+        snprintf(r, sizeof r, "DCIM/100CANON/IMG_%04d.CR2", 504 + i);
+        long bn = 0, cn = 0, rn = 0;
+        char *bb = get_file(d, &bn), *cb = get_file(s, &cn), *rb = get_file(r, &rn);
+        const char *why = jp_pics((unsigned char *)bb, bn, (unsigned char *)cb, cn);
+        uint32_t tc = 0;
+        const unsigned char *tq = cb ? jp_thumb((unsigned char *)cb, cn, &tc) : 0;
+        chk(!why, "copy: IMG_%04d.JPG holds only our two pictures, nothing of Canon's (%s)", 504 + i, why ? why : "yes");
+        if (i == 0) {                            /* the check itself: Canon's own JPEG is caught */
+            const char *own = jp_pics((unsigned char *)cb, cn, (unsigned char *)cb, cn);
+            chk(own && !strcmp(own, "Canon's thumbnail in it"), "pictures: Canon's own JPEG caught (%s)", own ? own : "no");
+        }
+        chk(rb && tq && tc > 1000 && memmem(rb, (size_t)rn, tq, tc), "copy: IMG_%04d.CR2 still carries Canon's own "
+            "thumbnail (%u B): Canon's previews of the frame are only in the CR2", 504 + i, tc);
+        free(bb);
+        free(cb);
+        free(rb);
     }
     chk(jp_cr2s(dir, 504) && !jp_wft(504), "copy: CR2s untouched, no .WFT");
 
@@ -6552,6 +6634,13 @@ static void t_roll_jpeg(void)
             && memmem(b, (size_t)(n < 65536 ? n : 65536), "WindyFilm Darkroom", 18) && tp && tl > 1000 && pb && pn != n,
             "frame: IMG_%04d.JPG the print fitted %dx%d (%ld B, the roll print %ld B), our comment + thumbnail (%u B) "
             "('%s')", 507 + i, w, h, n, pn, tl, log_line(e));
+        char s[300];
+        long cn = 0;
+        snprintf(s, sizeof s, "%s/%s.JPG", dir, mem_pairs[i]);
+        char *cb = get_file(s, &cn);
+        const char *why = jp_pics((unsigned char *)b, n, (unsigned char *)cb, cn);
+        chk(!why, "frame: IMG_%04d.JPG holds only our two pictures, nothing of Canon's (%s)", 507 + i, why ? why : "yes");
+        free(cb);
         free(b);
         free(pb);
     }
@@ -6644,6 +6733,14 @@ static void t_roll_jpeg(void)
             snprintf(t1, sizeof t1, "DCIM/100CANON/IMG_%04d.WFT", from + i);
             snprintf(t2, sizeof t2, "%s/WFP_%04d.WFT", d2, from + i);
             chk(access(t1, F_OK) != 0 && access(t2, F_OK) != 0, "%s: F%02d no .WFT left", what, i + 1);
+            char s[300];
+            long cn = 0;
+            snprintf(s, sizeof s, "%s/%s.JPG", dir, mem_pairs[i]);
+            char *cb = get_file(s, &cn);
+            const char *why = jp_pics((unsigned char *)ba, na, (unsigned char *)cb, cn);
+            chk(!why, "%s: IMG_%04d.JPG holds only our two pictures, nothing of Canon's (%s)", what, from + i,
+                why ? why : "yes");
+            free(cb);
             free(ba);
             free(bc);
             free(bp);

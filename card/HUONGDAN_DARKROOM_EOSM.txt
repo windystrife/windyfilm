@@ -534,6 +534,18 @@ ah. (17/11 đêm) Phím tắt (Shoot > WindyFilm > Quick keys = DOWN ring, mặc
    mở (Magic Zoom tắt). Ghi lại: hộp có đè thông tin Canon không, Magic Zoom có tắt nhấp
    nháy không, ISO / khẩu có theo kịp khi xoay nhanh không.
 
+ai. (17/11 đêm) Ảnh xem lại sau Camera JPEG = Overwrite vẫn màu Canon: không cần thẻ mới.
+   Lấy một tấm đã tráng với Overwrite mà máy vẫn hiện màu Canon:
+   1. Trên PC mở IMG_nnnn.JPG của tấm đó: phải là bản đã tráng (màu phim). Nếu vẫn màu
+      Canon: lỗi ghi của mình, gửi WINDYFLM.LOG và file JPG đó.
+   2. Cắt (không xoá) IMG_nnnn.CR2 của tấm đó ra một thư mục trên PC, trong DCIM chỉ còn
+      JPG. Lắp thẻ vào máy, PLAY tấm đó, xem cả lưới ảnh nhỏ:
+      - hiện màu phim: máy lấy ảnh xem lại từ CR2 của cặp RAW+L (CR2 giữ nguyên như lúc
+        chụp, module không sửa);
+      - máy báo lỗi / không mở được: máy không đọc được JPEG của mình, chụp màn hình gửi;
+      - vẫn màu Canon: ghi lại, gửi file JPG đó.
+   3. Chép CR2 về đúng chỗ cũ trong DCIM.
+
 
 6. GỬI LẠI
 ----------

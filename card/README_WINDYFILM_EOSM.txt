@@ -265,6 +265,9 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
    ISO, DOWN lần nữa = khẩu (M, lens có tiếp điểm), lần nữa = về Canon; hộp nhỏ giữa đáy
    ghi giá trị. L/R ISO: LEFT / RIGHT = ISO. SET nhanh khi lấy nét tay = Magic Zoom. Giữ
    DOWN / SET lâu vẫn như cũ (browser / màn Q). HUONGDAN bước ah.
+19. (17/11 đêm) Overwrite mà PLAY vẫn màu Canon: JPEG đã là bản tráng (cả thumbnail), ảnh
+   Canon còn lại chỉ nằm trong CR2 của cặp RAW+L, module không sửa CR2. HUONGDAN bước ai
+   thử trên thẻ (cắt CR2 ra PC rồi PLAY).
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

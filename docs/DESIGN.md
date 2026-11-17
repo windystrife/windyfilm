@@ -945,8 +945,28 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
       - A new file number in the shot's folder. It would take the numbers Canon uses next, or need a write to
         `PROP_FILE_NUMBER`.
       - A folder outside DCF. Playback never shows it, and `ROLLS/` is that already.
-  - Not checked on the camera yet: that Canon's playback opens an overwritten JPEG and shows its thumbnail (qemu has
-    no playback), and how it lists `WFP_nnnn.JPG` beside the pair. The roll copy is the safe one.
+  - **Playback of an overwritten RAW+L pair** (owner 2026-11-17, RAWB24/25: "sao jpg nó overwrite rồi mà preview vẫn
+    là ảnh chưa qua xử lí"; still Canon's colours after a power cycle, so no cache from the time of the shot).
+    - What a real EOS M pair holds (`tools/jpg_pictures.py` on IMG_6839 and IMG_6851, firmware 2.0.2). The JPEG: two
+      pictures, the main image (5184 x 3456, Y 2x1) and Exif IFD1's 160 x 120 thumbnail; no MPF APP2, no MakerNote
+      preview (0x00B6), no bytes after the EOI; a second APP1 is XMP with `xmp:Rating` only. The CR2: four, IFD0 a
+      5184 x 3456 JPEG, IFD1 a 160 x 120 JPEG byte for byte the JPEG's, IFD2 660 x 441 uncompressed 16-bit RGB, IFD3
+      the raw data.
+    - Overwrite replaces both pictures of the JPEG. ROLL:jpeg "pictures" checks it on every overwritten file: two
+      image starts only, no APP2, nothing after the EOI, the thumbnail 160 x 120 Y 2x1 like Canon's, neither Canon's
+      thumbnail nor the start of Canon's scan anywhere in the file. Our encoder writes Canon's own layout (SOI, APP1,
+      one DQT with both tables, SOF0 Y 2x1, one DHT, SOS), so the format is not a reason to refuse it.
+    - So the Canon picture on the screen can only come from the CR2: for a RAW+L pair the playback draws the CR2's
+      own previews (by elimination; HUONGDAN step ai proves it on the card: the CR2 moved out on the PC, the frame
+      then shows the film look). The CR2 stays byte for byte as shot (the rule), so nothing of ours changes.
+    - Options for the owner (none taken): as now (a pair shows Canon's look on the camera; the film look is the
+      JPEG on the PC or phone, and ROLLS); or an opt-in "RAW to ROLLS after the Darkroom": each developed frame's CR2
+      renamed into its `ROLLS/ROLLnnn/` (bytes untouched, one directory call a frame through `wf_frename`), so DCIM
+      holds the JPEG alone and playback shows it. Its costs: RAW+JPEG importers no longer find the pair in one
+      folder, Canon's erase no longer takes the CR2, a rename across folders on DryOS is unchecked. Not proposed:
+      hiding the CR2 by name or attribute (PC software would not read it), our previews written into the CR2 (the
+      rule), a second CR2 (the card's space).
+  - Not checked on the camera yet: how playback lists `WFP_nnnn.JPG` beside the pair. The roll copy is the safe one.
 - **Memory.** Nothing new is allocated: the pack (<= 512 KB), the caption band (<= about 3.7 MB) and the row buffer
   (about 197 KB) use `M.raw`, which is free scratch in the DRY phase. The stamp's map (about 148 KB) uses `M.raw` too.
   Fonts / text are static (about 1 KB BSS). The logo pack (<= 384 KB) is read beside the fonts in the 512 KB pack
