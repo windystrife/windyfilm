@@ -1,98 +1,122 @@
 # WindyFilm
 
-Module Magic Lantern cho **Canon EOS M (firmware 2.0.2)** và **Canon 5D Mark II (2.1.2)**. Module tạo màu phim cho
-ảnh JPEG ngay lúc chụp. Tác giả: **WindyStrife**. Giấy phép GPL-2.0, xem `LICENSE`; dữ liệu bên thứ ba ghi ở
+**Tiếng Việt** · [English](README.en.md)
+
+Module Magic Lantern cho **Canon EOS M (firmware 2.0.2)** và **Canon EOS 5D Mark II (2.1.2)**. WindyFilm cho ảnh màu
+phim ngay trong máy: màu phim lên JPEG lúc chụp, develop file RAW 14-bit ngay trên máy, hoặc chụp cả cuộn rồi tráng
+trong Darkroom thành bản in có khung. Tác giả: **WindyStrife**. Giấy phép GPL-2.0 (`LICENSE`); dữ liệu bên thứ ba ghi ở
 `ATTRIBUTIONS.md`.
 
-WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Bản cũ là code của WindyStrife chạy bên trong module
-`filmroll.mo` của tác giả khác. WindyFilm không dùng, không nạp và không chứa bất cứ thứ gì của module đó.
-**Đừng bật hai module cùng lúc.**
+![Windy EKTA P, JPEG ra thẳng từ module trên EOS M](docs/img/vi/cover.jpg)
 
-> **Trạng thái 14/11/2026: đã có thẻ thử `F:\MagicLatern\EOSM_WindyFilm` và `F:\MagicLatern\5D2_WindyFilm`, nhưng
-> module chưa chạy trên máy thật.**
->
-> - Test host: EOS M 449 phép kiểm tra (có probe RAW P0 và hai đường cong Film 1, Neutral), 5D2 403 phép, đều 0 lỗi.
-> - Cổng kiểm tra nguồn gốc: PASS.
->
-> Tình trạng mới nhất (nhánh, thẻ, việc còn mở, nhật ký) ở `docs/HANDOFF.md`.
+> **Bản hiện tại: RAWB27** (tag `RAWB27`, nhánh `main`). Đã chạy test host: EOS M 2289 phép kiểm tra, 5D2 1832 phép,
+> đều 0 lỗi.
+> **Chưa thử trên máy thật:** Darkroom và RAW develop trên 5D2, chuyển CR2 sang ROLLS, hàng RAW files, Quick keys, ISO
+> theo phim. Tình trạng mới nhất (nhánh, thẻ, việc còn mở) ở `docs/HANDOFF.md`.
 
-## Tính năng
+WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Nó không dùng, không nạp và không chứa bất cứ thứ gì của
+module `filmroll.mo`. **Đừng bật hai module cùng lúc.**
 
-- **Màu phim lúc chụp.** Mỗi ảnh JPEG đi qua bảng màu 17³ YCbCr của phim đang chọn (nhân 2.5D, xử lý theo từng khúc).
-  - EOS M: hook ở bước Canon chuyển YUV (NN 5184x3456 hoặc Diana hai nửa).
-  - 5D2: hook đường A, hai nửa 5616x1872.
-- **Danh mục phim**, chia nhóm Colour / Cine / B&W / Film LUT. Mỗi phim có mô tả ngắn.
-- **Hàng Light:**
-  - Auto: giữ nguyên WB máy;
-  - Day: WB theo phim;
-  - Cloudy: WB phim x1,25;
-  - Tungsten: 3200 K.
-  WB của bạn được lưu lại và trả về khi chọn Auto hoặc tắt module.
-- **Hàng Print:** Scan (scan trung tính), Cine print (in lên phim chiếu kiểu 2383), Paper (in giấy màu). Chỉ có với
-  những phim có mô hình.
-- **Hiệu ứng:**
-  - Grain (kiểu Yedlin);
-  - Halation và bloom;
-  - Mist (chỉ EOS M);
-  - Strength 30 / 100 / 125 %.
-- **Đầu ra log:** S-Log3, V-Log, LogC3, Canon Log 2, Canon Log 3, dạng phẳng hoặc **+ LUT** (cube trên thẻ). Có LUT EI.
-- **Input curve** (cho Log + LUT và các lon Film LUT): sRGB (mặc định), **Canon Film 1** hoặc **Canon Neutral**.
-  - Mỗi lựa chọn Canon đảo đúng đường cong Picture Style đo trên EOS M từ các cặp RAW+L của chủ dự án, thay cho sRGB.
-    Xám 18 % ra đúng chỗ, và phần sáng trên trắng (Film 1 tới 2,07, Neutral tới 1,70) đi vào đoạn log của đường cong.
-  - Canon Film 1 cần file style Film 1 nạp trong User Def. 1, Contrast −2. Canon Neutral cần style Neutral có sẵn,
-    Contrast 0. Sai style, User Def. 1 dựa trên style có sẵn, hay Contrast khác: module tự đọc sRGB và menu báo lý
-    do. Log phẳng và phim trong danh mục vẫn đọc sRGB.
-- **Film LUT can:** chọn một lon là đặt luôn V-Log + LUT với cube của lon đó.
-- **Xem trước trên LiveView** bằng cùng nhân màu, kèm xem trước độ phơi sáng.
-- **EXIF:** UserComment ghi phim, kiểu in, Light, hiệu ứng và EV của từng ảnh.
-- **Nhật ký:** `ML/LOGS/WINDYFLM.LOG`.
-- **RAW probe (P0, chỉ EOS M, để thử):** menu Shoot > WindyFilm > RAW probe. Probe ghi vào log và
-  `ML/LOGS/WFPROBE.BIN` địa chỉ RAW / SSRAW của Canon lúc chụp, không đổi ảnh, và tự tắt mỗi lần bật máy. Đây là bước
-  đầu của đường RAW (`docs/DESIGN.md` 3.2).
+## Giao diện
 
-## Giao diện chọn phim
+Mở giao diện bằng phím tắt: **EOS M** giữ lâu nút DOWN khi đang LiveView; **5D Mark II** bấm TRASH. Trên một màn hình
+có lon phim, tên và chip của phim, các hàng chỉnh, dải phim 35 mm, và chip chế độ ở góc trên bên phải.
 
-Mở từ menu **WindyFilm > Browser**, hoặc bằng phím tắt: EOS M giữ lâu nút DOWN, 5D2 bấm TRASH.
+![Giao diện WindyFilm](docs/img/vi/interface.jpg)
 
-- Bên trái là lon phim lớn, có quầng sáng theo màu của phim.
-- Bên phải là tên phim, các chip (loại, ISO, khổ), mô tả ngắn và 7 hàng: Light, Print, Grain, Halation, Mist,
-  Strength, Film LUT.
-- Phía dưới là dải phim 35 mm cuộn ngang, có tab nhóm và thanh cuộn.
-
-| Việc | EOS M | 5D2 |
+| Việc | EOS M | 5D Mark II |
 |---|---|---|
-| Đổi phim (sang được nhóm khác) | trái / phải | joystick trái / phải |
+| Đổi phim | trái / phải | joystick trái / phải |
 | Chọn hàng | lên / xuống | joystick lên / xuống |
-| Đổi giá trị hàng đang chọn | vòng xoay sau | bánh xe trên hoặc bánh xe sau |
-| Nạp phim | SET | SET hoặc nhấn joystick |
-| Nhóm kế tiếp | chạm 1 ngón | Picture Style |
-| Trang chi tiết | INFO | INFO |
+| Đổi giá trị | vòng xoay sau | bánh xe trên hoặc sau; hoặc bấm joystick rồi trái / phải |
+| Nạp phim / cuộn | SET | SET |
+| Đổi nhóm phim | chạm 1 ngón | PICT (nút Picture Style) |
+| Trang Info | INFO | INFO |
+| Darkroom | PLAY | PLAY |
 | Đóng | MENU hoặc chạm 2 ngón | MENU hoặc TRASH |
 
-- Bấm nửa hoặc hết nút chụp thì giao diện đóng và máy chụp như thường.
-- EOS M cần đang ở LiveView chụp ảnh. Phím mở giao diện cần thẻ có core ML với patch 0002 / 0003 (thẻ EOS M hiện tại
-  đã có).
-- Bảng phím được chốt sau lần chạy thử đầu tiên trên máy.
+Bấm nửa hoặc hết nút chụp thì giao diện đóng và máy chụp như thường.
 
-## Cài lên thẻ
+## Hoạt động thế nào
 
-Thẻ WindyFilm nằm ở thư mục riêng (`EOSM_WindyFilm`, `5D2_WindyFilm`), không đụng vào các thẻ Film Roll đang dùng.
-Thẻ được tạo bằng `tools/mk_card.sh` (PLAYBOOK mục 7).
+Bạn chọn hai thứ: **nạp gì** (Film hay Film stage) và **máy develop ra sao** (JPEG, RAW develop hay Darkroom). Chế độ
+nào cũng dùng được cho cả Film lẫn Film stage.
+
+![WindyFilm hoạt động thế nào](docs/img/vi/how_it_works.jpg)
+
+**Nạp gì**
+- **Film**: màu phim làm sẵn. 30 cuộn (Colour 15, Cine 4, B&W 11), mỗi cuộn có màu, độ tương phản, grain, halation và
+  bloom riêng. Thêm 23 lon **Film LUT**: máy ghi ra Log rồi áp cube.
+- **Film stage**: làm như phòng lab điện ảnh. 44 phim âm bản điện ảnh in lên 15 loại phim in (643 cặp). Có hàng chỉnh
+  phơi sáng âm bản, push / pull, đèn in RGB, interlayer và bleach bypass.
+
+**Máy develop ra sao** (chip chế độ)
+- **JPEG** (trong Film stage gọi là *JPEG 8-bit*): màu phim lên JPEG L của Canon ngay lúc chụp. Nhanh, nhưng đi từ JPEG
+  8-bit nên vùng sáng và vùng tối ít chi tiết hơn.
+- **RAW develop**: chụp RAW + L từng tấm. Module develop file RAW 14-bit của tấm đó ngay trong máy rồi ghi màu phim vào
+  JPEG, khoảng 30 giây một tấm trên EOS M. Giữ được nhiều chi tiết hơn. File CR2 không bị sửa.
+- **Darkroom**: như máy phim. Nạp cuộn 3–36 kiểu, chụp RAW + L; máy đếm kiểu và chưa cho xem màu. Sau đó máy tráng cả
+  cuộn thành bản in trong `ROLLS/ROLLnnn` (khoảng 1 phút một kiểu trên EOS M).
+
+**Các hàng chỉnh của phim:** Light (Auto · Day · Cloudy · Shade · Tungsten), Print stock, Paper (Glossy · Matte · Warm ·
+Cool), Grain, Halation, Bloom, Gauge, và Exposures cho cuộn. *Light Auto* giữ WB của bạn; các lựa chọn khác đặt WB theo
+phim, và WB của bạn được trả lại khi về Auto hoặc tắt module. Nạp phim hoặc cuộn sẽ đặt **ISO theo phim**.
+
+## Darkroom
+
+![Chụp một cuộn, tráng ngay trong máy](docs/img/vi/darkroom.jpg)
+
+Khối **PRINT** trên màn hình Darkroom:
+- **Frame**: Off · White · Black · White wide · Black wide (khung giấy quanh ảnh).
+- **Info**: Off · On · On + roll (ống kính, thông số phơi sáng, dòng phim, số cuộn).
+- **Date**: dấu ngày kiểu máy phim.
+- **Camera JPEG**: Keep (bản in nằm trong ROLLS) · Overwrite (bản in thay JPEG trong DCIM) · Over + print (giữ ảnh trong
+  DCIM, thêm bản in có khung `WFP_nnnn.JPG` bên cạnh).
+- **RAW files**: Keep in DCIM · Move to ROLLS. CR2 chỉ được chuyển khi Camera JPEG là Overwrite hoặc Over + print, và
+  chỉ sau khi JPEG đã được kiểm tra; nội dung CR2 không bao giờ bị sửa. Đây cũng là mục *RAW after Darkroom* trong menu
+  ML.
+
+Cuộn đã tráng nằm trên **shelf**. Một cuộn có thể tráng lại với phim khác (ra `ROLLnnnB`), bản in cũ vẫn giữ. Lúc máy
+tráng có thể tắt màn hình (Screen Off) cho đỡ tốn pin.
+
+![Bản in Darkroom trên 5D Mark II](docs/img/vi/print_5d2.jpg)
+
+## Trước / sau
+
+![Cùng một file RAW: develop trung tính và Kodak Gold 200](docs/img/vi/before_after.jpg)
+
+## Có gì mới trong RAWB27
+
+![Có gì mới](docs/img/vi/whats_new.jpg)
+
+- Darkroom trên 5D Mark II, cùng màn hình với EOS M.
+- Hàng **RAW files** ngay trên màn hình Darkroom.
+- **ISO theo phim** trên cả hai máy.
+- **Quick keys** trên EOS M: bấm nhanh DOWN thì vòng xoay chỉnh ISO; DOWN lần nữa chỉnh khẩu (chế độ M); SET khi lấy nét
+  tay mở Magic Zoom.
+- Chú thích trên bản in đậm và dễ đọc hơn.
+
+Danh sách đầy đủ ở trang Release RAWB27. Hướng dẫn PDF (tiếng Việt và tiếng Anh) được đính kèm ở đó.
+
+## Thẻ nhớ
+
+Thẻ WindyFilm nằm ở thư mục riêng (ví dụ `EOSM_WindyFilm_RAWB27`, `5D2_WindyFilm_RAWB27`) và được tạo bằng
+`tools/mk_card.sh` từ bản build cộng dữ liệu riêng của chủ dự án. Thẻ không nằm trong repo.
 
 ```
-ML/modules/windyflm.mo
-ML/data/WFFILMS.DAT    bảng màu của các phim (Scan / Cine / Paper)
-ML/data/WFCANS.DAT     hình lon phim
-ML/data/WFFONTS.DAT    font chữ nhỏ của giao diện
-ML/data/*.CUB          cube Film LUT
-ML/SETTINGS/WINDYFLM.EN  bật module lúc khởi động
-README_WINDYFILM.txt, README_FILMLUT.txt, CHANGELOG_FILMLUT.txt, SPEKTRAFILM_LICENSE.txt,
-UBUNTU_FONT_LICENCE.txt, ATTRIBUTIONS.txt, LICENSE_WINDYFILM.txt, MD5SUMS.txt
+autoexec.bin, ML/modules/<máy>.sym     luôn đi đúng cặp, giữ nguyên cặp đang có
+ML/modules/windyflm.mo                 module
+ML/data/WFFILMS.DAT                    bảng màu các phim
+ML/data/WFSTAGE.DAT, WFSTLOG.DAT       Film stage (JPEG 8-bit, RAW develop)
+ML/data/WFLOG.DAT                      bảng của RAW develop
+ML/data/WFPRINT.DAT, WFLOGO.DAT        giấy in, chữ và logo trên khung in
+ML/data/WFCANS.DAT, WFFONTS.DAT        hình lon phim, font giao diện
+ML/data/*.CUB                          cube của Film LUT
+ML/SETTINGS/WINDYFLM.EN                bật module lúc khởi động
+README_WINDYFILM.txt, MD5SUMS.txt và các file giấy phép
 ```
 
-- `autoexec.bin` và file `.sym` của máy (`EOSM_202.sym` / `5D2_212.sym`) phải luôn đi đúng cặp. Giữ nguyên cặp thẻ
-  đang có.
-- `filmroll.mo` không được có trên thẻ WindyFilm.
+`filmroll.mo` không được có trên thẻ WindyFilm.
 
 ## Build và test (WSL Ubuntu-24.04)
 
@@ -102,7 +126,7 @@ bash build.sh CAM=5D2
 bash test.sh
 ```
 
-Chạy từ một file script trong WSL; lệnh đầy đủ ở `docs/PLAYBOOK-QWEN.md`. `build.sh` kiểm tra các việc sau:
+Chạy từ một file script trong WSL. `build.sh` kiểm tra:
 - mọi symbol module dùng đều có trong file `.sym` của thẻ;
 - kích thước image khi TCC liên kết;
 - cổng nguồn gốc (`tools/provenance_gate.py`): không có chuỗi hay đoạn byte nào trùng với module cũ.
@@ -111,7 +135,10 @@ Không chạy bộ test EOS M và 5D2 cùng lúc.
 
 ## Tài liệu
 
-- `docs/DESIGN.md`: kiến trúc, định dạng các file trên thẻ, giao diện giữa các phần.
 - `docs/HANDOFF.md`: điểm vào duy nhất: tình trạng hiện tại, sơ đồ nhánh, các thẻ, việc còn mở, nhật ký.
-- `docs/PLAYBOOK-QWEN.md`: hướng dẫn cho Qwen Code (quy tắc, lệnh build / test / thẻ, bẫy).
+- `docs/DESIGN.md`: kiến trúc, định dạng các file trên thẻ, giao diện giữa các phần.
+- `docs/UI-NOTES.md`, `docs/CORE-NOTES.md`, `docs/DATA-NOTES.md`: ghi chú giao diện, core ML và dữ liệu.
 - `ATTRIBUTIONS.md`: ghi công dữ liệu và thông số bên thứ ba.
+
+*Ảnh trong README: màn hình là code giao diện của module chạy trên PC (EOS M và 5D2 vẽ ra cùng một ảnh); bản in và ảnh
+là ảnh của chủ dự án, chụp bằng máy có WindyFilm.*

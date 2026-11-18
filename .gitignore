@@ -37,3 +37,8 @@ films/tables/log/
 # owner 11-16: a maker's wordmark (Canon_wordmark.svg and the like) stays in the owner's private folder; only our own
 # test shape tests/host/logo_test.svg is tracked (*.DAT above keeps WFLOGO.DAT out)
 *wordmark*
+# owner 11-18: the Qwen hand-off files stay local only, never in the repo
+# (copies in F:\MagicLatern\_windyfilm_docs\private\qwen_local; a pull that removes them can be restored from there)
+/QWEN.md
+/docs/*QWEN*.md
+/docs/agents/
