@@ -2,7 +2,7 @@ WindyFilm cho Canon EOS M (firmware 2.0.2) - thẻ thử đầu tiên, 14/11/202
 =========================================================================
 
 Module Magic Lantern tạo màu phim cho ảnh JPEG ngay lúc chụp.
-Tác giả: WindyStrife. Giấy phép GPL-2.0 (LICENSE_WINDYFILM.txt).
+Tác giả: WindyStrife. Giấy phép GPL-3.0 trở lên (LICENSE_WINDYFILM.txt).
 Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
 dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.

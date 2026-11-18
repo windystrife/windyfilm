@@ -1,10 +1,10 @@
 # WindyFilm
 
-**Tiếng Việt** · [English](README.en.md)
+**Tiếng Việt** · [English](README.en.md) · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
 Module Magic Lantern cho **Canon EOS M (firmware 2.0.2)** và **Canon EOS 5D Mark II (2.1.2)**. WindyFilm cho ảnh màu
 phim ngay trong máy: màu phim lên JPEG lúc chụp, develop file RAW 14-bit ngay trên máy, hoặc chụp cả cuộn rồi tráng
-trong Darkroom thành bản in có khung. Tác giả: **WindyStrife**. Giấy phép GPL-2.0 (`LICENSE`); dữ liệu bên thứ ba ghi ở
+trong Darkroom thành bản in có khung. Tác giả: **WindyStrife**. Giấy phép GPL-3.0 trở lên (`LICENSE`); dữ liệu bên thứ ba ghi ở
 `ATTRIBUTIONS.md`.
 
 ![Windy EKTA P, JPEG ra thẳng từ module trên EOS M](docs/img/vi/cover.jpg)

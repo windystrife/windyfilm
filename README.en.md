@@ -1,11 +1,11 @@
 # WindyFilm
 
-[Tiếng Việt](README.md) · **English**
+[Tiếng Việt](README.md) · **English** · [中文](README.zh.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
 A Magic Lantern module for the **Canon EOS M (firmware 2.0.2)** and the **Canon EOS 5D Mark II (2.1.2)**. WindyFilm
 gives you film colour in the camera: a film look on the JPEG at the shot, a 14-bit RAW develop on the camera, or a
 whole roll shot first and then developed in the Darkroom into framed prints. Author: **WindyStrife**. Licence
-GPL-2.0 (`LICENSE`); third-party data is credited in `ATTRIBUTIONS.md`.
+GPL-3.0-or-later (`LICENSE`); third-party data is credited in `ATTRIBUTIONS.md`.
 
 ![Windy EKTA P, camera JPEG straight out of the module on the EOS M](docs/img/en/cover.jpg)
 

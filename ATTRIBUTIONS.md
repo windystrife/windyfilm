@@ -1,15 +1,18 @@
 # Attributions
 
 WindyFilm (`windyflm.mo`, its tools and its card files) is written by **WindyStrife**. It is licensed under the
-GNU GPL version 2 (`LICENSE`), the licence of Magic Lantern, which it is built against and runs inside.
+GNU GPL version 3 or (at your option) any later version (`LICENSE`), since 18/11/2026; earlier commits, up to and
+including tag RAWB27, were released under GPL version 2. Magic Lantern, which it is built against and runs inside, is
+GPL version 2 or any later version, so the two combine under GPL version 3.
 
 The sources below are credited. Unless a line says "data", no third-party code is included: those sources gave
 ideas, published formulas or published numbers, implemented independently here.
 
 ## Code it builds against
 
-- **Magic Lantern**: GPL-2.0, the Magic Lantern team (magiclantern.fm). The module includes ML headers and calls the ML
-  API at run time; ML core patches 0002 / 0003 / 0004 are WindyStrife's.
+- **Magic Lantern**: GPL-2.0-or-later (its source files say "version 2 of the License, or (at your option) any later
+  version"), the Magic Lantern team (magiclantern.fm). The module includes ML headers and calls the ML API at run time;
+  ML core patches 0002 / 0003 / 0004 are WindyStrife's and keep Magic Lantern's own licence, GPL-2.0-or-later.
 
 ## Data included (with its licence)
 
@@ -59,4 +62,6 @@ companies. No logos are drawn.
 - The "Film Roll" module by florinkiritescu.ro and every part of it: its binary, film data, can art, palette, fonts
   and strings. WindyFilm does not need it, does not load it and must not run together with it.
 - Third-party cubes the owner uses privately (for example cine print or camera-maker LUTs). They stay on the owner's
-  own card and are never put in this repo or in a release.
+  own card and are never put in this repo or in a public release. The owner's private release RAWB27 (this repo
+  is private) carries the owner's full cards as zip files, cubes and maker wordmark included; those zips must be
+  deleted before the repo or any release is made public.
