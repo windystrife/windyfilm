@@ -9,7 +9,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 WORK=$1; OUT=$2; shift 2
 EDGE=${EDGE:-"/c/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"}
 mkdir -p "$WORK" "$OUT"
-cp "$HERE"/*.html "$HERE"/wfm.css "$WORK"/
+cp "$HERE"/*.html "$HERE"/*.js "$HERE"/wfm.css "$WORK"/
 LIST=("$@"); [ ${#LIST[@]} -eq 0 ] && LIST=($(cd "$HERE" && ls [0-9]*.html))
 WIN_WORK=$(cygpath -m "$WORK")
 for h in "${LIST[@]}"; do

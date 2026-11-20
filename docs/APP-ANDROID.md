@@ -82,24 +82,26 @@ Status as in the option model: **H** have it (the engine part), **A** add, our o
 | Source temperature / tint | Light Auto / Day / Cloudy / Shade / Tungsten + Kelvin / Tint | H + A | Light (3.13); B's channel scales |
 | Source exposure | Exposure -3..+3 EV (RAW: before B's shoulder) | A | B scene scale |
 | Push / pull | Film stage: Film exp, Push / pull; Film: Film exp | H / A | `wf_stagek.c` X axis; Film: linear scale before the table |
-| Film developer (gamma, contrast, colour gain) | Dev contrast; Saturation | A | scale of the negative's density curves about grey (Film stage), N curve (Film) |
-| Film compression (highlight roll-off) | Highlights / Shadows; RAW develop's film shoulder | H | `wf_hs_bend` (3.3); B shoulder |
-| Expand (black / white points) | Print range: pinned / natural | A | the chain's pinned ends (DESIGN 1a) |
+| Film development (contrast, gamma, colour separation) | Dev. contrast, Contrast centre, Colour purity; Saturation (gamut-safe) | A | the negative's density scale about a movable grey (Film stage), N curve (Film); purity = a chroma knee after the table (Film stage: Interlayer) |
+| Highlight compression (white point, range, colour) | Highlights / Shadows; Shoulder white, Shoulder knee, Highlight colour | H + A | `wf_hs_bend` (3.3); B shoulder `j.roll` as parameters; chroma inside the shoulder |
+| Black / white points | Black level, White level, Levels on colour / luma; Print range pinned / natural | A | output levels after the print; the chain's pinned ends (DESIGN 1a) |
 | Print stock, print exposure | Print stock (Scan / Cine / Paper; Film stage 15 prints), Print exposure (Exp comp) | H | `WFFILMS.DAT` variants, `wf_stagek.c` print half |
-| Print paper, target white | Paper Glossy / Matte / Warm / Cool | H | `wf_paper` (3.10); printing lamp: S (needs new chain data) |
-| CMY colour head + gang | Printer lights R / G / B (+-12 points), shown as RGB or CMY | H + A | `wf_stagek.c` printer timing; CMY = a view of the same numbers |
-| Split toning (shadows / mids / highlights) | - | L | split toning after the print, our own |
-| Grain profiles (gauge x ISO) | Grain Off / Fine / Normal / Strong / Even x3, Gauge 16 / 35 / 65 | H | `yg_grain.c`, Gauge row (3.7) |
+| Print contrast, colour density | Print contrast, Dye density | A | the print stock's curve gamma about its mid density; channel density away from neutral |
+| Print paper, target white | Paper Glossy / Matte / Warm / Cool; Printing lamp 5000..6500 K (Film stage prints) | H + A | `wf_paper` (3.10); lamp K -> printer points R / B, computed at run time from the user's `WFSTAGE.DAT` |
+| Printer lights (CMY), linked, keep exposure | Printer lights R / G / B (+-12 points), shown as RGB or CMY, Linked, Keep brightness | H + A | `wf_stagek.c` printer timing; CMY = a view of the same numbers; Keep = the mean goes to Print exposure |
+| Split toning (shadows / mids / highlights) | Split tone: Shadows / Mids / Highlights warm..cool, Amount | A | temperature offsets in soft tone bands after Levels, our own |
+| Grain profiles (gauge x ISO) | Grain Off / Fine / Normal / Strong / Even x3, Gauge 16 / 35 / 65, Grain speed (film's own / 50..3200) | H + A | `yg_grain.c`, Gauge row (3.7), `yg_stocks.c` parameters per speed |
 | Grain size, amount, chroma, per-tone | Amount, Size, Colour, Tones | A | the same `yg` parameters, continuous |
 | Halation presets, without the anti-halation backing | Halation Off / Wide / Tight / Wrap; Backing on / removed | H + A | `yh_halo.c`; removed = wider, stronger red part |
 | Halation amount, threshold, spread, hue | Amount, Threshold, Spread, Hue | A | `yh` hal_q8, knee, gauge reach, colour |
 | Bloom profiles and controls | Bloom Off / Low / Normal / Strong + Amount, Threshold | H + A | `yh_halo.c` bloom part |
 | - (ours) | Mist White / Black 1/8..1 | H | `wf_mist.c` (3.8) |
 | Strength | Strength 0..150 % (camera 30 / 100 / 125) | H | the table build's deviation scale |
-| Vignette | Vignette amount, size, feather | A | print burn-in in linear light, our own |
-| Film rebate | Film rebate with our own edge text | L | own art; the contact sheet already draws one |
-| Film damage (dust, hair, scratches) | - | L | own procedural, later if wanted |
-| Film breath, gate weave | - | S | video only |
+| Effect-only view | Effect alone (Grain, Glow tabs) | A | a view switch, never saved |
+| Vignette | Vignette Amount, Size, Feather, Roundness, Centre | A | print burn-in in linear light, our own |
+| Film rebate | Film rebate: Format (off / 35 mm / half frame / Super 8 / 16 mm / cine 4-perf / 6x4.5 / 6x6 / 6x7 / 6x9 / 4x5), Corners, Sprocket holes, Film runs, Edge light, Rebate shown, Picture size, Position, Edge softness, Mirror, Edge print, Same on every frame | A | our own drawn rebates from public format sizes, edge print in our font (`mk_wffont.py`), never scans |
+| Film damage (dust, hair, scratches) | Dust & scratches: Look clean / light / used / old, Amount, Dust, Hairs, Scratches, Vary per frame | A | own procedural marks seeded by roll + frame, white on a print from a negative, dark on a slide |
+| Film breath, gate weave (video) | Frame variation (each frame of a roll), Frame drift (the picture in the rebate) | A | stills meanings, seeded by roll + frame; a video meaning only if phone video comes |
 | LUT export | look as .cube | L | desktop has it (A) |
 | Histogram, undo / redo, hold for before, 200 % | histogram, undo, split + hold, 1:1 grain check | A | app |
 | Crop | crop, straighten, 3:2 / 4:3 / 1:1 / 65:24 / 16:9 | A | before the look |
@@ -110,10 +112,19 @@ Status as in the option model: **H** have it (the engine part), **A** add, our o
 | **Roll (ours)** | 3..36 frames, film locked, Blind roll, shelf, develop again | H | `wf_roll.c` semantics, `WFROLL.TXT` format |
 | **Camera card import** | EOS M / 5D2 CR2 + JPG + rolls over OTG, develop again on the phone | A | `wf_cr2.c` + B, bit-exact with the camera |
 
+**Owner, 21 Nov: every option on the plugin's tool panel goes in, desktop and phone**, each as our own control (option
+model section 12; the phone's live-preview split in section 13). Still S: the skin mask (detection, outside
+WindyFilm). Still L: micro-contrast, defringe (not on that panel), LUT export and print sizes on the phone.
+
 Film stage keeps its 44 negatives and 15 offered prints and its nine knobs (Film exp, Push / pull, Print exposure,
-Printer R / G / B, Interlayer, Bleach bypass, Print bleach, Neutral neg / print) and gains Dev contrast, the CMY view
-of the printer lights, Print range, the continuous grain / halation / bloom controls and Exposure / Kelvin / Tint in
-front (mock 05).
+Printer R / G / B, Interlayer, Bleach bypass, Print bleach, Neutral neg / print) and gains Dev contrast, Contrast
+centre, the CMY view of the printer lights with Linked / Keep brightness, Printing lamp, Print contrast, Dye density,
+Split tone, Print range, the continuous grain / halation / bloom controls and Exposure / Kelvin / Tint in front (mocks
+05, 08).
+
+Develop on the phone has **8 tabs**: Film · Print · Tone · Grain · Glow · Lens · Gate · Finish (mocks 04, 04b, 08..12).
+Tone = Developer, Highlights & shadows, Colour, Levels; Grain also holds Dust & scratches; Gate = Film rebate and a
+Per frame group (Same on every frame, Frame drift, Frame variation).
 
 ## 4. Architecture
 
@@ -162,9 +173,22 @@ viewfinder                 ^
     (Strength, Highlights / Shadows, Paper, Print, Film stage compose by `wf_stagek.c`, Light gains), and the result is
     uploaded as one 3D texture; the shader samples it (tetrahedral). The preview's colour is then the core's kernel up
     to interpolation, with no second colour implementation to keep in step.
-  - Approximated: grain = a pre-made noise texture per gauge / size, amplitude per level from the `yg` table; halation /
-    bloom = dual-filter blur at 1/4 resolution with the `yh` knee and colours; mist = one more blur level.
-  - Tiers: Full (all), Fast (cube only), Off (the phone's picture). Film LUT 65^3 cubes are resampled to 33^3 for it.
+  - The panel's per-pixel controls (Developer, shoulder, Saturation, Print range, Levels, Printing lamp, Print
+    contrast, Dye density, Keep brightness, Split tone) and Frame variation fold into the same cube: exact up to the
+    cube. While a slider is dragged a 17^3 cube is baked (<= 8 ms), the 33^3 one on release (<= 60 ms, a worker thread;
+    the GPU keeps the old cube until the new one is up).
+  - Per-frame draws use the seed of roll + frame; the viewfinder shows the **next** frame's (Frame variation, Frame
+    drift, dust): what you see is the frame you get. Free mode seeds with the shot counter.
+  - Overlays drawn by the core at preview size when a setting changes (<= 30 ms): the film rebate (exact shapes; Edge
+    light and Edge softness blurs at preview size) and the dust marks (exact positions, thin marks at least 1 px). The
+    shader places the picture in the rebate (Frame drift = an affine move, bilinear) and computes the vignette with the
+    core's formula in float.
+  - Approximated: grain = a pre-made noise texture per gauge / size / speed, amplitude per level from the `yg` table;
+    halation / bloom = dual-filter blur at 1/4 resolution with the `yh` knee, colours and amounts; mist = one more blur
+    level.
+  - Tiers: Full (all), Fast (the cube + vignette + rebate: no grain / glow / mist / dust), Off (the phone's picture,
+    with a thin frame line when a rebate is on). Film LUT 65^3 cubes are resampled to 33^3 for it. Details per key:
+    option model section 13.
 - **Roll, shelf, Darkroom** (DESIGN 3.6, 3.14, 3.15): one roll in the camera, 3 / 6 / 12 / 24 / 36 frames, its film
   locked, Blind roll hides the frames until developed, a finished roll goes on the shelf, the Darkroom develops a roll
   (a foreground service with progress, safelight red on the run screen only), develop again with another film
@@ -185,6 +209,9 @@ viewfinder                 ^
 |---|---|---|
 | viewfinder, Full look | 30 fps steady at 1080 x 1440, GPU <= 10 ms a frame | Fast tier: 60 fps |
 | film or knob change in the viewfinder | <= 100 ms (Film stage compose <= 150 ms) | 33^3 bake on the CPU + upload |
+| slider drag in Develop | <= 8 ms a step (17^3 bake), 33^3 on release | the picture follows the finger |
+| rebate / dust overlay redraw | <= 30 ms at preview size | only when a gate / dust setting or the frame changes |
+| extra GPU cost of rebate, dust, vignette, drift | <= 1 ms a frame at 1080p | two texture reads + math |
 | camera start | <= 700 ms | MPC figure |
 | shot to shot, DNG + JPG | <= 1 s | DNG written on an IO thread |
 | develop one frame (B + look + print + JPEG) | <= 2 s for 12 MP DNG, <= 3 s for an 18 MP CR2 | 4 threads; the camera takes 50-60 s |
@@ -218,29 +245,33 @@ All of these are targets to measure in stage 2, not measurements.
 
 ## 7. Staged plan
 
-1. **Stage 1 (this):** research, feature map, the shared option model, 8 mockups, this plan. Owner approval.
+1. **Stage 1 (this):** research, feature map, the shared option model, 13 mockups, this plan. Owner approval.
 2. **Stage 2, core + preview skeleton:** the core as `libwfcore.so` (arm64 / x86_64) with the wasm kit's shims; host
    test: the ref17 CR2 frames give the camera's prints (bit-exact gate, section 4); a bare Kotlin app with Camera2
    PRIV + RAW + JPEG, the GL preview with the baked cube, the shutter writing DNG. Measure section 5 on the owner's
    phone(s).
 3. **Stage 3, develop + roll:** `wf_dng.c` and B on DNG; Free mode; rolls (film lock, Blind, exposures), the shelf, the
    Darkroom service, the contact sheet, gallery, export, share.
-4. **Stage 4, Develop tools:** the H rows everywhere, then the A controls in the option model's order (Light K / Tint,
-   Exposure, grain / halation / bloom continuous, Dev contrast, vignette, crop), recipes, sidecar, undo, split / hold,
-   1:1.
-5. **Stage 5, Film stage + user data + card:** the data folder (SAF), Film stage and its knobs and prints, the Film
-   LUT cans from the user's cubes, camera card import, develop again.
+4. **Stage 4, Develop tools:** the 8 tabs; the H rows everywhere, then the A controls in this order: Light K / Tint,
+   Exposure; Developer, shoulder, Saturation, Print range, Levels; Print contrast, Dye density, Keep brightness, Split
+   tone; grain speed / amount / size, halation / bloom amounts, Effect alone; vignette, crop; then Dust & scratches,
+   Film rebate (all formats, edge print), Frame variation, Frame drift. Recipes, sidecar, undo, split / hold, 1:1.
+   Each control lands in the core (C, the camera's and desktop's too) and in the preview split of section 4 together.
+5. **Stage 5, Film stage + user data + card:** the data folder (SAF), Film stage and its knobs and prints, Printing
+   lamp (needs the user's `WFSTAGE.DAT`), the Film LUT cans from the user's cubes, camera card import, develop again.
 6. **Stage 6, beta:** a device matrix (the owner's phones + 3-4 common mid-range models), perf / thermal, packaging
    (APK / F-Droid / Play: the owner decides), the README languages (vi / en / ja / ko / zh).
 
 ## 8. Mockups
 
-Sources `tools/apps/android_mocks/` (HTML + `wfm.css`, `mk_assets.py` gathers the inputs, `render.sh` = Edge headless
-at 360 x 800 x3, `mk_sheet.py` = the overview). PNGs, 1080 x 2400, in `F:\MagicLatern\_windyfilm_docs\android_mocks\`:
-`00_tong_quan.png` (overview), `01_viewfinder`, `02_shelf`, `03_roll`, `04_develop` (Glow tab), `04b_develop_film`
-(Film tab), `05_filmstage`, `06_settings`, `07_import`. The photos in them are real renders of the WindyFilm core on
-the owner's EOS M CR2s (the look-sweep galleries); the Film stage strip uses the private chain renders, so the PNGs
-stay private.
+Sources `tools/apps/android_mocks/` (HTML + `wfm.css`, `dev.js` = the shared Develop chrome of 08..12, `mk_assets.py`
+gathers the inputs, `render.sh` = Edge headless at 360 x 800 x3, `mk_sheet.py` = the overview). PNGs, 1080 x 2400, in
+`F:\MagicLatern\_windyfilm_docs\android_mocks\`: `00_tong_quan.png` (overview), `01_viewfinder`, `02_shelf`,
+`03_roll`, `04_develop` (Glow tab), `04b_develop_film` (Film tab), `05_filmstage`, `06_settings`, `07_import`,
+`08_develop_print`, `09_develop_tone`, `10_develop_grain` (with Dust & scratches), `11_develop_lens`,
+`12_develop_gate` (Film rebate, Per frame). The photos in them are real renders of the WindyFilm core on the owner's
+EOS M CR2s (the look-sweep galleries); the Film stage strip uses the private chain renders, so the PNGs stay private.
+The rebate in 12 and the dust in 10 are drawn by the mock itself (our own shapes from public format sizes).
 
 ## 9. Open questions for the owner
 
@@ -255,6 +286,12 @@ stay private.
    them out of app builds?
 7. Distribution: APK only, F-Droid, or Play Store (and the stock names on the cans there)?
 8. Which phones first (your own models), and minSdk 29?
-9. Which NEW options for v1 (Kelvin / Tint / Exposure, Dev contrast, Halation amount / threshold, grain amount / size,
-   vignette, crop) and which later?
+9. Everything on the panel goes in (your 21 Nov note). The order inside stage 4 (section 7: tone and print controls
+   first, then dust, rebate and per-frame variation): OK, or something first?
 10. Ship the 4 spektrafilm Film LUT cans inside the app, or all 23 cans from your folder only?
+11. 8 Develop tabs on a phone (Film · Print · Tone · Grain · Glow · Lens · Gate · Finish), or fold Lens (vignette)
+    into Gate for 7?
+12. Viewfinder with Frame variation / Frame drift / dust on: show the next frame's draw (what you see is what you
+    get, mock 01 would change per shot), or keep the viewfinder clean and show them only in Develop?
+13. Edge print text on the rebate: "WINDYFILM · film name · frame number" (mock 12), or something else (roll number,
+    your name)?

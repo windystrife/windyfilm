@@ -80,3 +80,36 @@ html, body { width: 360px; height: 800px; overflow: hidden; background: var(--in
 
 /* note box used on the mock sheets */
 .tag { position: absolute; font-size: 10px; font-weight: 700; color: #1A1206; background: var(--amber); border-radius: 4px; padding: 1px 5px; }
+
+/* Develop screens 08..12 (dev.js): picture, the 8 tool tabs, a taller tool panel */
+.hdr .ttl { font-size: 14px; font-weight: 700; } .hdr .sub { font-size: 10.5px; color: var(--t3); font-weight: 600; }
+.dimg { position: absolute; left: 0; top: 76px; width: 360px; overflow: hidden; background: #08090B center/cover no-repeat; }
+.dimg .l { position: absolute; left: 8px; bottom: 8px; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 5px; background: rgba(13,14,17,.75); }
+.dimg .l b { color: var(--amber); }
+.dimg .r { position: absolute; right: 8px; top: 8px; background: rgba(13,14,17,.75); }
+.dtt { position: absolute; left: 0; width: 360px; height: 50px; display: grid; grid-template-columns: repeat(8, 1fr);
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--s1); }
+.dtt div { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--t3); font-size: 9.5px; font-weight: 700; }
+.dtt svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.dtt .on { color: var(--amber); background: linear-gradient(to top, var(--amber) 0 2px, transparent 2px); }
+.dpn { position: absolute; left: 0; width: 360px; padding: 0 14px; }
+.dpn .gh { display: flex; justify-content: space-between; align-items: center; height: 22px; margin-top: 6px; }
+.dpn .gh .h { font-size: 10px; color: var(--t3); }
+.sec.new::after, .rw.new .n::after { content: " NEW"; color: var(--teal); font-size: 8.5px; font-weight: 800; letter-spacing: .08em; vertical-align: 1px; }
+.nw { font-size: 8.5px; color: var(--teal); font-weight: 800; letter-spacing: .08em; }
+.dpn .sl { height: 26px; grid-template-columns: 112px 1fr 50px; }
+.dpn .sl .n, .rw .n { font-size: 12px; font-stretch: 87%; }
+.rw { display: grid; grid-template-columns: 112px 1fr; gap: 8px; align-items: center; height: 30px; }
+.rw .n { color: var(--t1); font-weight: 500; white-space: nowrap; }
+.dpn .seg span { padding: 4px 0; font-size: 10.5px; }
+.rw2 { display: flex; align-items: center; height: 30px; font-size: 12px; font-stretch: 87%; font-weight: 500; }
+.rw2 > span { flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.rw2 > span + span { margin-left: 22px; }
+.sw { display: inline-block; flex: none; position: relative; width: 30px; height: 17px; border-radius: 9px; background: var(--s3); border: 1px solid var(--line); }
+.sw::after { content: ""; position: absolute; left: 2px; top: 2px; width: 11px; height: 11px; border-radius: 6px; background: var(--t2); }
+.sw.on { background: var(--amber); border-color: var(--amber); } .sw.on::after { left: 15px; background: #1A1206; }
+.sl.wc .tr { background: linear-gradient(90deg, #5A8DE0, #2A2F38 50%, #E0A050); } .sl.wc .tr .f { display: none; }
+.rgb .n::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
+.rgb.r .n::before { background: #E0605A; } .rgb.g .n::before { background: #5FBF6A; } .rgb.b .n::before { background: #5A8DE0; }
+.rgb.c .n::before { background: #4FC3D9; } .rgb.m .n::before { background: #D95FB4; } .rgb.y .n::before { background: #E5C84A; }
+.fmt { display: flex; gap: 5px; height: 30px; align-items: center; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, #000 80%, transparent); }

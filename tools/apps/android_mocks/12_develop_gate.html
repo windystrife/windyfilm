@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm phone: develop, Gate tab (film rebate)</title>
+<link rel="stylesheet" href="wfm.css">
+<style>
+/* our own drawn 35 mm rebate (public format sizes), never a scan */
+.st35 { position: absolute; left: 0; width: 360px; background: #1B1815; overflow: hidden;
+  box-shadow: inset 0 2px 3px rgba(255,214,170,.22), inset 0 -2px 3px rgba(255,214,170,.22); }
+.st35 .fr { position: absolute; background-size: cover; background-position: center; border-radius: 3px; }
+.st35 .fr::after { content: ""; position: absolute; inset: 0; border-radius: 3px; box-shadow: inset 0 0 3px 1.5px rgba(27,24,21,.9); }
+.st35 .ho { position: absolute; background: #050506; border-radius: 1.6px; box-shadow: 0 0 3px 1.2px rgba(255,214,170,.26); }
+.st35 .tx { position: absolute; font-size: 6.4px; font-weight: 700; letter-spacing: .16em; color: rgba(226,214,196,.78); white-space: nowrap; font-stretch: 85%; }
+.fmt .chip { height: 22px; font-size: 10.5px; }
+</style></head>
+<body><div class="screen"></div>
+<script src="dev.js"></script>
+<script>
+const PX = 5.5, H = 35 * PX, FW = 36 * PX, FH = 24 * PX, PITCH = 38 * PX, X0 = (360 - FW) / 2, Y0 = (H - FH) / 2;
+const HP = 4.75 * PX, HW = 2.8 * PX, HH = 1.98 * PX, HY = 2.01 * PX;
+let s = `<div class="st35" style="top:6px;height:${H}px">`;
+[[-1, '033_6839', 11], [0, '033_6844', 12], [1, '033_6849', 13]].forEach(([k, f, n]) => {
+  const x = X0 + k * PITCH;
+  s += `<div class="fr" style="left:${x}px;top:${Y0}px;width:${FW}px;height:${FH}px;background-image:url(assets/f/${f}.jpg)"></div>`;
+  s += `<span class="tx" style="left:${x + 14}px;top:${H - 8.5}px">WINDYFILM · PORTRA 400</span>`;
+  s += `<span class="tx" style="left:${x + 136}px;top:${H - 8.5}px">→ ${n}</span>`;
+  s += `<span class="tx" style="left:${x + FW - 5}px;top:${H - 8.5}px">${n}A</span>`;
+});
+for (let i = -24; i < 24; i++) {
+  const x = X0 - PX + HP * (i + 0.5) - HW / 2;
+  if (x < -HW || x > 360) continue;
+  s += `<i class="ho" style="left:${x}px;top:${HY}px;width:${HW}px;height:${HH}px"></i>`;
+  s += `<i class="ho" style="left:${x}px;top:${H - HY - HH}px;width:${HW}px;height:${HH}px"></i>`;
+}
+s += '</div>';
+const fmts = ['Off', '35 mm', 'Half frame', 'Super 8', '16 mm', 'Cine 4-perf', '6x4.5', '6x6', '6x7', '6x9', '4x5'];
+wfDev({
+  time: '15:01', title: 'F12 · ROLL 003', sub: 'IMG_6844.CR2 · Portra 400', imgH: 205, img: s, chip: false, tab: 'Gate',
+  panel:
+    gh('Film rebate', 'our own drawn film edge', 'new') +
+    '<div class="fmt">' + fmts.map(f => `<span class="chip${f === '35 mm' ? ' am' : ' ol'}">${f}</span>`).join('') + '</div>' +
+    rw('Corners', seg(['Sharp', 'Soft', 'Round'], 'Soft')) +
+    rw('Sprocket holes', seg(['Black', 'Clear', 'None'], 'Black')) +
+    rw('Film runs', seg(['Across', 'Along'], 'Across')) +
+    sl('Edge light', 0.5, -2, 2, '+0.5 EV') +
+    sl('Rebate shown', 100, 0, 100, '100') +
+    sl('Picture size', 100, 80, 100, '100%') +
+    sl('Position ↔', 0, -100, 100, '0') +
+    sl('Position ↕', 0, -100, 100, '0') +
+    sl('Edge softness', 20, 0, 100, '20') +
+    sws(['Mirror', false], ['Edge print', true]) +
+    gh('Per frame', 'each frame of a roll a little different', 'new') +
+    sws(['Same on every frame', false]) +
+    sl('Frame drift', 30, 0, 100, '30') +
+    sl('Frame variation', 25, 0, 100, '25')
+});
+</script>
+</body></html>

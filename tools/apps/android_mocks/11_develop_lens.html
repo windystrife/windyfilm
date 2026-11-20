@@ -1,0 +1,31 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm phone: develop, Lens tab</title>
+<link rel="stylesheet" href="wfm.css">
+<style>
+.vig { position: absolute; inset: 0; background: radial-gradient(ellipse 62% 72% at 50% 56%, transparent 48%, rgba(0,0,0,.62) 100%); }
+.ctr { position: absolute; left: 168px; top: 156px; width: 24px; height: 24px; border: 1.5px solid rgba(236,238,240,.85); border-radius: 12px; }
+.ctr::before, .ctr::after { content: ""; position: absolute; background: rgba(236,238,240,.85); }
+.ctr::before { left: 10px; top: -7px; width: 1.5px; height: 35px; } .ctr::after { top: 10px; left: -7px; height: 1.5px; width: 35px; }
+.later { display: flex; justify-content: space-between; align-items: center; height: 32px; margin-top: 4px; padding: 0 10px;
+  border: 1px dashed var(--line); border-radius: 8px; font-size: 11.5px; color: var(--t3); }
+</style></head>
+<body><div class="screen"></div>
+<script src="dev.js"></script>
+<script>
+wfDev({
+  time: '14:59', title: 'F09 · ROLL 003', sub: 'IMG_6852.CR2 · Cine 250D', bg: 'assets/f/031_6852.jpg', pos: 'center 35%', imgH: 300,
+  img: '<div class="vig"></div><div class="ctr"></div>', label: 'Cine 250D · vignette -30', tab: 'Lens',
+  panel:
+    gh('Vignette', 'a print burn-in, before the print', 'new') +
+    sl('Amount', -30, -100, 100, '-30') +
+    sl('Size', 60, 0, 100, '60') +
+    sl('Feather', 50, 0, 100, '50') +
+    sl('Roundness', 30, -100, 100, '+30') +
+    sl('Centre ↔', 0, -1, 1, '0') +
+    sl('Centre ↕', 0.1, -1, 1, '+0.1') +
+    gh('Later stage') +
+    '<div class="later"><span>Micro-contrast · Defringe</span><span>not in v1</span></div>' +
+    '<div class="t3" style="font-size:10px;text-align:center;margin-top:12px">Drag the centre mark on the picture, or the two sliders</div>'
+});
+</script>
+</body></html>

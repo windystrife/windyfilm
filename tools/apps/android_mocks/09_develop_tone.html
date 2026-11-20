@@ -1,0 +1,30 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm phone: develop, Tone tab</title>
+<link rel="stylesheet" href="wfm.css">
+</head>
+<body><div class="screen"></div>
+<script src="dev.js"></script>
+<script>
+wfDev({
+  time: '14:54', title: 'F11 · ROLL 003', sub: 'IMG_6849.CR2 · Ektar 100', bg: 'assets/f/039_6849.jpg', pos: 'center 30%',
+  label: 'Ektar 100', tab: 'Tone',
+  panel:
+    gh('Developer', 'how the negative was developed', 'new') +
+    sl('Dev. contrast', 18, -50, 50, '+18') +
+    sl('Contrast centre', -0.3, -1, 1, '-0.3 EV') +
+    sl('Colour purity', 85, 0, 100, '85%') +
+    gh('Highlights & shadows', 'the film\'s shoulder') +
+    sl('Highlights', 1, -5, 5, '+1.0') +
+    sl('Shadows', -0.5, -5, 5, '-0.5') +
+    sl('Shoulder white', 104, 80, 120, '104%', 'new', 100) +
+    sl('Shoulder knee', -1.2, -2, 0, '-1.2 EV', 'new') +
+    sl('Highlight colour', 50, 0, 100, 'film\'s', 'new', 50) +
+    gh('Colour', '', 'new') +
+    sl('Saturation', 8, -100, 50, '+8') +
+    rw('Print range', seg(['Pinned', 'Natural'], 'Pinned')) +
+    gh('Levels', seg(['Colour', 'Luma'], 'Colour', 'width:110px'), 'new') +
+    sl('Black level', 2, -10, 10, '+2%') +
+    sl('White level', 97, 80, 110, '97%', '', 100)
+});
+</script>
+</body></html>
