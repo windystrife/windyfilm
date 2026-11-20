@@ -9,9 +9,9 @@ RAW をカメラ内で現像することも、ロール 1 本を撮り切って�
 
 ![Windy EKTA P、EOS M でモジュールが直接出力したカメラ JPEG](docs/img/en/cover.jpg)
 
-> **現在のビルド：RAWB27**（タグ `RAWB27`、ブランチ `main`）。ホストテスト：EOS M 2289 件、5D2 1832 件のチェックで失敗 0。
-> **まだ実機で試していないもの**：5D2 の Darkroom と RAW develop、CR2 の ROLLS への移動、RAW files 行、Quick
-> keys、フィルムに合わせた ISO。最新の状況（ブランチ、カード、未解決の項目）は `docs/HANDOFF.md` にあります。
+> **現在のビルド：RAWB28**（タグ `RAWB28`、ブランチ `main`）。ホストテスト：EOS M 2330 件、5D2 1848 件のチェックで失敗 0。
+> **まだ実機で試していないもの**：Darkroom の写真表示、Camera JPEG の Print + over、新しい Quick keys、Blind roll
+> 行。以前のビルドからは、5D2 の Darkroom と RAW develop、CR2 の ROLLS への移動、RAW files 行、フィルムに合わせた ISO。
 
 WindyFilm は、以前の「Film Roll port」に代わる独立したモジュールです。
 `filmroll.mo` モジュールのものは、使うことも、読み込むことも、含むこともありません。
@@ -74,9 +74,11 @@ Darkroom 画面の **PRINT** ブロック：
 - **Info**：Off · On · On + roll（レンズ、露出、フィルム名の行、ロール番号）。
 - **Date**：フィルムカメラ風の日付写し込み。
 - **Camera JPEG**：Keep（プリントは ROLLS に残る）· Overwrite（プリントが DCIM の JPEG を置き換える）· Over + print（DCIM
-  に写真を残し、その横にフレーム付きプリント `WFP_nnnn.JPG` を追加する）。
-- **RAW files**：Keep in DCIM · Move to ROLLS。CR2 が移動するのは Camera JPEG が Overwrite か Over + print
-  のときだけで、しかも JPEG のチェックが済んでからです。CR2 の中身は一切変更されません。
+  にはフレームなしの写真）· Print + over（DCIM にはフレーム付きプリント。フレームなしの写真は `ROLLS/ROLLnnn/IMG_nnnn.JPG`
+  として、プリント `F01_nnnn.JPG` の隣に置かれる）。DCIM には 1 枚につき JPEG が 1 つだけ残り、Canon の PLAY はそれを
+  表示します。プリントは常に ROLLS にあります。
+- **RAW files**：Keep in DCIM · Move to ROLLS。CR2 が移動するのは Camera JPEG が Keep 以外のときだけで、しかも JPEG
+  のチェックが済んでからです。CR2 の中身は一切変更されません。
   これは ML メニューの *RAW after Darkroom* と同じ設定です。
 
 現像済みのロールは **shelf**（棚）で待機します。
@@ -89,6 +91,19 @@ Darkroom 画面の **PRINT** ブロック：
 
 ![同じ RAW ファイル：ニュートラルな現像と Kodak Gold 200](docs/img/en/before_after.jpg)
 
+## RAWB28 の新機能
+
+- **Darkroom の写真**：ROLL 行では、引き伸ばし台にロールのコンタクトシートが表示されます（12 コマ以下のロールはコマが
+  大きくなります）。PRINT の各行では、最初にプリントするコマの写真そのものでプリントの下書きが表示されます。写真は各 CR2
+  に入っている小さなプレビューから取ります（RAW データは読みません）。INFO で表示と非表示を切り替えます。
+- **Camera JPEG** は 4 択になりました：Keep、Overwrite、Over + print、Print + over。DCIM には 1 枚につき JPEG が 1 つ
+  だけ残るので、Canon の PLAY で表示できます。DCIM に `WFP_` ファイルはもう作られません。
+- EOS M の **Quick keys** が通常の LiveView でも動くようになりました。そこではリングの回転は Canon 自身のシャッター
+  速度（または絞り）の変更としてしかモジュールに届かないため、WindyFilm がそれを ISO や絞りのステップに戻します。
+- WindyFilm の Exposures の下に **Blind roll** 行。Off にすると、ロールを入れたままでも撮影後の確認と PLAY が使えます。
+
+全項目は RAWB28 のリリースページにあり、PDF マニュアル（ベトナム語と英語）も同じページにあります。
+
 ## RAWB27 の新機能
 
 ![新機能](docs/img/en/whats_new.jpg)
@@ -100,12 +115,11 @@ Darkroom 画面の **PRINT** ブロック：
   マニュアルフォーカス中に SET を押すと Magic Zoom が開きます。
 - プリントのキャプションが太くなり、読みやすくなりました。
 
-全項目は RAWB27 のリリースページにあり、PDF マニュアル（ベトナム語と英語）も同じページにあります。
-
 ## カード
 
-WindyFilm のカードはそれぞれ専用のフォルダーにあり（例：`EOSM_WindyFilm_RAWB27`、`5D2_WindyFilm_RAWB27`）、`tools/mk_card.sh`
-がビルド結果とプロジェクトオーナーの非公開データから作成します。カードはこのリポジトリには含まれていません。
+WindyFilm のカードはそれぞれ専用のフォルダーにあり（例：`EOSM_WindyFilm_RAWB28`、`5D2_WindyFilm_RAWB28`）、`tools/mk_card.sh`
+がビルド結果とプロジェクトオーナーの非公開データから作成します。カードはこのリポジトリには含まれていません。カード一式は
+リリースページの zip ファイルです。
 
 ```
 autoexec.bin, ML/modules/<camera>.sym  always a matching pair; keep the pair you have
@@ -139,7 +153,6 @@ EOS M と 5D2 のテストスイートを同時に実行しないでください
 
 ## ドキュメント
 
-- `docs/HANDOFF.md`：唯一の入口。現在の状況、ブランチマップ、カード、未解決の項目、ログ。
 - `docs/DESIGN.md`：アーキテクチャ、カードのファイル形式、各部分の間のインターフェース。
 - `docs/UI-NOTES.md`、`docs/CORE-NOTES.md`、`docs/DATA-NOTES.md`：インターフェース、ML コア、データについてのメモ。
 - `ATTRIBUTIONS.md`：第三者のデータと仕様のクレジット。

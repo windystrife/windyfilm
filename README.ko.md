@@ -9,9 +9,9 @@ WindyFilm은 카메라 안에서 필름 색감을 만들어 줍니다. 촬영할
 
 ![Windy EKTA P, EOS M에서 모듈이 바로 만들어 낸 카메라 JPEG](docs/img/en/cover.jpg)
 
-> **현재 빌드: RAWB27** (태그 `RAWB27`, 브랜치 `main`). 호스트 테스트: EOS M 2289개, 5D2 1832개 검사에서 실패 0건.
-> **아직 실제 카메라에서 돌려 보지 않은 것:** 5D2의 Darkroom과 RAW develop, CR2를 ROLLS로 옮기기, RAW files 줄,
-> Quick keys, 필름 기준 ISO. 최신 상태(브랜치, 카드, 남은 작업)는 `docs/HANDOFF.md`에 있습니다.
+> **현재 빌드: RAWB28** (태그 `RAWB28`, 브랜치 `main`). 호스트 테스트: EOS M 2330개, 5D2 1848개 검사에서 실패 0건.
+> **아직 실제 카메라에서 돌려 보지 않은 것:** Darkroom의 사진 보기, Camera JPEG의 Print + over, 새 Quick keys,
+> Blind roll 줄. 이전 빌드부터: 5D2의 Darkroom과 RAW develop, CR2를 ROLLS로 옮기기, RAW files 줄, 필름 기준 ISO.
 
 WindyFilm은 예전의 "Film Roll port"를 대체하는 독립 모듈입니다. `filmroll.mo` 모듈의 어떤 것도 사용하거나, 불러오거나,
 포함하지 않습니다. **두 모듈을 동시에 켜지 마세요.**
@@ -71,9 +71,11 @@ Darkroom 화면의 **PRINT** 블록:
 - **Frame**: Off · White · Black · White wide · Black wide (사진 둘레의 인화지 테두리).
 - **Info**: Off · On · On + roll (렌즈, 노출, 필름 이름 줄, 롤 번호).
 - **Date**: 필름 카메라식 날짜 각인.
-- **Camera JPEG**: Keep (프린트는 ROLLS에 남음) · Overwrite (프린트가 DCIM의 JPEG을 대체) · Over + print (DCIM에 사진을
-  남기고, 옆에 테두리가 있는 프린트 `WFP_nnnn.JPG`를 추가).
-- **RAW files**: Keep in DCIM · Move to ROLLS. CR2는 Camera JPEG 설정이 Overwrite 또는 Over + print일 때만, 그리고 JPEG
+- **Camera JPEG**: Keep (프린트는 ROLLS에 남음) · Overwrite (프린트가 DCIM의 JPEG을 대체) · Over + print (DCIM에는
+  테두리 없는 사진) · Print + over (DCIM에는 테두리가 있는 프린트, 테두리 없는 사진은 프린트 `F01_nnnn.JPG` 옆의
+  `ROLLS/ROLLnnn/IMG_nnnn.JPG`로). DCIM에는 컷마다 JPEG이 하나만 남고, Canon의 PLAY가 그것을 보여 줍니다. 프린트는
+  항상 ROLLS에 있습니다.
+- **RAW files**: Keep in DCIM · Move to ROLLS. CR2는 Camera JPEG 설정이 Keep이 아닐 때만, 그리고 JPEG
   검사가 끝난 뒤에만 옮겨집니다. CR2의 내용은 절대 바뀌지 않습니다. ML 메뉴의 *RAW after Darkroom*과 같은 설정입니다.
 
 현상된 롤은 **shelf**(선반)에서 기다립니다. 롤은 다른 필름으로 다시 현상할 수 있고(`ROLLnnnB`로 출력), 처음 프린트는
@@ -84,6 +86,19 @@ Darkroom 화면의 **PRINT** 블록:
 ## 비포 / 애프터
 
 ![같은 RAW 파일: 중립적인 현상과 Kodak Gold 200](docs/img/en/before_after.jpg)
+
+## RAWB28의 새 기능
+
+- **Darkroom의 사진**: ROLL 줄에서는 확대기 받침에 롤의 밀착 인화(콘택트 시트)가 나옵니다(12컷 이하의 롤은 컷이 더
+  큽니다). PRINT 줄에서는 처음 인화할 컷의 사진 그대로 만든 프린트 초안이 나옵니다. 사진은 각 CR2 안의 작은 미리보기에서
+  가져옵니다(RAW 데이터는 읽지 않음). INFO로 숨기거나 보이게 합니다.
+- **Camera JPEG** 선택지가 4개가 되었습니다: Keep, Overwrite, Over + print, Print + over. DCIM에는 컷마다 JPEG이 하나만
+  남아서 Canon의 PLAY로 볼 수 있습니다. DCIM에 `WFP_` 파일은 더 이상 생기지 않습니다.
+- EOS M의 **Quick keys**가 일반 LiveView에서도 작동합니다. 그곳에서는 링을 돌려도 Canon이 셔터 속도(또는 조리개)를
+  바꾼 것으로만 모듈에 전달되므로, WindyFilm이 이를 ISO나 조리개 단계로 되돌립니다.
+- WindyFilm의 Exposures 아래에 **Blind roll** 줄. Off로 하면 롤을 넣은 채로도 촬영 후 확인과 PLAY를 쓸 수 있습니다.
+
+전체 목록은 RAWB28 릴리스 페이지에 있으며, PDF 매뉴얼(베트남어, 영어)도 그 페이지에 있습니다.
 
 ## RAWB27의 새 기능
 
@@ -96,12 +111,11 @@ Darkroom 화면의 **PRINT** 블록:
   수동 초점일 때 SET을 누르면 Magic Zoom이 열립니다.
 - 프린트의 캡션이 더 굵고 읽기 쉬워졌습니다.
 
-전체 목록은 RAWB27 릴리스 페이지에 있으며, PDF 매뉴얼(베트남어, 영어)도 그 페이지에 있습니다.
-
 ## 카드
 
-WindyFilm 카드는 각각 전용 폴더에 들어 있으며(예: `EOSM_WindyFilm_RAWB27`, `5D2_WindyFilm_RAWB27`), 빌드 결과와
-프로젝트 소유자의 비공개 데이터로 `tools/mk_card.sh`가 만듭니다. 카드는 이 저장소에 없습니다.
+WindyFilm 카드는 각각 전용 폴더에 들어 있으며(예: `EOSM_WindyFilm_RAWB28`, `5D2_WindyFilm_RAWB28`), 빌드 결과와
+프로젝트 소유자의 비공개 데이터로 `tools/mk_card.sh`가 만듭니다. 카드는 이 저장소에 없습니다. 카드 전체는 릴리스 페이지의
+zip 파일입니다.
 
 ```
 autoexec.bin, ML/modules/<camera>.sym  always a matching pair; keep the pair you have
@@ -135,7 +149,6 @@ EOS M과 5D2 테스트 스위트를 동시에 실행하지 마세요.
 
 ## 문서
 
-- `docs/HANDOFF.md`: 유일한 시작점: 현재 상태, 브랜치 맵, 카드, 남은 작업, 로그.
 - `docs/DESIGN.md`: 아키텍처, 카드 파일 형식, 각 부분 사이의 인터페이스.
 - `docs/UI-NOTES.md`, `docs/CORE-NOTES.md`, `docs/DATA-NOTES.md`: 인터페이스, ML 코어, 데이터에 대한 노트.
 - `ATTRIBUTIONS.md`: 서드파티 데이터와 사양의 크레딧.

@@ -9,9 +9,9 @@ GPL-3.0-or-later (`LICENSE`); third-party data is credited in `ATTRIBUTIONS.md`.
 
 ![Windy EKTA P, camera JPEG straight out of the module on the EOS M](docs/img/en/cover.jpg)
 
-> **Current build: RAWB27** (tag `RAWB27`, branch `main`). Host tests: EOS M 2289 checks, 5D2 1832 checks, 0 failures.
-> **Not yet run on a camera:** the 5D2 Darkroom and RAW develop, moving the CR2 to ROLLS, the RAW files row, Quick
-> keys, ISO from the film. The latest state (branches, cards, open items) is in `docs/HANDOFF.md`.
+> **Current build: RAWB28** (tag `RAWB28`, branch `main`). Host tests: EOS M 2330 checks, 5D2 1848 checks, 0 failures.
+> **Not yet run on a camera:** the Darkroom photos, Camera JPEG Print + over, the new Quick keys and the Blind roll row;
+> from earlier builds, the 5D2 Darkroom and RAW develop, moving the CR2 to ROLLS, the RAW files row, ISO from the film.
 
 WindyFilm is a standalone module that replaces the old "Film Roll port". It does not use, load or contain anything
 from the `filmroll.mo` module. **Do not enable both modules at once.**
@@ -71,9 +71,11 @@ The **PRINT** block on the Darkroom screen:
 - **Frame**: Off · White · Black · White wide · Black wide (the paper border around the picture).
 - **Info**: Off · On · On + roll (lens, exposure, film line, roll number).
 - **Date**: a film-camera date stamp.
-- **Camera JPEG**: Keep (prints stay in ROLLS) · Overwrite (the print replaces the JPEG in DCIM) · Over + print (keeps the
-  picture in DCIM and adds the framed print `WFP_nnnn.JPG` beside it).
-- **RAW files**: Keep in DCIM · Move to ROLLS. The CR2 moves only when Camera JPEG is Overwrite or Over + print, and
+- **Camera JPEG**: Keep (prints stay in ROLLS) · Overwrite (the print replaces the JPEG in DCIM) · Over + print (DCIM
+  gets the picture without the frame) · Print + over (DCIM gets the framed print; the picture without the frame goes to
+  `ROLLS/ROLLnnn/IMG_nnnn.JPG`, beside the print `F01_nnnn.JPG`). DCIM keeps one JPEG per shot, the one Canon's PLAY
+  shows; the print is always in ROLLS.
+- **RAW files**: Keep in DCIM · Move to ROLLS. The CR2 moves only when Camera JPEG is not Keep, and
   only after the JPEG has been checked; the CR2's content is never changed. This is the same setting as *RAW after
   Darkroom* in the ML menu.
 
@@ -86,6 +88,19 @@ stay. The screen can be switched off (Screen Off) while the camera develops, to 
 
 ![The same RAW file: a neutral develop and Kodak Gold 200](docs/img/en/before_after.jpg)
 
+## New in RAWB28
+
+- **Photos in the Darkroom**: on the ROLL row the easel shows the roll's contact sheet (bigger frames for a roll of 12
+  or fewer); on the PRINT rows, a print sketch with the first frame's own picture. The pictures come from the small
+  preview inside each CR2 (the RAW data is not read). INFO hides or shows them.
+- **Camera JPEG** has four choices: Keep, Overwrite, Over + print, Print + over. DCIM keeps one JPEG per shot, so
+  Canon's PLAY can show it; there are no more `WFP_` files in DCIM.
+- **Quick keys** on the EOS M work in plain LiveView: there the ring reaches the module only as Canon's own shutter (or
+  aperture) change, which WindyFilm turns back into ISO or aperture steps.
+- **Blind roll** row in WindyFilm, under Exposures: Off lets you review shots and use PLAY with a roll loaded.
+
+The full list is on the RAWB28 release page, with the PDF manuals (Vietnamese and English).
+
 ## New in RAWB27
 
 ![What's new](docs/img/en/whats_new.jpg)
@@ -97,12 +112,11 @@ stay. The screen can be switched off (Screen Off) while the camera develops, to 
   manual focus opens Magic Zoom.
 - Bolder, easier-to-read captions on the prints.
 
-The full list is on the RAWB27 release page, which also carries the PDF manuals (Vietnamese and English).
-
 ## Cards
 
-A WindyFilm card lives in its own folder (for example `EOSM_WindyFilm_RAWB27`, `5D2_WindyFilm_RAWB27`) and is made by
-`tools/mk_card.sh` from the build plus the owner's private data. Cards are not in this repo.
+A WindyFilm card lives in its own folder (for example `EOSM_WindyFilm_RAWB28`, `5D2_WindyFilm_RAWB28`) and is made by
+`tools/mk_card.sh` from the build plus the owner's private data. Cards are not in this repo: the full cards are zip
+files on the release page.
 
 ```
 autoexec.bin, ML/modules/<camera>.sym  always a matching pair; keep the pair you have
@@ -136,7 +150,6 @@ Do not run the EOS M and 5D2 test suites at the same time.
 
 ## Documents
 
-- `docs/HANDOFF.md`: the one entry point: current state, branch map, cards, open items, log.
 - `docs/DESIGN.md`: architecture, card file formats, interfaces between the parts.
 - `docs/UI-NOTES.md`, `docs/CORE-NOTES.md`, `docs/DATA-NOTES.md`: notes on the interface, the ML core and the data.
 - `ATTRIBUTIONS.md`: credits for third-party data and specifications.

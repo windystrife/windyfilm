@@ -42,3 +42,7 @@ films/tables/log/
 /QWEN.md
 /docs/*QWEN*.md
 /docs/agents/
+# owner 11-20 (RAWB28, before the repo went public): every agent hand-off file stays local only, and the history was
+# rewritten without them (copies in F:\MagicLatern\_windyfilm_docs\private\agent_local)
+/AGENTS.md
+/docs/HANDOFF*.md

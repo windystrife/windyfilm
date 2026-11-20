@@ -9,10 +9,10 @@ trong Darkroom thành bản in có khung. Tác giả: **WindyStrife**. Giấy ph
 
 ![Windy EKTA P, JPEG ra thẳng từ module trên EOS M](docs/img/vi/cover.jpg)
 
-> **Bản hiện tại: RAWB27** (tag `RAWB27`, nhánh `main`). Đã chạy test host: EOS M 2289 phép kiểm tra, 5D2 1832 phép,
+> **Bản hiện tại: RAWB28** (tag `RAWB28`, nhánh `main`). Đã chạy test host: EOS M 2330 phép kiểm tra, 5D2 1848 phép,
 > đều 0 lỗi.
-> **Chưa thử trên máy thật:** Darkroom và RAW develop trên 5D2, chuyển CR2 sang ROLLS, hàng RAW files, Quick keys, ISO
-> theo phim. Tình trạng mới nhất (nhánh, thẻ, việc còn mở) ở `docs/HANDOFF.md`.
+> **Chưa thử trên máy thật:** xem ảnh trong Darkroom, Camera JPEG Print + over, Quick keys bản mới, hàng Blind roll;
+> từ các bản trước: Darkroom và RAW develop trên 5D2, chuyển CR2 sang ROLLS, hàng RAW files, ISO theo phim.
 
 WindyFilm là module độc lập, thay cho bản "Film Roll port" cũ. Nó không dùng, không nạp và không chứa bất cứ thứ gì của
 module `filmroll.mo`. **Đừng bật hai module cùng lúc.**
@@ -70,9 +70,10 @@ Khối **PRINT** trên màn hình Darkroom:
 - **Frame**: Off · White · Black · White wide · Black wide (khung giấy quanh ảnh).
 - **Info**: Off · On · On + roll (ống kính, thông số phơi sáng, dòng phim, số cuộn).
 - **Date**: dấu ngày kiểu máy phim.
-- **Camera JPEG**: Keep (bản in nằm trong ROLLS) · Overwrite (bản in thay JPEG trong DCIM) · Over + print (giữ ảnh trong
-  DCIM, thêm bản in có khung `WFP_nnnn.JPG` bên cạnh).
-- **RAW files**: Keep in DCIM · Move to ROLLS. CR2 chỉ được chuyển khi Camera JPEG là Overwrite hoặc Over + print, và
+- **Camera JPEG**: Keep (bản in nằm trong ROLLS) · Overwrite (bản in thay JPEG trong DCIM) · Over + print (DCIM giữ ảnh
+  không viền) · Print + over (DCIM giữ bản in có khung; ảnh không viền vào `ROLLS/ROLLnnn/IMG_nnnn.JPG`, cạnh bản in
+  `F01_nnnn.JPG`). Mỗi kiểu chỉ còn một JPEG trong DCIM, là ảnh PLAY của Canon xem; bản in luôn nằm trong ROLLS.
+- **RAW files**: Keep in DCIM · Move to ROLLS. CR2 chỉ được chuyển khi Camera JPEG khác Keep, và
   chỉ sau khi JPEG đã được kiểm tra; nội dung CR2 không bao giờ bị sửa. Đây cũng là mục *RAW after Darkroom* trong menu
   ML.
 
@@ -85,6 +86,20 @@ tráng có thể tắt màn hình (Screen Off) cho đỡ tốn pin.
 
 ![Cùng một file RAW: develop trung tính và Kodak Gold 200](docs/img/vi/before_after.jpg)
 
+## Có gì mới trong RAWB28
+
+- **Xem ảnh trong Darkroom**: ở hàng ROLL, bàn phóng hiện tờ ảnh tiếp xúc của cuộn (cuộn từ 12 kiểu trở xuống thì ảnh to
+  hơn); ở các dòng PRINT là bản in phác bằng chính ảnh của kiểu in đầu tiên. Ảnh lấy từ ảnh nhỏ có sẵn trong mỗi CR2
+  (không đọc dữ liệu RAW). INFO để ẩn hoặc hiện ảnh.
+- **Camera JPEG** có 4 nấc: Keep, Overwrite, Over + print, Print + over. Mỗi kiểu chỉ còn một JPEG trong DCIM nên PLAY
+  của Canon xem được; không còn file `WFP_` trong DCIM.
+- **Quick keys** trên EOS M chạy được trong LiveView thường: ở đó vòng xoay chỉ tới module dưới dạng Canon tự đổi tốc
+  (hoặc khẩu), WindyFilm đọc lại thành bước ISO hoặc khẩu.
+- Hàng **Blind roll** ngay trong WindyFilm, dưới Exposures: Off thì đang có cuộn vẫn xem lại ảnh sau khi chụp và dùng
+  PLAY được.
+
+Danh sách đầy đủ ở trang Release RAWB28. Hướng dẫn PDF (tiếng Việt và tiếng Anh) được đính kèm ở đó.
+
 ## Có gì mới trong RAWB27
 
 ![Có gì mới](docs/img/vi/whats_new.jpg)
@@ -96,12 +111,11 @@ tráng có thể tắt màn hình (Screen Off) cho đỡ tốn pin.
   tay mở Magic Zoom.
 - Chú thích trên bản in đậm và dễ đọc hơn.
 
-Danh sách đầy đủ ở trang Release RAWB27. Hướng dẫn PDF (tiếng Việt và tiếng Anh) được đính kèm ở đó.
-
 ## Thẻ nhớ
 
-Thẻ WindyFilm nằm ở thư mục riêng (ví dụ `EOSM_WindyFilm_RAWB27`, `5D2_WindyFilm_RAWB27`) và được tạo bằng
-`tools/mk_card.sh` từ bản build cộng dữ liệu riêng của chủ dự án. Thẻ không nằm trong repo.
+Thẻ WindyFilm nằm ở thư mục riêng (ví dụ `EOSM_WindyFilm_RAWB28`, `5D2_WindyFilm_RAWB28`) và được tạo bằng
+`tools/mk_card.sh` từ bản build cộng dữ liệu riêng của chủ dự án. Thẻ không nằm trong repo: nguyên thẻ là các file zip ở
+trang Release.
 
 ```
 autoexec.bin, ML/modules/<máy>.sym     luôn đi đúng cặp, giữ nguyên cặp đang có
@@ -135,7 +149,6 @@ Không chạy bộ test EOS M và 5D2 cùng lúc.
 
 ## Tài liệu
 
-- `docs/HANDOFF.md`: điểm vào duy nhất: tình trạng hiện tại, sơ đồ nhánh, các thẻ, việc còn mở, nhật ký.
 - `docs/DESIGN.md`: kiến trúc, định dạng các file trên thẻ, giao diện giữa các phần.
 - `docs/UI-NOTES.md`, `docs/CORE-NOTES.md`, `docs/DATA-NOTES.md`: ghi chú giao diện, core ML và dữ liệu.
 - `ATTRIBUTIONS.md`: ghi công dữ liệu và thông số bên thứ ba.

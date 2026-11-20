@@ -5,8 +5,9 @@ GNU GPL version 3 or (at your option) any later version (`LICENSE`), since 18/11
 including tag RAWB27, were released under GPL version 2. Magic Lantern, which it is built against and runs inside, is
 GPL version 2 or any later version, so the two combine under GPL version 3.
 
-The sources below are credited. Unless a line says "data", no third-party code is included: those sources gave
-ideas, published formulas or published numbers, implemented independently here.
+The sources below are credited. Unless a line says "data" or stands under "Derived from Genesis Pro", no
+third-party code is included: those sources gave ideas, published formulas or published numbers, implemented
+independently here.
 
 ## Code it builds against
 
@@ -28,6 +29,18 @@ ideas, published formulas or published numbers, implemented independently here.
 - **Ubuntu Sans / Ubuntu fonts**: © Canonical Ltd., **Ubuntu Font Licence 1.0** (`licenses/UBUNTU_FONT_LICENCE.txt`).
   The browser's bitmap fonts (`WFFONTS.DAT`) and the text drawn on the cans are rendered from these fonts. The
   rendered bitmaps are not called "Ubuntu".
+
+## Derived from Genesis Pro (published with permission)
+
+- **Genesis Pro 1.6.6**, Cullen Kelly Color: a commercial OFX film-emulation plugin. WindyStrife states that
+  permission to publish what is derived from it was obtained (20/11/2026). Credit lines are added by WindyStrife.
+  These parts follow it (docs/DESIGN.md 1a):
+  - the film-stage chain numbers (negative DLogE, StMtoPD, interlayer IIE, Print DLogE, DyeAmountLUT,
+    Lin_to_LogFN), sampled by the host tools `tools/mk_genesis_*` and `tools/mk_wfstage.*` into card data:
+    `ML/DATA/WFSTAGE.DAT` and the chain film tables. That data is only in the card zips on the release page, not in
+    this repo;
+  - the WindyGrain model and its three 64-point quantile tables (`src/yg_grain.*`);
+  - the light-wrap halation, `YH_GEN` (`src/yh_halo.*`, `src/wf_fx.*`).
 
 ## Published specifications (formulas implemented independently)
 
@@ -55,13 +68,20 @@ These names are trademarks of their owners:
 - Canon, Sony, Panasonic, ARRI.
 
 WindyFilm uses them only to name the look it emulates. It is not affiliated with or endorsed by any of these
-companies. No logos are drawn.
+companies. The source code in this repo draws no logos; the card zips carry the maker wordmark for the print frame
+(below).
+
+## In the release zips only (not in this repo)
+
+The full card zips on the release page (RAWB27 onwards) also carry third-party data. WindyStrife publishes it and
+states that permission was obtained; credit lines are added by WindyStrife:
+- third-party LUT cubes under `ML/DATA/*.CUB`: the CinePrint cubes (Canon Log 2), the Leica look LUT, the V-Log
+  grades and the EKTA P export (the owner's cubes of docs/DESIGN.md 1);
+- the maker wordmark drawn in the print frame (`ML/DATA/WFLOGO.DAT`);
+- the film-stage data derived from Genesis Pro (above).
 
 ## Not included
 
 - The "Film Roll" module by florinkiritescu.ro and every part of it: its binary, film data, can art, palette, fonts
   and strings. WindyFilm does not need it, does not load it and must not run together with it.
-- Third-party cubes the owner uses privately (for example cine print or camera-maker LUTs). They stay on the owner's
-  own card and are never put in this repo or in a public release. The owner's private release RAWB27 (this repo
-  is private) carries the owner's full cards as zip files, cubes and maker wordmark included; those zips must be
-  deleted before the repo or any release is made public.
+- The third-party cubes, the maker wordmark and the Genesis-derived card data are never put in this repo's history.

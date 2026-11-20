@@ -30,8 +30,13 @@ The phase 1 audit (OWN / GLUE / DEP / DER for every file of the port) is in the 
 
 ### 1a. Declared exception on branch `film-stage` (owner, 14 Nov 2026)
 
-**This branch is NOT clean-room. Do not publish it, do not hand it over as if it were, and never merge it into `main`
-without this paragraph staying at the top of the merge.**
+**This branch is NOT clean-room. Do not hand it over as if it were, and never merge it into `main` without this
+paragraph staying at the top of the merge.**
+
+**Published 21 Nov 2026 (RAWB28).** The owner states that permission was obtained from Cullen Kelly Color for what is
+derived from Genesis Pro and made the repo and the RAWB28 release public ("Có phép cả Genesis, public", 20 Nov). The
+Genesis-derived parts are listed in `ATTRIBUTIONS.md` ("Derived from Genesis Pro"); the generated tables and
+`WFSTAGE.DAT` stay card data, never committed.
 
 Branch `film-stage` carries film tables whose numbers are derived from **Genesis Pro 1.6.6** (Cullen Kelly Color, a
 commercial OFX film-emulation plugin, unrelated to the filmroll.mo author): the negative-stock DLogE (121 points),
@@ -182,7 +187,7 @@ During Phase 2, agents write only inside their own paths and never commit. The l
 | `tools/mk_wffont.py` | ui | Ubuntu Sans -> WFFONTS.DAT (UI), WFPRINT.DAT (Darkroom print caption, EOS M) |
 | `tools/mk_catalog_c.py`, `tools/mk_*tab.py` (log tables), `tools/provenance_gate.py`, `build.sh`, `test.sh`, `tests/host/*` | core | C catalogue, generated tables, build, host tests, gate |
 | `tests/ui/*` | ui | UI host test (PPM dumps) |
-| `README.md`, `ATTRIBUTIONS.md`, `LICENSE`, `QWEN.md`, `AGENTS.md`, `docs/*` | lead | docs, Qwen hand-off |
+| `README*.md`, `ATTRIBUTIONS.md`, `LICENSE`, `docs/*` | lead | docs (the agent hand-off files stay local, `.gitignore`) |
 
 WSL work dirs (one each, never shared): core `/root/ml/wf_core`, ui `/root/ml/wf_uidev`, data `/root/ml/wf_data`.
 `/root/ml/wf_ui` holds the mockup inputs.

@@ -9,9 +9,9 @@ Darkroom（暗房）里冲洗成带边框的照片。作者：**WindyStrife**。
 
 ![Windy EKTA P，EOS M 上由模块直接输出的相机 JPEG](docs/img/en/cover.jpg)
 
-> **当前版本：RAWB27**（标签 `RAWB27`，分支 `main`）。主机测试：EOS M 2289 项检查，5D2 1832 项检查，0 项失败。
-> **尚未在相机上实测**：5D2 的 Darkroom 和 RAW develop、把 CR2 移到 ROLLS、RAW files 行、Quick keys、按胶片设定
-> ISO。最新状态（分支、存储卡、未完成事项）见 `docs/HANDOFF.md`。
+> **当前版本：RAWB28**（标签 `RAWB28`，分支 `main`）。主机测试：EOS M 2330 项检查，5D2 1848 项检查，0 项失败。
+> **尚未在相机上实测**：Darkroom 中的照片预览、Camera JPEG 的 Print + over、新版 Quick keys、Blind roll 行；以及之前
+> 版本的 5D2 Darkroom 和 RAW develop、把 CR2 移到 ROLLS、RAW files 行、按胶片设定 ISO。
 
 WindyFilm 是一个独立模块，取代旧的“Film Roll port”。它不使用、不加载、也不包含 `filmroll.mo` 模块中的任何内容。
 **请勿同时启用这两个模块。**
@@ -70,9 +70,10 @@ Darkroom 屏幕上的 **PRINT** 区块：
 - **Frame**：Off · White · Black · White wide · Black wide（照片四周的相纸边框）。
 - **Info**：Off · On · On + roll（镜头、曝光参数、胶片名称行、卷号）。
 - **Date**：胶片相机式的日期印记。
-- **Camera JPEG**：Keep（冲印照片留在 ROLLS 中）· Overwrite（冲印照片替换 DCIM 中的 JPEG）· Over + print（在 DCIM
-  中保留照片，并在旁边加上带边框的冲印照片 `WFP_nnnn.JPG`）。
-- **RAW files**：Keep in DCIM · Move to ROLLS。只有当 Camera JPEG 为 Overwrite 或 Over + print 时 CR2 才会移动，而且要等
+- **Camera JPEG**：Keep（冲印照片留在 ROLLS 中）· Overwrite（冲印照片替换 DCIM 中的 JPEG）· Over + print（DCIM
+  中放不带边框的照片）· Print + over（DCIM 中放带边框的冲印照片；不带边框的照片放到 `ROLLS/ROLLnnn/IMG_nnnn.JPG`，
+  与冲印照片 `F01_nnnn.JPG` 并列）。DCIM 中每张只保留一个 JPEG，即 Canon 的 PLAY 显示的那张；冲印照片始终在 ROLLS 中。
+- **RAW files**：Keep in DCIM · Move to ROLLS。只有当 Camera JPEG 不是 Keep 时 CR2 才会移动，而且要等
   JPEG 检查无误之后；CR2 的内容始终不会被改动。这与 ML 菜单中的 *RAW after Darkroom* 是同一个设置。
 
 冲洗好的胶卷放在 **shelf**（胶卷架）上等待。一卷胶卷可以换另一种胶片重新冲洗（输出到
@@ -83,6 +84,18 @@ Darkroom 屏幕上的 **PRINT** 区块：
 ## 处理前 / 处理后
 
 ![同一个 RAW 文件：中性冲洗与 Kodak Gold 200](docs/img/en/before_after.jpg)
+
+## RAWB28 新功能
+
+- **Darkroom 中的照片**：在 ROLL 行，放大机台面上显示该卷的印样（12 张及以下的胶卷，每格更大）；在 PRINT 各行，显示用
+  第一张要冲印的照片本身做成的冲印草图。照片取自每个 CR2 内的小预览图（不读取 RAW 数据）。INFO 用来隐藏或显示照片。
+- **Camera JPEG** 有 4 个选项：Keep、Overwrite、Over + print、Print + over。DCIM 中每张只保留一个 JPEG，所以 Canon 的
+  PLAY 可以显示它；DCIM 中不再有 `WFP_` 文件。
+- EOS M 上的 **Quick keys** 在普通 LiveView 中也能用了：在那里转环只会以 Canon 自己改变快门（或光圈）的形式到达模块，
+  WindyFilm 把它换算回 ISO 或光圈的步进。
+- WindyFilm 中新增 **Blind roll** 行，位于 Exposures 下方：设为 Off 时，装着胶卷也可以在拍摄后回看并使用 PLAY。
+
+完整列表见 RAWB28 的发布页面，那里也附有 PDF 说明书（越南语和英语）。
 
 ## RAWB27 新功能
 
@@ -95,12 +108,10 @@ Darkroom 屏幕上的 **PRINT** 区块：
   Magic Zoom。
 - 冲印照片上的说明文字更粗、更易读。
 
-完整列表见 RAWB27 的发布页面，那里也附有 PDF 说明书（越南语和英语）。
-
 ## 存储卡
 
-一张 WindyFilm 存储卡的内容放在它自己的文件夹里（例如 `EOSM_WindyFilm_RAWB27`、`5D2_WindyFilm_RAWB27`），由
-`tools/mk_card.sh` 用构建结果加上项目所有者的私有数据生成。存储卡内容不在本仓库中。
+一张 WindyFilm 存储卡的内容放在它自己的文件夹里（例如 `EOSM_WindyFilm_RAWB28`、`5D2_WindyFilm_RAWB28`），由
+`tools/mk_card.sh` 用构建结果加上项目所有者的私有数据生成。存储卡内容不在本仓库中：完整的存储卡是发布页面上的 zip 文件。
 
 ```
 autoexec.bin, ML/modules/<camera>.sym  always a matching pair; keep the pair you have
@@ -134,7 +145,6 @@ bash test.sh
 
 ## 文档
 
-- `docs/HANDOFF.md`：唯一的入口：当前状态、分支图、存储卡、未完成事项、日志。
 - `docs/DESIGN.md`：架构、存储卡文件格式、各部分之间的接口。
 - `docs/UI-NOTES.md`、`docs/CORE-NOTES.md`、`docs/DATA-NOTES.md`：关于界面、ML 核心和数据的笔记。
 - `ATTRIBUTIONS.md`：第三方数据与规格的致谢。
