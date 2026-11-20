@@ -2,6 +2,8 @@
  *
  * Small text (13 / 15 px): our own 1-bit font pack ML/DATA/WFFONTS.DAT (tools/mk_wffont.py, Ubuntu Sans, format in
  * that tool's header), drawn by this file: it needs none of ML's dynamic font slots.
+ * The film OS's display sizes (docs/MODERNUI.md: 20 / 30 / 80 px, the 12 px small caps) are in the same pack; a pack
+ * without them (a card from before modernUI M1) still works: those sizes fall back to argnor23 / argnor28 / 13 px.
  * Title and film name: ML's own argnor23 / argnor28, looked up with font_by_name (ML loads both at boot) and drawn
  * here from ML's loaded RBF data (font_dynamic[slot].bitmap -> rbf_font.h `font`), straight into our canvas. */
 #include "wf_ui_int.h"
@@ -18,8 +20,9 @@ struct wff {
 
 static uint8_t *wff_buf;
 static uint32_t wff_len;
-static struct wff wff[3];
-static int wff_ok[3];
+#define WFF_NSLOT 7                     /* F_15 .. F_L12 (font - F_15): 0..2 the small text, 3..6 the display sizes */
+static struct wff wff[WFF_NSLOT];
+static int wff_ok[WFF_NSLOT];
 static font *rbf[3];                    /* argnor23, argnor28, term12 (fallback for the small text) */
 static int fstat, fwhy;                         /* fwhy: why our pack is not used (WFF_W_*) */
 enum { WFF_W_OK, WFF_W_FILE, WFF_W_HEADER, WFF_W_MEM, WFF_W_READ, WFF_W_PARSE, WFF_W_BUSY, WFF_W_N };
@@ -65,7 +68,9 @@ static int wff_parse(void)
     {
         const uint8_t *d = b + 16 + i * 24;
         int px = d[0], wd = d[1];
-        int slot = px == 15 && wd == 100 ? 0 : px == 13 && wd == 100 ? 1 : px == 13 && wd == 82 ? 2 : -1;
+        int slot = px == 15 && wd == 100 ? 0 : px == 13 && wd == 100 ? 1 : px == 13 && wd == 82 ? 2
+                 : px == 20 && wd == 100 ? 3 : px == 30 && wd == 100 ? 4 : px == 80 && wd == 100 ? 5
+                 : px == 12 && wd == 100 ? 6 : -1;
         if (slot < 0) continue;
         struct wff *f = &wff[slot];
         f->h = d[4];
@@ -103,7 +108,7 @@ static void wff_free(void)
     if (wff_buf) free(wff_buf);
     wff_buf = 0;
     wff_len = 0;
-    for (int i = 0; i < 3; i++) wff_ok[i] = 0;
+    for (int i = 0; i < WFF_NSLOT; i++) wff_ok[i] = 0;
 }
 
 /* one more user (the UI or the roll HUD): read only when nobody has it yet, or the last read may pass now (card busy,
@@ -155,7 +160,7 @@ int wff_reload(void)
         fstat |= 1;
         if (fwhy == WFF_W_OK)
             fwhy = WFF_W_PARSE;                     /* a size slot missing or bad */
-        if (!wff_ok[0] && !wff_ok[1] && !wff_ok[2])
+        if (!wff_disp() && !wff_ok[0] && !wff_ok[1] && !wff_ok[2])
         {
             if (wff_buf) free(wff_buf);             /* nothing usable in it: no buffer held for nothing */
             wff_buf = 0;
@@ -177,6 +182,13 @@ void wff_close(void)
 
 int wff_status(void) { return fstat; }
 
+int wff_disp(void)
+{
+    int m = 0;
+    for (int i = 3; i < WFF_NSLOT; i++) if (wff_ok[i]) m |= 1 << (i - 3);
+    return m;
+}
+
 /* ------------------------------------------------------------------ drawing */
 static int kern(const struct wff *f, int a, int b)
 {
@@ -190,15 +202,17 @@ static int kern(const struct wff *f, int a, int b)
     return 0;
 }
 
-static int wff_run(const struct wff *f, int x, int y, const char *s, int c, int xmax, int draw)
+/* sp: extra px between letters (the small caps labels) */
+static int wff_run(const struct wff *f, int x, int y, const char *s, int c, int xmax, int draw, int sp)
 {
     int pen = 0, prev = -1;
     uint8_t col = PX(c);
     for (; *s; s++)
     {
         int o = (unsigned char)*s;
-        if (o < f->first || o >= f->first + f->count) o = '?';
-        if (prev >= 0) pen += kern(f, prev, o);
+        if (o < f->first || o >= f->first + f->count)       /* the 80 px font has only 32..57: no '?' there */
+            o = '?' >= f->first && '?' < f->first + f->count ? '?' : f->first;
+        if (prev >= 0) pen += kern(f, prev, o) + sp * 64;
         const uint8_t *g = f->g + (o - f->first) * 12;
         int gx = x + ((pen + 32) >> 6) + (int8_t)g[2];
         int gy = y + (int8_t)g[3];
@@ -258,35 +272,61 @@ static int rbf_run(const font *f, int x, int y, const char *s, int c, int xmax, 
     return x - x0;
 }
 
-/* font -> (own pack slot, ML RBF) with fallbacks: ML title fonts -> own 15 px, own pack -> ML term12 */
-static int run(int font, int x, int y, const char *s, int c, int xmax, int draw)
+/* a display size missing from the pack (an older card): the nearest other font */
+static int disp_fallback(int font)
+{
+    return font == F_D20 ? F_ML23 : font == F_D30 || font == F_D80 ? F_ML28 : F_13;
+}
+
+/* font -> (own pack slot, ML RBF) with fallbacks: ML title fonts -> own 15 px, own pack -> ML term12, a display size ->
+ * disp_fallback */
+static int run(int font, int x, int y, const char *s, int c, int xmax, int draw, int sp)
 {
     if (!s) return 0;
+    if (font >= F_D20 && font < F_NFONTS && !wff_ok[font - F_15]) font = disp_fallback(font);
     if (font == F_ML23 || font == F_ML28)
     {
         const struct _font *f = rbf[font == F_ML28];
         if (f) return rbf_run(f, x, y, s, c, xmax, draw);
         font = F_15;
     }
-    int slot = font == F_15 ? 0 : font == F_13 ? 1 : 2;
-    if (wff_ok[slot]) return wff_run(&wff[slot], x, y, s, c, xmax, draw);
+    int slot = font >= F_15 && font < F_NFONTS ? font - F_15 : 2;
+    if (wff_ok[slot]) return wff_run(&wff[slot], x, y, s, c, xmax, draw, sp);
     if (rbf[2]) return rbf_run(rbf[2], x, y, s, c, xmax, draw);
     return 0;
 }
 
-int ui_text(int font, int x, int y, const char *s, int c) { return run(font, x, y, s, c, 0, 1); }
-int ui_textw(int font, const char *s) { return run(font, 0, 0, s, 0, 0, 0); }
-int ui_text_clip(int font, int x, int y, const char *s, int c, int xmax) { return run(font, x, y, s, c, xmax, 1); }
+int ui_text(int font, int x, int y, const char *s, int c) { return run(font, x, y, s, c, 0, 1, 0); }
+int ui_textw(int font, const char *s) { return run(font, 0, 0, s, 0, 0, 0, 0); }
+int ui_text_clip(int font, int x, int y, const char *s, int c, int xmax) { return run(font, x, y, s, c, xmax, 1, 0); }
+int ui_caps(int x, int y, const char *s, int c) { return run(F_L12, x, y, s, c, 0, 1, 1); }
+int ui_capsw(const char *s) { return run(F_L12, 0, 0, s, 0, 0, 0, 1); }
 
 int ui_texth(int font)
 {
+    if (font >= F_D20 && font < F_NFONTS && !wff_ok[font - F_15]) font = disp_fallback(font);
     if (font == F_ML23 || font == F_ML28)
     {
         const struct _font *f = rbf[font == F_ML28];
         if (f) return f->hdr.height;
         font = F_15;
     }
-    int slot = font == F_15 ? 0 : font == F_13 ? 1 : 2;
+    int slot = font >= F_15 && font < F_NFONTS ? font - F_15 : 2;
     if (wff_ok[slot]) return wff[slot].h;
     return rbf[2] ? rbf[2]->hdr.height : 12;
+}
+
+/* the ascent (cell top to baseline) of a font: text on a common baseline b is drawn at y = b - ui_textasc */
+int ui_textasc(int font)
+{
+    if (font >= F_D20 && font < F_NFONTS && !wff_ok[font - F_15]) font = disp_fallback(font);
+    if (font == F_ML23 || font == F_ML28)
+    {
+        const struct _font *f = rbf[font == F_ML28];
+        if (f) return f->hdr.height * 4 / 5;
+        font = F_15;
+    }
+    int slot = font >= F_15 && font < F_NFONTS ? font - F_15 : 2;
+    if (wff_ok[slot]) return wff[slot].asc;
+    return rbf[2] ? rbf[2]->hdr.height * 4 / 5 : 10;
 }

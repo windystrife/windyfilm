@@ -191,6 +191,7 @@ const struct wf_dark_photos *wf_dark_photos(int num, int cam);
    old Roll picker screen is gone); WF_UI_SCR_DARK = the Darkroom screen; anything else = the browser */
 #define WF_UI_NEW_ROLL 1
 #define WF_UI_SCR_DARK 2
+#define WF_UI_SCR_HOME 3                         /* the film OS's Home (docs/MODERNUI.md) */
 void wf_ui_open_scr(int scr);
 /* the HUD over LiveView (src/ui/wf_dark_ui.c; wf_task draws it while a roll is in the camera): wfdr_hud_fonts(1) loads
    the font pack once (0 frees it, 2 reads it again; 1 back = the read may pass later: card busy), wfdr_hud draws into ML's bitmap with ML's own colour indices; blink = the "wind on"

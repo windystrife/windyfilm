@@ -69,18 +69,24 @@ void wfp_restore(void);                 /* give Canon its entries back */
 void wfp_log(int can_used);             /* can_used: can colours in use (pack or plain cans) */
 
 /* ------------------------------------------------------------------ wf_font.c: text */
-enum { F_ML23 = 0, F_ML28, F_15, F_13, F_13C, F_NFONTS };
+enum { F_ML23 = 0, F_ML28, F_15, F_13, F_13C,
+       F_D20, F_D30, F_D80, F_L12,     /* the film OS's display sizes (docs/MODERNUI.md); F_D80 has digits, "/", "." only */
+       F_NFONTS };
 int  wff_open(void);                    /* load WFFONTS.DAT and look up ML's argnor23 / argnor28; 0 = all there. One more
                                            user (the UI, the roll HUD): read only when not there yet or wff_again() */
 int  wff_reload(void);                  /* read it again from nothing, the users stay (a retry while open) */
 void wff_close(void);                   /* one user less: freed with the last */
 int  wff_status(void);                  /* bit 0: own pack missing, bit 1: argnor23 missing, bit 2: argnor28 */
+int  wff_disp(void);                    /* the display sizes in the pack: bit 0 F_D20 .. bit 3 F_L12 (missing ones fall back) */
 const char *wff_why(void);              /* why the own pack is not used ("ok", "not on the card", "card busy", ...) */
 int  wff_again(void);                   /* 1 = the own pack failed for a reason that may pass (card busy, memory) */
 int  ui_text(int font, int x, int y, const char *s, int c);                   /* returns the advance */
 int  ui_textw(int font, const char *s);
 int  ui_text_clip(int font, int x, int y, const char *s, int c, int xmax);    /* stops before xmax */
 int  ui_texth(int font);
+int  ui_textasc(int font);              /* cell top to baseline */
+int  ui_caps(int x, int y, const char *s, int c);   /* F_L12 letter-spaced by 1 px (small caps labels: pass capitals) */
+int  ui_capsw(const char *s);
 
 /* ------------------------------------------------------------------ wf_cans.c: can pack */
 enum { CAN_BIG = 0, CAN_STRIP, CAN_SEL, CAN_NSIZES };
@@ -110,7 +116,7 @@ void wfui_render_anim(int t, int first);/* the load animation at t ms over it (f
 
 /* ------------------------------------------------------------------ wf_dark_ui.c: the Darkroom screen (DESIGN 3.6) */
 /* (owner 11-17: the Roll picker screen is gone; a roll is picked in the browser's Darkroom mode, DESIGN 3.12) */
-enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_DARK, WFUI_SCR_N };
+enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_DARK, WFUI_SCR_HOME, WFUI_SCR_SET, WFUI_SCR_N };
 void wfdr_enter(int scr);               /* the screen becomes active: palette theme, its state */
 void wfdr_render(int scr, int now);     /* draw it into the idle buffer */
 int  wfdr_key(int scr, int key);        /* 1 = close the UI */
@@ -128,5 +134,19 @@ int  wfdr_dev_hint_w(void);
    -1 = none) and switch back to the Darkroom */
 void wfui_pick_film(int film, int num, int dev);
 void wfdr_pick_done(int film);
+
+/* ------------------------------------------------------------------ wf_os_ui.c: the film OS screens (docs/MODERNUI.md) */
+/* Home (the MENU key with Camera interface = WindyFilm) and Settings; wf_dark_ui.c's wfdr_* pass these two screens on */
+void wfos_enter(int scr);
+void wfos_leave(int scr);
+void wfos_render(int scr, int now);
+int  wfos_key(int scr, int key);        /* 1 = close the UI (nothing after it) */
+int  wfos_tick(int scr, int now);       /* 1 = redraw */
+/* wf_ui.c, for the screens (UI task): switch to another screen; close and then hand Canon / ML a key (WFUI_AFTER_*);
+   the browser with the focus on a row (the Home look strip) */
+enum { WFUI_AFTER_NONE = 0, WFUI_AFTER_MENU, WFUI_AFTER_MLMENU, WFUI_AFTER_PLAY };
+void wfui_goto(int scr);
+void wfui_close_after(int what);
+void wfui_browse(int row);
 
 #endif

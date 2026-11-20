@@ -7,12 +7,18 @@ wght]), ImageDraw fontmode '1'):
   font 0: 15 px, wght 500            (rows, description, tabs, loaded chip)
   font 1: 13 px, wght 500            (chips, footer, counter, "by WindyStrife")
   font 2: 13 px, wght 500, wdth 82   (strip names)
+  the film OS (docs/MODERNUI.md, modernUI M1), display sizes; an older wf_font.c skips sizes it does not know:
+  font 3: 20 px, wght 600            (titles, Home tiles, look values)
+  font 4: 30 px, wght 500            (the film name on Home)
+  font 5: 80 px, wght 300, ASCII 32..57 only (the frame counter: digits, "/", ".", "-")
+  font 6: 12 px, wght 700            (small caps labels, letter-spaced by the renderer)
 The browser's renderer (src/ui/wf_font.c) needs none of ML's dynamic font slots.
 
 WFFONTS.DAT v1 (little endian, own format):
   header 16 B   "WFFN", u16 version 1, u16 nfonts, u32 file bytes, u32 FNV-1a of every byte after the header
   font dir      nfonts x 24 B: u8 px, u8 wdth, u16 wght, u8 height (ascent + descent), u8 ascent, u8 first, u8 count,
                 u32 glyph table offset, u32 kern table offset, u16 nkern, u16 0, u32 0
+                (first is 32; count 95, or fewer for a font with only the low ASCII range)
   glyph table   count x 12 B: u16 advance (1/64 px), s8 x (left of the bitmap from the pen), s8 y (top of the bitmap
                 from the cell top = PIL's ascender line), u8 w, u8 h, u8 bytes per row, u8 0, u32 bitmap offset
   kern table    nkern x 4 B, sorted by (left, right): u8 left, u8 right, s16 dx (1/64 px)
@@ -24,7 +30,7 @@ Pen positions are 26.6 fixed point; a glyph is drawn at ((pen + 32) >> 6) + x, a
                Film LUT, and the film-stage knobs Film exp, Push, Exp comp, Printer R / G / B, Interlayer), and the 3
                Darkroom print rows' icons (Frame, Info, Date, Camera JPEG, RAW files) as wf_picons.
 --check        renders sample strings with the pack's own algorithm and compares them with PIL (pixel mismatches).
---render DIR   writes a PNG sample sheet of the three fonts.
+--render DIR   writes a PNG sample sheet of the fonts.
 --print-only   OUT is that print font pack alone (build.sh's pack step: mk_wffont.py WFPRINT.DAT --print-only).
 --print P.DAT  also writes the Darkroom's print font pack ML/DATA/WFPRINT.DAT (src/wf_print.c, DESIGN 3.9): the caption
                under a framed print, at print size and anti-aliased (16 levels), same font file:
@@ -43,8 +49,9 @@ Deterministic: same inputs, same bytes."""
 import sys, os, struct, argparse
 
 FONT = '/usr/share/fonts/truetype/ubuntu/UbuntuSans[wdth,wght].ttf'
-FONTS = ((15, 100, 500), (13, 100, 500), (13, 82, 500))
 FIRST, LAST = 32, 126
+FONTS = ((15, 100, 500), (13, 100, 500), (13, 82, 500),
+         (20, 100, 600), (30, 100, 500), (80, 100, 300, 57), (12, 100, 700))   # (px, wdth, wght[, last char])
 
 
 def fnv(b):
@@ -70,7 +77,7 @@ def fenced(f, s):
     """PIL mono rendering of FENCE + s + FENCE[::-1], shifted so that s's pen lands on a whole pixel:
     (image, O, column of s's pen)"""
     from PIL import Image, ImageDraw
-    O = 24
+    O = max(24, int(f.size * 1.25))                 # 24 up to 19 px (the small fonts' bytes); bigger: room for the bars
     p64 = int(round(f.getlength(FENCE) * 64))
     if s:
         p64 += int(round((f.getlength(FENCE + s[0]) - f.getlength(FENCE) - f.getlength(s[0])) * 64))
@@ -111,24 +118,24 @@ def glyph(f, c):
     return x0 - gx, y0 - O, x1 - x0, y1 - y0, rows
 
 
-def build_font(px, wdth, wght):
+def build_font(px, wdth, wght, last=LAST):
     f = load(px, wdth, wght)
     asc, desc = f.getmetrics()
     gl = []
-    for o in range(FIRST, LAST + 1):
+    for o in range(FIRST, last + 1):
         c = chr(o)
         adv = int(round(f.getlength(c) * 64))       # unhinted advance, 1/64 px (PIL positions glyphs with these)
         x, y, w, h, rows = glyph(f, c)
         gl.append((adv, x, y, w, h, rows))
     kern = []
-    chars = [chr(o) for o in range(FIRST, LAST + 1)]
+    chars = [chr(o) for o in range(FIRST, last + 1)]
     single = {c: f.getlength(c) for c in chars}
     for a in chars:
         for b in chars:
             k = int(round((f.getlength(a + b) - single[a] - single[b]) * 64))
             if k:
                 kern.append((ord(a), ord(b), k))
-    return dict(px=px, wdth=wdth, wght=wght, asc=asc, desc=desc, gl=gl, kern=kern, f=f)
+    return dict(px=px, wdth=wdth, wght=wght, asc=asc, desc=desc, gl=gl, kern=kern, f=f, last=last)
 
 
 def pack(fonts):
@@ -138,7 +145,7 @@ def pack(fonts):
     blobs = []
     dirs = []
     for F in fonts:
-        n = LAST - FIRST + 1
+        n = F['last'] - FIRST + 1
         g_off = pos
         pos += n * 12
         k_off = pos
@@ -166,7 +173,7 @@ def pack(fonts):
         blobs.append(blob)
         pos = bpos
         dirs.append(struct.pack('<BBHBBBBIIHHI', F['px'], F['wdth'], F['wght'], F['asc'] + F['desc'], F['asc'], FIRST,
-                                LAST - FIRST + 1, g_off, k_off, len(F['kern']), 0, 0))
+                                n, g_off, k_off, len(F['kern']), 0, 0))
     body = b''.join(dirs) + b''.join(blobs)
     total = 16 + len(body)
     hdr = b'WFFN' + struct.pack('<HHII', 1, nf, total, fnv(body))
@@ -179,7 +186,7 @@ def render_own(F, s):
     pen, prev, px = 0, None, set()
     for c in s:
         o = ord(c)
-        if not FIRST <= o <= LAST:
+        if not FIRST <= o <= F['last']:
             continue
         if prev is not None:
             pen += kern.get((prev, o), 0)
@@ -217,17 +224,28 @@ SAMPLES = ["Light", "Print", "Grain", "Halation", "Strength", "Film LUT", "Norma
            "Superia 400", "Ektar 100", "Color 800", "Tung Neutral", "Luca Bono", "2383 v3", "AVATAR To WAVY"]
 
 
+DIGIT_SAMPLES = ["24", "36", "/ 36", "0123456789", "1.5", "-2"]
+
+
+def font_samples(F):
+    """the samples a font can draw (the digit font: its own)"""
+    s = [t for t in SAMPLES if all(FIRST <= ord(c) <= F['last'] for c in t)]
+    return s if F['last'] == LAST else DIGIT_SAMPLES
+
+
 def check(fonts):
     bad = 0
+    n = 0
     for F in fonts:
-        for s in SAMPLES:
+        for s in font_samples(F):
+            n += 1
             a, _ = render_own(F, s)
             b = render_pil(F, s)
             d = len(a ^ b)
             if d:
                 bad += 1
                 print('font %d/%d %r: %d pixels differ' % (F['px'], F['wdth'], s, d))
-    print('check: %d of %d strings differ from PIL' % (bad, len(SAMPLES) * len(fonts)))
+    print('check: %d of %d strings differ from PIL' % (bad, n))
     return bad
 
 
@@ -421,15 +439,16 @@ def write_icons(path):
 def sheet(fonts, d):
     from PIL import Image, ImageDraw
     os.makedirs(d, exist_ok=True)
-    im = Image.new('RGB', (720, 60 + 30 * len(fonts) * 3), (12, 13, 16))
+    rows = [(F, s) for F in fonts for s in (''.join(chr(o) for o in range(32, 80)),
+                                            ''.join(chr(o) for o in range(80, 127)), SAMPLES[9])]
+    im = Image.new('RGB', (720, 20 + sum(F['asc'] + F['desc'] + 6 for F, s in rows)), (12, 13, 16))
     y = 10
-    for F in fonts:
-        for s in (''.join(chr(o) for o in range(32, 80)), ''.join(chr(o) for o in range(80, 127)), SAMPLES[9]):
-            px, w = render_own(F, s)
-            for (x, yy) in px:
-                if 0 <= 10 + x < 720:
-                    im.putpixel((10 + x, y + yy), (230, 232, 236))
-            y += 26
+    for F, s in rows:
+        px, w = render_own(F, s)
+        for (x, yy) in px:
+            if 0 <= 10 + x < 720 and 0 <= y + yy < im.size[1]:
+                im.putpixel((10 + x, y + yy), (230, 232, 236))
+        y += F['asc'] + F['desc'] + 6
     im.save(os.path.join(d, 'wffonts_sheet.png'))
 
 

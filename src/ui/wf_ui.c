@@ -20,7 +20,12 @@
  * task to close when it runs again (the EOS M two-finger tap then opens the ML
  * menu: no module took MENU). The task is never declared dead from outside: it may still run and give the screen back.
  * Phases in the log: 1 created, 2 ML menu away, 3 film list, 4 fonts, 5 cans, 6 Canon dialog, 7 screen, 8 palette,
- * 9 tick, 10 drawing, 11 copy, 12 palette check, 13 load animation, 14 closing, 15 starting LiveView. */
+ * 9 tick, 10 drawing, 11 copy, 12 palette check, 13 load animation, 14 closing, 15 starting LiveView.
+ *
+ * The film OS (docs/MODERNUI.md, modernUI M1): with Camera interface = WindyFilm (wf_os) the MENU key in shooting opens
+ * the Home screen (wf_os_ui.c) instead of Canon's menu (wf_ui_home_key), and MENU in the browser / the Darkroom goes back
+ * to Home. MENU on Home closes the UI at once (the EOS M two-finger tap arrives as MENU too: ML opens its menu when we let
+ * go) and, when no ML menu came, hands Canon its MENU (after_close): Canon's menu. Off: everything as before M1. */
 #include "wf_ui_int.h"
 #include "wf_icons.h"
 #include "../wf_dark.h"
@@ -57,6 +62,8 @@ static volatile int scr;                /* WFUI_SCR_*: the browser, or a Roll + 
 static volatile int scr_req = -1;       /* a switch asked for while open (the UI task makes it) */
 static volatile int hb, phase;          /* the UI task's last sign of life (ms clock) and where it was */
 static volatile int stale_said;
+static volatile int close_after;        /* WFUI_AFTER_*: what the close hands Canon / ML once the screen is theirs */
+static volatile int menu_pass, menu_pass_t;   /* our own MENU for Canon's menu (after Home): not Home again */
 static inline void beat(int p) { phase = p; hb = get_ms_clock(); }
 
 /* Pack reads (fonts, cans). Canon may hold the card for a while (owner's log 11-14, EOS M 10 s after boot: "fonts
@@ -708,7 +715,11 @@ static void act(int k)
     }
     if (scr != WFUI_SCR_BROWSER)
     {
-        if (wfdr_key(scr, k)) close_req = 1;
+        if (wfdr_key(scr, k))
+        {
+            if (scr == WFUI_SCR_DARK && k == MODULE_KEY_MENU && wf_os) wfui_goto(WFUI_SCR_HOME);   /* film OS: back */
+            else close_req = 1;
+        }
         dirty = 1;
         return;
     }
@@ -755,9 +766,35 @@ static void act(int k)
         close_req = 1;                                      /* it closes, as before */
         break;
     case MODULE_KEY_MENU:
+        if (wf_os) { edit = info = 0; wfui_goto(WFUI_SCR_HOME); break; }   /* film OS: back to Home */
+        close_req = 1;
+        break;
     case MODULE_KEY_TRASH:
     case MODULE_KEY_LV:           close_req = 1; break;
     }
+}
+
+/* ------------------------------------------------------------------ for the film OS screens (wf_os_ui.c, UI task) */
+void wfui_goto(int s)
+{
+    if (s >= 0 && s < WFUI_SCR_N) scr_req = s;
+}
+
+void wfui_close_after(int what)
+{
+    close_after = what;
+    close_req = 1;
+}
+
+/* the browser on the film in the camera, the focus on a row (Home's look strip: SET / INFO there) */
+void wfui_browse(int row)
+{
+    int i = index_of_id(wf_loaded());
+    if (i >= 0) select_film(i);
+    edit = info = 0;
+    tsub = 0;
+    focus_to(row >= 0 && row < WF_NROWS ? row : WF_ROW_LIGHT);
+    scr_req = WFUI_SCR_BROWSER;
 }
 
 /* ------------------------------------------------------------------ drawing helpers */
@@ -1712,8 +1749,9 @@ void wfui_task_begin(void)
              fs & 4 ? ", no argnor28" : "");
     rt[0] = 0;
     if (rd_tries) snprintf(rt, sizeof rt, ", %d reads tried again", rd_tries);
-    wf_log("ui: open, %d films, fonts WFFONTS.DAT %s, cans WFCANS.DAT %s (%s%d colours)%s%s", nlist, fw, wfc_why(cs),
-           cs ? "plain cans, " : "", wfc_pal_used(), rt, pack_again ? ", packs tried again while open" : "");
+    wf_log("ui: open, %d films, fonts WFFONTS.DAT %s, cans WFCANS.DAT %s (%s%d colours)%s%s%s", nlist, fw, wfc_why(cs),
+           cs ? "plain cans, " : "", wfc_pal_used(), rt, pack_again ? ", packs tried again while open" : "",
+           !(fs & 1) && wff_disp() != 0xF ? ", film OS sizes missing from the font pack (older pack)" : "");
     wfp_log(wfc_pal_used());
     int now = get_ms_clock();
     t_probe = t_force = t_heal = t_pack = now;
@@ -1840,9 +1878,47 @@ int wfui_task_tick(void)
     return 0;
 }
 
+/* the close hands Canon / ML a key once the screen is theirs (Home: MENU, PLAY; 5D2 TRASH: the ML menu) */
+static void after_close(int what)
+{
+    if (ml_shutdown_requested || RECORDING) return;
+    if (what == WFUI_AFTER_MLMENU)
+    {
+        wf_log("ui: closed for the ML menu");
+        gui_open_menu();
+        return;
+    }
+    if (what == WFUI_AFTER_PLAY)
+    {
+        wf_log("ui: closed for Canon's PLAY");
+        module_send_keypress(MODULE_KEY_PLAY);
+        return;
+    }
+    if (what != WFUI_AFTER_MENU) return;
+    if (wf_cam() == WF_CAM_EOSM)            /* a two-finger tap came as MENU (patch 0003): ML opens its menu at the end of */
+    {                                       /* canon_gui_enable_front_buffer (module_ui_after_release); a real MENU does not */
+        for (int t = 0; t < 400 && !gui_menu_shown(); t += 20)
+        {
+            msleep(20);
+            beat(PH_END);
+        }
+        if (gui_menu_shown())
+        {
+            wf_log("ui: MENU on Home was the two-finger tap: the ML menu");
+            return;
+        }
+    }
+    menu_pass_t = get_ms_clock();
+    menu_pass = 1;
+    module_send_keypress(MODULE_KEY_MENU);
+    wf_log("ui: MENU on Home: Canon's menu");
+}
+
 void wfui_task_end(void)
 {
     beat(PH_END);
+    int after = close_after, under_menu = 0;
+    close_after = 0;
     if (took)
     {
         /* The ML menu has the screen: the core opened it over us (a two-finger tap while this task did not beat, the
@@ -1850,6 +1926,7 @@ void wfui_task_end(void)
          * Canon's LiveView GUI paints over the menu, and its pixels are not ours to clear. So: the palette back now,
          * keys on (ST_CLOSING), and the screen back only once the menu has gone (menu_close gave Canon its GUI). */
         int under = gui_menu_shown();
+        under_menu = under;
         if (under)
         {
             st = ST_CLOSING;
@@ -1886,6 +1963,7 @@ void wfui_task_end(void)
     anim_on = edit = 0;
     st = ST_CLOSING;                                        /* the screen is Canon's: keys pass on */
     wf_log("ui: closed");
+    if (after && !under_menu && !lv_after) after_close(after);
     int go_lv = lv_after && is5d2() && !lv && !RECORDING;
     lv_after = 0;
     if (go_lv)                                              /* loaded from the viewfinder: show the film in LiveView */
@@ -1920,6 +1998,8 @@ int wfui_host_info(void) { return info; }
 int wfui_host_info_y(void) { return ilast; }                /* the Info page's last grid row (drawn) */
 int wfui_host_anim(void) { return anim_on; }
 int wfui_host_scr(void) { return scr; }
+int wfui_host_after(void) { return close_after; }
+int wfui_host_menu_pass(void) { return menu_pass; }
 const char *wfui_host_msg(void) { return msg && get_ms_clock() - msg_until < 0 ? msg : ""; }
 int wfui_host_edit(void) { return edit; }
 int wfui_host_phase(void) { return phase; }
@@ -2022,6 +2102,7 @@ void wf_ui_init(void)
     took = 0;
     fonts_held = ui_quit = 0;
     anim_on = lv_after = edit = 0;
+    close_after = menu_pass = 0;
     mg.shown = mg.tries = mg.came = mg.done = mg.undo_until = 0;
 }
 
@@ -2035,6 +2116,7 @@ int wf_ui_open(void)
         hb = now;
         phase = PH_CREATED;
         close_req = 0;
+        close_after = 0;
         ui_quit = 0;
         kq_r = kq_w = 0;
         st = ST_OPENING;
@@ -2065,12 +2147,12 @@ void wf_ui_close(void)
 
 int wf_ui_is_open(void) { return st != ST_CLOSED; }
 
-/* wf_dark.h: WF_UI_SCR_DARK opens the UI on the Darkroom screen (or switches an open UI to it), WF_UI_NEW_ROLL the browser
- * in Darkroom mode for a new roll (new_roll_view), anything else the browser */
+/* wf_dark.h: WF_UI_SCR_DARK opens the UI on the Darkroom screen (or switches an open UI to it), WF_UI_SCR_HOME on the film
+ * OS's Home, WF_UI_NEW_ROLL the browser in Darkroom mode for a new roll (new_roll_view), anything else the browser */
 void wf_ui_open_scr(int s)
 {
     if (s == WF_UI_NEW_ROLL) nr_req = 1;
-    s = s == WF_UI_SCR_DARK ? WFUI_SCR_DARK : WFUI_SCR_BROWSER;
+    s = s == WF_UI_SCR_DARK ? WFUI_SCR_DARK : s == WF_UI_SCR_HOME ? WFUI_SCR_HOME : WFUI_SCR_BROWSER;
     if (st == ST_OPEN)
     {
         scr_req = s;                                        /* the UI task makes the switch on its next tick */
@@ -2114,10 +2196,17 @@ unsigned int wf_ui_key(unsigned int key)
     {
         int w = kq_w, nw = (w + 1) % KQ_N;
         if (nw != kq_r) { kq[w] = key; kq_w = nw; }
-        if (key == MODULE_KEY_MENU && scr == WFUI_SCR_BROWSER && leave_to < 0 && !sw_film && sec_to < 0 && !pick)
+        if (key == MODULE_KEY_MENU && scr == WFUI_SCR_BROWSER && !wf_os && leave_to < 0 && !sw_film && sec_to < 0
+            && !pick)
             close_req = 1;                                  /* EOS M 2-finger tap: the ML menu opens in 3 s (the Roll /
                                                                Darkroom screens and the browser's questions decide on
-                                                               MENU themselves: there it is "no") */
+                                                               MENU themselves: there it is "no"; with the film OS the
+                                                               browser's MENU goes back to Home) */
+        if (key == MODULE_KEY_MENU && scr == WFUI_SCR_HOME && scr_req < 0)
+        {
+            close_after = WFUI_AFTER_MENU;                  /* Home: close at once (a tap: the ML menu; else Canon's) */
+            close_req = 1;
+        }
         return 0;
     }
     }
@@ -2129,6 +2218,23 @@ void wf_ui_open_refused(unsigned int key, int play)
     if (key != MODULE_KEY_TRASH) return;
     wf_log("ui: TRASH not taken: open %d, ML menu %d, play %d, gui_state %d, lv %d, display %d", st != ST_CLOSED,
            gui_menu_shown(), play, gui_state, lv, display_is_on());
+}
+
+void wf_ui_open_home(void) { wf_ui_open_scr(WF_UI_SCR_HOME); }
+
+/* the film OS (docs/MODERNUI.md): MENU in shooting opens Home with Camera interface = WindyFilm. Not over the ML menu or
+ * a Canon screen, not while recording; EOS M: stills LiveView (as the open key); not our own MENU for Canon's menu */
+int wf_ui_home_key(unsigned int key)
+{
+    if (key != MODULE_KEY_MENU || !wf_os || st != ST_CLOSED) return 0;
+    if (menu_pass)
+    {
+        menu_pass = 0;
+        if (get_ms_clock() - menu_pass_t < 1500) return 0;
+    }
+    if (gui_menu_shown() || gui_state != GUISTATE_IDLE || RECORDING) return 0;
+    if (wf_cam() != WF_CAM_5D2 && (!lv || is_movie_mode())) return 0;
+    return 1;
 }
 
 int wf_ui_open_key(unsigned int key)

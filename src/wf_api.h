@@ -95,6 +95,11 @@ enum { WF_QKEY_OTHER = 0, WF_QKEY_DOWN, WF_QKEY_SET, WF_QKEY_LEFT, WF_QKEY_RIGHT
        WF_QKEY_TRASH, WF_QKEY_SHUTTER };
 extern volatile int wf_qk;
 int  wf_qk_key(int k);
+void wf_qk_set(int v);                    /* WF_QK_*: the film OS's Settings (the config saves it) */
+/* the film OS (docs/MODERNUI.md, modernUI M1): Camera interface = WindyFilm (1, default) has the MENU key in shooting
+   open the WindyFilm Home screen (src/ui/wf_os_ui.c); 0 = Canon + ML, the camera as before. config os=on|off */
+extern volatile int wf_os;
+void wf_os_set(int on);
 int  wf_loaded(void);                     /* the active film id, 0 = none (output is plain log, Log + LUT or Off) */
 int  wf_avail(int id);                    /* 1 = loadable now (its table is in the pack / its cube is on the card) */
 int  wf_films_state(void);                /* the film tables: 1 read, 0 starting (worker / pack not up yet), -1 the
@@ -114,6 +119,8 @@ void wf_ui_close(void);
 int  wf_ui_is_open(void);
 unsigned int wf_ui_key(unsigned int key); /* from the core's CBR_KEYPRESS while open: 0 = consumed, 1 = pass on */
 int  wf_ui_open_key(unsigned int key);    /* 1 = this key opens the browser (EOS M: long DOWN; 5D2: TRASH) */
+int  wf_ui_home_key(unsigned int key);    /* 1 = this key opens the film OS's Home (MENU with wf_os, in shooting) */
+void wf_ui_open_home(void);
 void wf_ui_open_refused(unsigned int key, int play);   /* the open key did not open it: log why */
 int  wf_ui_menu_guard(void);              /* EOS M, every ~10 ms (wf_task's waits): the ML menu's Canon dialog; 1 = asked */
 

@@ -1126,27 +1126,34 @@ void wfdr_pick_done(int film)
     if (film > 0) dr_afilm = film;
 }
 
-/* =================================================================== dispatch (wf_ui.c) */
+/* =================================================================== dispatch (wf_ui.c); the film OS's Home and Settings
+ * (wf_os_ui.c) come through here too */
+static int os_scr(int scr) { return scr == WFUI_SCR_HOME || scr == WFUI_SCR_SET; }
+
 void wfdr_enter(int scr)
 {
     if (scr == WFUI_SCR_DARK) dark_enter();
+    if (os_scr(scr)) wfos_enter(scr);
 }
 
 void wfdr_leave(int scr)
 {
     if (scr == WFUI_SCR_DARK) wfp_init_fixed();          /* the browser's colours back */
+    if (os_scr(scr)) wfos_leave(scr);
     wfg_glow_centre(125, 150, 125, 272);                    /* the browser's glow under its big can */
 }
 
 void wfdr_render(int scr, int now)
 {
     if (scr == WFUI_SCR_DARK) dark_render(now);
+    if (os_scr(scr)) wfos_render(scr, now);
 }
 
 int wfdr_key(int scr, int key)
 {
     int now = get_ms_clock();
     if (scr == WFUI_SCR_DARK) return dark_key(key, now);
+    if (os_scr(scr)) return wfos_key(scr, key);
     return 0;
 }
 
@@ -1155,6 +1162,7 @@ int wfdr_tick(int scr, int now)
     int moved = msg && now - msg_until >= 0;
     if (moved) msg = 0;
     if (scr == WFUI_SCR_DARK) moved |= dark_tick(now);
+    if (os_scr(scr)) moved |= wfos_tick(scr, now);
     return moved;
 }
 

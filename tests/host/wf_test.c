@@ -2515,7 +2515,7 @@ static void t_cfg(void)
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
             "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=PrintOver\njpeg2=Folder\ndkscreen=Off\ndkphoto=Off\n"
             "rolllook=ON\nshoulder=D\n"
-            "qkeys=LR\ncr2=Move\nuserwb=1,5600,2,-3\n",
+            "qkeys=LR\nos=OFF\ncr2=Move\nuserwb=1,5600,2,-3\n",
             wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
@@ -2532,6 +2532,7 @@ static void t_cfg(void)
     chk(wf_roll_look8 == 1, "rolllook=ON read: a JPEG 8-bit roll (%d)", wf_roll_look8);
     chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
     chk(wf_qk == WF_QK_LR, "qkeys=LR read: Quick keys L/R ISO (%d)", wf_qk);
+    chk(wf_os == 0, "os=OFF read: Camera interface Canon + ML (%d)", wf_os);
     chk(wf_pr_cr2 == WF_PC_MOVE, "cr2=Move read: RAW after Darkroom Move to ROLLS (%d)", wf_pr_cr2);
     chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_PRINT && wf_pr_jpg2 == WF_J2_FOLDER
         && wf_dk_scr == WF_DS_OFF, "print finishes read: frame %d info %d date %d jpeg %d jpeg2 %d dkscreen %d (want 4 2 2 "
@@ -2553,6 +2554,7 @@ static void t_cfg(void)
              "rolllook=on\n"
              "shoulder=d\n"
              "qkeys=lr\n"
+             "os=off\n"
              "stage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
@@ -2578,6 +2580,7 @@ static void t_cfg(void)
     chk(b && !strcmp(b, want), "back to the first file");
     free(b);
     wf_qk = WF_QK_DOWN;
+    wf_os = 1;                                   /* the default: Camera interface WindyFilm */
     wf_pr_cr2 = WF_PC_KEEP;
     wf_roll_look8 = 0;                           /* the other checks: a roll keeps Canon's JPEG */
     put_cfg("film=99999\noutput=nope\nlutei=77\nexptrim=99\ncurve=x\nprint=\nhl=7\nsh=\n");

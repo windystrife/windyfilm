@@ -18,6 +18,7 @@ static uint8_t print_buf[WF_DR_PW * WF_DR_PH];
 static uint8_t wire_buf[WF_DR_NWIRE][WF_DR_TW * WF_DR_TH];
 volatile int wf_blind = 1;
 void wf_blind_set(int on) { wf_blind = on != 0; }
+int wf_roll_blocks_play(void);
 
 static int locked, nswap;
 static int fshelf, rawb_can = 1;
@@ -29,6 +30,7 @@ void wf_roll_look8_set(int on) { wf_roll_look8 = on != 0; }
 void fake_set_locked(int k) { locked = k; }
 int fake_nswap(void) { return nswap; }
 int wf_roll_shutter_locked(void) { return locked; }
+int wf_roll_blocks_play(void) { return wf_blind && wf_roll_open(&roll) && !fshelf; }   /* (no darkroom run here) */
 void fake_dark_reset(void)
 {
     wf_roll_reset(&roll);

@@ -75,6 +75,7 @@ volatile int wf_paper;                            /* Paper, WF_PAPER_* (wf_paper
 volatile int wf_sg_exp, wf_sg_push, wf_sg_comp, wf_sg_prn[3], wf_sg_iie = WF_SG_IIE_START;   /* film-stage knob rows */
 volatile int wf_sg_bl, wf_sg_pbl, wf_sg_nn, wf_sg_np;   /* Bleach bypass, Print bleach, Neutral neg / print 0..4 */
 volatile int wf_exif_off;
+volatile int wf_os = 1;                           /* Camera interface (wf_api.h): 1 WindyFilm, 0 Canon + ML */
 volatile int wf_cfg_dirty;
 static volatile int wf_cfg_t;
 static int wf_out_prev = WF_OUT_FILM;             /* Film LUT row Off goes back to this output */
@@ -311,6 +312,7 @@ static const int wf_popt_n[WF_PO_N] = { WF_PFR_N, WF_PIN_N, WF_PDT_N, WF_PJ_N, W
 
 static const char *const wf_qk_cfg[WF_QK_N] = { "off", "down", "lr" };      /* the quick keys (DESIGN 3.17) */
 static const char *wf_qk_name[WF_QK_N] = { "Off", "DOWN ring", "L/R ISO" };
+static const char *wf_os_name[2] = { "Canon + ML", "WindyFilm" };   /* Camera interface (docs/MODERNUI.md) */
 static const char *const wf_rl_key[2] = { "off", "on" };            /* a JPEG 8-bit roll (wf_dark.h, DESIGN 3.14) */
 static const char *const wf_ds_key[WF_DS_N] = { "on", "off" };   /* Screen Off (DESIGN 3.11): the Darkroom's chip only */
 void wf_dk_scr_step(int d)
@@ -328,6 +330,16 @@ void wf_dk_photo_set(int on)                    /* the Darkroom's photos (wf_dar
 void wf_blind_set(int on)                       /* Blind roll (wf_dark.h): this menu or the browser's row (RAWB28) */
 {
     wf_blind = on != 0;
+    wf_dirty();
+}
+void wf_os_set(int on)                          /* Camera interface (wf_api.h): this menu or the film OS's Settings */
+{
+    wf_os = on != 0;
+    wf_dirty();
+}
+void wf_qk_set(int v)                           /* the quick keys from the film OS's Settings */
+{
+    wf_qk = v >= 0 && v < WF_QK_N ? v : WF_QK_DOWN;
     wf_dirty();
 }
 
@@ -1049,6 +1061,8 @@ void wf_cfg_load(void)
             wf_rb_hue = wf_cfg_word(v, wf_hue_key, WF_DEV_HUE_N, WF_DEV_HUE_I);
         } else if ((v = wf_cfg_val(l, "qkeys"))) {
             wf_qk = wf_cfg_word(v, wf_qk_cfg, WF_QK_N, WF_QK_DOWN);
+        } else if ((v = wf_cfg_val(l, "os"))) {
+            wf_os = !wf_cfg_word(v, (const char *const[]){ "on", "off" }, 2, 0);
         } else if ((v = wf_cfg_val(l, "input"))) {
             ;                                     /* reserved: "jpeg" is the only input path */
         } else if ((v = wf_cfg_val(l, "userwb"))) {
@@ -1086,7 +1100,7 @@ static int wf_cfg_save(void)
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
                      "strength=%s\nhl=%d\nsh=%d\npaper=%s\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\n"
                      "exposure=%s\nexptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\njpeg=%s\njpeg2=%s\ncr2=%s\ndkscreen=%s\n"
-                     "dkphoto=%s\nrolllook=%s\nshoulder=%s\nqkeys=%s\n",
+                     "dkphoto=%s\nrolllook=%s\nshoulder=%s\nqkeys=%s\nos=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
@@ -1101,7 +1115,7 @@ static int wf_cfg_save(void)
                      wf_pick(wf_pc_key, WF_PC_N, wf_pr_cr2),
                      wf_pick(wf_ds_key, WF_DS_N, wf_dk_scr), wf_pick(wf_rl_key, 2, wf_dk_photo),
                      wf_pick(wf_rl_key, 2, wf_roll_look8), wf_pick(wf_hue_key, WF_DEV_HUE_N, wf_rb_hue),
-                     wf_pick(wf_qk_cfg, WF_QK_N, wf_qk));
+                     wf_pick(wf_qk_cfg, WF_QK_N, wf_qk), wf_os ? "on" : "off");
     struct wf_sg_knobs sk;
     wf_sg_knobs_now(&sk);
     if (n > 0 && n < (int)sizeof b)
@@ -1511,6 +1525,16 @@ static void wf_exif_poll(void)
 
 /* ------------------------------------------------------------------ the ML menu */
 static MENU_SELECT_FUNC(wf_open_select) { (void)priv; (void)delta; wf_ui_request(); }
+static MENU_SELECT_FUNC(wf_os_select) { (void)priv; (void)delta; wf_os_set(!wf_os); }
+static MENU_UPDATE_FUNC(wf_os_update)
+{
+    if (!wf_os)
+        MENU_SET_WARNING(MENU_WARN_INFO, "The camera as before: MENU opens Canon's menu, WindyFilm lives here.");
+    else if (wf_cam() == WF_CAM_EOSM)
+        MENU_SET_WARNING(MENU_WARN_INFO, "MENU: WindyFilm Home; MENU there: Canon's menu. Two fingers: this menu.");
+    else
+        MENU_SET_WARNING(MENU_WARN_INFO, "MENU: WindyFilm Home; MENU there: Canon's menu, TRASH there: this menu.");
+}
 
 static void wf_step_int(volatile int *v, int lo, int hi, int delta)
 {
@@ -1923,6 +1947,9 @@ static struct menu_entry wf_menu[] = {
         .children = (struct menu_entry[]) {
             { .name = "Open film browser", .select = wf_open_select, .icon_type = IT_ACTION,
               .help = "The film strip: pick a film or Film LUT can, Light, Print, effects." },
+            { .name = "Camera interface", .priv = (void *)&wf_os, .max = 1, .choices = wf_os_name,
+              .select = wf_os_select, .update = wf_os_update,
+              .help = "WindyFilm: the MENU key opens WindyFilm's Home. Canon + ML: the camera as before." },
             { .name = "Film roll", .select = wf_roll_select, .update = wf_roll_update, .icon_type = IT_ACTION,
               .help = "WindyFilm in Darkroom mode: Exposures 3-36, SET on a film loads a roll (developed later)." },
             { .name = "Blind roll", .priv = (void *)&wf_blind, .max = 1, .select = wf_blind_select,

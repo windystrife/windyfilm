@@ -66,6 +66,7 @@ static int films_state = 1;                 /* wf_films_state(): 1 read, 0 start
 void fake_reset(void)
 {
     cam = WF_CAM_EOSM; loaded = 0; gen++; grey_mask = 0; nmissing = 0; status = ""; films_state = 1;
+    wf_os = 0; wf_qk = WF_QK_DOWN;
     film_grey_id = film_grey_mask = 0;
     busy_n = 0;
     dev_ms = dev_path = 0;
@@ -93,6 +94,11 @@ int  fake_row_value(int r) { return val[r]; }
 
 /* ------------------------------------------------------------------ wf_api.h */
 int wf_cam(void) { return cam; }
+/* the film OS (wf_api.h): off by default here, so the browser suites see the camera as before M1; os_test turns it on */
+volatile int wf_os;
+void wf_os_set(int on) { wf_os = on != 0; gen++; }
+volatile int wf_qk = WF_QK_DOWN;
+void wf_qk_set(int v) { wf_qk = v >= 0 && v < WF_QK_N ? v : WF_QK_DOWN; gen++; }
 
 const struct wf_film *wf_film_by_id(int id)
 {

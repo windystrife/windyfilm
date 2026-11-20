@@ -8,6 +8,8 @@ void wf_ui_close(void) { }
 int  wf_ui_is_open(void) { return 0; }
 unsigned int wf_ui_key(unsigned int key) { (void)key; return 1; }
 int  wf_ui_open_key(unsigned int key) { (void)key; return 0; }
+int  wf_ui_home_key(unsigned int key) { (void)key; return 0; }
+void wf_ui_open_home(void) { }
 void wf_ui_open_refused(unsigned int key, int play) { (void)key; (void)play; }
 int  wf_ui_menu_guard(void) { return 0; }
 

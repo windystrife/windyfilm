@@ -135,6 +135,15 @@ int  host_bmp_offs(void);               /* bmp_off() calls since host_gui_set */
 int  host_bmp_muted_at_req(void);       /* muted at the last SetGUIRequestMode(non-zero): 1 = Canon's dialog hidden */
 int  host_lv_starts(void);              /* force_liveview() calls since host_gui_set */
 int  host_tasks(void);                  /* task_create() calls */
+/* the film OS (src/ui/wf_os_ui.c): keys handed to Canon after a close, the ML menu opened by us, the EOS M tap */
+int  module_send_keypress(int module_key);
+void gui_open_menu(void);
+int  host_sent_key(void);               /* the last module_send_keypress key, 0 none since host_sent_clear */
+int  host_nsent(void);
+int  host_menu_opens(void);             /* gui_open_menu calls since host_sent_clear */
+void host_sent_clear(void);
+void host_tap_menu(int on);             /* EOS M two-finger tap: the next canon_gui_enable_front_buffer opens the ML menu
+                                           (ML's module_ui_after_release) */
 void host_task_fail(int fail);          /* task_create returns an odd (error) handle */
 void host_hide_font(const char *name);  /* font_by_name does not find this ML font (0: all found again) */
 int  host_palette_is_canon(void);               /* every entry 0x50..0xFE back to Canon's value */

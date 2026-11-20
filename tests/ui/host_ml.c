@@ -112,7 +112,23 @@ int gui_state, lv = 1;
 static int menu_on, menu_off_at = -1, menu_sticky, under_enable, under_disable, menu_px_kept = -1, redraws;
 int ml_shutdown_requested;
 void canon_gui_disable_front_buffer(void) { if (menu_on) under_disable++; front_disabled = 1; }
-void canon_gui_enable_front_buffer(int also_redraw) { (void)also_redraw; if (menu_on) under_enable++; front_disabled = 0; }
+static int tap_menu;
+void host_menu(int on, int off_after_ms, int sticky);
+void canon_gui_enable_front_buffer(int also_redraw)
+{
+    (void)also_redraw;
+    if (menu_on) under_enable++;
+    front_disabled = 0;
+    if (tap_menu) { tap_menu = 0; host_menu(1, -1, 0); }   /* the tap's ML menu opens as the module lets go */
+}
+void host_tap_menu(int on) { tap_menu = on; }
+static int sent_key, nsent, menu_opens;
+int module_send_keypress(int k) { sent_key = k; nsent++; return 0; }
+void gui_open_menu(void) { menu_opens++; }
+int host_sent_key(void) { return sent_key; }
+int host_nsent(void) { return nsent; }
+int host_menu_opens(void) { return menu_opens; }
+void host_sent_clear(void) { sent_key = nsent = menu_opens = 0; tap_menu = 0; }
 void redraw(void) { redraws++; }
 static int ntasks, task_fail;
 uint32_t task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg)

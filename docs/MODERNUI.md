@@ -1,10 +1,14 @@
-# WindyFilm modernUI: the film OS (stage 1, 21 Nov 2026, branch `modernUI`)
+# WindyFilm modernUI: the film OS (stage 1 + M1, 21 Nov 2026, branch `modernUI`)
 
-Tóm tắt cho chủ dự án: đây là bản mock để duyệt, chưa có code chiếm giao diện. WindyFilm thay menu ML và phần lớn màn
-hình Canon bằng giao diện riêng: Home, Kệ phim, HUD LiveView, Top plate (5D2 chụp qua ống ngắm), PLAY xem ảnh in và tờ
-tiếp xúc, Cài đặt; Darkroom giữ nguyên RAWB28. Menu ML luôn mở được, và có một nút tắt để về giao diện Canon + ML như cũ.
-Ảnh mock: `F:\MagicLatern\_windyfilm_docs\modernui_mocks\` (`modernui_eosm.png`, `modernui_5d2.png`, `index.html`).
-Các câu hỏi cần chủ dự án chọn ở mục 7.
+M1 (21 Nov 2026, chủ dự án duyệt mock): đã có Home, Cài đặt và công tắc "Camera interface". Khi đang chụp, phím MENU mở
+Home thay cho menu Canon; MENU trên Home mở menu Canon; menu ML vẫn mở bằng chạm hai ngón (EOS M) hoặc TRASH trên Home
+(5D2). Chưa thử trên máy: chưa build thẻ. Trạng thái, cách thử và các quyết định ở mục 6 (M1).
+
+Tóm tắt stage 1 (bản mock): WindyFilm thay menu ML và phần lớn màn hình Canon bằng giao diện riêng: Home, Kệ phim, HUD
+LiveView, Top plate (5D2 chụp qua ống ngắm), PLAY xem ảnh in và tờ tiếp xúc, Cài đặt; Darkroom giữ nguyên RAWB28. Menu
+ML luôn mở được, và có một nút tắt để về giao diện Canon + ML như cũ. Ảnh mock:
+`F:\MagicLatern\_windyfilm_docs\modernui_mocks\` (`modernui_eosm.png`, `modernui_5d2.png`, `index.html`). Các câu hỏi
+cần chủ dự án chọn ở mục 7.
 
 The owner saw M-Film (HNGSeries, GPL-2.0), which replaces the Canon / ML interface with a film-camera interface, and
 asked for a WindyFilm variant in the same spirit on its own branch. The concept (a film-camera interface over ML) is
@@ -243,9 +247,11 @@ says so.
 ## 5. Risks
 
 - **R1. EOS M memory.**
-  - Budget: the browser peaks at 122 KB of UI heap. The film OS adds about 78 KB (WFOSFONT.DAT, read with the font
-    pack) and no frame buffers: the print previews stream into the display buffer in 16 KB chunks, the sheet reads
-    one strip at a time.
+  - Budget: the browser peaks at 122 KB of UI heap. The film OS adds no frame buffers: the print previews stream into
+    the display buffer in 16 KB chunks, the sheet reads one strip at a time.
+  - M1: the display sizes went into WFFONTS.DAT itself (no WFOSFONT.DAT): 22,111 B before, 53,757 B now. The host
+    harness's peak UI heap is 154 KB (153,776 B), the growth being the larger font pack. To check on the EOS M with
+    the first M1 card (free memory in the log at open).
   - Home and the Top plate need only one can image (the big can's blob, at most a few KB in the cache).
   - The Darkroom keeps its own budget (dark-nomem). The film OS screens never run during a develop: the Darkroom is a
     screen of the same task.
@@ -267,17 +273,25 @@ says so.
   - The display filter does not run without LV: Prints on the 5D2 use Canon's PLAY buffer.
   - The joystick press and the dials in LV need GUI mode 38 (DESIGN 5).
 - **R5. Taking MENU on the EOS M.** The two-finger tap reaches ML as its own event, and patch 0003 turns it into MENU
-  only while a module owns the screen, to close it. Stage 2 must check with KEYTRACE that the module's MENU takeover
-  sees only BGMT_MENU, so the tap still opens the ML menu, never Home.
-- **R6. Canon's menu after Home.** If `fake_simple_button` is not exported on a card core, Canon's menu has to come
-  from `SetGUIRequestMode`, which may differ by camera. Checked on the camera in stage 2. A Settings row "Canon menu"
-  is the last fallback.
+  only while a module owns the screen, to close it.
+  - Read in ML's code (M1): with no module UI open the tap is its own key code (37), so the takeover in shooting
+    (`wf_ui_home_key`, MENU = 22 only) never sees it: the tap opens the ML menu, never Home.
+  - With our UI open the tap arrives as MENU, the same code as the real key. So MENU on Home closes the UI at once and
+    looks after the close: if ML opened its menu (it does that for a tap, `module_ui_after_release`), that was the tap;
+    if not, it was the MENU key and Canon gets its MENU. In a sub-screen (shelf, Darkroom, Settings) MENU goes to Home
+    first: from there the tap takes two taps to reach the ML menu.
+  - Still to see on the camera: KEYTRACE on both, and no flash of Canon's menu after a tap.
+- **R6. Canon's menu after Home.** Settled in M1: `module_send_keypress` and `gui_open_menu` are exported on both card
+  cores (EOS M 2.0.2, 5D2 2.1.2; `checksyms` passes). Home sends MENU back with `module_send_keypress` once our UI has
+  closed, and lets that one MENU through (1.5 s) so it does not open Home again. No `fake_simple_button` or
+  `SetGUIRequestMode`.
 - **R7. Falling back to the ML menu.** It is never taken:
   - EOS M: the two-finger tap. 5D2: TRASH from Home (Q1).
   - "Camera interface" sits in ML's menu too.
   - A UI task without a beat for 2 s passes every key.
-  - A boot with a missing or bad WFOSFONT.DAT falls back to the classic interface (the ML menu entry and the browser),
-    and logs why.
+  - M1: a font pack from before M1 (three fonts) still loads: the display sizes fall back to ML's fonts, the open log
+    says "film OS sizes missing from the font pack (older pack)", and Settings > System shows "older pack". A missing
+    or bad pack draws with ML's fonts, as the browser does.
 - **R8. Auto power-off.** Our screens tell Canon "busy" as the Darkroom does (`powersave_prohibit` while open,
   `powersave_permit` on close), so Canon's own timers still run while shooting.
 
@@ -290,11 +304,40 @@ Each stage has the same checks as the browser:
 - EOS M and 5D2 suites, never at the same time.
 Cards are built only on the owner's word.
 
-1. **M1: Home + Settings + the switch.**
-   - New screens in `wf_ui.c`; display fonts appended to WFFONTS.DAT (`wf_font.c` takes the new sizes by px / weight);
-     config keys.
-   - MENU takeover with Canon's menu on MENU again; the ML menu item "Camera interface".
-   - EOS M first, then 5D2.
+1. **M1: Home + Settings + the switch.** Done on 21 Nov 2026 (host checks, both builds, both suites); not yet on a
+   camera.
+   - **Code:**
+     - `src/ui/wf_os_ui.c` (new): Home and Settings, drawn in the browser's UI task; `wf_dark_ui.c` passes the two
+       screens on.
+     - `wf_font.c` / `tools/mk_wffont.py`: four sizes appended to WFFONTS.DAT (D20, D30, D80 light, L12 bold caps) with
+       letter spacing for the caps. The first three fonts stay byte-equal.
+     - `wf_ui.c`: `wf_ui_home_key`, `wfui_goto`, the close-then-act step (`after_close`: Canon MENU, ML menu, PLAY).
+     - `wf_main.c`: the MENU takeover in `wf_keypress`. `wf_menu.c`: `os=` in WINDYFLM.CFG (default WindyFilm) and the
+       ML menu entry "Camera interface" under "Open film browser".
+   - **The way in:** MENU in shooting, Camera interface = WindyFilm, no ML menu, Canon idle (GUISTATE_IDLE), not
+     recording; on the EOS M only in photo LiveView (movie mode keeps Canon's MENU). Home also opens from MENU in the
+     browser and in the Darkroom.
+   - **Home keys:**
+     - UP / DOWN between the four tiles and the look strip; LEFT / RIGHT in the strip; the ring / main dial steps the
+       look value (or moves between tiles).
+     - SET / joystick / Q opens; INFO opens the browser.
+     - MENU: Canon's menu. PLAY: Canon's playback (Prints). LV or a half-press closes.
+     - TRASH: on the 5D2 the ML menu (Q1), on the EOS M the shelf.
+     - A blind roll eats PLAY with "Blind roll: the prints come after the Darkroom".
+   - **Settings:**
+     - Interface: Camera interface, Quick keys (EOS M), Blind roll, plus the fixed ML menu and MENU key rows.
+     - System: films, font pack, can pack.
+     - LEFT / RIGHT, PICSTYLE or Q switch the section. MENU / TRASH go back to Home.
+   - **Checked:** `tests/ui/run.sh` (ui_test and the new os_test, 0 failures under ASan, shots in
+     `F:\MagicLatern\_windyfilm_docs\modernui_mocks\m1\`); `build.sh CAM=EOSM` and `CAM=5D2` (checksyms, TCC link,
+     provenance gate PASS); `test.sh` EOS M 2331 / 0 then 5D2 1849 / 0 (CFG checks `os=`).
+   - **On the camera (first M1 card):**
+     - MENU in LV gives Home, MENU on Home gives Canon's menu with no Home in between;
+     - the two-finger tap opens the ML menu from shooting and from Home;
+     - 5D2 TRASH on Home opens the ML menu;
+     - PLAY on Home gives Canon's playback;
+     - free memory at open;
+     - Camera interface = Canon + ML gives back the old MENU.
 2. **M2: Film shelf.** The new shelf layout over the browser's list. The browser stays as the INFO look editor.
 3. **M3: LiveView HUD.**
    - The palette probe card (R3), then the HUD in the chosen colours: EOS M stills LV, then 5D2 LV.
@@ -312,9 +355,9 @@ Cards are built only on the owner's word.
 ## 7. Open questions for the owner
 
 1. **5D2 ML menu key:** TRASH on Home (mock), or keep TRASH = Film shelf everywhere and reach the ML menu only from
-   Settings > System?
+   Settings > System? *M1 default: TRASH on Home opens the ML menu (5D2 only; the EOS M keeps the two-finger tap).*
 2. **PLAY default:** Camera JPEG (Canon's PLAY, as the owner likes) with Prints as the option (proposed), or Prints by
-   default?
+   default? *M1 default: PLAY on Home is Canon's playback (Prints comes in M5).*
 3. **LiveView HUD default:** Full or Minimal? Is the FILM tag next to ISO (ISO set by the film) wanted?
 4. **Home look strip:** keep it (Light / Print / Paper / Grain / Halation / Strength), or show the last 6 frames
    instead?

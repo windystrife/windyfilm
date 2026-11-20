@@ -422,6 +422,10 @@ static unsigned int wf_keypress(unsigned int key)
         NotifyBox(2000, "Roll in camera: develop it in the Darkroom");
         return 0;
     }
+    if (!gui_menu_shown() && !is_play_mode() && wf_ui_home_key(key)) {   /* the film OS: MENU -> Home */
+        wf_ui_open_home();
+        return 0;
+    }
     if (!gui_menu_shown() && !is_play_mode() && wf_ui_open_key(key)) {
         wf_ui_open();
         return 0;
