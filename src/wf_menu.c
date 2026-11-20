@@ -2061,10 +2061,16 @@ static void wf_iso_poll(void)
  * either did nothing in LiveView (the core holds them for the long press). So the module acts on the press and lets
  * it go on: a long DOWN still opens the browser (its TRASH gives the ring back) and a long SET still opens Canon's Quick
  * Control (the screen is Canon's: Magic Zoom off). The GUI task (wf_qk_key) only notes; wf_task (wf_qk_poll) sets ISO
- * and aperture (both wait for the camera), keeps Magic Zoom's countdown up, logs and draws the box (wfdr_toast). */
+ * and aperture (both wait for the camera), keeps Magic Zoom's countdown up, logs and draws the box (wfdr_toast).
+ * The ring itself (owner RAWB28, 11-20: "phím tắt EOS M vẫn chưa hoạt động"; the KEYTRACE): in plain LiveView Canon
+ * turns it into its own Tv (M, Tv) / aperture (Av) change and ML gets only a key event without a code (0x54), never
+ * a WHEEL code. So qk_watch reads the turn back from the code Canon moved, puts it back and steps ISO / aperture by
+ * its clicks, as ML's Expo lock follows Canon's changes. P shifts the program (no way back): no ISO ring there. */
 volatile int wf_qk = WF_QK_DOWN;
 enum { QK_CANON = 0, QK_ISO, QK_AV };
 static volatile int qk_ring, qk_t, qk_isod, qk_avd, qk_mz;
+enum { QK_W_NONE = 0, QK_W_TV, QK_W_AV };
+static int qk_wsrc, qk_wbase;
 #define QK_RING_MS 6000                          /* the ring goes back this long after its last turn */
 #define QK_SAY_MS  1500
 #define QK_FADE_MS 400
@@ -2280,6 +2286,41 @@ static void qk_draw(int now)
     }
 }
 
+/* the ring read back from Canon (see the top of the quick keys): the code Canon moves in this mode, 0 = none */
+static int qk_wget(int src) { return src == QK_W_TV ? lens_info.raw_shutter : src == QK_W_AV ? lens_info.raw_aperture : 0; }
+static void qk_watch(int now, int r)
+{
+    int src = r == QK_CANON ? QK_W_NONE : shooting_mode == SHOOTMODE_M || shooting_mode == SHOOTMODE_TV ? QK_W_TV
+              : shooting_mode == SHOOTMODE_AV ? QK_W_AV : QK_W_NONE;
+    const char *nm = src == QK_W_TV ? "Tv" : "aperture";
+    if (src != qk_wsrc) {                        /* the ring is ours now (or the mode changed): the code to keep */
+        qk_wsrc = src;
+        qk_wbase = qk_wget(src);
+        if (src)
+            wf_log("keys: ring read from Canon's %s (code %d, mode %d)", nm, qk_wbase, shooting_mode);
+        return;
+    }
+    if (!src || !qk_wbase)
+        return;
+    int v = qk_wget(src);
+    if (v && v != qk_wbase) {
+        int n = wf_roll_dial_clicks(qk_wbase, v);
+        int ok = src == QK_W_TV ? lens_set_rawshutter(qk_wbase) : lens_set_rawaperture(qk_wbase);
+        int v2 = qk_wget(src);
+        if (!ok && v2 == v) {                    /* Canon keeps its code: no ISO step on top, the ring is the camera's */
+            wf_log("keys: the camera kept %s code %d (asked %d): the ring goes back to the camera", nm, v, qk_wbase);
+            qk_ring = QK_CANON;
+            return;
+        }
+        wf_log("keys: ring turn %d (%s code %d -> %d, put back: %d)", n, nm, qk_wbase, v, v2);
+        if (r == QK_ISO)
+            qk_isod += n;
+        else
+            qk_avd += n;
+        qk_t = now;
+    }
+}
+
 static void wf_qk_poll(void)
 {
     int now = get_ms_clock();
@@ -2291,6 +2332,7 @@ static void wf_qk_poll(void)
         qk_ring = QK_CANON;
         qk_isod = qk_avd = 0;
         qk_shown = QK_CANON;
+        qk_wsrc = QK_W_NONE;
         if (qk_mz_on) {
             zoom_overlay_set_countdown(0);
             wf_log("keys: Magic Zoom off (the screen changed)");
@@ -2313,6 +2355,10 @@ static void wf_qk_poll(void)
             wf_log("keys: ISO is set by the camera in this mode (%d)", shooting_mode);
             qk_say(now, QK_SAY_MS, 0, "ISO", 0, "Set by the camera in this mode", 0, 0);
             qk_ring = r = QK_CANON;
+        } else if (r == QK_ISO && wf_qk == WF_QK_DOWN && shooting_mode == SHOOTMODE_P) {
+            wf_log("keys: in P the ring shifts the program: the ISO ring needs Tv, Av or M");
+            qk_say(now, QK_SAY_MS + 1000, 0, "ISO", 0, "P: the ring shifts. Tv, Av or M", 0, 0);
+            qk_ring = r = QK_CANON;
         } else if (r == QK_AV && !qk_av_ok()) {
             wf_log("keys: the aperture ring needs M mode and a lens with contacts (mode %d)", shooting_mode);
             qk_say(now, QK_SAY_MS, 0, "APERTURE", 0, lens_info.name[0] ? "The ring sets it in M mode" : "Set it on the lens",
@@ -2330,6 +2376,7 @@ static void wf_qk_poll(void)
         }
         qk_shown = r;
     }
+    qk_watch(now, qk_ring);
     int d = qk_isod;
     if (d) {
         qk_isod -= d;

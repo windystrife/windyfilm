@@ -37,6 +37,7 @@ extern int h_iso_whole, h_iso_refuse, h_htp;             /* body: whole stops on
  * lens_set_rawaperture calls / a body that refuses the aperture */
 extern int gui_state, lv_dispsize, af_mode;
 extern volatile int h_disp_idle, h_mz_cd, h_mz_n, h_mz_en, h_av_n, h_av_refuse;
+extern volatile int h_tv_n, h_tv_refuse;                 /* lens_set_rawshutter calls / a body that keeps its Tv */
 
 /* lens_info fields by name */
 int  h_li_get(const char *field);

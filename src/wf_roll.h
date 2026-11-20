@@ -133,6 +133,10 @@ int  wf_roll_iso_step(int code, int dir, int lo, int hi, int third);
  * or the 1/2-stop grid (half 1: 0, 4) inside lo..hi (the lens' widest and smallest; an end off the grid counts too);
  * at an end: code */
 int  wf_roll_av_step(int code, int dir, int lo, int hi, int half);
+/* the quick keys' ring in plain LiveView (owner RAWB28, 11-20): Canon moved its own Tv / aperture code from `from` to
+ * `to`; the clicks of that turn, signed (> 0: a bigger code): the codes passed on the 1/3-stop grid (code % 8 = 0, 3, 5)
+ * or, when either code is a half (% 8 = 4), the 1/2-stop grid; at least one when the codes differ; 0 for a code <= 0 */
+int  wf_roll_dial_clicks(int from, int to);
 int  wf_roll_av_f10(int code);                  /* the f-number x 10 of an aperture code (8 = f/1.0), 0 = none */
 
 #endif

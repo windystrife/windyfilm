@@ -14,6 +14,12 @@ Thay đổi 15/11 (sau log RAWB9):
 - (15/11 tối) Cuộn bằng lon Film stage (âm bản x print stock) và các hàng knob (11 hàng từ 16/11): mục 4
   "CUỘN PHIM FILM STAGE", thử ở 5s.
 
+Thay đổi 20/11 (thẻ RAWB28, nhánh wf-onescreen, từ RAWB27):
+- Phím tắt Quick keys: xoay vòng sau DOWN giờ đổi ISO / khẩu thật (thẻ RAWB27 chỉ đổi
+  được chế độ vòng, xoay thì Canon tự đổi tốc độ). Ở LiveView Canon không gửi mã vòng xoay
+  cho ML; module đọc lại nấc Canon vừa đổi (Tv ở M / Tv, khẩu ở Av), trả về như cũ, rồi đổi
+  ISO / khẩu đúng số nấc. Ở P: vòng vẫn là của Canon (dịch chương trình). Thử ở bước al.
+
 Thay đổi 18/11 (thẻ RAWB27, nhánh wf-onescreen, từ RAWB26):
 - RAW after Darkroom chọn ngay lúc tráng: dòng thứ 5 "RAW files" của khối PRINT trên màn
   hình Darkroom (Keep in DCIM / Move to ROLLS), cùng một cài đặt với hàng menu RAW after
@@ -595,6 +601,19 @@ ak. (18/11, RAWB27) Dòng "RAW files" trong Darkroom và chữ trên bản in.
       một tấm dọc. Dòng 2-3 (tiêu cự, khẩu, tốc, ISO; phim · Print · Grain ...) và "ROLL
       ... · nn/nn" đọc rõ hơn bản RAWB26, vẫn nằm trong viền dưới; dòng 1, logo Canon +
       "EOS M" và ngày cam như cũ. Nói lại nếu muốn đậm / to hơn nữa hay quay về như cũ.
+
+al. (20/11, RAWB28) Phím tắt xoay vòng (Shoot > WindyFilm > Quick keys = DOWN ring).
+   1. M, LiveView, lens EF-M, tốc độ 1/125. Bấm nhanh DOWN: hộp "ISO ... [RING] ISO".
+      Xoay vòng một nấc sang phải: ISO lên 1/3 nấc, tốc độ trên màn Canon có thể nháy rồi
+      về 1/125. Xoay trái: ISO xuống. Xoay nhanh 4-5 nấc: ISO theo kịp không (ghi lại nấc
+      nào bị mất).
+   2. DOWN lần nữa: "f/..." rồi xoay: khẩu đổi, tốc độ vẫn 1/125. DOWN lần nữa: vòng về
+      Canon (xoay thì tốc độ đổi như thường).
+   3. Av: DOWN, xoay: ISO đổi, khẩu về như cũ. Tv: ISO đổi, tốc độ về như cũ.
+   4. P: DOWN: hộp "P: the ring shifts. Tv, Av or M", vòng vẫn dịch chương trình.
+   5. Ghi lại: nháy tốc độ / khẩu trên màn có khó chịu không, có lần nào tốc độ không về
+      số cũ không. Gửi WINDYFLM.LOG (các dòng "keys: ring read ...", "keys: ring turn ...")
+      và ML/LOGS/KEYTRACE.LOG.
 
 
 6. GỬI LẠI

@@ -7,6 +7,14 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
 dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB28 (20/11, nhánh wf-onescreen, từ RAWB27): sửa phím tắt.
+- Quick keys (DOWN ring): xoay vòng sau DOWN giờ đổi ISO / khẩu thật. Log thẻ RAWB27 cho
+  thấy ở LiveView Canon không gửi mã vòng xoay cho ML, chỉ tự đổi tốc độ (M). Module giờ
+  đọc lại nấc Canon vừa đổi (Tv ở M / Tv, khẩu ở Av), trả Tv / khẩu về như cũ rồi đổi ISO
+  (hay khẩu) đúng số nấc đó. Ở P vòng xoay là dịch chương trình: DOWN báo "P: the ring
+  shifts. Tv, Av or M" và vòng vẫn là của Canon.
+Xem mục 3 bước 22; HUONGDAN_DARKROOM_EOSM.txt bước al.
+
 Thẻ RAWB27 (18/11, nhánh wf-onescreen, từ RAWB26): hai thứ nhỏ theo ý anh.
 - RAW after Darkroom chọn ngay lúc tráng: dòng thứ 5 "RAW files" trong khối PRINT của
   Darkroom (Keep in DCIM / Move to ROLLS), cùng cài đặt với hàng menu. Camera JPEG = Keep
@@ -294,6 +302,10 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
 21. (18/11, RAWB27) Darkroom, dòng thứ 5 "RAW files": mờ với Camera JPEG = Keep, sáng với
    Overwrite; trái / phải / vòng xoay đổi Keep in DCIM / Move to ROLLS, hàng menu đổi theo.
    Bản in có viền + Info: dòng 2-3 và chữ ROLL rõ hơn RAWB26. HUONGDAN bước ak.
+22. (20/11, RAWB28) Phím tắt: M, LiveView, DOWN nhanh rồi xoay vòng: ISO đổi 1/3 nấc mỗi
+   nấc xoay, tốc độ trên màn Canon nháy rồi về số cũ; log "keys: ring turn 1 (Tv code ...
+   put back ...)" rồi "keys: ISO ...". DOWN lần nữa: khẩu đổi. Av: ISO đổi, khẩu về như
+   cũ. P: hộp báo "P: the ring shifts". HUONGDAN bước al.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

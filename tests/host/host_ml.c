@@ -724,6 +724,15 @@ int lens_set_rawaperture(int a)
     h_li_set("aperture", a);
     return 1;
 }
+/* the quick keys' ring in plain LiveView (owner RAWB28): Canon moves its own Tv, the module puts it back */
+volatile int h_tv_n, h_tv_refuse;
+int lens_set_rawshutter(int s)
+{
+    h_tv_n++;
+    if (h_tv_refuse) return 0;
+    h_li_set("shutter", s);
+    return 1;
+}
 void lens_set_wbs_gm(int v) { h_gm_last = v; h_li_set("gm", v); }
 void lens_set_wbs_ba(int v) { h_ba_last = v; h_li_set("ba", v); }
 int get_expsim(void) { return h_expsim; }

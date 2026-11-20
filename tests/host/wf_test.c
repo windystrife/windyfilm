@@ -7127,6 +7127,15 @@ static int k_speed(int iso)                      /* a ready colour film of that 
 #define QK_LEFT 16
 #define QK_DOWN 19
 #define QK_TRASH 25
+/* the EOS M's real ring in plain LiveView (owner RAWB28 KEYTRACE.LOG 11-20): Canon's key event 0x54 reaches ML with no
+ * code (ML's module_translate_key gives the module key 0), then Canon moves its own code (Tv in M / Tv, the aperture
+ * in Av) and ML's property handler puts it into lens_info */
+static void qk_canon_turn(const char *field, int code)
+{
+    chk(cbr_key(0) == 1, "Canon's 0x54 (key 0) goes on");
+    if (field)
+        h_li_set(field, code);
+}
 static int qk_quiet(const char *what)             /* every key goes on and no ring / zoom log */
 {
     log_mark();
@@ -7215,6 +7224,86 @@ static void t_qkeys(void)
     log_mark();
     cbr_key(QK_UP);
     chk(cbr_key(QK_WR) == 1 && LOGW("keys: ring back to the camera", 3000), "UP (Canon's Av +-): the ring back");
+    /* the camera's own sequence (owner RAWB28 KEYTRACE.LOG, 14.1 s: E 54 + E 2c = DOWN, then E 54 alone four times while
+     * the ring was ISO, and WINDYFLM.LOG shows no ISO step): no WHEEL code ever comes, Canon moves Tv a third a turn */
+    h_li_set("shutter", 104);                     /* 1/125 */
+    log_mark();
+    qk_canon_turn(0, 0);                          /* E 54 right before the DOWN */
+    chk(cbr_key(QK_DOWN) == 1 && LOGW("keys: ring ISO (ISO 320)", 3000)
+        && LOGW("keys: ring read from Canon's Tv (code 104, mode 3)", 3000), "replay: DOWN = the ISO ring, read from Tv ('%s')",
+        log_line("keys: ring read"));
+    usleep(100000);
+    int tn = h_tv_n;
+    qk_canon_turn("shutter", 107);                /* E 54, Canon: 1/125 -> 1/160 */
+    chk(WAIT(h_li_get("iso") == 88, 3000) && LOGW("keys: ISO 400", 3000), "replay: Canon's Tv a third up -> ISO 400 (code %d)",
+        h_li_get("iso"));
+    chk(LOGW("keys: ring turn 1 (Tv code 104 -> 107, put back: 104)", 3000) && h_li_get("shutter") == 104 && h_tv_n == tn + 1,
+        "replay: Tv put back to 1/125 (code %d, %d asks, '%s')", h_li_get("shutter"), h_tv_n - tn, log_line("ring turn"));
+    qk_canon_turn("shutter", 101);                /* a third down (1/100) */
+    chk(WAIT(h_li_get("iso") == 85, 3000) && WAIT(h_li_get("shutter") == 104, 2000), "replay: a turn down -> ISO 320, Tv back");
+    qk_canon_turn("shutter", 109);                /* two clicks before one look (1/200) */
+    chk(WAIT(h_li_get("iso") == 91, 3000) && LOGW("keys: ring turn 2 (Tv code 104 -> 109", 3000), "replay: two clicks at once "
+        "-> two thirds up, ISO 500 (code %d)", h_li_get("iso"));
+    h_clock_add_ms += 5000;
+    qk_canon_turn("shutter", 107);
+    chk(WAIT(h_li_get("iso") == 93, 3000), "replay: a turn 5 s later -> ISO 640 (code %d)", h_li_get("iso"));
+    log_mark();
+    h_clock_add_ms += 4000;
+    usleep(300000);
+    chk(!log_has("ring back to the camera"), "replay: the turns keep the ring (4 s after the last one)");
+    /* the aperture ring in M: Canon's Tv turn steps the aperture */
+    log_mark();
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring aperture (f/2.0)", 3000), "replay: DOWN again = the aperture ring ('%s')", log_line("keys:"));
+    usleep(100000);
+    qk_canon_turn("shutter", 107);
+    chk(WAIT(h_li_get("aperture") == 27, 3000) && WAIT(h_li_get("shutter") == 104, 2000) && LOGW("keys: f/2.2", 3000),
+        "replay: aperture ring, Canon's Tv up -> f/2.2, Tv back (code %d)", h_li_get("aperture"));
+    /* a body that keeps its Tv: no ISO on top, the ring goes back */
+    cbr_key(QK_HALF);
+    usleep(200000);
+    log_mark();
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring ISO", 3000), "replay: ISO ring");
+    usleep(100000);
+    h_tv_refuse = 1;
+    int rin = h_iso_n;
+    qk_canon_turn("shutter", 107);
+    chk(LOGW("keys: the camera kept Tv code 107 (asked 104): the ring goes back to the camera", 3000)
+        && LOGW("keys: ring back to the camera", 3000), "replay: Tv not put back: told, the ring back ('%s')",
+        log_line("kept"));
+    usleep(200000);
+    chk(h_iso_n == rin, "replay: no ISO step on top of Canon's Tv (%d asks)", h_iso_n - rin);
+    h_tv_refuse = 0;
+    h_li_set("shutter", 104);
+    /* Av: Canon's ring moves the aperture: put back, ISO a third */
+    shooting_mode = 2;
+    h_li_set("aperture", 32);
+    log_mark();
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: ring ISO", 3000), "replay Av: ISO ring");
+    usleep(100000);
+    int iso0 = h_li_get("iso");
+    qk_canon_turn("aperture", 35);
+    chk(WAIT(h_li_get("aperture") == 32, 3000) && WAIT(h_li_get("iso") == wf_roll_iso_step(iso0, 1, 72, 128, 1), 3000)
+        && LOGW("keys: ring turn 1 (aperture code 32 -> 35, put back: 32)", 3000), "replay Av: Canon's aperture up -> put "
+        "back, ISO a third up (code %d -> %d)", iso0, h_li_get("iso"));
+    cbr_key(QK_HALF);
+    usleep(200000);                               /* (wf_task sees the ring go back before the next DOWN) */
+    /* P: the ring shifts the program, no ISO ring */
+    shooting_mode = 0;
+    log_mark();
+    tn = h_tv_n;
+    rin = h_iso_n;
+    cbr_key(QK_DOWN);
+    chk(LOGW("keys: in P the ring shifts the program: the ISO ring needs Tv, Av or M", 3000), "replay P: told ('%s')",
+        log_line("keys:"));
+    qk_canon_turn("shutter", 107);
+    usleep(300000);
+    chk(h_tv_n == tn && h_iso_n == rin && h_li_get("shutter") == 107, "replay P: Canon's shift left alone");
+    h_li_set("shutter", 104);
+    shooting_mode = 3;
+    h_li_set("aperture", 24);
     /* Av: no aperture step (Canon's ring sets it); a scene mode: no ISO ring */
     shooting_mode = 2;
     log_mark();

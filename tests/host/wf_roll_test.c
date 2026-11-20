@@ -218,6 +218,12 @@ int main(void)
         CHECK(wf_roll_av_step(24, -1, 24, 80, 0) == 24 && wf_roll_av_step(80, 1, 24, 80, 0) == 80
               && wf_roll_av_step(27, -1, 26, 80, 0) == 26 && wf_roll_av_step(26, 1, 26, 80, 0) == 27
               && wf_roll_av_step(0, 1, 24, 80, 0) == 0, "the lens' ends stay, an end off the grid counts, no aperture: 0");
+        CHECK(wf_roll_dial_clicks(104, 107) == 1 && wf_roll_dial_clicks(104, 109) == 2 && wf_roll_dial_clicks(104, 112) == 3
+              && wf_roll_dial_clicks(107, 104) == -1 && wf_roll_dial_clicks(112, 104) == -3,
+              "a turn read back from Canon's code: thirds up / down");
+        CHECK(wf_roll_dial_clicks(104, 108) == 1 && wf_roll_dial_clicks(104, 112 + 4) == 3 && wf_roll_dial_clicks(108, 104) == -1
+              && wf_roll_dial_clicks(106, 107) == 1 && wf_roll_dial_clicks(106, 106) == 0 && wf_roll_dial_clicks(0, 107) == 0
+              && wf_roll_dial_clicks(107, 0) == 0, "halves, an end off the grid (one), no move / no code: 0");
         CHECK(wf_roll_av_f10(32) == 28 && wf_roll_av_f10(35) == 32 && wf_roll_av_f10(37) == 35 && wf_roll_av_f10(36) == 35
               && wf_roll_av_f10(56) == 80 && wf_roll_av_f10(64) == 110 && wf_roll_av_f10(21) == 18 && wf_roll_av_f10(8) == 10
               && wf_roll_av_f10(0) == 0 && wf_roll_av_f10(31) == 28 && wf_roll_av_f10(26) == 22,

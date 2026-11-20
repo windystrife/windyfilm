@@ -1461,8 +1461,10 @@ ring, and there is no zoom key. EOS M only (the 5D2 has an ISO button and two di
   DOWN and the ring centre (Q/SET) are offered to modules (`module_offer_key`) before the core starts its long-press
   timers; a module that lets them go on keeps the long press (DOWN 500 ms: TRASH, the WindyFilm browser; SET 500 ms:
   Canon's Quick Control). A short DOWN or SET did nothing in LiveView (`longpress_check` fakes the short press only in
-  the ML menu). LEFT / RIGHT / UP, the ring (`WHEEL_*`), INFO, MENU, PLAY, the shutter come through
-  `handle_module_keys` before Canon. No unpress of DOWN / LEFT / RIGHT reaches a module (`BGMT_UNPRESS_UDLR` is not
+  the ML menu). LEFT / RIGHT / UP, INFO, MENU, PLAY, the shutter come through `handle_module_keys` before Canon.
+  **The ring does not** (owner RAWB28 KEYTRACE.LOG, 20-11, M mode): in plain LiveView (GUI mode 0) Canon turns it into
+  its own exposure change and ML's GUI queue gets only `GMT_GUICMD_PRESS_BUTTON_SOMETHING` (0x54, arg 0) per click, no
+  `WHEEL_*` code, which the module sees as key 0 (as on the 5D2 in LiveView, 3.x Keys). No unpress of DOWN / LEFT / RIGHT reaches a module (`BGMT_UNPRESS_UDLR` is not
   there on the EOS M). Canon's own: ring = shutter (M) / aperture (Av) / shift (P); UP = Av / exposure comp.; LEFT =
   drive mode; RIGHT = AE lock; DOWN = erase (PLAY).
 - **The row** `Quick keys` (Shoot > WindyFilm, config `qkeys=off|down|lr`): **DOWN ring** (default, takes nothing of
@@ -1471,6 +1473,15 @@ ring, and there is no zoom key. EOS M only (the 5D2 has an ISO button and two di
   LiveView; drive mode stays on the Q screen): LEFT / RIGHT set ISO a third down / up, DOWN gives the aperture ring.
   **Off**: the keys do what they did. Both mappings: **SET with manual focus** (MF, or a lens without contacts) turns
   ML's Magic Zoom on / off.
+- **The ring read back from Canon** (RAWB28): while the ring is ours, `qk_watch` (wf_task, each pass) keeps the code
+  Canon's ring moves in this mode: Tv in M and Tv, the aperture in Av (`lens_info.raw_shutter` / `raw_aperture`, from
+  ML's property handlers). When Canon moves it, the turn's clicks (`wf_roll_dial_clicks`: the 1/3- or 1/2-stop grid
+  codes passed, signed; a bigger code = up, so the camera's own dial direction setting holds) go to ISO / aperture and
+  the code is put back (`lens_set_rawshutter` / `lens_set_rawaperture`), as ML's Expo lock follows Canon's changes.
+  Each caught turn counts as a turn for the 6 s. A code Canon will not take back: no ISO step on top, the ring goes
+  back to the camera. P shifts the program (Tv and aperture together, no way back): DOWN in P says so ("P: the ring
+  shifts. Tv, Av or M", 2.5 s) and the ring stays Canon's; L/R ISO still works in P. `WHEEL_*` keys, if a body sends
+  them, are still taken as before. Seen for a moment on Canon's display: its Tv / aperture steps and comes back.
 - **How:** `wf_main.c` maps the keys (`wf_qk_map`) and `wf_qk_key` (GUI task, `wf_menu.c`) only notes: the ring mode,
   turns, L/R steps, the zoom toggle; DOWN and SET always go on (their long presses stay). A long DOWN's TRASH, 6 s
   without a turn, the shutter, UP, LEFT / RIGHT (DOWN ring), INFO / MENU / PLAY / Q give the ring back. `wf_qk_poll`
@@ -1491,18 +1502,27 @@ ring, and there is no zoom key. EOS M only (the 5D2 has an ISO button and two di
 - **Log:** `keys: ring ISO (ISO 400)`, `keys: ISO 500`, `keys: ISO 200 (whole stops)`, `keys: ISO 250 not taken by the
   camera (ISO 200)`, `keys: ring aperture (f/2.8)`, `keys: f/3.2`, `keys: ring back to the camera`, `keys: Magic Zoom
   on` / `off` / `off (the screen changed)` / `off (focus on AF again)`, `keys: Magic Zoom needs ML Overlay > Magic
-  Zoom`, `keys: ISO is set by the camera in this mode (9)`.
+  Zoom`, `keys: ISO is set by the camera in this mode (9)`; RAWB28: `keys: ring read from Canon's Tv (code 104, mode
+  3)`, `keys: ring turn 1 (Tv code 104 -> 107, put back: 104)`, `keys: the camera kept Tv code 107 (asked 104): the ring
+  goes back to the camera`, `keys: in P the ring shifts the program: the ISO ring needs Tv, Av or M`.
 - **Imports** (both `.sym`, W11): `display_idle`, `gui_state`, `lv_dispsize`, `is_manual_focus`,
   `zoom_overlay_set_countdown`, `menu_get_value_from_script`, `lens_set_rawaperture`, `raw2iso` (with
-  `lens_set_rawiso`, `get_htp` from 3.16).
+  `lens_set_rawiso`, `get_htp` from 3.16); RAWB28 `lens_set_rawshutter`. (A `CBR_KEYPRESS_RAW` counter of the 0x54
+  events was tried and dropped: the gate finds that core name among the third-party module's strings; the core's
+  KEYTRACE build logs them anyway.)
 - **Checks:** `wf_roll_test` (ISO steps: thirds, whole, Auto, ends, HTP; aperture steps: thirds, halves, the lens'
   ends; f-numbers); `test.sh` QKEYS (EOS M: the whole DOWN ring cycle, ring turns used / passed, the four ways back,
   Av, a scene mode, the six not-LiveView cases, Auto ISO, whole stops, a refusal, L/R ISO, Off, Magic Zoom on / off /
   Q screen / AF / not on in ML / no Global Draw, a lens without contacts, unload; 5D2: every key goes on);
   `dr_run.sh` (the box's renders, clear of the roll HUD's widest and the notice box, CLEAR gives every pixel back, a
   narrow box over a wide one).
-- **Not checked on the camera:** which way the ring turns count (right = up here), the ring's events on the EOS M
-  (`WHEEL_LEFT / RIGHT` taken as the ring), how fast Canon takes ISO / aperture while the ring turns, Magic Zoom's
+- **Checks (RAWB28):** `wf_roll_test` (clicks: thirds up / down, halves, an end off the grid, none); QKEYS replays the
+  owner's KEYTRACE (0x54 as key 0 goes on, Canon's Tv a third up / down / two at once -> ISO, Tv put back, a turn keeps
+  the ring past the DOWN's 6 s, the aperture ring from Tv, a body that keeps its Tv, Av from the aperture, P told and
+  left alone).
+- **Not checked on the camera:** the RAWB28 read-back itself (that Canon's Tv / aperture property comes back to
+  `lens_info` while the ring turns, how long the put-back shows on Canon's display, clicks lost when turned very fast
+  or with Tv at its end), how fast Canon takes ISO / aperture while the ring turns, Magic Zoom's
   countdown rate (40 passes), the box over Canon's LiveView info.
 
 ### 3.18 The Darkroom on the 5D Mark II (owner 2026-11-17, branch `dark-5d2`)

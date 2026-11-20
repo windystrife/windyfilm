@@ -553,6 +553,20 @@ int wf_roll_av_step(int code, int dir, int lo, int hi, int half)
     return code;
 }
 
+int wf_roll_dial_clicks(int from, int to)
+{
+    if (from == to || from <= 0 || to <= 0)
+        return 0;
+    int s = to > from ? 1 : -1, half = (from & 7) == 4 || (to & 7) == 4, n = 0;
+    int lo = s > 0 ? from + 1 : to, hi = s > 0 ? to : from - 1;
+    for (int c = lo; c <= hi; c++) {
+        int m = c & 7;
+        if (half ? m == 0 || m == 4 : m == 0 || m == 3 || m == 5)
+            n++;
+    }
+    return s * (n ? n : 1);
+}
+
 /* Canon's f-numbers by stop (code 8 = f/1.0, 8 codes a stop): whole, +1/3, +1/2, +2/3; the eighths between them
  * (a lens' own end) show as the nearest of these */
 int wf_roll_av_f10(int code)
