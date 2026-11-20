@@ -146,7 +146,11 @@ static int disp_seen = 1;                                   /* the display read 
  * wait for the Darkroom / Keep the roll), a finished one is set aside at once (wf_roll_shelve, wf_dark.h), an empty
  * one comes out. Focus (11-17, round 2): the top bar holds the section pill and this chip (below). EOS M (RAW develop and rolls are EOS M only): the 5D2 keeps the film chip.
  * The Roll picker screen is gone (owner 11-17: "the WindyFilm UI is nicer"): the ML menu's Film roll and the end-of-roll
- * notice's INFO open this browser in Darkroom mode on the Exposures row (wf_ui_open_scr(WF_UI_NEW_ROLL), new_roll_view). */
+ * notice's INFO open this browser in Darkroom mode on the Exposures row (wf_ui_open_scr(WF_UI_NEW_ROLL), new_roll_view).
+ * The Blind roll row under it (owner RAWB28, 20-11: "trước đây bấm play ko thấy được ảnh lúc liveview h thì có tùy chọn
+ * cho nhìn thấy"): the ML menu's Blind roll, the same setting (wf_blind, cfg blind). On (default) = as film: no image
+ * review and PLAY blocked while the roll is in the camera; Off = Canon's review after each shot and PLAY shows the
+ * frames (Canon's own JPEGs: the film look comes at the Darkroom). */
 /* The section pill (owner 11-17, DESIGN 3.14) at the top left: Film | Film stage. Each section has its own tabs (TAP
  * cycles them, the counter counts inside it): Film = Colour / Cine / B&W / Film LUT, Film stage = the chain films by
  * their negative's family (Vision3 / Vision / ECN-EXR / Fuji / B&W). The section is the film under the cursor's; the
@@ -165,6 +169,7 @@ enum { M_JPEG = 0, M_RAW, M_DARK, M_N };
 static const char *const mode_name[M_N] = { "JPEG", "RAW develop", "Darkroom" };
 #define FOC_TOP  (-2)                           /* focus on the top bar: the section pill or the mode chip (tsub) */
 #define FOC_EXP  (-1)                           /* focus on the Exposures row (a roll can be loaded) */
+#define FOC_BLIND (-3)                          /* focus on the Blind roll row (under Exposures) */
 #define NEXP 5
 static const int exps[NEXP] = { 3, 6, 12, 24, 36 };
 static int mode_dk;                             /* Darkroom picked on the chip, no roll on the camera yet */
@@ -235,8 +240,8 @@ static int mode_now(void)
 }
 static const char *mname(int m) { return m == M_JPEG && sec_now() ? "JPEG 8-bit" : mode_name[m]; }
 static inline int dkm(void) { return mode_now() == M_DARK; }
-/* the Exposures row and SET = a roll: Film in Darkroom mode, Film stage in every mode */
-static int rollrows(void) { return !pick && mode_ok(M_DARK) && (sec_now() || dkm()); }
+/* the Exposures and Blind roll rows (2, else 0) and SET = a roll: Film in Darkroom mode, Film stage in every mode */
+static int rollrows(void) { return !pick && mode_ok(M_DARK) && (sec_now() || dkm()) ? 2 : 0; }
 /* a roll still shooting with frames keeps its count (the Exposures row shows it, greyed); a finished one (full, rewound)
  * leaves the row to the next roll: SET on a can then asks to close it and load that count (the close-and-load question) */
 static int exp_locked(void)
@@ -246,21 +251,26 @@ static int exp_locked(void)
 }
 static int exp_now(void) { return exp_locked() ? wf_roll_now()->exp : exps[exp_i]; }
 
-/* positions UP / DOWN walk: the top bar, [Exposures], the WF_NROWS rows; lines (the list that scrolls): [Exposures] rows */
+/* positions UP / DOWN walk: the top bar, [Exposures, Blind roll], the WF_NROWS rows; lines (the list that scrolls):
+ * [Exposures, Blind roll] rows */
 static int nlines(void) { return WF_NROWS + rollrows(); }
-static int line_of(int f) { return f == FOC_EXP ? 0 : f >= 0 ? f + rollrows() : -1; }
+static int line_of(int f) { return f == FOC_EXP ? 0 : f == FOC_BLIND ? 1 : f >= 0 ? f + rollrows() : -1; }
 static int npos(void) { return nlines() + 1; }
 static int pos_of(int f) { return f == FOC_TOP ? 0 : line_of(f) + 1; }
 static int foc_at(int p)
 {
     if (!p--) return FOC_TOP;
-    if (rollrows() && !p--) return FOC_EXP;
+    if (rollrows())
+    {
+        if (!p--) return FOC_EXP;
+        if (!p--) return FOC_BLIND;
+    }
     return p;
 }
 /* the focus still valid (the mode may change under it: a roll loaded / closed by wf_task) and its line on screen */
 static void focus_fix(void)
 {
-    if ((focus == FOC_EXP && !rollrows()) || focus >= WF_NROWS || focus < FOC_TOP)
+    if (((focus == FOC_EXP || focus == FOC_BLIND) && !rollrows()) || focus >= WF_NROWS || focus < FOC_BLIND)
         focus = WF_ROW_LIGHT;
     if (!chip_on()) tsub = 0;
     int l = line_of(focus), top_max = nlines() - ROWS_VIS;
@@ -619,6 +629,14 @@ static void exp_step(int d)
     dirty = 1;
 }
 
+/* the Blind roll row: the ring / LEFT / RIGHT (5D2 edit) switch it, either way */
+static void blind_step(void)
+{
+    wf_blind_set(!wf_blind);
+    wf_log("ui: blind roll %s", wf_blind ? "on" : "off");
+    dirty = 1;
+}
+
 static void pick_back(const struct wf_film *f);
 static void load_sel(void)
 {
@@ -666,6 +684,7 @@ static void step_row(int d)
 {
     if (focus == FOC_TOP) { top_step(d); return; }
     if (focus == FOC_EXP) { exp_step(d); return; }
+    if (focus == FOC_BLIND) { blind_step(); return; }
     int id = row_film();
     if (!wf_row_avail_for(focus, id)) return;
     if (wf_row_step_for(focus, d, id)) dirty = 1;
@@ -991,6 +1010,41 @@ static void draw_exp_line(int y, int A, int AD, int last)
     if (!foc && !last) wfg_rect(294, y + 18, 700, y + 18, C_SEP);
 }
 
+/* the Blind roll row (under Exposures): Off / On in pills as the counts are; the note beside the name says what PLAY
+ * does with the roll in. The icon: an eye, struck through while the roll is blind */
+static void draw_blind_line(int y, int A, int AD, int last)
+{
+    int foc = focus == FOC_BLIND, on = wf_blind != 0;
+    if (foc)
+    {
+        wfg_rrect(258, y - 1, 708, y + 18, 6, AD, -1, 1);
+        wfg_rrect(258, y - 1, 261, y + 18, 2, A, -1, 0);
+    }
+    int ic = foc ? A : C_TXT3;
+    wfg_rrect(270, y + 4, 286, y + 14, 5, -1, ic, 1);                /* the eye */
+    wfg_ellipse(275, y + 6, 281, y + 12, ic);                        /* its pupil */
+    if (on)                                                          /* struck through */
+        for (int k = 0; k < 15; k++) wfg_rect(271 + k, y + 16 - k, 272 + k, y + 16 - k, ic);
+    int nx = 294 + ui_text(F_15, 294, y, "Blind roll", foc ? C_TXT : C_TXT2);
+    ui_text(F_13, nx + 10, y + 2, on ? "no review, no PLAY" : "review + PLAY show the frames", foc ? C_TXT2 : C_TXT3);
+    static const char *const v[2] = { "Off", "On" };
+    int xr = foc ? 684 : 700, xl = xr;
+    for (int k = 1; k >= 0; k--)
+    {
+        int w = ui_textw(F_15, v[k]), x = xr - w, cur = k == on;
+        if (cur) wfg_rrect(x - 6, y, x + w + 5, y + 17, 8, foc ? A : -1, A, 1);
+        ui_text(F_15, x, y, v[k], cur ? (foc ? C_BGLAST : C_TXT) : C_TXT3);
+        xl = x - 6;
+        xr = x - 16;
+    }
+    if (foc)
+    {
+        wfg_tri(694, y + 4, 699, y + 9, 694, y + 14, A);
+        wfg_tri(xl - 7, y + 4, xl - 12, y + 9, xl - 7, y + 14, A);
+    }
+    if (!foc && !last) wfg_rect(294, y + 18, 700, y + 18, C_SEP);
+}
+
 /* Film stage (owner 11-17): two EXIF lines under the film's chips, what the develop writes (wf_exif_text, DESIGN 3.14):
  *   EXIF  <negative> -> <print stock> . Exp <film exp> . Push <n> . Comp <exp comp>
  *         Printer R/G/B . Interlayer <n> . <Light>
@@ -1060,7 +1114,12 @@ static void draw_info_column(const struct wf_film *f, int g)
     for (int li = rtop; li < rtop + ROWS_VIS && li < nl; li++)
     {
         int y = 136 + (li - rtop) * 19, r = li - dk;
-        if (r < 0) { draw_exp_line(y, A, AD, li == rtop + ROWS_VIS - 1); continue; }
+        if (r < 0)
+        {
+            if (r == -dk) draw_exp_line(y, A, AD, li == rtop + ROWS_VIS - 1);
+            else draw_blind_line(y, A, AD, li == rtop + ROWS_VIS - 1);
+            continue;
+        }
         int foc = r == focus, av = wf_row_avail_for(r, f->id);
         if (foc)
         {

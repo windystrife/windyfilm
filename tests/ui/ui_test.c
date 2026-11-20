@@ -35,6 +35,7 @@ extern volatile int wf_rawb;
 extern volatile int wf_roll_look8;
 #define FOC_TOP  (-2)                           /* wf_ui.c's focus on the top bar: the section pill or the mode chip */
 #define FOC_EXP  (-1)
+#define FOC_BLIND (-3)                         /* the Blind roll row (under Exposures) */
 
 static const char *outdir;
 static int fails, closed;
@@ -107,7 +108,7 @@ static void go_to(const char *code)
             for (int i = 0; i < 40 && wfui_host_focus() != f0; i++)
             {
                 key(MODULE_KEY_PRESS_DOWN);
-                if (f0 == FOC_EXP && !wfui_host_rows()) break;  /* no Exposures row in this section: Light */
+                if ((f0 == FOC_EXP || f0 == FOC_BLIND) && !wfui_host_rows()) break;  /* no roll rows here: Light */
             }
     }
     for (int i = 0; i < 5 && wfui_host_tab() != tt; i++) key(MODULE_KEY_Q);
@@ -1004,9 +1005,23 @@ int main(int argc, char **argv)
     CHECK(wfui_host_exp() == 3, "the ring right past 36: 3 (%d)", wfui_host_exp());
     key(MODULE_KEY_WHEEL_LEFT);
     key(MODULE_KEY_WHEEL_LEFT);
+    /* the Blind roll row under Exposures (owner RAWB28: PLAY may show a roll's frames): the ML menu's setting, either
+     * way the ring turns it; the config saves it */
     key(MODULE_KEY_PRESS_DOWN);
-    CHECK(wfui_host_focus() == WF_ROW_LIGHT, "DOWN from Exposures: Light (%d)", wfui_host_focus());
+    CHECK(wfui_host_focus() == FOC_BLIND && wf_blind == 1, "DOWN from Exposures: Blind roll, On (focus %d, %d)",
+          wfui_host_focus(), wf_blind);
+    shot("one_blind_on");
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wf_blind == 0 && wfui_host_exp() == 24, "the ring on Blind roll: Off, the count kept (%d, %d)", wf_blind,
+          wfui_host_exp());
+    shot("one_blind_off");
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wf_blind == 1, "the ring left: On again (%d)", wf_blind);
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_LIGHT, "DOWN from Blind roll: Light (%d)", wfui_host_focus());
     key(MODULE_KEY_PRESS_UP);
+    key(MODULE_KEY_PRESS_UP);
+    CHECK(wfui_host_focus() == FOC_EXP, "UP x2 from Light: Exposures (%d)", wfui_host_focus());
     shot("one_dark_noroll");
     CHECK(key(MODULE_KEY_PRESS_SET) == 0 && fake_req_film() == id_of("PRT160") && fake_req_exp() == 24
           && wf_roll_now()->state == WF_RS_LOADED && wfui_host_anim(), "SET: a roll of 24 PRT160 (asked %d x%d)",
@@ -1023,18 +1038,20 @@ int main(int argc, char **argv)
     CHECK(wfui_host_mode() == 2 && wfui_host_exp() == 24 && wfui_host_focus() == WF_ROW_LIGHT,
           "a roll with frames: Darkroom, its 24 (mode %d)", wfui_host_mode());
     key(MODULE_KEY_PRESS_UP);
+    CHECK(wfui_host_focus() == FOC_BLIND, "UP from Light: Blind roll (%d)", wfui_host_focus());
+    key(MODULE_KEY_PRESS_UP);
     key(MODULE_KEY_WHEEL_LEFT);
-    CHECK(wfui_host_exp() == 24 && strstr(wfui_host_msg(), "keeps its count"), "the roll's count stays ('%s')",
-          wfui_host_msg());
+    CHECK(wfui_host_exp() == 24 && strstr(wfui_host_msg(), "keeps its count") && wf_blind == 1,
+          "the roll's count stays ('%s')", wfui_host_msg());
+    key(MODULE_KEY_PRESS_DOWN);
     key(MODULE_KEY_PRESS_DOWN);
     tick(150);                                                      /* the message times out */
     shot("one_dark_roll");
     go_to("SUN200");
     CHECK(key(MODULE_KEY_PRESS_SET) == 0 && !wfui_host_anim() && !closed && strstr(wfui_host_msg(), "PLAY develops")
           && wf_roll_now()->film == id_of("PRT160"), "another film while the roll shoots: refused ('%s')", wfui_host_msg());
-    key(MODULE_KEY_PRESS_UP);
-    key(MODULE_KEY_PRESS_UP);
-    CHECK(wfui_host_focus() == FOC_TOP, "UP x2 from Light: the top bar (%d)", wfui_host_focus());
+    for (int i = 0; i < 3; i++) key(MODULE_KEY_PRESS_UP);
+    CHECK(wfui_host_focus() == FOC_TOP, "UP x3 from Light: the top bar (%d)", wfui_host_focus());
     key(MODULE_KEY_PRESS_RIGHT);
     key(MODULE_KEY_PRESS_SET);
     CHECK(wfui_host_leave() == 0 && wfui_host_mode() == 2 && wf_roll_now()->state == WF_RS_LOADED,

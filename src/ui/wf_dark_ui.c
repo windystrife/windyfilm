@@ -18,6 +18,7 @@
 #include "wf_ui_int.h"
 #include "../wf_dark.h"
 #include "../wf_print.h"                                   /* the finishes' setting values (WF_PFR_*, ...) */
+#include "../wf_photo.h"                                   /* the Darkroom's photos: their sizes (RAWB28) */
 #include "wf_icons.h"                                      /* wf_picons: the print rows' icons */
 
 #define MSG_MS 2600
@@ -252,7 +253,50 @@ static void luma_blit(const uint8_t *l, int lw, int lh, int x, int y, int w, int
     }
 }
 
-static void dr_ppreview(void);
+static void dr_ppreview(const struct wf_dark_photos *P);
+
+/* the Darkroom's photos (owner RAWB28, wf_dark.h): the picked roll's, 0 = none to show (INFO off, no roll, no frame) */
+static const struct wf_dark_photos *dr_ph;                 /* the last ones asked for: the tick redraws as they come */
+static uint32_t dr_phgen;
+static const struct wf_dark_photos *dr_photos(void)
+{
+    const struct dr_item *it = dr_cur();
+    dr_ph = 0;
+    if (!wf_dk_photo || !it) return 0;
+    dr_ph = wf_dark_photos(it->cam ? 0 : it->num, it->cam);
+    dr_phgen = dr_ph->gen;
+    return dr_ph->n > 0 ? dr_ph : 0;
+}
+
+/* the contact sheet (owner RAWB28): the roll's frames on the easel's paper in strips as a contact print of the
+ * negatives shows them (black film between, a portrait frame lying on its side): up to 6 strips of 6, a roll of up to 12
+ * frames 3 strips of 4 bigger; the safelight's mark under the frame the run prints first. A frame not read yet is grey,
+ * one without a photo (no CR2) dark with a dash */
+#define CS_Y 135
+static void dr_contact(const struct wf_dark_photos *P)
+{
+    int big = P->cw > WF_PH_CW, per = big ? 4 : 6, g = big ? 3 : 4, e = big ? 5 : 4, sg = big ? 6 : 2;
+    int cw = P->cw, ch = P->ch, sh = ch + 6, x0 = 184 - (per * cw + (per - 1) * g + 2 * e) / 2;
+    int n = P->n > (big ? WF_PH_LMAX : WF_DK_SHEET) ? (big ? WF_PH_LMAX : WF_DK_SHEET) : P->n;
+    for (int s = 0; s * per < n; s++)
+    {
+        int y = CS_Y + s * (sh + sg), m = n - s * per > per ? per : n - s * per;
+        wfg_rect(x0, y, x0 + m * (cw + g) - g + 2 * e - 1, y + sh - 1, C_DRY0);   /* the strip */
+        for (int j = 0; j < m; j++)
+        {
+            int k = s * per + j, x = x0 + e + j * (cw + g);
+            if (P->st[k] == WF_PHS_OK)
+                luma_blit(P->cell + k * cw * ch, cw, ch, x, y + 3, cw, ch, C_DRY0, DR_NDRY);
+            else
+            {
+                int none = P->st[k] == WF_PHS_NONE;
+                wfg_rect(x, y + 3, x + cw - 1, y + 2 + ch, none ? C_DRY0 + 3 : C_DRY0 + 9);
+                if (none) wfg_rect(x + cw / 2 - 6, y + 2 + ch / 2, x + cw / 2 + 5, y + 3 + ch / 2, C_DRY0 + 12);
+            }
+            if (k == P->big_frame) wfg_rect(x + 8, y + sh - 2, x + cw - 9, y + sh - 1, C_AMBER);
+        }
+    }
+}
 
 /* the print window: easel frame, paper, the print */
 #define PR_X 40
@@ -263,10 +307,16 @@ static void dr_easel(const struct wf_dark_view *v, int now)
     wfg_rect(30, 134, 338, 362, C_DEV0 + DR_NDEV - 1);                  /* paper (the brightest ramp step = paper) */
     wfg_rect(24, 126, 344, 128, C_FRAME);                                /* easel blades */
     wfg_rect(24, 368, 344, 370, C_FRAME);
-    if (v->print_ready && v->print)
+    /* the rows work (no run, or a run's end from before this visit): the picked roll's photos before the last print */
+    int idle = v->state != WF_DR_RUN && v->state != WF_DR_STOPPING && (v->state != WF_DR_DONE || dr_old);
+    const struct wf_dark_photos *P = idle ? dr_photos() : 0;
+    if (!idle) dr_ph = 0;
+    if (P && (dr_pfoc < 0 || dr_pfoc >= WF_PO_N))
+        dr_contact(P);                                     /* the chip, ROLL, Film: the roll's frames */
+    else if (v->print_ready && v->print && !(P && P->big_st == WF_PHS_OK))
         luma_blit(v->print, WF_DR_PW, WF_DR_PH, PR_X, PR_Y, WF_DR_PW, WF_DR_PH, C_DEV0, DR_NDEV);
-    else if (v->state != WF_DR_RUN && v->state != WF_DR_STOPPING && v->state != WF_DR_DONE)
-        dr_ppreview();                                     /* no print yet: how the finishes will look */
+    else if (idle)
+        dr_ppreview(P);                                    /* how the finishes will look on the frame printed first */
 }
 
 /* the wire with the hung prints; the newest one slides up from the easel for 700 ms */
@@ -402,10 +452,13 @@ static void dr_prows(void)
     }
 }
 
-/* the easel before a print: what the finishes look like, drawn small on the paper (the picture a plain scene) */
-static void dr_ppreview(void)
+/* the easel before a print: what the finishes look like, drawn small on the paper (the picture: the frame the run prints
+ * first, from its CR2, the right way up as the print turns it; no photo: a plain drawn scene) */
+static void dr_ppreview(const struct wf_dark_photos *P)
 {
     char b[24];
+    const uint8_t *pic = P && P->big_st == WF_PHS_OK && P->big ? P->big : 0;
+    int port = pic && P->big_h > P->big_w, iw = port ? 3456 : 5184, ih = port ? 5184 : 3456;
     int pf = wf_pr_frame, pi = wf_pr_info;
     int fr = pf == WF_PFR_WHITE || pf == WF_PFR_WHITE_W ? 1 : pf == WF_PFR_BLACK || pf == WF_PFR_BLACK_W ? 2 : 0;
     int wide = pf == WF_PFR_WHITE_W || pf == WF_PFR_BLACK_W;
@@ -414,18 +467,23 @@ static void dr_ppreview(void)
     const char *dt = wf_popt_text(WF_PO_DATE, b, sizeof b);
     /* proportions of the print (wf_print.h, at 3456 px): border 112 / 256, caption 464 */
     int bd = fr ? (wide ? 256 : 112) : 0, bb = bd + (info ? 464 : 0);
-    int dw = 5184 + 2 * bd, dh = 3456 + bd + bb;
+    int dw = iw + 2 * bd, dh = ih + bd + bb;
     int k = 288 * 1000 / dw < 212 * 1000 / dh ? 288 * 1000 / dw : 212 * 1000 / dh;   /* scale, 1/1000 */
     int w = dw * k / 1000, h = dh * k / 1000, x0 = 184 - w / 2, y0 = 248 - h / 2;
-    int px0 = x0 + bd * k / 1000, py0 = y0 + bd * k / 1000, pw = 5184 * k / 1000, ph = 3456 * k / 1000;
+    int px0 = x0 + bd * k / 1000, py0 = y0 + bd * k / 1000, pw = iw * k / 1000, ph = ih * k / 1000;
     int paper = C_DRY0 + DR_NDRY - 1, ink = C_DRY0 + 2;
     if (fr) wfg_rect(x0, y0, x0 + w - 1, y0 + h - 1, fr == 1 ? paper : C_DRY0);
-    for (int y = 0; y < ph; y++)                           /* sky to the horizon, then the ground */
+    if (pic)
+        luma_blit(pic, P->big_w, P->big_h, px0, py0, pw, ph, C_DRY0, DR_NDRY);
+    else
     {
-        int t = y < ph * 3 / 5 ? DR_NDRY - 6 - y * 10 / (ph * 3 / 5) : 9 - (y - ph * 3 / 5) * 5 / (ph - ph * 3 / 5);
-        wfg_rect(px0, py0 + y, px0 + pw - 1, py0 + y, C_DRY0 + t);
+        for (int y = 0; y < ph; y++)                       /* sky to the horizon, then the ground */
+        {
+            int t = y < ph * 3 / 5 ? DR_NDRY - 6 - y * 10 / (ph * 3 / 5) : 9 - (y - ph * 3 / 5) * 5 / (ph - ph * 3 / 5);
+            wfg_rect(px0, py0 + y, px0 + pw - 1, py0 + y, C_DRY0 + t);
+        }
+        wfg_ellipse(px0 + pw * 2 / 3, py0 + ph / 6, px0 + pw * 2 / 3 + ph / 6, py0 + ph / 6 + ph / 6, paper);   /* sun */
     }
-    wfg_ellipse(px0 + pw * 2 / 3, py0 + ph / 6, px0 + pw * 2 / 3 + ph / 6, py0 + ph / 6 + ph / 6, paper);   /* the sun */
     if (info)
     {
         int fg = fr == 1 ? ink : paper - 4, fg2 = fr == 1 ? C_DRY0 + 9 : C_DRY0 + 22, ty = py0 + ph + (bb - bd) * k / 2000;
@@ -495,6 +553,26 @@ static void dr_filmrow(int foc)
     if (ui_textw(F_15, nm) > maxw && f && f->shortname) nm = f->shortname;
     text_r(F_15, xr, y + 1, nm, dr_afilm && dr_afilm != dr_cur()->own ? C_AMBER : foc ? C_TXT : C_TXT2);
 }
+/* where a run puts the files (owner RAWB28): the idle block's two lines while Camera JPEG or RAW files has the focus.
+ * Canon's PLAY shows DCIM. The print is always written to ROLLS first, whatever the value (owner 20-11: "print có sẵn ở
+ * roll"): a value only picks the JPEG DCIM gets, and Print + over adds the picture (the look alone, no frame) to ROLLS.
+ * The frame Off: one file, the print */
+static int dr_where(const struct dr_item *it, int again)
+{
+    if (dr_pfoc != WF_PO_JPEG && dr_pfoc != WF_PO_RAW) return 0;
+    char a[64], b[64], nm[12];
+    int fr = wf_pr_frame != WF_PFR_OFF, pj = wf_pr_jpeg > WF_PJ_KEEP && wf_pr_jpeg < WF_PJ_N ? wf_pr_jpeg : WF_PJ_KEEP;
+    int mv = wf_pr_cr2 == WF_PC_MOVE && wf_popt_avail(WF_PO_RAW);
+    const char *d = pj == WF_PJ_KEEP ? "Canon's JPEG" : pj == WF_PJ_BOTH && fr ? "the picture" : "the print";
+    wf_roll_name(it->num, again ? it->dev + 1 : it->dev, nm);
+    snprintf(a, sizeof a, "PLAY (DCIM): %s%s", d, mv ? "" : " + CR2");
+    const char *x = pj == WF_PJ_PRINT && fr ? " + the picture" : "", *c = mv ? " + CR2" : "";
+    snprintf(b, sizeof b, "ROLLS/%s: the print (always)%s%s", nm, x, c);
+    if (ui_textw(F_13, b) > DR_RX1 - DR_RX0 - 8) snprintf(b, sizeof b, "ROLLS: the print (always)%s%s", x, c);
+    text_c(F_15, 540, DR_IY, a, C_TXT);
+    text_c(F_13, 540, DR_IY + 22, b, C_TXT2);
+    return 1;
+}
 /* the idle info block (no run, or a run's end from before): the ROLL row, the film (or the Film row), what it does */
 static void dr_idle(const struct wf_dark_view *v)
 {
@@ -531,6 +609,7 @@ static void dr_idle(const struct wf_dark_view *v)
         text_c(F_15, cx, 172, b, C_AMBER);
     }
     dr_prows();                                            /* the print finishes (no run: they can change) */
+    if (dr_where(it, again)) return;
     if (!dr_old && (v->state == WF_DR_STOPPED || v->state == WF_DR_FAIL))
         text_c(F_15, cx, DR_IY, v->msg && *v->msg ? v->msg : "Stopped", v->state == WF_DR_FAIL ? C_WARN : C_TXT);
     else if (it->cam)
@@ -647,8 +726,16 @@ static void dr_footer(const struct wf_dark_view *v)
     const char *const *k = v->state == WF_DR_RUN ? (dr_confirm ? k_conf : k_run)
                          : v->state == WF_DR_DONE && !dr_old ? k_done : dr_pfoc == DR_FOC_FILM ? k_film
                          : !dr_nit ? k_none : dr_again() ? k_again : k_idle;
-    hints(k, 16, 455, C_TXT2, C_TXT3);
-    int run = v->state == WF_DR_RUN || v->state == WF_DR_STOPPING;
+    const char *kk[8];
+    int n = 0, run = v->state == WF_DR_RUN || v->state == WF_DR_STOPPING;
+    for (; k[n] && n < 4; n++) kk[n] = k[n];
+    if (!run && (v->state != WF_DR_DONE || dr_old) && dr_nit)   /* the photos on the easel (owner RAWB28) */
+    {
+        kk[n++] = "INFO";
+        kk[n++] = wf_dk_photo ? "Hide photos" : "Show photos";
+    }
+    kk[n] = 0;
+    hints(kk, 16, 455, C_TXT2, C_TXT3);
     const char *h = run && wf_dk_scr == WF_DS_OFF ? "Screen Off: any key wakes it for 10 s"
                   : run ? "Keep the camera on"
                   : v->state == WF_DR_DONE && !dr_old ? "" : "The shutter is locked while the darkroom works";
@@ -748,6 +835,9 @@ static int dark_key(int key, int now)
         else if (dr_pfoc >= 0 && dr_pfoc < WF_PO_N)
             wf_popt_step(dr_pfoc, neg ? -1 : 1);
         break;
+    case MODULE_KEY_INFO:                                  /* the photos on the easel on / off (owner RAWB28) */
+        if (idle && dr_nit) { msg = 0; wf_dk_photo_set(!wf_dk_photo); }
+        break;
     case MODULE_KEY_MENU: case MODULE_KEY_TRASH: case MODULE_KEY_PLAY: case MODULE_KEY_LV:
         if (!run && dr_pfoc == DR_FOC_FILM && key == MODULE_KEY_MENU) { dr_pfoc = DR_FOC_ROLL; break; }
         if (!run) return 1;
@@ -774,6 +864,12 @@ static int dark_tick(int now)
     static int last_state = -1;
     if (v->state != last_state) { last_state = v->state; msg = 0; dr_confirm = 0; moved = 1; }
     if (v->gen != dr_gen) { dr_gen = v->gen; moved = 1; }
+    if (dr_ph)                                             /* the Darkroom's photos (RAWB28): asked again each tick (wf_task */
+    {                                                      /* reads while asked), drawn again as they come */
+        const struct dr_item *it = dr_cur();
+        const struct wf_dark_photos *p = it && wf_dk_photo ? wf_dark_photos(it->cam ? 0 : it->num, it->cam) : 0;
+        if (p != dr_ph || (p && p->gen != dr_phgen)) moved = 1;
+    }
     if (v->nwire && now - v->hung_ms >= 0 && now - v->hung_ms < 760) moved = 1;          /* sliding print */
     static int last_sec = -1;
     if ((v->state == WF_DR_RUN || v->state == WF_DR_STOPPING) && v->t_frame / 1000 != last_sec)

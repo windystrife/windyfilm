@@ -299,8 +299,8 @@ static const char *const wf_pfr_name[WF_PFR_N] = { "Off", "White", "Black", "Whi
 static const char *const wf_pin_key[WF_PIN_N] = { "off", "on", "roll" };
 static const char *const wf_pin_name[WF_PIN_N] = { "Off", "On", "On + roll" };
 static const char *const wf_pdt_key[WF_PDT_N] = { "off", "ymd", "dmy", "mdy" };
-static const char *const wf_pj_key[WF_PJ_N] = { "keep", "overwrite", "both" };
-static const char *const wf_pj_name[WF_PJ_N] = { "Keep", "Overwrite", "Over + print" };
+static const char *const wf_pj_key[WF_PJ_N] = { "keep", "overwrite", "both", "printover" };
+static const char *const wf_pj_name[WF_PJ_N] = { "Keep", "Overwrite", "Over + print", "Print + over" };
 static const char *const wf_j2_key[WF_J2_N] = { "prefix", "folder" };   /* the second JPEG's place (wf_dark.h) */
 static const char *const wf_pc_key[WF_PC_N] = { "keep", "move" };   /* RAW after Darkroom (wf_dark.h, DESIGN 3.9) */
 static const char *wf_pc_name[WF_PC_N] = { "Keep in DCIM", "Move to ROLLS" };
@@ -318,6 +318,16 @@ void wf_dk_scr_step(int d)
     if (!d)
         return;
     wf_dk_scr = wf_dk_scr == WF_DS_OFF ? WF_DS_ON : WF_DS_OFF;
+    wf_dirty();
+}
+void wf_dk_photo_set(int on)                    /* the Darkroom's photos (wf_dark.h, RAWB28): INFO on its screen */
+{
+    wf_dk_photo = on != 0;
+    wf_dirty();
+}
+void wf_blind_set(int on)                       /* Blind roll (wf_dark.h): this menu or the browser's row (RAWB28) */
+{
+    wf_blind = on != 0;
     wf_dirty();
 }
 
@@ -1004,6 +1014,8 @@ void wf_cfg_load(void)
             wf_pr_cr2 = wf_cfg_word(v, wf_pc_key, WF_PC_N, WF_PC_KEEP);
         } else if ((v = wf_cfg_val(l, "dkscreen"))) {
             wf_dk_scr = wf_cfg_word(v, wf_ds_key, WF_DS_N, WF_DS_ON);
+        } else if ((v = wf_cfg_val(l, "dkphoto"))) {
+            wf_dk_photo = wf_cfg_word(v, wf_rl_key, 2, 1);
         } else if ((v = wf_cfg_val(l, "rolllook"))) {
             wf_roll_look8 = wf_cfg_word(v, wf_rl_key, 2, 0);
         } else if ((v = wf_cfg_val(l, "stage"))) {
@@ -1074,7 +1086,7 @@ static int wf_cfg_save(void)
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
                      "strength=%s\nhl=%d\nsh=%d\npaper=%s\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\n"
                      "exposure=%s\nexptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\njpeg=%s\njpeg2=%s\ncr2=%s\ndkscreen=%s\n"
-                     "rolllook=%s\nshoulder=%s\nqkeys=%s\n",
+                     "dkphoto=%s\nrolllook=%s\nshoulder=%s\nqkeys=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
@@ -1087,7 +1099,7 @@ static int wf_cfg_save(void)
                      wf_pick(wf_pin_key, WF_PIN_N, wf_pr_info), wf_pick(wf_pdt_key, WF_PDT_N, wf_pr_date),
                      wf_pick(wf_pj_key, WF_PJ_N, wf_pr_jpeg), wf_pick(wf_j2_key, WF_J2_N, wf_pr_jpg2),
                      wf_pick(wf_pc_key, WF_PC_N, wf_pr_cr2),
-                     wf_pick(wf_ds_key, WF_DS_N, wf_dk_scr),
+                     wf_pick(wf_ds_key, WF_DS_N, wf_dk_scr), wf_pick(wf_rl_key, 2, wf_dk_photo),
                      wf_pick(wf_rl_key, 2, wf_roll_look8), wf_pick(wf_hue_key, WF_DEV_HUE_N, wf_rb_hue),
                      wf_pick(wf_qk_cfg, WF_QK_N, wf_qk));
     struct wf_sg_knobs sk;
@@ -1856,7 +1868,7 @@ static MENU_UPDATE_FUNC(wf_roll_update)
         MENU_SET_WARNING(MENU_WARN_INFO, "RAW develop stays on: frames get B now and a print later.");
 #endif
 }
-static MENU_SELECT_FUNC(wf_blind_select) { (void)priv; (void)delta; wf_blind = !wf_blind; wf_dirty(); }
+static MENU_SELECT_FUNC(wf_blind_select) { (void)priv; (void)delta; wf_blind_set(!wf_blind); }
 static MENU_SELECT_FUNC(wf_dark_select) { (void)priv; (void)delta; wf_ui_open_scr(WF_UI_SCR_DARK); gui_stop_menu(); }
 static MENU_SELECT_FUNC(wf_popt_select) { wf_popt_step((int)(intptr_t)priv - 1, delta); }
 static MENU_UPDATE_FUNC(wf_popt_update)
@@ -1914,7 +1926,7 @@ static struct menu_entry wf_menu[] = {
             { .name = "Film roll", .select = wf_roll_select, .update = wf_roll_update, .icon_type = IT_ACTION,
               .help = "WindyFilm in Darkroom mode: Exposures 3-36, SET on a film loads a roll (developed later)." },
             { .name = "Blind roll", .priv = (void *)&wf_blind, .max = 1, .select = wf_blind_select,
-              .help = "On: no image review and no PLAY while a roll is in the camera." },
+              .help = "On: no image review and no PLAY while a roll is in the camera. Also a row in WindyFilm." },
             { .name = "Darkroom", .select = wf_dark_select, .update = wf_dark_update, .icon_type = IT_ACTION,
               .help = "Develop the roll's RAW files with its film into ROLLS/ROLLnnn (about 1 min each)." },
             { .name = "Print frame", .priv = (void *)(intptr_t)(WF_PO_FRAME + 1), .select = wf_popt_select,

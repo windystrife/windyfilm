@@ -7,13 +7,26 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT, WFSTAGE.DAT và WFLOG.DAT) là dữ liệu
 dẫn xuất (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
-Thẻ RAWB28 (20/11, nhánh wf-onescreen, từ RAWB27): sửa phím tắt.
+Thẻ RAWB28 (20/11, nhánh wf-onescreen, từ RAWB27): phím tắt, xem ảnh trong Darkroom,
+Camera JPEG mới, Blind roll trong WindyFilm.
 - Quick keys (DOWN ring): xoay vòng sau DOWN giờ đổi ISO / khẩu thật. Log thẻ RAWB27 cho
   thấy ở LiveView Canon không gửi mã vòng xoay cho ML, chỉ tự đổi tốc độ (M). Module giờ
   đọc lại nấc Canon vừa đổi (Tv ở M / Tv, khẩu ở Av), trả Tv / khẩu về như cũ rồi đổi ISO
   (hay khẩu) đúng số nấc đó. Ở P vòng xoay là dịch chương trình: DOWN báo "P: the ring
   shifts. Tv, Av or M" và vòng vẫn là của Canon.
-Xem mục 3 bước 22; HUONGDAN_DARKROOM_EOSM.txt bước al.
+- Xem ảnh trong Darkroom: chọn cuộn ở hàng ROLL là bàn phóng hiện tờ ảnh tiếp xúc (các
+  kiểu của cuộn, cuộn <= 12 kiểu thì ảnh to hơn, vạch cam dưới kiểu sẽ in đầu tiên); ở các
+  dòng PRINT là bản in phác bằng chính ảnh của kiểu in đầu tiên. Ảnh lấy từ ảnh nhỏ có sẵn
+  trong CR2 (không đọc RAW), máy đọc từng kiểu lúc Darkroom rảnh; ô xám = chưa đọc xong,
+  ô tối có gạch = kiểu không có CR2. INFO: Hide photos / Show photos (lưu trong cấu hình).
+- Camera JPEG có 4 nấc: Keep / Overwrite / Over + print / Print + over. Trong DCIM chỉ còn
+  MỘT JPEG mỗi kiểu (cái PLAY của Canon xem); bản in luôn nằm ở ROLLS, không chép thêm.
+  Over + print: DCIM = ảnh màu phim không viền. Print + over: DCIM = bản in, ảnh không viền
+  thêm vào ROLLS/ROLLnnn/IMG_nnnn.JPG cạnh F01_nnnn.JPG (và CR2 nếu Move to ROLLS). Không
+  còn file WFP_ trong DCIM.
+- Blind roll ngay trong WindyFilm: hàng "Blind roll" dưới Exposures (RING đổi On / Off),
+  cùng cài đặt với menu. Off = có cuộn vẫn xem lại sau khi chụp và PLAY xem được ảnh.
+Xem mục 3 bước 22-23; HUONGDAN_DARKROOM_EOSM.txt bước al, am.
 
 Thẻ RAWB27 (18/11, nhánh wf-onescreen, từ RAWB26): hai thứ nhỏ theo ý anh.
 - RAW after Darkroom chọn ngay lúc tráng: dòng thứ 5 "RAW files" trong khối PRINT của
@@ -306,6 +319,10 @@ Chỉ RAW thì không có JPEG nên không có màu phim (RAW+L thì có).
    nấc xoay, tốc độ trên màn Canon nháy rồi về số cũ; log "keys: ring turn 1 (Tv code ...
    put back ...)" rồi "keys: ISO ...". DOWN lần nữa: khẩu đổi. Av: ISO đổi, khẩu về như
    cũ. P: hộp báo "P: the ring shifts". HUONGDAN bước al.
+23. (20/11, RAWB28) Darkroom: tờ ảnh tiếp xúc ở hàng ROLL, bản in phác có ảnh thật ở các
+   dòng PRINT, INFO tắt / bật ảnh. Camera JPEG Over + print và Print + over (một JPEG trong
+   DCIM, ảnh không viền vào ROLLS với Print + over). Browser: hàng Blind roll dưới
+   Exposures, Off thì PLAY xem được ảnh của cuộn. HUONGDAN bước am.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

@@ -2513,7 +2513,8 @@ static void t_cfg(void)
     const char *code1 = wf_flut_code[1];
     put_cfg("# comment\nfilm=%d\n output = LUT\ncurve=CLOG2\nflut=%s\nlutei=-2\nincurve=FILM1\nprint=CINE\nlight=tungsten\nstrength=strong\n"
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
-            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=Both\njpeg2=Folder\ndkscreen=Off\nrolllook=ON\nshoulder=D\n"
+            "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=PrintOver\njpeg2=Folder\ndkscreen=Off\ndkphoto=Off\n"
+            "rolllook=ON\nshoulder=D\n"
             "qkeys=LR\ncr2=Move\nuserwb=1,5600,2,-3\n",
             wf_films[fA].id, code1);
     mod_init(1);
@@ -2532,9 +2533,10 @@ static void t_cfg(void)
     chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
     chk(wf_qk == WF_QK_LR, "qkeys=LR read: Quick keys L/R ISO (%d)", wf_qk);
     chk(wf_pr_cr2 == WF_PC_MOVE, "cr2=Move read: RAW after Darkroom Move to ROLLS (%d)", wf_pr_cr2);
-    chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_BOTH && wf_pr_jpg2 == WF_J2_FOLDER
+    chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_PRINT && wf_pr_jpg2 == WF_J2_FOLDER
         && wf_dk_scr == WF_DS_OFF, "print finishes read: frame %d info %d date %d jpeg %d jpeg2 %d dkscreen %d (want 4 2 2 "
-        "2 1 1)", wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2, wf_dk_scr);
+        "3 1 1)", wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2, wf_dk_scr);
+    chk(wf_dk_photo == 0, "dkphoto=Off read: the Darkroom's photos off (%d)", wf_dk_photo);
     chk(WAIT(h_kelvin_last == 3200, 5000), "Light Tungsten applied at start (%dK)", h_kelvin_last);
     wf_row_step(WF_ROW_GRAIN, 1);
     h_clock_add_ms += 2000;
@@ -2545,8 +2547,9 @@ static void t_cfg(void)
     snprintf(want, sizeof want, "input=jpeg\nfilm=%d\noutput=lut\ncurve=clog2\nflut=%s\nlutei=-2\nincurve=film1\nprint=cine\nlight=tungsten\n"
              "strength=strong\nhl=3\nsh=-2\npaper=glossy\ngrain=normal\nhalation=spk\nbloom=normal\ngauge=35\nmist=b2\npreview=fast\n"
              "exposure=%s\n"
-             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=both\njpeg2=folder\ncr2=move\n"
+             "exptrim=-5\nexif=off\nblind=off\nframe=blackwide\ninfo=roll\ndate=dmy\njpeg=printover\njpeg2=folder\ncr2=move\n"
              "dkscreen=off\n"
+             "dkphoto=off\n"
              "rolllook=on\n"
              "shoulder=d\n"
              "qkeys=lr\n"
@@ -6722,60 +6725,77 @@ static void t_roll_jpeg(void)
         }
         chk(okw && okb, "previews in %s: white %d, black %d", ow, okw, okb);
     }
-    /* both (owner 11-17, "Over + print"): a black frame + details + the logo; each IMG_nnnn.JPG = the picture alone at
-     * 5184 x 3456 (Overwrite up to RAWB23), WFP_nnnn.JPG beside it = the print fitted into 5184 x 3456; then jpeg2=folder
-     * with a white frame: the second JPEG in 100WFILM/ (the run makes it); no .WFT left, the CR2s untouched */
+    /* RAWB28 (owner 11-20): one JPEG in DCIM, the print is the roll's copy in ROLLS and is never copied again.
+     * Over + print, a black frame + details + the logo: each IMG_nnnn.JPG = the picture alone at 5184 x 3456, nothing
+     * else written (no WFP_ file, even with jpeg2=folder: no 100WFILM/), ROLLS holds the prints only.
+     * Print + over, a white frame: each IMG_nnnn.JPG = the print fitted into 5184 x 3456, the picture alone added to the
+     * run's ROLLS folder under the shot's name (ROLLS/ROLLnnn/IMG_nnnn.JPG beside Fnn_nnnn.JPG). No .WFT left, the CR2s
+     * untouched */
     wf_pr_frame = WF_PFR_BLACK;
     wf_pr_jpeg = WF_PJ_BOTH;
-    wf_pr_jpg2 = WF_J2_PREFIX;
+    wf_pr_jpg2 = WF_J2_FOLDER;                   /* read, no longer used */
     for (int pass = 0, rn = ow ? 5 : 4; pass < 2; pass++, rn++) {
         int from = 513 + pass * 3;
-        const char *d2 = pass ? "DCIM/100WFILM" : "DCIM/100CANON", *what = pass ? "both folder" : "both";
+        const char *what = pass ? "print + over" : "over + print";
         char e[96];
         if (pass) {
-            wf_pr_jpg2 = WF_J2_FOLDER;
+            wf_pr_jpeg = WF_PJ_PRINT;
             wf_pr_frame = WF_PFR_WHITE;
         }
         chk(mem_roll(film, rn, dir, from), "roll %03d: 3 frames (%d)", rn, wf_roll_now()->nshot);
         mem_run(what, rn);
         snprintf(e, sizeof e, "dark: roll %03d end", rn);
         chk(strstr(log_line(e), "3 developed, 0 failed, 0 left") != 0, "%s: 3 of 3 ('%s')", what, log_line(e));
-        chk(log_has(pass ? "dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print in NNNWFILM/WFP_nnnn.JPG"
-                         : "dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print beside it as "
-                           "WFP_nnnn.JPG"), "%s: the run says where ('%s')", what, log_line("dark: Camera JPEG Over"));
-        chk(log_has(jp_fitline(fl2, sizeof fl2, 1, wf_pr_frame, 6)), "%s: F02 (portrait) fitted ('%s')", what,
-            log_line("dark: F02 camera JPEG: the print"));
+        chk(log_has(pass ? "dark: Camera JPEG Print + over: the print over IMG_nnnn.JPG, the picture as ROLLS/ROLLnnn/"
+                           "IMG_nnnn.JPG"
+                         : "dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print in ROLLS only"),
+            "%s: the run says where ('%s')", what, log_line("dark: Camera JPEG "));
+        if (pass)
+            chk(log_has(jp_fitline(fl2, sizeof fl2, 1, wf_pr_frame, 6)), "%s: F02 (portrait) fitted ('%s')", what,
+                log_line("dark: F02 camera JPEG: the print"));
+        else
+            chk(!log_has("camera JPEG: the print fitted"), "%s: no print fitted ('%s')", what,
+                log_line("camera JPEG: the print fitted"));
         for (int i = 0; i < 3; i++) {
-            char a[64], c[64], e1[96], e2[96], e3[64], t1[64], t2[64];
+            char a[64], c[64], e1[96], e2[96], e3[96], t1[64], t2[64];
             snprintf(a, sizeof a, "DCIM/100CANON/IMG_%04d.JPG", from + i);
-            snprintf(c, sizeof c, "%s/WFP_%04d.JPG", d2, from + i);
-            snprintf(e1, sizeof e1, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the picture %dx%d,", i + 1,
+            snprintf(c, sizeof c, "ROLLS/ROLL%03d/IMG_%04d.JPG", rn, from + i);
+            snprintf(e1, sizeof e1, "dark: F%02d camera JPEG IMG_%04d.JPG overwritten: the %s %dx%d,", i + 1, from + i,
+                     pass ? "print fitted" : "picture", FW, FH);
+            snprintf(e2, sizeof e2, "dark: F%02d camera JPEG ROLL%03d/IMG_%04d.JPG written: the picture %dx%d,", i + 1, rn,
                      from + i, FW, FH);
-            snprintf(e2, sizeof e2, "dark: F%02d camera JPEG %sWFP_%04d.JPG written: the print fitted %dx%d,", i + 1,
-                     pass ? "100WFILM/" : "", from + i, FW, FH);
-            snprintf(e3, sizeof e3, "dark: F%02d camera JPEG: 2 of 2 files in DCIM, ", i + 1);
+            snprintf(e3, sizeof e3, "dark: F%02d camera JPEG: the print in DCIM written, the picture in ROLLS written, ",
+                     i + 1);
             long na = 0, nc = 0, np = 0;
-            char *ba = get_file(a, &na), *bc = get_file(c, &nc), *bp = mem_print(rn, i, from + i, &np);
+            char *ba = get_file(a, &na), *bc = pass ? get_file(c, &nc) : 0, *bp = mem_print(rn, i, from + i, &np);
             int wa = 0, ha = 0, wc = 0, hc = 0;
             uint32_t ta = 0, tc = 0;
             const unsigned char *pa = ba ? jp_thumb((unsigned char *)ba, na, &ta) : 0;
             const unsigned char *pc = bc ? jp_thumb((unsigned char *)bc, nc, &tc) : 0;
             int da = ba && mem_dims((unsigned char *)ba, na, &wa, &ha), dc = bc && mem_dims((unsigned char *)bc, nc, &wc, &hc);
-            chk(da && dc && wa == FW && ha == FH && wc == FW && hc == FH && bp && na != nc && np != na && np != nc
-                && memmem(bc, (size_t)(nc < 65536 ? nc : 65536), "WindyFilm Darkroom", 18) && pa && pc && ta > 1000
-                && tc > 1000 && (ta != tc || memcmp(pa, pc, ta)) && log_has(e1) && log_has(e2) && log_has(e3),
-                "%s: F%02d IMG_%04d.JPG the picture %dx%d (%ld B), %s %dx%d (%ld B), print %ld B, thumbnails %u / %u B "
-                "('%s', '%s')", what, i + 1, from + i, wa, ha, na, c, wc, hc, nc, np, ta, tc, log_line(e1), log_line(e2));
+            chk(da && wa == FW && ha == FH && bp && np != na && pa && ta > 1000 && log_has(e1)
+                && memmem(ba, (size_t)(na < 65536 ? na : 65536), "WindyFilm Darkroom", 18),
+                "%s: F%02d IMG_%04d.JPG the %s %dx%d (%ld B), print %ld B, thumbnail %u B ('%s')", what, i + 1, from + i,
+                pass ? "print fitted" : "picture", wa, ha, na, np, ta, log_line(e1));
+            if (pass)
+                chk(dc && wc == FW && hc == FH && na != nc && np != nc && pc && tc > 1000 && (ta != tc || memcmp(pa, pc, ta))
+                    && memmem(bc, (size_t)(nc < 65536 ? nc : 65536), "WindyFilm Darkroom", 18) && log_has(e2) && log_has(e3),
+                    "%s: F%02d %s the picture %dx%d (%ld B), thumbnail %u B ('%s', '%s')", what, i + 1, c, wc, hc, nc, tc,
+                    log_line(e2), log_line(e3));
+            else
+                chk(access(c, F_OK) != 0 && !log_has("in ROLLS written") && !log_has("WFP_"),
+                    "over + print: F%02d nothing but IMG_%04d.JPG written ('%s')", i + 1, from + i, log_line("WFP_"));
             snprintf(t1, sizeof t1, "DCIM/100CANON/IMG_%04d.WFT", from + i);
-            snprintf(t2, sizeof t2, "%s/WFP_%04d.WFT", d2, from + i);
+            snprintf(t2, sizeof t2, "ROLLS/ROLL%03d/IMG_%04d.WFT", rn, from + i);
             chk(access(t1, F_OK) != 0 && access(t2, F_OK) != 0, "%s: F%02d no .WFT left", what, i + 1);
             char s[300];
             long cn = 0;
             snprintf(s, sizeof s, "%s/%s.JPG", dir, mem_pairs[i]);
             char *cb = get_file(s, &cn);
             const char *why = jp_pics((unsigned char *)ba, na, (unsigned char *)cb, cn);
-            chk(!why, "%s: IMG_%04d.JPG holds only our two pictures, nothing of Canon's (%s)", what, from + i,
-                why ? why : "yes");
+            const char *why2 = pass ? jp_pics((unsigned char *)bc, nc, (unsigned char *)cb, cn) : 0;
+            chk(!why && !why2, "%s: IMG_%04d.JPG holds only our two pictures, nothing of Canon's (%s %s)", what, from + i,
+                why ? why : "yes", why2 ? why2 : "yes");
             free(cb);
             free(ba);
             free(bc);
@@ -6783,8 +6803,8 @@ static void t_roll_jpeg(void)
         }
         chk(jp_cr2s(dir, from), "%s: CR2s untouched", what);
     }
-    chk(access("DCIM/100CANON/WFP_0516.JPG", F_OK) != 0 && access("DCIM/100WFILM/WFP_0513.JPG", F_OK) != 0,
-        "both: each second JPEG only where its jpeg2 put it");
+    chk(access("DCIM/100WFILM", F_OK) != 0 && access("DCIM/100CANON/WFP_0513.JPG", F_OK) != 0,
+        "no second JPEG in DCIM any more (no 100WFILM/, no WFP_)");
     wf_pr_jpg2 = WF_J2_PREFIX;
     wf_pr_frame = 0;
     wf_pr_info = 1;
@@ -6805,7 +6825,9 @@ static void t_roll_jpeg(void)
  *          write; on the EOS M its rename refused first): no copy left, its CR2 in DCIM; F03 shot RAW only (its JPEG
  *          gone): its CR2 kept;
  *   again: roll 002 developed again (ROLL002B): every frame found (F01 read from ROLLS/ROLL002/, nothing skipped), F02
- *          moves now (EOS M: the rename refused again, the copy moves it), F03 still kept, each pass-2 print made. */
+ *          moves now (EOS M: the rename refused again, the copy moves it), F03 still kept, each pass-2 print made;
+ *   print: roll 003, Print + over with a white frame (RAWB28): each frame's picture in ROLLS/ROLL003/IMG_nnnn.JPG and its
+ *          CR2 beside it; F02's picture reads back wrong (a byte flipped in its write): its CR2 stays in DCIM. */
 static void t_roll_cr2mv(void)
 {
     const char *dir = dk_t_dir();
@@ -6911,6 +6933,49 @@ static void t_roll_cr2mv(void)
         free(b);
     }
     chk(jp_same("DCIM/100CANON/IMG_0704.JPG", "ROLLS/ROLL002B/F01_0704.JPG"), "again: IMG_0704.JPG = the pass-2 print");
+
+    /* print: Print + over with a frame: the picture beside the print and the CR2; F02's picture write goes wrong */
+    wf_pr_jpeg = WF_PJ_PRINT;
+    wf_pr_frame = WF_PFR_WHITE;
+    chk(mem_roll(film, 3, dir, 707), "roll 003: 3 real RAW+L frames shot (%d)", wf_roll_now()->nshot);
+    snprintf(h_fio_wpath, sizeof h_fio_wpath, "%s", "ROLLS/ROLL003/IMG_0708.WFT");
+    h_fio_wflip = 1;
+    mem_run("print", 3);
+    int flip3 = !h_fio_wflip;
+    h_fio_wflip = 0;
+    h_fio_wpath[0] = 0;
+    chk(strstr(log_line("dark: roll 003 end"), "3 developed, 0 failed, 0 left") != 0, "print: 3 developed ('%s')",
+        log_line("dark: roll 003 end"));
+    for (int i = 0; i < 3; i += 2) {
+        char p[64], c[64], j[64], m[64];
+        snprintf(p, sizeof p, "ROLLS/ROLL003/IMG_%04d.JPG", 707 + i);
+        snprintf(c, sizeof c, "ROLLS/ROLL003/IMG_%04d.CR2", 707 + i);
+        snprintf(j, sizeof j, "DCIM/100CANON/IMG_%04d.JPG", 707 + i);
+        snprintf(m, sizeof m, "dark: F%02d IMG_%04d.CR2 moved to ROLLS/ROLL003/ ", i + 1, 707 + i);
+        char sp[300];
+        snprintf(sp, sizeof sp, "%s/%s.CR2", dir, mem_pairs[i]);
+        long np = 0, nj = 0, nr = 0;
+        char *bp = get_file(p, &np), *bj = get_file(j, &nj), *br = mem_print(3, i, 707 + i, &nr);
+        int w = 0, h = 0, d = bp && mem_dims((unsigned char *)bp, np, &w, &h);
+        chk(d && w == FW && h == FH && bj && br && np != nj && np != nr && nj != nr && log_has(m) && jp_same(sp, c),
+            "print: F%02d the picture %s %dx%d, the print in DCIM, the CR2 moved beside "
+            "them ('%s')", i + 1, p, w, h, log_line(m));
+        char dc[64];
+        snprintf(dc, sizeof dc, "DCIM/100CANON/IMG_%04d.CR2", 707 + i);
+        chk(!file_exists(dc), "print: F%02d CR2 gone from DCIM", i + 1);
+        free(bp);
+        free(bj);
+        free(br);
+    }
+    char sp2[300];
+    snprintf(sp2, sizeof sp2, "%s/%s.CR2", dir, mem_pairs[1]);
+    chk(flip3 && log_has("dark: F02 camera JPEG: the print in DCIM written, the picture in ROLLS not written")
+        && log_has("dark: F02 IMG_0708.CR2 kept in DCIM: its JPEG was not written") && jp_same(sp2, "DCIM/100CANON/IMG_0708.CR2")
+        && !file_exists("ROLLS/ROLL003/IMG_0708.CR2") && !file_exists("ROLLS/ROLL003/IMG_0708.JPG")
+        && !file_exists("ROLLS/ROLL003/IMG_0708.WFT"), "print: F02's picture read back wrong: nothing left of it in ROLLS, "
+        "its CR2 kept in DCIM ('%s', '%s')", log_line("dark: F02 camera JPEG: the print in DCIM"),
+        log_line("dark: F02 IMG_0708.CR2"));
+    wf_pr_frame = 0;
     wf_pr_cr2 = WF_PC_KEEP;
     wf_pr_jpeg = WF_PJ_KEEP;
     h_srm_n = 0;

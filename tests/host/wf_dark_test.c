@@ -22,6 +22,8 @@
  *     mode's print byte for byte.
  *   wf_dark_test devset LIST OUTDIR   several CR2s through several develop tables (sRGB / cube / display cube), full-size
  *                          UYVY or third-size PPM: the look sweep's base frames (tools/look_sweep.sh)
+ * The Darkroom's photos (owner RAWB28, wf_photo.c): units on a made-up TIFF (IFDs, orientations, levels, a short file),
+ * and each frame's small RGB in the frame mode (its size, the sheet cells, the picture the right way up).
  * Prints RESULT pass / fail. */
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,6 +35,7 @@
 #include "wf_jpe.h"
 #include "wf_darkp.h"
 #include "wf_print.h"
+#include "wf_photo.h"
 
 static int pass, fail;
 static int dk_cam = WF_DK_EOSM;                       /* env WF_DK_CAM=5D2: the 5D2 frame (wf_dk_geom) */
@@ -828,8 +831,11 @@ static int xthumb(uint8_t *app1, uint32_t al, const struct wf_dk_xth *xt, const 
     return ok ? q + 10 : 0;
 }
 
+static void phframe(const char *cr2);
 static void frame(const char *cr2, const char *jpg, const char *od, const char *juyvy, const struct fin *fn)
 {
+    if (!fn)
+        phframe(cr2);                                        /* the Darkroom's photo of it (RAWB28) */
     FILE *f = fopen(cr2, "rb");
     CHECK(f != 0, "open %s", cr2);
     if (!f) return;
@@ -1161,6 +1167,144 @@ static void devset(const char *list, const char *od)
     free(frm); free(scr);
 }
 
+/* ------------------------------------------------------------------ the Darkroom's photos (wf_photo.c) */
+struct ph_mem { const uint8_t *b; uint32_t n; int nrd; };
+static int ph_mrd(void *ctx, uint32_t pos, void *dst, uint32_t n)
+{
+    struct ph_mem *m = ctx;
+    m->nrd++;
+    if (pos > m->n || m->n - pos < n) return -1;
+    memcpy(dst, m->b + pos, n);
+    return 0;
+}
+static int ph_frd(void *ctx, uint32_t pos, void *dst, uint32_t n)
+{
+    FILE *f = ctx;
+    return fseek(f, (long)pos, SEEK_SET) == 0 && fread(dst, 1, n, f) == n ? 0 : -1;
+}
+static double ph_mean(const uint8_t *p, int w, int x0, int y0, int x1, int y1)
+{
+    double s = 0;
+    for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) s += p[y * w + x];
+    return s / ((x1 - x0) * (y1 - y0));
+}
+/* a made-up CR2 head: IFD0 (orientation), IFD1, IFD2 = W x H x 3 x 16 bits, black 0, the left half dark, the right half
+ * bright, a gradient down */
+#define PHW 320
+#define PHH 214
+static uint32_t ph_tiff(uint8_t *b, int orient)
+{
+    uint32_t i0 = 8, i1 = 64, i2 = 96, bps = 200, strip = 256;
+    memset(b, 0, strip);
+    b[0] = b[1] = 'I'; put16(b + 2, 42); put32(b + 4, i0);
+    put16(b + i0, 1);                                                     /* IFD0: 274 SHORT */
+    put16(b + i0 + 2, 274); put16(b + i0 + 4, 3); put32(b + i0 + 6, 1); put16(b + i0 + 10, (unsigned)orient);
+    put32(b + i0 + 14, i1);
+    put16(b + i1, 1);                                                     /* IFD1: a width, nothing else */
+    put16(b + i1 + 2, 256); put16(b + i1 + 4, 3); put32(b + i1 + 6, 1); put16(b + i1 + 10, 160);
+    put32(b + i1 + 14, i2);
+    static const uint16_t tg[7] = { 256, 257, 258, 259, 273, 277, 279 };
+    uint32_t v[7] = { PHW, PHH, bps, 1, strip, 3, PHW * PHH * 6 };
+    put16(b + i2, 7);
+    for (int k = 0; k < 7; k++) {
+        uint8_t *e = b + i2 + 2 + 12 * k;
+        int lng = tg[k] == 273 || tg[k] == 279;
+        put16(e, tg[k]); put16(e + 2, lng ? 4 : 3); put32(e + 4, tg[k] == 258 ? 3 : 1);
+        if (lng || tg[k] == 258) put32(e + 8, v[k]); else put16(e + 8, v[k]);
+    }
+    put32(b + i2 + 2 + 12 * 7, 0);
+    put16(b + bps, 16); put16(b + bps + 2, 16); put16(b + bps + 4, 16);
+    for (int y = 0; y < PHH; y++)
+        for (int x = 0; x < PHW; x++)
+            for (int c = 0; c < 3; c++)
+                put16(b + strip + ((uint32_t)y * PHW + x) * 6 + c * 2, x < PHW / 2 ? 300 + y : 9000 + y * 20);
+    return strip + PHW * PHH * 6;
+}
+static void phunits(void)
+{
+    static uint8_t b[256 + PHW * PHH * 6], ifdb[WF_PH_IFDB], cell[WF_PH_LW * WF_PH_LH], big[WF_PH_BW * WF_PH_BH];
+    static uint16_t t16[WF_PH_BW * WF_PH_BH], rows[WF_PH_ROWS];
+    static struct wf_ph t;
+    struct wf_ph_src s;
+    int bw = 0, bh = 0;
+    static const int ors[4] = { 1, 3, 6, 8 };                              /* as shot, turned over, turned */
+    for (int q = 0; q < 4; q++) {
+        int orient = ors[q];
+        uint32_t n = ph_tiff(b, orient);
+        struct ph_mem m = { b, n, 0 };
+        CHECK(wf_ph_find(ph_mrd, &m, ifdb, &s) == 0 && s.w == PHW && s.h == PHH && s.orient == orient && s.off == 256,
+              "photo find o%d: %dx%d o%d at %u", orient, s.w, s.h, s.orient, s.off);
+        CHECK(wf_ph_cell(ph_mrd, &m, &s, &t, WF_PH_LW, WF_PH_LH, rows, t16, cell) == 0, "photo cell o%d", orient);
+        double cl = ph_mean(cell, WF_PH_LW, 0, 0, WF_PH_LW / 2 - 2, WF_PH_LH),
+               cr = ph_mean(cell, WF_PH_LW, WF_PH_LW / 2 + 2, 0, WF_PH_LW, WF_PH_LH);
+        CHECK(cl < 40 && cr > 150, "photo cell o%d: left %.0f right %.0f (as stored, dark | bright)", orient, cl, cr);
+        int nr0 = m.nrd;
+        CHECK(wf_ph_big(ph_mrd, &m, &s, &t, rows, t16, big, &bw, &bh) == 0, "photo big o%d", orient);
+        CHECK(m.nrd - nr0 == (PHH + WF_PH_NROW - 1) / WF_PH_NROW, "photo big o%d: %d reads", orient, m.nrd - nr0);
+        int port = orient == 6 || orient == 8;
+        CHECK(bw == (port ? 128 : WF_PH_BW) && bh == (port ? WF_PH_BW * 2 / 3 : WF_PH_BH) && bh == WF_PH_BH,
+              "photo big o%d: %dx%d", orient, bw, bh);
+        /* where the dark half went: as shot left, turned over right, turned right (6) top, turned left (8) bottom */
+        double a = port ? ph_mean(big, bw, 0, 0, bw, bh / 2 - 4) : ph_mean(big, bw, 0, 0, bw / 2 - 4, bh),
+               z = port ? ph_mean(big, bw, 0, bh / 2 + 4, bw, bh) : ph_mean(big, bw, bw / 2 + 4, 0, bw, bh);
+        int dark_first = orient == 1 || orient == 6;
+        CHECK(dark_first ? a < 40 && z > 150 : a > 150 && z < 40, "photo big o%d: halves %.0f %.0f", orient, a, z);
+        CHECK(big[0] <= big[(bh - 1) * bw] || orient == 3 || port, "photo big o%d: the gradient down", orient);
+    }
+    uint32_t n = ph_tiff(b, 1);
+    struct ph_mem m = { b, n - 100, 0 };                                   /* the strip cut short: the last rows */
+    CHECK(wf_ph_find(ph_mrd, &m, ifdb, &s) == 0 && wf_ph_big(ph_mrd, &m, &s, &t, rows, t16, big, &bw, &bh) == -1,
+          "photo: a short file fails");
+    m.n = 96 + WF_PH_IFDB;                         /* every IFD's 512-byte read there (IFD2 at 96), the strip's rows not */
+    CHECK(wf_ph_find(ph_mrd, &m, ifdb, &s) == 0 && wf_ph_cell(ph_mrd, &m, &s, &t, WF_PH_CW, WF_PH_CH, rows, t16, cell) == -1,
+          "photo: no strip fails");
+    m.n = n;
+    b[0] = 'M';
+    CHECK(wf_ph_find(ph_mrd, &m, ifdb, &s) == -1, "photo: not II");
+    b[0] = 'I';
+    put16(b + 96 + 2 + 12 * 3 + 8, 6);                                    /* IFD2 compressed */
+    CHECK(wf_ph_find(ph_mrd, &m, ifdb, &s) == -1, "photo: compressed IFD2 refused");
+    uint16_t lv[100];
+    int lo, hi;
+    for (int i = 0; i < 100; i++) lv[i] = (uint16_t)(2048 + i * 10);
+    wf_ph_levels(lv, 100, 2040, &lo, &hi);
+    CHECK(lo == 2040 && hi == 2040 + WF_PH_SPAN, "photo levels: a dark frame stays dark (%d %d)", lo, hi);
+    uint8_t o8[3];
+    uint16_t v3[3] = { 100, 1100, 2100 };
+    wf_ph_to8(v3, o8, 3, 100, 2100);
+    CHECK(o8[0] == 0 && o8[2] == 255 && o8[1] > 180 && o8[1] < 192, "photo to8: sRGB mid %d (want ~187)", o8[1]);
+}
+/* a frame's small RGB as the camera reads it (frame mode): its size, the cells, the picture */
+static void phframe(const char *cr2)
+{
+    static uint8_t ifdb[WF_PH_IFDB], cell[WF_PH_LW * WF_PH_LH], big[WF_PH_BW * WF_PH_BH];
+    static uint16_t t16[WF_PH_BW * WF_PH_BH], rows[WF_PH_ROWS];
+    static struct wf_ph t;
+    struct wf_ph_src s;
+    int bw = 0, bh = 0, five = dk_cam == WF_DK_5D2;
+    FILE *f = fopen(cr2, "rb");
+    if (!f) return;
+    int fr = wf_ph_find(ph_frd, f, ifdb, &s);
+    CHECK(fr == 0 && s.w == (five ? 362 : 660) && s.h == (five ? 234 : 441), "photo %s: small RGB %dx%d", cr2, s.w, s.h);
+    if (fr) { fclose(f); return; }
+    int c1 = wf_ph_cell(ph_frd, f, &s, &t, WF_PH_CW, WF_PH_CH, rows, t16, cell);
+    double m1 = ph_mean(cell, WF_PH_CW, 0, 0, WF_PH_CW, WF_PH_CH);
+    int c2 = wf_ph_cell(ph_frd, f, &s, &t, WF_PH_LW, WF_PH_LH, rows, t16, cell);
+    double m2 = ph_mean(cell, WF_PH_LW, 0, 0, WF_PH_LW, WF_PH_LH);
+    int b = wf_ph_big(ph_frd, f, &s, &t, rows, t16, big, &bw, &bh);
+    fclose(f);
+    int port = s.orient == 6 || s.orient == 8;
+    double mb = ph_mean(big, bw > 0 ? bw : 1, 0, 0, bw, bh), v = 0;
+    for (int i = 0; i < bw * bh; i++) v += (big[i] - mb) * (big[i] - mb);
+    v = bw * bh ? sqrt(v / (bw * bh)) : 0;
+    CHECK(c1 == 0 && c2 == 0 && b == 0 && bw == (port ? 128 : WF_PH_BW) && bh == WF_PH_BH, "photo %s: cells %d %d big %d %dx%d",
+          cr2, c1, c2, b, bw, bh);
+    CHECK(m1 > 8 && m1 < 247 && m2 > 8 && m2 < 247 && mb > 8 && mb < 247 && v > 6 && fabs(m1 - mb) < 25,
+          "photo %s: means %.0f %.0f %.0f sd %.0f", cr2, m1, m2, mb, v);
+    printf("photo %s: %dx%d o%d, picture %dx%d mean %.0f sd %.0f, cells %.0f %.0f\n", strrchr(cr2, '/') ? strrchr(cr2, '/') + 1
+           : cr2, s.w, s.h, s.orient, bw, bh, mb, v, m1, m2);
+}
+
 int main(int argc, char **argv)
 {
     const char *cm = getenv("WF_DK_CAM");
@@ -1170,6 +1314,7 @@ int main(int argc, char **argv)
         units();
         punits();
         lunits();
+        phunits();
     } else if (argc >= 5 && !strcmp(argv[1], "frame"))
         frame(argv[2], strcmp(argv[3], "-") ? argv[3] : 0, argv[4], argc > 5 ? argv[5] : 0, 0);
     else if (argc >= 12 && !strcmp(argv[1], "finish")) {

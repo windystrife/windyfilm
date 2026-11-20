@@ -19,6 +19,11 @@ Thay đổi 20/11 (thẻ RAWB28, nhánh wf-onescreen, từ RAWB27):
   được chế độ vòng, xoay thì Canon tự đổi tốc độ). Ở LiveView Canon không gửi mã vòng xoay
   cho ML; module đọc lại nấc Canon vừa đổi (Tv ở M / Tv, khẩu ở Av), trả về như cũ, rồi đổi
   ISO / khẩu đúng số nấc. Ở P: vòng vẫn là của Canon (dịch chương trình). Thử ở bước al.
+- Xem ảnh trong Darkroom (mục "XEM ẢNH TRONG DARKROOM"): tờ ảnh tiếp xúc của cuộn đang
+  chọn, bản in phác bằng ảnh thật; INFO tắt / bật. Thử ở bước am.
+- Camera JPEG thêm nấc "Print + over"; "Over + print" không còn file WFP_ (mục "ĐÈ LÊN
+  JPEG CỦA MÁY"). Thử ở bước am.
+- Blind roll chỉnh được ngay trong WindyFilm (hàng dưới Exposures). Thử ở bước am.
 
 Thay đổi 18/11 (thẻ RAWB27, nhánh wf-onescreen, từ RAWB26):
 - RAW after Darkroom chọn ngay lúc tráng: dòng thứ 5 "RAW files" của khối PRINT trên màn
@@ -116,7 +121,11 @@ bộ code Darkroom là code mới của WindyFilm (không dùng code Film Roll).
   roll" (MENU). Cuộn chưa có kiểu thì được lấy ra luôn.
 
 Mục "Blind roll" (mặc định On): khi có cuộn trong máy thì tắt xem lại ảnh sau khi
-chụp và khoá nút PLAY. Muốn xem ảnh như thường thì đặt Off.
+chụp và khoá nút PLAY. Muốn xem ảnh như thường thì đặt Off. Từ RAWB28 chỉnh được ngay
+trong WindyFilm: hàng "Blind roll" dưới hàng Exposures (biểu tượng con mắt, gạch chéo khi
+On), RING đổi On / Off; cùng một cài đặt với menu (blind= trong cấu hình). Off: sau mỗi
+kiểu Canon hiện ảnh xem lại, PLAY ở LiveView xem được các kiểu (JPEG gốc của Canon, màu
+phim chỉ có sau Darkroom).
 
 HAI CHẾ ĐỘ CHẠY CÙNG LÚC: "RAW develop" (develop RAW ngay lúc chụp) và "Film roll"
 bật được cùng nhau, cái này không tắt cái kia:
@@ -255,19 +264,27 @@ VIỀN VÀ NGÀY TRÊN BẢN IN (15/11, mặc định đều Off = bản in như
   viền: "the print fitted 5184x3456", trước đó một dòng "camera JPEG: the print fitted
   5184x3456, picture 4320x2880 at 432,96, logo"; "the picture 5184x3456" = thiếu bộ nhớ,
   chỉ phần ảnh). Không có JPG (chụp chỉ RAW): "not there: not overwritten".
-- (17/11) Giá trị thứ ba "Over + print": có viền thì IMG_nnnn.JPG trong DCIM là ẢNH màu phim
-  không viền (5184x3456, có ngày nếu bật Date; như Overwrite tới RAWB23), và thêm một file
-  thứ hai cùng thư mục, cùng số: WFP_nnnn.JPG = cả bản in thu vào 5184x3456 (như Overwrite
-  từ RAWB24). Frame Off: như Overwrite (một file). Mỗi file đi đúng thứ tự trên (ROLLS, file
-  .WFT, đọc lại, đổi tên); CR2 không bao giờ bị đụng. Mã hóa thêm một lần: mỗi kiểu lâu hơn
-  khoảng 35 giây. Log mỗi kiểu: "camera JPEG IMG_0208.JPG overwritten: the picture
-  5184x3456, NN KB, NNNNNms", "camera JPEG WFP_0208.JPG written: the print fitted 5184x3456,
-  NN KB, NNNNNms" và "camera JPEG: 2 of 2 files in DCIM, NNNNNms".
-- Dự phòng cho tên file thứ hai: máy Canon xếp ảnh theo số file, nên WFP_0208 cùng số với
-  cặp IMG_0208 có thể bị máy gộp, ẩn đi hay hiện lẫn. Nếu vậy: mở ML/SETTINGS/WINDYFLM.CFG
-  bằng máy tính, sửa (hoặc thêm) dòng "jpeg2=prefix" thành "jpeg2=folder". File thứ hai sẽ
-  vào thư mục riêng cùng số với thư mục của máy: DCIM/100WFILM/WFP_0208.JPG (máy vẫn chụp
-  vào 100CANON). Đổi lại "jpeg2=prefix" để về như cũ.
+- (20/11, RAWB28) Bốn nấc: Keep / Overwrite / Over + print / Print + over. Trong DCIM chỉ
+  còn MỘT JPEG mỗi kiểu, cái PLAY của Canon xem; bản in luôn nằm ở ROLLS, không chép thêm.
+  Có viền:
+  - Over + print: IMG_nnnn.JPG trong DCIM là ẢNH màu phim không viền (5184x3456, có ngày
+    nếu bật Date). Không ghi gì khác (không còn WFP_nnnn.JPG như RAWB25-27).
+  - Print + over: IMG_nnnn.JPG trong DCIM là bản in thu vào 5184x3456 (như Overwrite), và
+    ảnh không viền 5184x3456 thêm vào thư mục của lần tráng trong ROLLS, đúng tên của máy:
+    ROLLS/ROLL001/IMG_0208.JPG cạnh bản in F01_0208.JPG (và cạnh CR2 nếu RAW files = Move
+    to ROLLS). Tráng lại: vào ROLL001B. Mã hóa thêm một lần: mỗi kiểu lâu hơn khoảng 35 s.
+  - Frame Off: ảnh và bản in là một, cả hai nấc như Overwrite (một file).
+  Trên màn Darkroom, đứng ở hàng Camera JPEG hay RAW files: hai dòng dưới các hàng PRINT ghi
+  file nào vào DCIM ("PLAY (DCIM): the print + CR2") và file nào vào ROLLS ("ROLLS/ROLL021:
+  the print (always) + the picture").
+  Mỗi file đi đúng thứ tự trên (ROLLS, file .WFT, đọc lại, đổi tên); CR2 không bao giờ bị
+  đụng. Move to ROLLS chỉ chuyển CR2 khi mọi JPEG của kiểu đó đã ghi và đọc lại đúng.
+  Log: đầu cuộn "dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print
+  in ROLLS only" (hay "... Print + over: the print over IMG_nnnn.JPG, the picture as
+  ROLLS/ROLLnnn/IMG_nnnn.JPG"); mỗi kiểu "camera JPEG IMG_0208.JPG overwritten:
+  the picture 5184x3456" (Print + over: "the print fitted 5184x3456", rồi "camera JPEG
+  ROLL001/IMG_0208.JPG written: the picture 5184x3456" và "camera JPEG: the print in DCIM
+  written, the picture in ROLLS written"). Dòng jpeg2= trong cấu hình không còn dùng.
 - CHƯA THỬ ĐƯỢC trên máy thật: máy Canon có mở và hiện ảnh thu nhỏ của file đã đè hay
   không (giả lập không có phần xem lại của Canon). Lần đầu thử nên dùng cuộn ngắn.
 
@@ -485,7 +502,8 @@ ab. (17/11, RAWB24) Bản in có viền trong DCIM: Camera JPEG = Overwrite, Fra
    như lúc chụp (cỡ và giờ sửa không đổi). Rồi Frame White, cuộn 3 kiểu mới, xem lại như
    trên (viền trắng). Ghi lại: tấm nào máy không mở được hay ảnh thu nhỏ sai; chữ / logo
    có nhòe hay lệch không. Xong thì đặt lại Camera JPEG = Keep nếu muốn.
-ac. (17/11, RAWB25) Over + print (hai file trong DCIM): Camera JPEG = Over + print (phải
+ac. (17/11, RAWB25-27; từ RAWB28 Over + print không còn WFP_, thử bước am thay cho bước
+   này) Over + print (hai file trong DCIM): Camera JPEG = Over + print (phải
    thêm một nấc sau Overwrite), Frame Black, Info On + roll, cuộn 3 kiểu RAW+L (có 1 tấm
    dọc). Log đầu cuộn có "dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG,
    the print beside it as WFP_nnnn.JPG". Tráng xong, PLAY trên máy: mỗi kiểu phải có HAI
@@ -614,6 +632,25 @@ al. (20/11, RAWB28) Phím tắt xoay vòng (Shoot > WindyFilm > Quick keys = DOW
    5. Ghi lại: nháy tốc độ / khẩu trên màn có khó chịu không, có lần nào tốc độ không về
       số cũ không. Gửi WINDYFLM.LOG (các dòng "keys: ring read ...", "keys: ring turn ...")
       và ML/LOGS/KEYTRACE.LOG.
+am. (20/11, RAWB28) Xem ảnh trong Darkroom, Camera JPEG mới, Blind roll trong WindyFilm.
+   1. Browser, chế độ Darkroom: hàng "Blind roll" ngay dưới Exposures, mặc định On (con
+      mắt gạch chéo, "no review, no PLAY"). Nạp cuộn 3 kiểu, RING trên hàng Blind roll sang
+      Off ("review + PLAY show the frames"). Chụp: Canon hiện ảnh xem lại; LiveView bấm
+      PLAY: xem được các kiểu (JPEG gốc của Canon). Menu ML Blind roll cũng thành Off. Đặt
+      lại On: chụp không xem lại, PLAY bị chặn như cũ.
+   2. Darkroom, hàng ROLL: bàn phóng hiện tờ ảnh tiếp xúc (cuộn 3 kiểu: ảnh to, 3 dải x 4).
+      Đếm xem mất bao lâu từ lúc mở Darkroom tới khi đủ ảnh. Đổi sang cuộn trên kệ: tờ ảnh
+      đổi theo. Xuống các dòng PRINT: bản in phác là ảnh thật của kiểu in đầu tiên (tấm dọc
+      thì bản in dọc), đổi Frame / Info / Date thì khung đổi, ảnh giữ nguyên. INFO: chân màn
+      "Hide photos" / "Show photos", tắt thì bàn phóng về hình vẽ như RAWB27. Ghi lại: ảnh
+      có đúng kiểu, đúng chiều, sáng tối giống ảnh trên máy không.
+   3. Camera JPEG = Over + print, Frame Black, cuộn 3 kiểu: tráng xong DCIM chỉ có
+      IMG_nnnn.JPG (ảnh màu phim không viền) cạnh CR2, không có WFP_; PLAY đếm số ảnh không
+      tăng. ROLLS/ROLL00n/ chỉ có bản in F0n_nnnn.JPG.
+   4. Camera JPEG = Print + over, Frame White, RAW files = Move to ROLLS, cuộn 3 kiểu: DCIM
+      chỉ còn IMG_nnnn.JPG = bản in có viền (PLAY hiện bản in); ROLLS/ROLL00n/ có F0n_nnnn.JPG,
+      IMG_nnnn.JPG (ảnh không viền) và IMG_nnnn.CR2. Gửi WINDYFLM.LOG (các dòng "dark: photos
+      ...", "camera JPEG ..."), chụp màn hình Darkroom lúc có tờ ảnh và bản in phác.
 
 
 6. GỬI LẠI

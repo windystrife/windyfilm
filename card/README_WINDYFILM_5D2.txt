@@ -7,6 +7,19 @@ Dữ liệu và thông số bên thứ ba: ATTRIBUTIONS.txt.
 Bảng Film stage (lon G00..G44 trong WFFILMS.DAT và WFSTAGE.DAT) là dữ liệu dẫn xuất
 (DESIGN 1a): chỉ dùng riêng, không chia sẻ.
 
+Thẻ RAWB28 (20/11, nhánh wf-onescreen, từ RAWB27): như thẻ EOS M RAWB28 (trừ phím tắt,
+của EOS M).
+- Xem ảnh trong Darkroom: hàng ROLL = tờ ảnh tiếp xúc của cuộn, các dòng PRINT = bản in
+  phác bằng ảnh thật của kiểu in đầu tiên. Ảnh lấy từ ảnh nhỏ có sẵn trong CR2 (5D2:
+  362x234, không đọc RAW); ô xám = chưa đọc xong, ô tối có gạch = không có CR2. INFO: Hide
+  photos / Show photos (lưu trong cấu hình).
+- Camera JPEG 4 nấc: Keep / Overwrite / Over + print / Print + over. DCIM chỉ còn một JPEG
+  mỗi kiểu; bản in luôn ở ROLLS. Over + print: DCIM = ảnh không viền. Print + over: DCIM =
+  bản in, ảnh không viền vào ROLLS/ROLLnnn/IMG_nnnn.JPG cạnh F01_nnnn.JPG. Không còn WFP_.
+- Blind roll ngay trong WindyFilm: hàng dưới Exposures, DIAL (hay JOY rồi trái / phải) đổi
+  On / Off, cùng cài đặt với menu. Off = có cuộn vẫn xem lại và PLAY xem được ảnh.
+Xem mục 3 bước 10; HUONGDAN_DARKROOM_5D2.txt bước o.
+
 Thẻ RAWB27 (18/11, nhánh wf-onescreen, từ RAWB26): RAW after Darkroom chọn ngay lúc tráng
 (dòng thứ 5 "RAW files" trong khối PRINT của Darkroom, cùng cài đặt với hàng menu; mờ, ghi
 "needs Overwrite" khi Camera JPEG = Keep). Chữ thông số dưới ảnh in (dòng 2-3, chữ ROLL)
@@ -207,6 +220,9 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
 9. (18/11, RAWB27) Darkroom, dòng thứ 5 "RAW files": mờ với Camera JPEG = Keep, sáng với
    Overwrite; DIAL / trái / phải đổi Keep in DCIM / Move to ROLLS, hàng menu đổi theo.
    Bản in có viền + Info: dòng 2-3 và chữ ROLL rõ hơn RAWB26. HUONGDAN bước n.
+10. (20/11, RAWB28) Darkroom: tờ ảnh tiếp xúc ở hàng ROLL, bản in phác có ảnh thật, INFO
+   tắt / bật ảnh. Camera JPEG Over + print / Print + over. Browser: hàng Blind roll dưới
+   Exposures. HUONGDAN bước o.
 
 
 4. RAW PROBE (P0): CHỈ ĐỂ THỬ

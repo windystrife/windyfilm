@@ -47,6 +47,7 @@ $CC $MODFLAGS -O2 -c -o $O/wf_cr2.o $S/wf_cr2.c
 $CC $MODFLAGS -O2 -c -o $O/wf_jpe.o $S/wf_jpe.c
 $CC $MODFLAGS -Werror -c -o $O/wf_darkp.o $S/wf_darkp.c
 $CC $MODFLAGS -O2 -Werror -c -o $O/wf_print.o $S/wf_print.c
+$CC $MODFLAGS -O2 -Werror -c -o $O/wf_photo.o $S/wf_photo.c
 $CC $MODFLAGS -O2 -Werror -c -o $O/wf_dev_c.o $S/wf_dev.c
 $CC -mcpu=arm946e-s -marm -c -o $O/wf_dev_arm.o $S/wf_dev_arm.S
 arm-none-eabi-ld -r -o $O/wf_dev.o $O/wf_dev_c.o $O/wf_dev_arm.o
@@ -57,7 +58,7 @@ $CC $MODFLAGS -c -o $O/wf_logout_tab.o $S/wf_logout_tab.c
 $CC -mcpu=arm946e-s -marm -c -o $O/wf_logout_arm.o $S/wf_logout_arm.S
 arm-none-eabi-ld -r -o $O/wf_logout.o $O/wf_logout_tab.o $O/wf_logout_arm.o
 bad=
-for o in wf_cr2 wf_jpe wf_darkp wf_print; do
+for o in wf_cr2 wf_jpe wf_darkp wf_print wf_photo; do
   arm-none-eabi-readelf -A $O/$o.o | grep -q "Tag_CPU_arch: v5T$" || bad="$bad $o(not v5T)"
   n=$(arm-none-eabi-objdump -d $O/$o.o | grep -ciE "[[:space:]](ldr|str)d[a-z]{0,2}[[:space:]]" || true)
   [ "$n" = 0 ] || bad="$bad $o(LDRD/STRD $n)"
@@ -73,7 +74,7 @@ HCC="arm-linux-gnueabi-gcc -O1 -marm -march=armv5te -Wall -Wno-comment -I$S -I$R
 $HCC -c -o $O/wf_dark_test.o $R/tests/host/wf_dark_test.c
 $HCC -c -o $O/wf_dev_shim.o $R/tests/host/wf_dev_shim.c
 arm-linux-gnueabi-gcc -static -o $W/wf_dark_test $O/wf_dark_test.o $O/wf_dev_shim.o $O/wf_cr2.o $O/wf_jpe.o \
-  $O/wf_darkp.o $O/wf_print.o $O/wf_dev.o $O/wf_loglut.o $O/wf_llk.o $O/wf_llk_arm.o $O/wf_logout.o -lm \
+  $O/wf_darkp.o $O/wf_print.o $O/wf_photo.o $O/wf_dev.o $O/wf_loglut.o $O/wf_llk.o $O/wf_llk_arm.o $O/wf_logout.o -lm \
   -Wl,--no-enum-size-warning -Wl,--no-wchar-size-warning -Wl,--no-warn-execstack
 
 TP=0; TF=0
@@ -123,7 +124,7 @@ for c in "$D"/*.CR2; do
   [ -f "$j" ] || continue
   $PY $W/j2u.py "$j" $W/out/$b.jpeg.uyvy
   ( cd $W && qemu-arm-static $W/wf_dark_test frame "$c" "$j" $W/out $W/out/$b.jpeg.uyvy ) > $W/out/$b.log 2>&1 || true
-  grep -E "^(frame|trim|print|FAIL)" $W/out/$b.log | sed "s#$D/##; s#$W/out/##"
+  grep -E "^(frame|trim|print|photo|FAIL)" $W/out/$b.log | sed "s#$D/##; s#$W/out/##"
   tally $W/out/$b.log
   if [ -f $W/out/$b.JPG ]; then
     djpeg -outfile /dev/null $W/out/$b.JPG && echo "djpeg $b: ok" || { echo "djpeg $b: FAIL"; TF=$((TF + 1)); }

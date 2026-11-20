@@ -607,6 +607,7 @@ Stocks keep their Windy names, and there are no brand logos.
   - image review off (`PROP_REVIEW_TIME` 0, the old value back afterwards);
   - PLAY blocked: CBR_KEYPRESS eats it (outside the ML menu) while a roll is in the camera (loaded or rewound, not yet developed or closed) and the darkroom is not running, and shows a short note.
   - Off leaves Canon's review and PLAY alone.
+  - Since RAWB28 (owner 2026-11-20) also a browser row in Darkroom mode, under Exposures (3.19); the same `wf_blind`.
 - **HUD** over LiveView (wf_task draws it, ML colour indices, solid black chips). The film info shows for 2.5 s,
   then fades (owner 11-14: "giu phim info 2-3 s"):
   - "ROLL 021 <short name>" top left;
@@ -881,11 +882,12 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     as on the camera body. The lettering takes the caption's line 1 tone.
   - The maps are area-resampled (Q12 taps, at most 10x down) into scratch, then screened by the band code like the
     caption. The 16-px grid and the picture's own blocks are unchanged (the logo is in the border only).
-- **Camera JPEG** (owner 2026-11-16, RAWB21): Keep (default) / Overwrite / Over + print (2026-11-17). Shoot RAW+L
-  quickly; at the Darkroom the
+- **Camera JPEG** (owner 2026-11-16, RAWB21): Keep (default) / Overwrite / Over + print (2026-11-17) / Print + over
+  (2026-11-20, RAWB28). Shoot RAW+L quickly; at the Darkroom the
   print also replaces the shot's own JPEG in DCIM, so the camera's playback and a card reader show the print. The roll
   copy in `ROLLS/ROLL00n/` is always written first.
-  - Config `jpeg=keep|overwrite|both` (+ `jpeg2=prefix|folder`, below); ML menu "Camera JPEG" under "Darkroom"; the
+  - Config `jpeg=keep|overwrite|both|printover` (`jpeg2=prefix|folder` still read and saved, unused since RAWB28); ML
+    menu "Camera JPEG" under "Darkroom"; the
     fourth PRINT row on the Darkroom screen
     (icon: an arrow into a sheet). Snapshot at start: `... jpeg j logo nK` in the start line.
   - Order per frame: roll print written, read back and checked; then `IMG_nnnn.WFT` in the same DCIM folder; read
@@ -911,43 +913,26 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     print (`wf_dk_xthumb_*`, `src/wf_darkp.c`): the band rows are averaged into 160 x 120 while encoding, encoded at
     q90 down to q40 until it fits the slot (the IFD1 JPEG to the APP1's end when only zeros follow), our JFIF APP0
     dropped, the rest zero-filled; the APP1 is rewritten in place at offset 2. Too big at q40 = Canon's kept.
-  - **Over + print** (owner 2026-11-17: "the film-look JPEG and the framed JPEG, both in the main DCIM folder"). With
-    a frame, `IMG_nnnn.JPG` becomes the picture alone at 5184 x 3456, date stamp in it (Overwrite's file up to RAWB23),
-    and a second JPEG holds the print fitted into 5184 x 3456 (Overwrite's file since RAWB24). Frame Off = Overwrite,
-    one file. Each file goes the same way (`dk_dcim_put`): roll print checked first, then a .WFT of the target's name
-    beside it, read back, renamed onto it; the CR2 is never touched. The picture first, then the print (`dk_fit`
-    needs only the pack area, which the picture's encode does not touch); a stop in the first skips the second. A
-    print that cannot be fitted is not written a second time as the picture. The second encode costs about as much as
-    the first (~35 s a frame on the EOS M, logged per file).
-  - **The second file's name** (`wf_roll_jpg2`, `src/wf_roll.c`).
-    - DCF (JEITA CP-3461 / CIPA DC-009): `DCIM/` holds DCF folders `NNNxxxxx` (number 100..999 + five letters
-      A-Z 0-9 _); a DCF file name is four free letters + a four-digit file number + extension. The file number is
-      the key: the files of one number in one folder are one DCF object (Canon's RAW+JPEG pair is `IMG_nnnn.CR2` +
-      `IMG_nnnn.JPG`), and neither folder numbers nor file numbers are meant to repeat.
-    - What this ML tree knows of Canon's numbering (`src/fio-ml.c`, `src/fileprefix.c`): the folder number
-      (`PROP_FOLDER_NUMBER_A/B/C`), the next file number (`PROP_FILE_NUMBER_A/B/C`), the five letters of Canon's
-      folders (`PROP_DCIM_DIR_SUFFIX`, "CANON"; `get_dcim_dir` = number + those letters) and the four letters of its
-      files (`PROP_FILE_PREFIX`, "IMG_"; ML's `file_prefix_set` changes them and the numbers carry on). So Canon's
-      numbers do not depend on the letters, and Canon only ever writes its own letters into its own folder.
-    - `WFP_nnnn.JPG` beside the shot (config `jpeg2=prefix`, the default): the shot's folder and number, our
-      letters ("WindyFilm Print", DCF-legal). It can never meet a Canon file: nnnn is used already, Canon's counter
-      is past it, and Canon writes `IMG_` (refused when Canon's own prefix is `WFP_`). The pair keeps its names, and
-      the file is in the main folder as the owner asked. The risk: it repeats a file number, so Canon's playback
-      may count it into the `IMG_nnnn` object. It might show only one of the two JPEGs, pair the CR2 with ours, or
-      erase all three together. Without the camera we cannot know, so the card guide tests it first (HUONGDAN step
-      ac).
-    - The fallback (`jpeg2=folder`): `NNNWFILM/WFP_nnnn.JPG`, a folder of the shot's folder number with our five
-      letters, made by the run (`wf_fmkdir`). No file number repeats inside a folder. Canon's recording folder is
-      unchanged (its number + its own letters), and its next new folder is still the highest + 1. The cost: two
-      folders share one number, which DCF does not allow either, so playback may show it, skip it or merge it, and
-      the files are not in the main folder.
-    - Not taken:
-      - A higher folder number (`101WFILM`). The folder number is a camera property, and a camera may pick the
-        highest folder at card mount. New shots could then land away from the roll's folder (`wf_roll_cr2`), mixed
-        with our files.
-      - A new file number in the shot's folder. It would take the numbers Canon uses next, or need a write to
-        `PROP_FILE_NUMBER`.
-      - A folder outside DCF. Playback never shows it, and `ROLLS/` is that already.
+  - **One JPEG in DCIM** (owner 2026-11-20, RAWB28, approved with the mock images `_windyfilm_docs/rawb28_ui/`):
+    DCIM keeps one JPEG per shot, the one Canon's PLAY shows; the print is always the roll's copy in `ROLLS/`, never
+    copied again. With a frame (`dk_camjpg`, `src/wf_dark.c`):
+    - **Over + print**: `IMG_nnnn.JPG` becomes the picture alone at 5184 x 3456, date stamp in it (`DK_CJ_PIC`).
+      Nothing else is written.
+    - **Print + over**: `IMG_nnnn.JPG` becomes the print fitted into 5184 x 3456 (`DK_CJ_FIT`, as Overwrite), and the
+      picture alone at 5184 x 3456 goes into the run's ROLLS folder under the shot's own name:
+      `ROLLS/ROLL021/IMG_0208.JPG` beside `F01_0208.JPG` (and beside the CR2 that Move to ROLLS puts there; a develop
+      again writes into ROLL021B like its prints). The print first, then the picture; a stop in the first skips the
+      second. Both go through `dk_dcim_put` (a .WFT of the target's name beside it, read back, renamed onto it); the
+      second encode costs about as much as the first (~35 s a frame on the EOS M, logged per file).
+    - Frame Off: the print is the picture, so both are Overwrite (one file).
+    - The Darkroom screen says where the files go (`dr_where`, `src/ui/wf_dark_ui.c`): while Camera JPEG or RAW files
+      has the focus, the idle block's two lines read "PLAY (DCIM): Canon's JPEG / the picture / the print[ + CR2]" and
+      "ROLLS/ROLL021: the print (always)[ + the picture][ + CR2]" ("ROLLS: ..." when too wide), from the values now.
+    - Up to RAWB27 Over + print also wrote the print into DCIM as a second JPEG, `WFP_nnnn.JPG` beside the pair
+      (config `jpeg2=prefix`) or `NNNWFILM/WFP_nnnn.JPG` (`jpeg2=folder`), named by `wf_roll_jpg2` (`src/wf_roll.c`).
+      Both repeat a DCF file or folder number, which Canon's playback may merge or hide; the owner dropped it for
+      Print + over. `wf_roll_jpg2` is kept (unused by the run, `tests/host/wf_roll_test.c` still checks it); the
+      DCF reasoning is in git history (this section up to commit 8a5fee1).
   - **Playback of an overwritten RAW+L pair** (owner 2026-11-17, RAWB24/25: "sao jpg nó overwrite rồi mà preview vẫn
     là ảnh chưa qua xử lí"; still Canon's colours after a power cycle, so no cache from the time of the shot).
     - What a real EOS M pair holds (`tools/jpg_pictures.py` on IMG_6839 and IMG_6851, firmware 2.0.2). The JPEG: two
@@ -977,10 +962,10 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     under the idle block, `DR_MY` 410, gone with the next key). Icon: a folder with an arrow down in it. The idle
     block's two lines move one row down (`DR_IY` 365 / 387). The EOS M and the 5D2 draw the same screen (CAM=5D2
     dr_run: the same pixels); the shelf's rolls and a develop again show the same five rows.
-    - When: Move, Camera JPEG Overwrite or Over + print, and that frame's JPEG(s) written and read back (`dk_camjpg`
-      says so: `IMG_nnnn.JPG`, and with Over + print and a frame also `WFP_nnnn.JPG`). Otherwise the CR2 stays and one
+    - When: Move, Camera JPEG not Keep, and that frame's JPEG(s) written and read back (`dk_camjpg` says so:
+      `IMG_nnnn.JPG`, and with Print + over and a frame also the picture in ROLLS). Otherwise the CR2 stays and one
       log line says why: Keep (the run says it once at its start), a frame shot RAW only, a JPEG without Canon's Exif,
-      a print that did not read back, a stop in the camera JPEG, no second JPEG name / folder.
+      a print that did not read back, a stop in the camera JPEG, the picture in ROLLS not written.
     - Where: `ROLLS/ROLLnnn/IMG_nnnn.CR2` (`wf_roll_cr2_moved`): Canon's name, the roll's first folder for every
       develop pass (ROLL021, not ROLL021B), so one folder holds a roll's CR2s.
     - How, bytes unchanged. EOS M (its ML core defines `CONFIG_FIO_RENAMEFILE_WORKS`: `FIO_RenameFile` is Canon's
@@ -1003,7 +988,8 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     - Costs (told to the owner): an importer that pairs RAW + JPEG by folder sees the JPEG alone in DCIM; Canon's erase
       takes only the JPEG; the 5D2 copy reads the CR2 twice and writes it once (about 25 MB a frame; the time is in the
       log line); a rename across folders on DryOS is first tried by the card run.
-  - Not checked on the camera yet: how playback lists `WFP_nnnn.JPG` beside the pair. The roll copy is the safe one.
+  - Not checked on the camera yet: PLAY after Print + over (the print in DCIM, the CR2 still beside it unless moved,
+    so 3.9's playback note applies), and the time of the second encode on the 5D2.
 - **Memory.** Nothing new is allocated: the pack (<= 512 KB), the caption band (<= about 3.7 MB) and the row buffer
   (about 197 KB) use `M.raw`, which is free scratch in the DRY phase. The stamp's map (about 148 KB) uses `M.raw` too.
   Fonts / text are static (about 1 KB BSS). The logo pack (<= 384 KB) is read beside the fonts in the 512 KB pack
@@ -1016,10 +1002,12 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
   `dark: F07 camera JPEG: the print fitted 5184x3456, picture 4320x2880 at 432,96, logo`, `dark: F07 camera JPEG
   caption ...`, `dark: F07 camera JPEG IMG_0208.JPG overwritten: the print fitted 5184x3456, .. KB, ..ms` (or `the
   print` with Frame Off, `the picture 5184x3456` when it could not be fitted); every refusal names the step and the
-  file kept. Over + print: `dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print beside it as
-  WFP_nnnn.JPG` at the start, then per frame `... IMG_0208.JPG overwritten: the picture 5184x3456, .. KB, ..ms`,
-  `... WFP_0208.JPG written: the print fitted 5184x3456, .. KB, ..ms` (`100WFILM/WFP_0208.JPG` with the fallback)
-  and `dark: F07 camera JPEG: 2 of 2 files in DCIM, ..ms`. RAW after Darkroom: `dark: RAW after Darkroom Move to ROLLS:
+  file kept. Over + print: `dark: Camera JPEG Over + print: the picture over IMG_nnnn.JPG, the print in ROLLS only`
+  at the start, then per frame `... IMG_0208.JPG overwritten: the picture 5184x3456, .. KB, ..ms`. Print + over:
+  `dark: Camera JPEG Print + over: the print over IMG_nnnn.JPG, the picture as ROLLS/ROLLnnn/IMG_nnnn.JPG`, then `... IMG_0208.JPG overwritten: the print fitted 5184x3456, .. KB, ..ms`, `... ROLL021/
+  IMG_0208.JPG written: the picture 5184x3456, .. KB, ..ms` and `dark: F07 camera JPEG: the print in DCIM written,
+  the picture in ROLLS written, ..ms` (either `not written`). Frame Off: `dark: Camera JPEG Print + over: frame Off,
+  so as Overwrite (one file)`. RAW after Darkroom: `dark: RAW after Darkroom Move to ROLLS:
   each CR2 goes to ROLLS/ROLL021/ once its frame's JPEG is in DCIM` at the start (or `..., but Camera JPEG is Keep: the
   CR2s stay in DCIM`), then per frame `dark: F07 IMG_0208.CR2 moved to ROLLS/ROLL021/ (renamed, .. KB, ..ms)` (5D2
   `(copied and read back, ...)`, EOS M fallback `(rename failed: copied and read back, ...)`) or `dark: F07
@@ -1041,20 +1029,25 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     frame / info / orientation, `wf_pf_scale` within 1.25 of the exact area mean (two roundings), chroma flat, half
     size and short memory refused; `WF_OW_OUT=dir` keeps these DCIM files and adds a black frame roll (the owner's
     preview images); no .WFT left, CR2s unchanged, a missing JPEG is logged and
-    skipped, both files carry our Exif thumbnail. Over + print (black frame, then `jpeg2=folder` with a white frame):
-    each `IMG_nnnn.JPG` the picture at 5184 x 3456 and `WFP_nnnn.JPG` (beside it, or in `100WFILM/`) the print
-    fitted, different bytes and thumbnails, the three log lines, no .WFT, the CR2s unchanged. `tests/host/
+    skipped, both files carry our Exif thumbnail. Over + print (black frame, `jpeg2=folder` set and ignored): each
+    `IMG_nnnn.JPG` the picture at 5184 x 3456, no picture in ROLLS, no `WFP_` file and no `100WFILM/`. Print + over
+    (white frame): each `IMG_nnnn.JPG` the print fitted, `ROLLS/ROLLnnn/IMG_nnnn.JPG` the picture at 5184 x 3456,
+    both read by `tools/jpg_pictures.py` rules (two pictures, our thumbnail), the log lines, no .WFT, the CR2s
+    unchanged. `tests/host/
     wf_roll_test.c`: `wf_roll_jpg2` names, temps, Canon's other prefixes, our own prefix refused, non-DCF names and
     short buffers.
-  - `tests/ui/dr_ui_test.c` 3b: the PRINT rows (Camera JPEG the fourth, Keep / Overwrite / Over + print; RAW files the
+  - `tests/ui/dr_ui_test.c` 3b: the PRINT rows (Camera JPEG the fourth, Keep / Overwrite / Over + print / Print +
+    over; RAW files the
     fifth: greyed with Camera JPEG Keep, its keys say why and change nothing; with Overwrite RIGHT / the wheel step
     Keep in DCIM / Move to ROLLS and wrap; the message gone with the next key) and the easel sketch.
   - `test.sh` ROLL:cr2mv (RAW after Darkroom, both cameras, real RAW+L pairs): the row Keep by default, shown, SET
     steps it; Move with Camera JPEG Keep moves nothing; Overwrite + Move: F01's CR2 in `ROLLS/ROLL002/` byte for byte
     and gone from DCIM (EOS M renamed, 5D2 copied), F02's copy made wrong by `h_fio_wflip` (EOS M: its rename refused
     first by `h_fio_ren_fail`) leaves no copy and its CR2 in DCIM, F03 shot RAW only keeps its CR2; develop again:
-    F01 read from ROLLS, nothing skipped, F02 moved by the copy (EOS M: the fallback), the pass-2 prints. CFG reads and
-    saves `cr2=`; `tests/host/wf_roll_test.c` checks `wf_roll_cr2_moved`.
+    F01 read from ROLLS, nothing skipped, F02 moved by the copy (EOS M: the fallback), the pass-2 prints. A Print +
+    over pass (roll 003, white frame): F01 / F03 pictures in `ROLLS/ROLL003/` and their CR2s moved; F02's picture made
+    wrong by `h_fio_wflip` on `ROLLS/ROLL003/IMG_0708.WFT`: "the picture in ROLLS not written" and its CR2 kept in
+    DCIM. CFG reads and saves `cr2=`; `tests/host/wf_roll_test.c` checks `wf_roll_cr2_moved`.
   - The 5D2 has no Darkroom: `wf_print.o` and WFPRINT.DAT are EOS M only (both cameras from `dark-5d2`, 3.18).
 
 ### 3.10 Paper finish (owner 2026-11-16, both cameras and the Darkroom web core)
@@ -1183,7 +1176,8 @@ picker screen is gone (owner 11-17: "the original WindyFilm UI looks nicer"): ev
   roll's own film picked again = the load animation, no load; a roll still shooting with frames keeps its film ("This
   roll has frames: PLAY develops it (Darkroom)"); a finished roll (FULL / REWOUND with frames) brings the picker's
   close-and-load question in the browser (`draw_swap`, SET yes = `wf_roll_req_swap`, MENU no). The load button reads
-  "SET Load roll", and the roll's film shows "On the roll". The PLAY hint stays ("PLAY Darkroom").
+  "SET Load roll", and the roll's film shows "On the roll". The PLAY hint stays ("PLAY Darkroom"). Under it since
+  RAWB28 the Blind roll row (3.19).
 - **Leaving Darkroom with a roll** (`mode_set`). Frames are never lost:
   - LOADED with 0 frames: the roll is taken out (`wf_roll_req_close`), "Roll 021 taken out: no frame on it".
   - LOADED with frames: a question in the browser (`draw_leave`): "Roll 021: 5 of 24 frames shot", "End the roll now
@@ -1594,6 +1588,55 @@ ring, and there is no zoom key. EOS M only (the 5D2 has an ISO button and two di
   (3.16) sets the 5D2's ISO on a roll load too; RAW after Darkroom (3.9) copies the CR2 on the 5D2 and renames it on the
   EOS M; B's fallback white (`rb_white`, `wf_cam_5d2.c`) takes ISO 2500 / 5000 as 15600, not 13300 (the CR2s clip them
   at 16268..16332).
+
+### 3.19 The Darkroom's photos, Print + over and Blind roll in the browser (owner 2026-11-20, RAWB28, branch `wf-onescreen`)
+Approved with the mock images `_windyfilm_docs/rawb28_ui/` 01-04 (AskUserQuestion 11-20: "Duyệt, làm RAWB28"); the
+Blind roll row added the same day at the owner's word ("trước đây bấm play ko thấy được ảnh lúc liveview h thì có
+tùy chọn cho nhìn thấy"), image 05. Print + over is 3.9.
+- **The photos.** Up to RAWB27 the easel showed a drawn sketch. Now, both cameras:
+  - ROLL row, the chip, Film (focus not on a PRINT row): a **contact sheet** of the picked roll (camera or shelf),
+    `dr_contact` (`src/ui/wf_dark_ui.c`): strips on the easel's paper as a contact print shows negatives (dark film
+    between, a portrait frame on its side). Up to 12 frames: 3 strips of 4 at 72 x 48; else up to 6 strips of 6 at
+    46 x 30 (36 shown; WF_DK_SHEET). A frame not read yet is grey; one without a CR2 dark with a dash; the frame the
+    run prints first (`wf_roll_next_dev`) has the safelight's amber mark under it.
+  - PRINT rows: the print sketch (`dr_ppreview`) draws that first frame's photo (288 x 192, a portrait 128 x 192) in
+    the frame / caption / date layout of the rows, so changing Frame / Info / Date redraws round the same photo. No
+    photo yet: the drawn sky as before. After a run, the last print is shown as before unless the photo is ready.
+  - INFO (footer "Hide photos" / "Show photos"): `wf_dk_photo`, config `dkphoto=on|off` (default on, written after
+    `dkscreen=`), `wf_dk_photo_set` (`src/wf_menu.c`). Off = RAWB27's easel; nothing is read or allocated.
+- **Where the photos come from** (`src/wf_photo.c`, shared by the module and the UI harness's fake). The CR2's IFD2:
+  Canon's uncompressed 16-bit RGB small picture (EOS M 660 x 441, 5D2 362 x 234; little-endian, linear light, a
+  masked band at the edge), orientation from IFD0 tag 274. `wf_ph_find` reads 8 bytes, then 512 at IFD0 / 1 / 2, and
+  takes IFD2 only if it is uncompressed RGB 16-bit, one strip, <= 680 wide (`wf_ph_rgb_ok`); `wf_ph_cell` reads three
+  middle rows per cell band; `wf_ph_big` reads 8 rows at a time. The black comes from the masked columns, the white
+  point from `wf_ph_levels` (a 0.5 % clip per end); an sRGB table maps to 8-bit luma (`wf_ph_to8`); `wf_ph_turn`
+  turns by the orientation. No RAW or JPEG decode. Read per frame (EOS M, 3960 B a row): 3 rows per cell band (90 rows at 46 x 30,
+  144 at 72 x 48) and, for the photo, all 441 rows (1.7 MB).
+- **The loader** (`ph_poll`, `src/wf_dark.c`, in wf_task's idle polls; W13: the hook only flags). The UI task asks
+  each tick (`wf_dark_photos(num, cam)`: returns at once, `n` = 0 until a sheet starts); wf_task reads, at most 100 ms
+  a poll: the first-printed frame's cell and photo first, then the other cells in order. Memory: one 242 KB block
+  (36 cells 46 x 30 or 12 at 72 x 48, the photo, its 16-bit rows) + 32 KB DMA (`__mem_malloc`), freed 3 s after the
+  last ask, when a run starts and at unload; a changed roll (FNV of its count, frames, next frame, last file) starts
+  again; no memory = the sketch, asked again after 10 s. A CR2 moved to ROLLS is found there (`wf_roll_cr2_moved`).
+  Card reads only through FIO_OpenFile / ReadFile / CloseFile (imported already; W11, W24).
+- **Blind roll in the browser.** Darkroom mode with a roll: a row under Exposures (`FOC_BLIND`, `rollrows()` = 2,
+  `src/ui/wf_ui.c`): an eye icon, struck through when On; "Blind roll", the note "no review, no PLAY" / "review + PLAY
+  show the frames", Off / On pills; LEFT / RIGHT / the wheel step it, SET loads as on Exposures (`wf_blind_set`;
+  log `ui: blind roll on|off`). The menu row's help says it is also in WindyFilm.
+- **Text.** `dark: photos roll 21: 12 frames read, 0 without, picture 288x192, 1840ms` (or `camera roll`), `dark:
+  photos: no memory (274 KB), the sketch`, `dark: photos: roll 21 (pass 1) not read back`.
+- **Checks.**
+  - `tests/host/wf_dark_test.c` units: a synthetic TIFF in four orientations (find, cell halves, the big read in
+    ceil(214 / 8) reads, dims, where the dark half lands), a short file / no strip / big-endian / compressed refused,
+    levels and the sRGB midpoint. `tools/dr_dark_check.sh`: on every real CR2 (EOS M and 5D2) the small RGB's size,
+    cells and photo means (`photo ...` lines); `wf_photo.o` -Werror and in the object checks.
+  - `tests/ui/dr_run.sh` (EOS M and CAM=5D2): the contact sheet from the test rolls' CR2s, the sketch with the
+    photo, INFO off / on, the shelf roll; the shared reader gives the mock images pixel for pixel (13 shots each
+    camera). `tests/ui/run.sh`: the Blind roll row (focus order, On / Off, the menu value follows, shot
+    `one_blind_off`).
+  - `test.sh` CFG: `dkphoto=` and `jpeg=printover` read and saved; ROLL:jpeg and ROLL:cr2mv as in 3.9.
+- **Not checked on the camera:** how long a sheet takes to fill (the card's seek time per frame), the photos' look
+  against the camera's own playback, and Blind roll Off with PLAY in LiveView during a roll.
 
 ## 4. Interfaces
 

@@ -470,6 +470,7 @@ int main(int argc, char **argv)
     to_dump("toast_mz", "MAGIC ZOOM", "SET", "Off", 0, 0, WF_HUD_FULL, -1);
     to_dump("toast_mz_ml", "MAGIC ZOOM", 0, "Turn on ML Overlay > Magic Zoom first", 0, 0, WF_HUD_FULL, -1);
     to_dump("toast_iso_auto", "ISO AUTO", 0, "Turn up: ISO 100", 0, 0, WF_HUD_FULL, -1);
+    to_dump("toast_p_ring", "ISO", 0, "P: the ring shifts. Tv, Av or M", 0, 0, WF_HUD_FULL, -1);   /* RAWB28 */
     roll_of(bw, 12, 5, WF_RS_LOADED);
     to_dump("toast_iso_roll", "ISO 400", "RING", "ISO", "DOWN", "Aperture", WF_HUD_FULL, WF_HUD_FULL);
     to_dump("toast_mz_roll", "MAGIC ZOOM", "SET", "Off", 0, 0, WF_HUD_FULL, WF_HUD_SMALL);
@@ -481,8 +482,9 @@ int main(int argc, char **argv)
         memcpy(hud_only, hv, sizeof hv);
         const char *wide[][5] = { { "ISO 12800", "RING", "ISO", "DOWN", "Aperture" },
                                   { "MAGIC ZOOM", 0, "Turn on ML Overlay > Global Draw first", 0, 0 },
-                                  { "ISO 400", 0, "The highest the camera takes", 0, 0 } };
-        for (int k = 0; k < 3; k++)
+                                  { "ISO 400", 0, "The highest the camera takes", 0, 0 },
+                                  { "ISO", 0, "P: the ring shifts. Tv, Av or M", 0, 0 } };   /* RAWB28 */
+        for (int k = 0; k < 4; k++)
         {
             memset(hv, 0, sizeof hv);
             wfdr_toast(0, 0, 0, 0, 0, 0, 0, WF_HUD_CLEAR);
@@ -582,14 +584,13 @@ int main(int argc, char **argv)
     /* 14. owner 11-15: the Darkroom from inside the UI (PLAY, EOS M), the close-and-load question, the notice while the
      * shutter is held, rolls of 3 */
     /* .. browser in JPEG mode, no roll: as before (no entry, PLAY closes it). Darkroom mode is kept from the opens above
-     * (the mode chip, owner 11-17): UP past Exposures to the top bar, RIGHT to the chip (round 2: LEFT / RIGHT pick the
-     * section pill or the chip), SET = JPEG (no Exposures row), DOWN back to Light */
+     * (the mode chip, owner 11-17): UP past Blind roll and Exposures to the top bar, RIGHT to the chip (round 2: LEFT /
+     * RIGHT pick the section pill or the chip), SET = JPEG (no roll rows), DOWN back to Light */
     fake_dark_reset();
     open_scr(0);
     if (wfui_host_mode() == M_DARK)
     {
-        key(MODULE_KEY_PRESS_UP);
-        key(MODULE_KEY_PRESS_UP);
+        for (int i = 0; i < 3; i++) key(MODULE_KEY_PRESS_UP);
         key(MODULE_KEY_PRESS_RIGHT);
         key(MODULE_KEY_PRESS_SET);
         key(MODULE_KEY_PRESS_DOWN);
@@ -831,6 +832,86 @@ int main(int argc, char **argv)
               "'%s'", fake_nstart() - st1, wfdr_host_msg());
         close_ui();
         CHECK(host_live_allocs() == 0, "section 16: %ld allocations left", host_live_allocs());
+    }
+
+    /* 17. RAWB28 (owner 20-11): the Darkroom's photos from the CR2s (a contact sheet with the chip / ROLL / Film focused,
+     * the frame the run prints first in the print sketch with a PRINT row focused, INFO on / off) and where Camera JPEG
+     * puts the files (one JPEG in DCIM for Canon's PLAY, the other in ROLLS) */
+    if (argc > 5)
+    {
+        fake_dark_reset();
+        fake_set_photo_dir(argv[5]);
+        roll_of(colour, 36, 12, WF_RS_LOADED);                      /* the camera: roll 024, 12 of 36 */
+        fake_roll()->num = 24;
+        shelf_ent(23, 1, bw, bw, 36, WF_RS_REWOUND, 36, 36, 0);     /* 36 frames on the shelf */
+        shelf_ent(21, 1, colour, colour, 24, WF_RS_REWOUND, 24, 22, 2);   /* 2 developed: the print is frame 3 */
+        fake_view()->state = WF_DR_IDLE;
+        fake_view()->battery = 64;
+        fake_view()->nwire = 0;
+        fake_view()->print_ready = 0;
+        wf_pr_frame = 1;                                             /* White, Info On */
+        wf_pr_info = 1;
+        open_scr(WF_UI_SCR_DARK);
+        const struct wf_dark_photos *P = fake_photos();
+        CHECK(wfdr_host_pfoc() == 0 && P->n == 12 && P->big_frame == 0 && P->big_st == WF_PHS_OK && P->st[11] == WF_PHS_OK,
+              "photos: the camera's roll: focus %d, %d frames, print frame %d (st %d)", wfdr_host_pfoc(), P->n,
+              P->big_frame, P->big_st);
+        shot("rawb28_print_cam");                                   /* the print sketch: frame 1's photo */
+        key(MODULE_KEY_PRESS_UP);
+        CHECK(wfdr_host_pfoc() == WF_PO_N + 1, "photos: UP: the ROLL row (%d)", wfdr_host_pfoc());
+        shot("rawb28_sheet_cam12");                                 /* the contact sheet: 12 frames */
+        key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(wfdr_host_sel() == 23 && P->n == 36 && P->num == 23, "photos: roll 023: %d frames of roll %d", P->n, P->num);
+        shot("rawb28_sheet_36");
+        key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(wfdr_host_sel() == 21 && P->n == 24 && P->big_frame == 2, "photos: roll 021: %d frames, print frame %d",
+              P->n, P->big_frame);
+        shot("rawb28_sheet_24");
+        key(MODULE_KEY_PRESS_DOWN);                                 /* Frame: the print sketch, frame 3 */
+        CHECK(wfdr_host_pfoc() == WF_PO_FRAME, "photos: DOWN from ROLL: focus %d (want Frame)", wfdr_host_pfoc());
+        shot("rawb28_print_021");
+        /* where the files go: Camera JPEG's four values (Print + over new), the frame White */
+        for (int i = 0; i < 3; i++) key(MODULE_KEY_PRESS_DOWN);
+        CHECK(wfdr_host_pfoc() == WF_PO_JPEG && wf_pr_jpeg == 0, "Camera JPEG row: focus %d jpeg %d", wfdr_host_pfoc(),
+              wf_pr_jpeg);
+        shot("rawb28_jpeg_keep");
+        key(MODULE_KEY_PRESS_RIGHT);
+        shot("rawb28_jpeg_overwrite");
+        key(MODULE_KEY_PRESS_RIGHT);
+        shot("rawb28_jpeg_overprint");
+        key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(wf_pr_jpeg == WF_PJ_PRINT && wf_popt_avail(WF_PO_RAW), "RIGHT x3: jpeg %d (want Print + over), RAW files "
+              "avail %d", wf_pr_jpeg, wf_popt_avail(WF_PO_RAW));
+        shot("rawb28_jpeg_printover");
+        key(MODULE_KEY_PRESS_DOWN);
+        key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(wfdr_host_pfoc() == WF_PO_RAW && wf_pr_cr2 == 1, "RAW files Move: focus %d cr2 %d", wfdr_host_pfoc(),
+              wf_pr_cr2);
+        shot("rawb28_jpeg_printover_move");
+        key(MODULE_KEY_PRESS_UP);
+        key(MODULE_KEY_WHEEL_RIGHT);
+        CHECK(wf_pr_jpeg == WF_PJ_KEEP, "wheel right on Print + over: %d (want Keep, wraps)", wf_pr_jpeg);
+        wf_pr_frame = 0;                                             /* the frame Off: one picture */
+        key(MODULE_KEY_WHEEL_LEFT);
+        shot("rawb28_jpeg_printover_frameoff");
+        wf_pr_frame = 1;
+        wf_pr_cr2 = 0;
+        /* INFO: the photos off (the drawn sketch, as before) and on again */
+        key(MODULE_KEY_INFO);
+        CHECK(wf_dk_photo == 0, "INFO: photos %d (want off)", wf_dk_photo);
+        for (int i = 0; i < 4; i++) key(MODULE_KEY_PRESS_UP);      /* Camera JPEG -> ROLL */
+        CHECK(wfdr_host_pfoc() == WF_PO_N + 1, "UP x4: focus %d (want ROLL)", wfdr_host_pfoc());
+        shot("rawb28_photos_off");
+        key(MODULE_KEY_INFO);
+        CHECK(wf_dk_photo == 1, "INFO again: photos %d (want on)", wf_dk_photo);
+        /* while they are read: grey frames not read yet, one without a CR2 */
+        fake_photo_partial(9, 4);
+        key(MODULE_KEY_PRESS_LEFT);
+        CHECK(wfdr_host_sel() == 23 && P->st[4] == WF_PHS_NONE && P->st[9] == WF_PHS_WAIT && P->st[8] == WF_PHS_OK,
+              "photos read in part: roll %d, st %d %d %d", wfdr_host_sel(), P->st[4], P->st[9], P->st[8]);
+        shot("rawb28_sheet_loading");
+        close_ui();
+        CHECK(host_live_allocs() == 0, "section 17: %ld allocations left", host_live_allocs());
     }
 
     printf("peak UI heap %ld bytes\n", host_peak_bytes());

@@ -15,6 +15,7 @@
 /* ------------------------------------------------------------------ roll (wf_task) */
 extern volatile int wf_blind;                    /* menu "Blind roll": 1 (default) = image review off and PLAY blocked
                                                     while a roll is in the camera (loaded, full or rewound) and no darkroom run */
+void wf_blind_set(int on);                       /* the ML menu or the browser's Blind roll row: set it, the config saves it */
 const struct wf_roll *wf_roll_now(void);         /* the current roll (never 0) */
 uint32_t wf_roll_gen(void);                      /* bumped when the roll changes */
 /* UI / menu requests (wf_task carries them out while Canon is idle; the result shows in wf_roll_now):
@@ -113,15 +114,21 @@ int  wf_dark_src(int output, int flut);          /* EOS M: the WF_DEV_* tables a
    On, Off): a run takes them at its start, so the prints of one run match. Frame Off and Date Off = today's print.
    wf_pr_jpeg (owner 11-16): WF_PJ_OVER = each print also replaces the shot's own JPEG in DCIM (after the roll copy is
    written and read back; the CR2 is never touched), so Canon's playback shows the print; default WF_PJ_KEEP.
-   WF_PJ_BOTH (owner 11-17, "Over + print"): with a frame the shot's JPEG becomes the picture alone (as Overwrite did
-   up to RAWB23) and a second JPEG in DCIM holds the framed print fitted to 5184 x 3456; frame Off = Overwrite.
-   wf_pr_jpg2 (config jpeg2=prefix|folder, kept silently): where that second JPEG goes (wf_roll_jpg2).
+   With a frame the picture (the look alone) and the print (framed) differ, and Canon's playback shows one JPEG a shot
+   (owner RAWB28, 20-11: two JPEGs in one DCIM folder do not both preview), so one goes to DCIM, the other to ROLLS:
+   WF_PJ_BOTH "Over + print" = the shot's JPEG becomes the picture alone at 5184 x 3456 (as Overwrite did up to
+   RAWB23), the print stays the roll copy in ROLLS (always written first: nothing more is copied); WF_PJ_PRINT "Print +
+   over" (RAWB28) = the shot's JPEG becomes the print fitted to 5184 x 3456 (as Overwrite), and the picture alone is
+   added to ROLLS: ROLLS/ROLLnnn/IMG_nnnn.JPG (the camera JPEG's own name) beside the print F01_nnnn.JPG and, moved,
+   the CR2 IMG_nnnn.CR2 (a RAW + JPEG pair again).
+   Frame Off: one picture, both are Overwrite. (RAWB24-27 put the print into DCIM as WFP_nnnn.JPG; wf_pr_jpg2, config
+   jpeg2=prefix|folder, is still read, not used.)
    wf_pr_cr2 (owner 11-17, menu "RAW after Darkroom", config cr2=keep|move; default WF_PC_KEEP): WF_PC_MOVE = with Camera
    JPEG Overwrite or Over + print, once a frame's JPEG(s) are written and read back its CR2 moves, bytes unchanged, to
    ROLLS/ROLLnnn/ (wf_roll_cr2_moved), so Canon's PLAY finds only our JPEG; the shelf and develop again read it there.
    Keep, or a frame without a camera JPEG (RAW only): the CR2 stays in DCIM. */
 extern volatile int wf_pr_frame, wf_pr_info, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2, wf_pr_cr2;
-enum { WF_PJ_KEEP = 0, WF_PJ_OVER, WF_PJ_BOTH, WF_PJ_N };
+enum { WF_PJ_KEEP = 0, WF_PJ_OVER, WF_PJ_BOTH, WF_PJ_PRINT, WF_PJ_N };
 enum { WF_J2_PREFIX = 0, WF_J2_FOLDER, WF_J2_N };
 enum { WF_PC_KEEP = 0, WF_PC_MOVE, WF_PC_N };
 enum { WF_PO_FRAME = 0, WF_PO_INFO, WF_PO_DATE, WF_PO_JPEG, WF_PO_RAW, WF_PO_N };   /* the Darkroom's print rows (wf_menu.c) */
@@ -151,6 +158,32 @@ int  wf_dark_keep(int now, int ui);              /* Screen On: the UI's tick (ui
                                                     a display Canon turned off mid-frame is turned on again, every 1 s */
 int  wf_dark_dark(int now);                      /* the UI's tick on the Darkroom screen: turns the display off when a
                                                     Screen Off run is due dark; 1 = it reads dark (redraws can wait) */
+
+/* the Darkroom's photos (owner RAWB28, 20-11: "preview ảnh lúc chọn darkroom", src/wf_photo.h): the picked roll's
+   frames from their CR2s' small RGB, read a frame at a time while the Darkroom screen is idle (no run). The easel shows
+   them as a contact sheet (focus on the chip, the ROLL or the Film row) or in the print sketch (focus on a PRINT row:
+   the frame the run prints first). wf_dk_photo (config dkphoto=on|off, default on): INFO on the Darkroom screen
+   switches it; off = the drawn sketch, as before RAWB28 */
+extern volatile int wf_dk_photo;
+void wf_dk_photo_set(int on);                    /* the UI: set it, the config saves it */
+#define WF_DK_SHEET 36                           /* a contact sheet: 6 strips of 6 (the longest roll) */
+enum { WF_PHS_WAIT = 0, WF_PHS_OK, WF_PHS_NONE };   /* a frame's photo: not read yet, read, none (no CR2 / not one) */
+struct wf_dark_photos {
+    int      num, cam;                           /* the roll asked for (cam 1 = the camera's roll) */
+    int      n;                                  /* frames on the sheet (0 = nothing to show: the sketch) */
+    uint8_t  st[WF_DK_SHEET];                    /* WF_PHS_* */
+    int      cw, ch;                             /* a frame's size on the sheet: WF_PH_LW x WF_PH_LH up to WF_PH_LMAX
+                                                    frames, else WF_PH_CW x WF_PH_CH (wf_photo.h) */
+    uint8_t *cell;                               /* n x cw x ch luma, as stored (a portrait frame lies on its side, as
+                                                    on a contact print) */
+    int      big_frame, big_st;                  /* the frame the run prints first, WF_PHS_* */
+    int      big_w, big_h;                       /* its picture the right way up: 288 x 192, or 128 x 192 */
+    uint8_t *big;
+    uint32_t gen;                                /* bumped as photos come in */
+};
+/* the UI: the roll it shows, asked each tick while shown (wf_task reads while asked: a frame's state is set once its
+   cell is there, big_st once the picture is); never 0 (n = 0 until a sheet starts) */
+const struct wf_dark_photos *wf_dark_photos(int num, int cam);
 
 /* ------------------------------------------------------------------ UI */
 /* wf_ui_open_scr (wf_ui.c): open the UI there, or switch an open UI to it. WF_UI_NEW_ROLL = the browser in Darkroom mode

@@ -26,6 +26,7 @@
 #error "wf_darkp.h WF_DK_EV_BAD must equal wf_fx.h WF_EV_BAD"
 #endif
 #include "wf_print.h"
+#include "wf_photo.h"
 #endif
 
 /* ML core (EOSM_202.sym / 5D2_212.sym both export these) */
@@ -727,6 +728,9 @@ static void roll_req(void)
     roll_changed();
 }
 
+#if WF_DARK_CAN
+static void ph_poll(int idle);
+#endif
 void wf_roll_poll(void)
 {
     if (!roll_read_done) {
@@ -747,6 +751,7 @@ void wf_roll_poll(void)
 #if WF_DARK_CAN
     if (idle && sh_scan)
         shelf_scan();
+    ph_poll(idle);                               /* the Darkroom screen's photos (RAWB28) */
 #endif
     if (aside && !wf_roll_open(&roll)) {         /* developed (done) or closed: nothing set aside any more */
         aside = 0;
@@ -867,6 +872,243 @@ int wf_clock_ymd(void)
 /* print finishes (wf_dark.h, DESIGN 3.9): the settings; a run takes them at its start */
 volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg, wf_pr_jpg2, wf_pr_cr2;
 volatile int wf_dk_scr;                          /* Screen Off (wf_dark.h, DESIGN 3.11): read live, a run follows a change */
+volatile int wf_dk_photo = 1;                    /* the Darkroom's photos (wf_dark.h, RAWB28) */
+
+/* ------------------------------------------------------------------ the Darkroom's photos (owner RAWB28, wf_photo.h)
+ * The Darkroom screen asks each tick for the roll it shows (wf_dark_photos: the UI task, no card access); wf_task's idle
+ * poll (ph_poll; never in a run) reads its frames a CR2 at a time through wf_photo.c: the frame the run prints first
+ * (its cell and the print sketch's picture), then the other cells in order, PH_BUDGET ms of reads a poll. One block
+ * while asked (the cells, the picture, the 16-bit scratch, the rows) and a DMA buffer, given back PH_ASK_MS after the
+ * last ask (the screen closed, INFO off), at a run's start and at unload. A sheet starts again when the roll asked for
+ * or its frames change (ph_sig: a new frame, a develop, a shelf pass). A frame's CR2 in DCIM, else where RAW files
+ * Move to ROLLS put it. */
+#if WF_DARK_CAN
+#define PH_ASK_MS 3000
+#define PH_BUDGET 100
+#define PH_DMA    (32 * 1024)
+#define PH_CELLS  (WF_DK_SHEET * WF_PH_CW * WF_PH_CH)
+#define PH_BIG    (WF_PH_BW * WF_PH_BH)
+#define PH_MEM    (PH_CELLS + PH_BIG + PH_BIG * 2 + WF_PH_ROWS * 2)
+typedef char ph_mem_check[PH_CELLS >= WF_PH_LMAX * WF_PH_LW * WF_PH_LH && (PH_CELLS + PH_BIG) % 4 == 0 ? 1 : -1];
+static struct wf_dark_photos ph, ph_empty;       /* what the UI reads (wf_task writes ph) */
+static volatile int ph_ask_num = -1, ph_ask_cam, ph_ask_t;
+static uint8_t *ph_mem, *ph_dma, *ph_old, *ph_old_dma;   /* dropped blocks are freed a poll later (a draw may be on) */
+static uint16_t *ph_t16, *ph_rows;
+static struct wf_roll ph_shroll;                 /* a shelf roll's frames: its roll file read back */
+static const struct wf_roll *ph_r;               /* the roll read: the camera's or ph_shroll */
+static uint32_t ph_sig;
+static int ph_next, ph_t0, ph_nok, ph_nnone, ph_fail_t = -100000;
+static struct wf_ph ph_t;
+
+const struct wf_dark_photos *wf_dark_photos(int num, int cam)
+{
+    ph_ask_num = num;
+    ph_ask_cam = cam;
+    ph_ask_t = get_ms_clock();
+    WF_BARRIER();
+    return ph.n > 0 && ph.num == num && ph.cam == cam ? &ph : &ph_empty;
+}
+
+static void ph_free_old(void)
+{
+    if (ph_old)
+        __mem_free(ph_old);
+    if (ph_old_dma)
+        __mem_free(ph_old_dma);
+    ph_old = ph_old_dma = 0;
+}
+static void ph_drop(void)
+{
+    ph.n = 0;
+    ph.num = -1;
+    WF_BARRIER();
+    ph.gen++;
+    ph_free_old();
+    ph_old = ph_mem;
+    ph_old_dma = ph_dma;
+    ph_mem = ph_dma = 0;
+    ph_sig = 0;
+}
+
+/* what the sheet shows of a roll: 0 = nothing (no roll, no frame); *dev = a shelf roll's pass */
+static uint32_t ph_sig_of(int num, int cam, int *dev)
+{
+    int v[6];
+    *dev = 0;
+    if (cam) {
+        if (!wf_roll_open(&roll) || roll.nshot <= 0)
+            return 0;
+        v[0] = roll.num; v[1] = roll.nshot; v[2] = wf_roll_next_dev(&roll); v[3] = roll.file[roll.nshot - 1];
+        v[4] = roll.folder[roll.nshot - 1]; v[5] = -1;
+    } else {
+        int k = 0;
+        while (k < shv.n && shv.e[k].num != num)
+            k++;
+        if (k >= shv.n || shv.e[k].nshot <= 0)
+            return 0;
+        *dev = shv.e[k].dev;
+        v[0] = num; v[1] = shv.e[k].nshot; v[2] = shv.e[k].left; v[3] = shv.e[k].dev; v[4] = shv.e[k].ndev; v[5] = 1;
+    }
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < 6; i++)
+        h = (h ^ (uint32_t)v[i]) * 16777619u;
+    return h | 1;
+}
+
+static void ph_start(int num, int cam, uint32_t sig, int dev)
+{
+    ph.n = 0;
+    WF_BARRIER();
+    ph_sig = sig;
+    ph.num = num;
+    ph.cam = cam;
+    ph.gen++;
+    if (!sig)
+        return;                                  /* nothing to show: the easel's sketch */
+    if (cam)
+        ph_r = &roll;
+    else if (shelf_read(num, dev, &ph_shroll) == 0)
+        ph_r = &ph_shroll;
+    else {
+        wf_log("dark: photos: roll %d (pass %d) not read back", num, dev);
+        return;
+    }
+    int n = ph_r->nshot > WF_DK_SHEET ? WF_DK_SHEET : ph_r->nshot, f = wf_roll_next_dev(ph_r);
+    if (n <= 0)
+        return;
+    memset(ph.st, 0, sizeof ph.st);
+    ph.cw = n <= WF_PH_LMAX ? WF_PH_LW : WF_PH_CW;
+    ph.ch = n <= WF_PH_LMAX ? WF_PH_LH : WF_PH_CH;
+    ph.big_frame = f >= 0 && f < n ? f : 0;
+    ph.big_st = WF_PHS_WAIT;
+    ph.big_w = ph.big_h = 0;
+    ph.cell = ph_mem;
+    ph.big = ph_mem + PH_CELLS;
+    ph_next = ph_nok = ph_nnone = 0;
+    ph_t0 = get_ms_clock();
+    WF_BARRIER();
+    ph.n = n;
+    ph.gen++;
+}
+
+struct ph_fh { void *f; uint32_t pos; };
+static int ph_rd(void *ctx, uint32_t pos, void *dst, uint32_t n)   /* wf_photo.h's reader: FIO through ph_dma */
+{
+    struct ph_fh *h = ctx;
+    uint8_t *d = dst;
+    if (pos != h->pos) {
+        if (FIO_SeekSkipFile(h->f, pos, 0) != (int64_t)pos)
+            return -1;
+        h->pos = pos;
+    }
+    while (n) {
+        uint32_t k = n > PH_DMA ? PH_DMA : n;
+        if (FIO_ReadFile(h->f, ph_dma, k) != (int)k)
+            return -1;
+        memcpy(d, ph_dma, k);
+        d += k;
+        n -= k;
+        h->pos += k;
+    }
+    return 0;
+}
+
+/* frame i's cell (big: and the print sketch's picture), its state set last */
+static void ph_frame(int i, int big)
+{
+    char p[96], root[16];
+    uint32_t sz = 0;
+    struct wf_ph_src s;
+    struct ph_fh h = { 0, 0 };
+    int ok = 0;
+    if (wf_roll_cr2(ph_r, i, wf_dcim_dir(), wf_file_prefix(), "CR2", p, sizeof p) < 0 || FIO_GetFileSize(p, &sz) != 0
+        || sz < 4096) {                          /* moved beside the prints by RAW files Move to ROLLS? */
+        if (wf_roll_root(wf_dcim_dir(), root, sizeof root) < 0
+            || wf_roll_cr2_moved(ph_r->num, ph_r->file[i], root, wf_file_prefix(), p, sizeof p) < 0
+            || FIO_GetFileSize(p, &sz) != 0 || sz < 4096)
+            p[0] = 0;
+    }
+    if (p[0]) {
+        h.f = FIO_OpenFile(p, 0);
+        if (!WF_FH_OK(h.f))
+            h.f = 0;
+    }
+    if (h.f && wf_ph_find(ph_rd, &h, (uint8_t *)ph_rows, &s) == 0) {
+        ok = wf_ph_cell(ph_rd, &h, &s, &ph_t, ph.cw, ph.ch, ph_rows, ph_t16, ph.cell + i * ph.cw * ph.ch) == 0;
+        int bw = 0, bh = 0;
+        if (ok && big && wf_ph_big(ph_rd, &h, &s, &ph_t, ph_rows, ph_t16, ph.big, &bw, &bh) == 0) {
+            ph.big_w = bw;
+            ph.big_h = bh;
+            WF_BARRIER();
+            ph.big_st = WF_PHS_OK;
+        }
+    }
+    if (h.f)
+        FIO_CloseFile(h.f);
+    if (big && ph.big_st != WF_PHS_OK)
+        ph.big_st = WF_PHS_NONE;
+    WF_BARRIER();
+    ph.st[i] = ok ? WF_PHS_OK : WF_PHS_NONE;
+    if (ok)
+        ph_nok++;
+    else
+        ph_nnone++;
+    ph.gen++;
+}
+
+static void ph_poll(int idle)
+{
+    ph_free_old();
+    int now = get_ms_clock();
+    if (!wf_dk_photo || ph_ask_num < 0 || now - ph_ask_t > PH_ASK_MS) {
+        if (ph_mem)
+            ph_drop();
+        return;
+    }
+    if (!idle)
+        return;
+    int num = ph_ask_num, cam = ph_ask_cam, dev = 0;
+    uint32_t sig = ph_sig_of(num, cam, &dev);
+    if (sig && !ph_mem) {
+        if (now - ph_fail_t < 10000)
+            return;
+        ph_mem = __mem_malloc(PH_MEM, 0, "wf_dark.c", __LINE__);
+        ph_dma = __mem_malloc(PH_DMA, WF_MEM_DMA, "wf_dark.c", __LINE__);
+        if (!ph_mem || !ph_dma) {
+            if (ph_mem)
+                __mem_free(ph_mem);
+            if (ph_dma)
+                __mem_free(ph_dma);
+            ph_mem = ph_dma = 0;
+            ph_fail_t = now;
+            wf_log("dark: photos: no memory (%d KB), the sketch", (PH_MEM + PH_DMA) >> 10);
+            return;
+        }
+        ph_t16 = (uint16_t *)(ph_mem + PH_CELLS + PH_BIG);
+        ph_rows = ph_t16 + PH_BIG;
+        ph_sig = 0;
+    }
+    if (sig != ph_sig || ph.num != num || ph.cam != cam) {
+        ph_start(num, cam, sig, dev);
+        return;
+    }
+    if (!sig || ph.n <= 0 || ph_next > ph.n)
+        return;
+    while (ph_next <= ph.n && get_ms_clock() - now < PH_BUDGET) {
+        int k = ph_next++;
+        if (!k)
+            ph_frame(ph.big_frame, 1);
+        else if (k - 1 != ph.big_frame)
+            ph_frame(k - 1, 0);
+    }
+    if (ph_next > ph.n)
+        wf_log("dark: photos %s %d: %d frames read, %d without, picture %dx%d, %dms", cam ? "camera roll" : "roll",
+               ph_r->num, ph_nok, ph_nnone, ph.big_w, ph.big_h, get_ms_clock() - ph_t0);
+}
+#else
+static struct wf_dark_photos ph_empty;
+const struct wf_dark_photos *wf_dark_photos(int num, int cam) { (void)num; (void)cam; return &ph_empty; }
+#endif
 volatile int wf_roll_look8;                      /* a JPEG 8-bit roll (wf_dark.h, DESIGN 3.14): config rolllook=, read live */
 void wf_roll_look8_set(int on)
 {
@@ -925,10 +1167,8 @@ static int dk_wa_said;                           /* Light Auto on a CR2 without 
                                                     150 KB for every frame style, checked when drawn) */
 static uint32_t dk_lgn;                          /* WFLOGO.DAT's size at the run's start, 0 = none */
 static int dk_lg_said;                           /* WFLOGO.DAT too big / bad: said once a run */
-static int dk_pjp;                               /* this run's Camera JPEG (wf_pr_jpeg at its start): WF_PJ_OVER = each
-                                                    print also replaces the shot's own JPEG; WF_PJ_BOTH = with a frame
-                                                    the picture there and the print in a second JPEG */
-static int dk_pj2;                               /* and where that second JPEG goes (wf_pr_jpg2: WF_J2_*) */
+static int dk_pjp;                               /* this run's Camera JPEG (wf_pr_jpeg at its start, wf_dark.h WF_PJ_*):
+                                                    which JPEG the shot's own IMG_nnnn.JPG in DCIM becomes */
 static int dk_pcr;                               /* RAW after Darkroom (wf_pr_cr2): 1 = Move to ROLLS (dk_cr2_move) */
 
 static int dk_battery(void)
@@ -1902,20 +2142,21 @@ static int dk_dcim_put(int i, const char *dst, const char *nm, const char *verb,
     return DK_OK;
 }
 
-/* Camera JPEG (owner 11-16: shoot fast, the darkroom's print goes over the camera's JPEG later, the ROLLS copy stays).
- * Overwrite: the shot's JPEG becomes the print (frame Off: its bytes; a frame: the print fitted into 5184 x 3456).
- * Over + print (owner 11-17: "the film-look JPEG and the framed JPEG, both in the main DCIM folder"): with a frame the
- * shot's JPEG becomes the picture alone at 5184 x 3456 (as Overwrite was up to RAWB23) and a second JPEG holds the
- * print fitted into 5184 x 3456: WFP_nnnn.JPG beside it (config jpeg2=prefix) or NNNWFILM/WFP_nnnn.JPG (jpeg2=folder),
- * DESIGN 3.9 says why; frame Off = Overwrite, one file. A JPEG missing (RAW only) or without Canon's Exif: nothing.
- * Returns DK_STOP when stopped, else DK_OK: the print is done. *jok = 1 when every JPEG it makes is written and read
- * back (RAW after Darkroom moves the CR2 only then, dk_cr2_move). */
+/* Camera JPEG (owner 11-16: shoot fast, the darkroom's print goes over the camera's JPEG later, the ROLLS copy stays;
+ * RAWB28, 11-20: one JPEG in DCIM, the one Canon's PLAY shows; the print is always the roll's copy in ROLLS, never
+ * copied again). Overwrite: the shot's JPEG becomes the print (frame Off: its bytes; a frame: the print fitted into
+ * 5184 x 3456). Over + print: with a frame the shot's JPEG becomes the picture alone at 5184 x 3456, nothing else
+ * (no WFP_ file any more). Print + over: with a frame the shot's JPEG becomes the print fitted, and the picture alone
+ * goes into the run's ROLLS folder under the shot's own name, ROLLS/ROLL021/IMG_0206.JPG beside F01_0206.JPG (and the
+ * CR2 RAW files Move to ROLLS puts there). Frame Off: one file in every mode (the print is the picture). A JPEG
+ * missing (RAW only) or without Canon's Exif: nothing. Returns DK_STOP when stopped, else DK_OK: the print is done.
+ * *jok = 1 when every JPEG it makes is written and read back (RAW after Darkroom moves the CR2 only then,
+ * dk_cr2_move). */
 static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr *pw, uint8_t *app1, uint32_t al,
                      const struct wf_pf_lay *L, uint32_t *rowbuf, const char *look, int *jok)
 {
     int t0 = get_ms_clock(), b = 0, n = 0;
-    char tmp[96], d2[96], dir2[64];
-    struct wf_fe e = { 0, 0 };
+    char tmp[96], d2[96];
     uint32_t sz = 0;
     *jok = 0;
     while (jpg[n])
@@ -1942,32 +2183,31 @@ static int dk_camjpg(int i, const char *jpg, const char *out, const struct dk_wr
         wf_log("dark: F%02d roll print did not read back (%d): camera JPEG kept", i + 1, v);
         return DK_OK;
     }
-    int two = dk_pjp == WF_PJ_BOTH && L->frame;
-    int r1 = dk_dcim_put(i, jpg, jpg + b, "overwritten", !L->frame ? DK_CJ_COPY : two ? DK_CJ_PIC : DK_CJ_FIT, 0, out,
+    int pic = dk_pjp == WF_PJ_BOTH && L->frame, two = dk_pjp == WF_PJ_PRINT && L->frame;
+    int r1 = dk_dcim_put(i, jpg, jpg + b, "overwritten", !L->frame ? DK_CJ_COPY : pic ? DK_CJ_PIC : DK_CJ_FIT, 0, out,
                          pw, app1, al, L, rowbuf, look);
     if (r1 == DK_STOP || !two) {
         *jok = r1 == DK_OK;
         return r1 == DK_STOP ? DK_STOP : DK_OK;
     }
-    int k = wf_roll_jpg2(jpg, dk_pj2 == WF_J2_FOLDER, "JPG", dir2, sizeof dir2, d2, sizeof d2);
-    if (k < 0) {
-        wf_log("dark: F%02d camera JPEG: no second name for %s: the print stays in ROLLS only", i + 1, jpg + b);
+    int o = 0, s1 = -1, s2 = -1;                 /* Print + over: the picture beside the roll print, the shot's name */
+    for (; out[o]; o++)
+        if (out[o] == '/') {
+            s2 = s1;
+            s1 = o;
+        }
+    if (s1 < 0 || s1 + 1 + n - b >= (int)sizeof d2) {
+        wf_log("dark: F%02d camera JPEG: no ROLLS name for the picture of %s", i + 1, jpg + b);
         return DK_OK;
     }
-    if (dk_pj2 == WF_J2_FOLDER && wf_fmkdir(dir2, &e) != 0) {
-        wf_log("dark: F%02d camera JPEG: folder %s not made (%s %d): the print stays in ROLLS only", i + 1, dir2,
-               wf_fe_name(e.step), e.rc);
-        return DK_OK;
-    }
-    int c = k;                                   /* the log's name: WFP_nnnn.JPG, or NNNWFILM/WFP_nnnn.JPG */
-    for (int sl = dk_pj2 == WF_J2_FOLDER ? 2 : 1; c > 0 && (d2[c - 1] != '/' || --sl > 0);)
-        c--;
-    int r2 = dk_dcim_put(i, d2, d2 + c, "written", DK_CJ_FIT, 1, out, pw, app1, al, L, rowbuf, look);
+    memcpy(d2, out, (size_t)s1 + 1);
+    memcpy(d2 + s1 + 1, jpg + b, (size_t)(n - b) + 1);
+    int r2 = dk_dcim_put(i, d2, d2 + s2 + 1, "written", DK_CJ_PIC, 0, out, pw, app1, al, L, rowbuf, look);
     if (r2 == DK_STOP)
         return DK_STOP;
     *jok = r1 == DK_OK && r2 == DK_OK;
-    wf_log("dark: F%02d camera JPEG: %d of 2 files in DCIM, %dms", i + 1, (r1 == DK_OK) + (r2 == DK_OK),
-           get_ms_clock() - t0);
+    wf_log("dark: F%02d camera JPEG: the print in DCIM %s, the picture in ROLLS %s, %dms", i + 1,
+           r1 == DK_OK ? "written" : "not written", r2 == DK_OK ? "written" : "not written", get_ms_clock() - t0);
     return DK_OK;
 }
 
@@ -2428,6 +2668,8 @@ static void dk_task(void)
 {
     int t_run = get_ms_clock(), ndone = 0, nerr = 0, paused = 0, ms_sum = 0;
     dk_stopk = 0;
+    ph_drop();                                   /* the photos' memory back for the run */
+    ph_free_old();
     const char *end_why = "";
     dkr = &roll;
     dk_film_prev = 0;
@@ -2481,7 +2723,6 @@ static void dk_task(void)
     dk_pin = wf_pr_info > WF_PIN_OFF && wf_pr_info < WF_PIN_N ? wf_pr_info : WF_PIN_OFF;
     dk_pdt = wf_pr_date > WF_PDT_OFF && wf_pr_date < WF_PDT_N ? wf_pr_date : WF_PDT_OFF;
     dk_pjp = wf_pr_jpeg > WF_PJ_KEEP && wf_pr_jpeg < WF_PJ_N ? wf_pr_jpeg : WF_PJ_KEEP;
-    dk_pj2 = wf_pr_jpg2 == WF_J2_FOLDER ? WF_J2_FOLDER : WF_J2_PREFIX;
     dk_pcr = wf_pr_cr2 == WF_PC_MOVE;
     dk_pf_said = dk_lg_said = dk_wa_said = 0;
     dk_lgn = 0;
@@ -2489,11 +2730,11 @@ static void dk_task(void)
         dk_lgn = 0;                              /* no WFLOGO.DAT: the caption as text alone */
     wf_log("dark: roll %03d start, %d of %d to develop, look output %d, print frame %d info %d date %d jpeg %d logo %dK",
            dkr->num, dv.left, dv.total, lk.output, dk_pfr, dk_pin, dk_pdt, dk_pjp, (int)(dk_lgn >> 10));
-    if (dk_pjp == WF_PJ_BOTH)
-        wf_log("dark: Camera JPEG Over + print: %s", !dk_pfr ? "frame Off, so as Overwrite (one file)"
-               : dk_pj2 == WF_J2_FOLDER ? "the picture over IMG_nnnn.JPG, the print in NNN" WF_J2_SUFFIX "/"
-                 WF_J2_LETTERS "nnnn.JPG" : "the picture over IMG_nnnn.JPG, the print beside it as " WF_J2_LETTERS
-                 "nnnn.JPG");
+    if (dk_pjp == WF_PJ_BOTH || dk_pjp == WF_PJ_PRINT)
+        wf_log("dark: Camera JPEG %s: %s", dk_pjp == WF_PJ_BOTH ? "Over + print" : "Print + over",
+               !dk_pfr ? "frame Off, so as Overwrite (one file)" : dk_pjp == WF_PJ_BOTH
+               ? "the picture over IMG_nnnn.JPG, the print in ROLLS only"
+               : "the print over IMG_nnnn.JPG, the picture as ROLLS/ROLLnnn/IMG_nnnn.JPG");   /* < WF_LOG_W */
     if (dk_pcr && dk_pjp == WF_PJ_KEEP)
         wf_log("dark: RAW after Darkroom Move to ROLLS, but Camera JPEG is Keep: the CR2s stay in DCIM");
     else if (dk_pcr) {
@@ -2800,6 +3041,10 @@ void wf_dark_end(void)
         prop_request_change(WF_PROP_REVIEW, &rv_old, 4);
     if (roll_dirty)
         roll_save();
+#if WF_DARK_CAN
+    ph_drop();
+    ph_free_old();
+#endif
     roll_shutter(1);                             /* the shutter never stays held without the module */
     if (hud_fonts_on)
         wfdr_hud_fonts(0);

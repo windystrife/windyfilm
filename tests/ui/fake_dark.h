@@ -28,4 +28,11 @@ int  fake_start_num(void);                  /* the last start: 0 the camera's ro
 int  fake_start_again(void);
 int  fake_start_film(void);
 int  fake_nswap_devd(void);                 /* close-and-loads of a roll developed at the shot */
+/* the Darkroom's photos (RAWB28): real CR2s read from dir through wf_photo.c (frame i of roll num = its (i + num x 5)th
+ * CR2, the camera's roll from the first); none set = no photos (the sketch) */
+void fake_set_photo_dir(const char *dir);
+void fake_photo_partial(int nread, int none);   /* frames >= nread not read yet (-1 = all read), frame none has none */
+void fake_photo_again(void);               /* the next wf_dark_photos assembles them again */
+void fake_photo_reset(void);               /* wf_dk_photo on, all read */
+const struct wf_dark_photos *fake_photos(void);
 #endif

@@ -113,6 +113,8 @@ if true; then                                   # RAW develop "B": the develop +
 fi
 # the Darkroom's print finishes (frame + details, date stamp; DESIGN 3.9): both cameras (the 5D2 Darkroom since 11-17)
 cc wf_print.o  $MODFLAGS -O2 $S/wf_print.c
+# the Darkroom's photos from the CR2's small RGB (owner RAWB28, wf_photo.h): both cameras
+cc wf_photo.o  $MODFLAGS -O2 $S/wf_photo.c
 # Roll + Darkroom: the roll state machine and the core (both cameras: DESIGN 3.6, 3.18)
 cc wf_roll.o     $MODFLAGS $S/wf_roll.c
 cc wf_dark.o     $MODFLAGS $S/wf_dark.c

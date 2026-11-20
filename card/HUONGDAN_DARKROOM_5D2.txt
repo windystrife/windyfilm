@@ -1,5 +1,8 @@
 HƯỚNG DẪN THỬ ROLL + DARKROOM TRÊN 5D MARK II (lần đầu)
 =========================================================
+Thẻ RAWB28, 20/11/2026 (từ RAWB27): Darkroom hiện ảnh của cuộn (tờ ảnh tiếp xúc, bản in
+phác bằng ảnh thật; INFO tắt / bật), Camera JPEG thêm nấc Print + over (DCIM chỉ còn một
+JPEG mỗi kiểu, không còn WFP_), Blind roll chỉnh được ngay trong WindyFilm; thử ở bước o.
 Thẻ RAWB27, 18/11/2026 (từ RAWB26): RAW after Darkroom chọn ngay trong Darkroom (dòng thứ 5
 "RAW files" của khối PRINT) và chữ thông số dưới ảnh in đậm hơn một chút; thử ở bước n.
 Thẻ RAWB26, 17/11/2026 khuya (nhánh wf-onescreen, gộp dark-5d2). Darkroom trước giờ chỉ có
@@ -142,6 +145,18 @@ n. (RAWB27) Dòng "RAW files" trong Darkroom: Camera JPEG = Keep thì dòng mờ
    ROLLS; hàng menu RAW after Darkroom đổi theo (và ngược lại). Chữ dòng nào cũng nằm gọn.
    Bản in Frame White / Black / White wide, Info On + roll, tấm ngang và tấm dọc: dòng 2-3
    và "ROLL ..." rõ hơn RAWB26, vẫn trong viền dưới; dòng 1, logo, ngày như cũ.
+o. (RAWB28) Ảnh trong Darkroom, Camera JPEG, Blind roll.
+   1. Browser chế độ Darkroom: hàng "Blind roll" dưới Exposures (mặc định On). DIAL đổi
+      sang Off: chụp có ảnh xem lại, LiveView bấm PLAY xem được các kiểu; đặt lại On.
+   2. Darkroom hàng ROLL: tờ ảnh tiếp xúc (cuộn <= 12 kiểu: ảnh to). Ghi lại mất bao lâu
+      tới khi đủ ảnh. Dòng PRINT: bản in phác là ảnh thật của kiểu in đầu tiên (tấm dọc ra
+      bản in dọc). INFO: Hide photos / Show photos.
+   3. Đứng ở hàng Camera JPEG: hai dòng dưới các hàng PRINT ghi file nào vào DCIM ("PLAY
+      (DCIM): ...") và vào ROLLS ("ROLLS/ROLL00n: the print (always) ...").
+      Camera JPEG = Over + print, Frame Black: DCIM chỉ có IMG_nnnn.JPG (ảnh không viền),
+      không có WFP_. Camera JPEG = Print + over, Frame White, RAW files = Move to ROLLS: DCIM
+      chỉ còn bản in IMG_nnnn.JPG; ROLLS/ROLL00n/ có F0n_nnnn.JPG, IMG_nnnn.JPG, IMG_nnnn.CR2.
+      Gửi WINDYFLM.LOG (dòng "dark: photos ...", "camera JPEG ...").
 
 
 7. GỬI LẠI
