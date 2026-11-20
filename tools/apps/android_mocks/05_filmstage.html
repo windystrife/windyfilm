@@ -1,0 +1,71 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm phone: Film stage</title>
+<link rel="stylesheet" href="wfm.css">
+<style>
+.bar2 { position: absolute; left: 0; top: 76px; width: 360px; height: 34px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; }
+.tabs { position: absolute; left: 0; top: 110px; width: 360px; gap: 14px; }
+.cans { position: absolute; left: 0; top: 150px; width: 360px; height: 84px; display: flex; gap: 4px; padding: 0 10px; }
+.cans .c { flex: 1; display: flex; flex-direction: column; align-items: center; border-radius: 9px; padding-top: 4px; }
+.cans .c img { height: 56px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.7)); }
+.cans .c span { font-size: 10px; font-weight: 600; margin-top: 3px; white-space: nowrap; color: var(--t2); }
+.cans .c.sel { background: var(--s2); outline: 1.5px solid var(--amber); } .cans .c.sel span { color: var(--t1); }
+.pv { position: absolute; left: 12px; top: 240px; width: 336px; height: 160px; border-radius: 8px; background: url(assets/st/092_6844_p01.jpg) center 40%/cover; }
+.pv .l { position: absolute; left: 8px; bottom: 8px; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 5px; background: rgba(13,14,17,.75); }
+.pv .l b { color: var(--amber); }
+.pv .r { position: absolute; right: 8px; top: 8px; }
+.ph { position: absolute; left: 14px; top: 408px; right: 14px; display: flex; justify-content: space-between; align-items: baseline; }
+.prints { position: absolute; left: 0; top: 428px; width: 360px; height: 64px; display: flex; gap: 5px; padding: 0 12px; overflow: hidden; }
+.prints .p { flex: none; width: 56px; text-align: center; }
+.prints .p div { width: 56px; height: 37px; border-radius: 4px; background-size: cover; background-position: center; }
+.prints .p span { display: block; font-size: 9.5px; font-weight: 700; color: var(--t2); margin-top: 3px; white-space: nowrap; }
+.prints .p.on div { outline: 2px solid var(--amber); outline-offset: 1px; } .prints .p.on span { color: var(--amber); }
+.kn { position: absolute; left: 0; top: 490px; width: 360px; padding: 0 14px; }
+.kn .gh { display: flex; justify-content: space-between; align-items: center; height: 20px; margin-top: 4px; }
+.kn .sl { height: 25px; grid-template-columns: 104px 1fr 50px; }
+.kn .sl .n { font-size: 12px; }
+.more { margin-top: 6px; display: flex; align-items: center; justify-content: space-between; height: 30px; background: var(--s1); border: 1px solid var(--line); border-radius: 8px; padding: 0 10px; font-size: 10.5px; color: var(--t2); }
+.more b { color: var(--t1); font-weight: 600; }
+.rgb .n::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 4px; margin-right: 6px; vertical-align: 1px; }
+.rgb.r .n::before { background: #E0605A; } .rgb.g .n::before { background: #5FBF6A; } .rgb.b .n::before { background: #5A8DE0; }
+</style></head>
+<body><div class="screen">
+<div class="status"><span>14:46</span><div class="icons"><i class="wifi"></i><i class="sig"></i><i class="bat"></i></div></div>
+<div class="hdr">
+  <span class="ico"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></span>
+  <h1>Film stage</h1><div style="flex:1"></div>
+  <span class="chip gn">Your film data ✓</span>
+</div>
+<div class="bar2">
+  <div class="pill2"><span>Film</span><span class="on">Film stage</span></div>
+  <span class="t3" style="font-size:11px;font-weight:600">a negative printed on a print stock</span>
+</div>
+<div class="tabs"><span class="on">Vision3<b>4</b></span><span>Vision<b>15</b></span><span>ECN/EXR<b>15</b></span><span>Fuji<b>9</b></span><span>B&amp;W<b>1</b></span></div>
+<div class="cans">
+  <div class="c"><img src="assets/cans/G01.png"><span>5203 50D</span></div>
+  <div class="c sel"><img src="assets/cans/G03.png"><span>5207 250D</span></div>
+  <div class="c"><img src="assets/cans/G05.png"><span>5213 200T</span></div>
+  <div class="c"><img src="assets/cans/G08.png"><span>5219 500T</span></div>
+</div>
+<div class="pv"><span class="l">Vision3 5207 250D <b>→</b> 2383</span><span class="chip r" style="background:rgba(13,14,17,.75)">Hold: as shot</span></div>
+<div class="ph"><span class="sec">Print stock · 15</span><span class="t3" style="font-size:10.5px">Kodak Vision Color 2383</span></div>
+<div class="prints" id="prints"></div>
+<div class="kn" id="kn"></div>
+<div class="gesture"></div>
+</div>
+<script>
+const P = { p01: '2383', p02: '2393', p00: '2302', p03: '2395', p04: '5380', p05: '5381/50', p06: '5381/72', p07: '5382', p08: '5384/82', p09: '5384/92', p10: '5385/93', p11: '5385/62', p12: '5386', p13: '5383', p15: '3523XD' };
+const pr = document.getElementById('prints');
+Object.entries(P).forEach(([k, n]) => { const d = document.createElement('div'); d.className = 'p' + (k === 'p01' ? ' on' : ''); d.innerHTML = `<div style="background-image:url(assets/st/092_6844_${k}.jpg)"></div><span>${n}</span>`; pr.appendChild(d); });
+function sl(name, v, min, max, txt, cls) {
+  const z = (0 - min) / (max - min), p = (v - min) / (max - min), a = Math.min(z, p), w = Math.abs(p - z);
+  return `<div class="sl ${cls || 'st'}"><span class="n">${name}</span><div class="tr">${min < 0 ? '<i class="z"></i>' : ''}<div class="f" style="left:${a * 100}%;width:${w * 100}%"></div><div class="k" style="left:${p * 100}%"></div></div><span class="v">${txt}</span></div>`;
+}
+document.getElementById('kn').innerHTML =
+  `<div class="gh"><span class="sec">Negative</span><span class="t3" style="font-size:10px">how the film was exposed and developed</span></div>` +
+  sl('Film exp', 0.33, -2, 2, '+0.3') + sl('Push / pull', 0.67, -1, 1, 'Push 2/3') +
+  sl('Dev contrast', 12, -50, 50, '+12', 'st new') + sl('Interlayer', 100, 0, 200, '100%') +
+  `<div class="gh" style="margin-top:6px"><span class="sec">Print</span><span class="seg" style="width:96px;padding:1px"><span class="on" style="padding:2px 0;font-size:10px">RGB</span><span style="padding:2px 0;font-size:10px">CMY</span></span></div>` +
+  sl('Print exposure', 0, -2, 2, '0') + sl('Printer R', 3, -12, 12, '+3', 'st rgb r') + sl('Printer G', 0, -12, 12, '0', 'st rgb g') + sl('Printer B', -2, -12, 12, '-2', 'st rgb b') +
+  `<div class="more"><span><b>More</b> · Bleach bypass · Neutral neg / print · Print bleach · Range</span><span>›</span></div>`;
+</script>
+</body></html>

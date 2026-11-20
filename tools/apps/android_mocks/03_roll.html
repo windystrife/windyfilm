@@ -1,0 +1,74 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm phone: rolls and contact sheet</title>
+<link rel="stylesheet" href="wfm.css">
+<style>
+.cam { position: absolute; left: 12px; top: 80px; width: 336px; height: 92px; background: var(--s2); border-radius: 14px; border: 1px solid var(--line); padding: 10px 12px 0 70px; }
+.cam img { position: absolute; left: 12px; top: 10px; height: 70px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.6)); }
+.cam .a { font-size: 10px; font-weight: 700; letter-spacing: .14em; color: var(--green); }
+.cam .b { font-size: 15px; font-weight: 700; margin-top: 2px; }
+.cam .c { font-size: 11px; color: var(--t2); margin-top: 2px; }
+.cam .gauge { margin-top: 7px; }
+.cam .act { position: absolute; right: 10px; top: 12px; }
+.sh { position: absolute; left: 0; top: 184px; width: 360px; padding: 0 14px; display: flex; justify-content: space-between; align-items: baseline; }
+.sh .x { font-size: 14px; font-weight: 700; }
+.sheet { position: absolute; left: 8px; top: 230px; width: 344px; background: #050506; border-radius: 6px; padding: 4px 0; }
+.strip { position: relative; height: 70px; display: flex; gap: 3px; padding: 9px 6px; }
+.strip::before, .strip::after { content: ""; position: absolute; left: 4px; right: 4px; height: 4px; background: repeating-linear-gradient(to right, #24272D 0 5px, transparent 5px 9px); }
+.strip::before { top: 2px; } .strip::after { bottom: 2px; }
+.fr { position: relative; flex: 1; height: 52px; background-size: cover; background-position: center; border-radius: 1px; }
+.fr span { position: absolute; left: 1px; top: -9px; font-size: 6.5px; font-weight: 800; color: #D98E2A; letter-spacing: .04em; }
+.fr.sel { outline: 2px solid var(--amber); outline-offset: 1px; }
+.fr .st { position: absolute; right: 2px; bottom: 2px; font-size: 7px; color: #fff; background: rgba(0,0,0,.6); border-radius: 2px; padding: 0 2px; font-weight: 700; }
+.edge { position: absolute; left: 10px; bottom: 0; font-size: 6px; line-height: 8px; font-weight: 800; color: #8B5E1E; letter-spacing: .3em; background: #050506; padding: 0 4px; }
+.list { position: absolute; left: 0; top: 534px; width: 360px; padding: 0 12px; }
+.item { display: grid; grid-template-columns: 40px 1fr auto; gap: 10px; align-items: center; height: 56px; border-bottom: 1px solid var(--line); }
+.item img { height: 44px; justify-self: center; }
+.item .n { font-size: 13px; font-weight: 700; } .item .d { font-size: 11px; color: var(--t2); margin-top: 1px; }
+.go { position: absolute; left: 14px; right: 14px; top: 724px; }
+</style></head>
+<body><div class="screen">
+<div class="status"><span>14:35</span><div class="icons"><i class="wifi"></i><i class="sig"></i><i class="bat"></i></div></div>
+<div class="hdr">
+  <h1>Rolls</h1><div style="flex:1"></div>
+  <span class="chip ol">Import card</span>
+  <span class="ico"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="12" cy="19" r="1.3"/></svg></span>
+</div>
+<div class="cam">
+  <img src="assets/cans/PRT400.png">
+  <div class="a">IN THE CAMERA</div>
+  <div class="b">ROLL 004 · Portra 400 WS</div>
+  <div class="c">12 of 36 shot · Blind: 12 latent frames · DNG + JPG</div>
+  <div class="gauge" id="g"></div>
+  <span class="chip ol act">End roll</span>
+</div>
+<div class="sh"><span class="x">ROLL 003 · Classic Neg <span class="t3" style="font-weight:500">· 24/24</span></span><span class="chip gn">Developed · 20 Nov</span></div>
+<div class="sh" style="top:204px"><span class="t3" style="font-size:11px">Contact sheet · tap a frame to open it in Develop</span></div>
+<div class="sheet" id="sheet"></div>
+<div class="list">
+  <div class="sec" style="margin-bottom:2px">On the shelf · 2 rolls</div>
+  <div class="item"><img src="assets/cans/PRS400.png"><div><div class="n">ROLL 002 · Tri-X 400</div><div class="d">36/36 · waits for the Darkroom · from EOS M card</div></div><span class="chip am">Develop</span></div>
+  <div class="item"><img src="assets/cans/G03.png"><div><div class="n">ROLL 001 · 5207 250D → 2383</div><div class="d">24/24 · developed twice · Film stage</div></div><span class="chip ol">Again</span></div>
+</div>
+<div class="go"><div class="btn">Darkroom · develop ROLL 002 · 36 frames</div>
+  <div class="t3" style="text-align:center;font-size:10.5px;margin-top:6px">about 1 min on this phone · prints go to Pictures/WindyFilm/ROLL002</div></div>
+<div class="gesture"></div>
+</div>
+<script>
+const g = document.getElementById('g');
+for (let i = 1; i <= 36; i++) { const t = document.createElement('i'); if (i <= 12) t.className = 's'; if (i === 13) t.className = 'c'; g.appendChild(t); }
+const pics = ['00','01','02','03','06','10','11','13','15','18','20','21','24','26','29','31'];
+const sh = document.getElementById('sheet');
+for (let r = 0; r < 4; r++) {
+  const s = document.createElement('div'); s.className = 'strip';
+  for (let c = 0; c < 4; c++) {
+    const k = r * 4 + c, n = k + 1;
+    const f = document.createElement('div'); f.className = 'fr' + (n === 10 ? ' sel' : '');
+    f.style.backgroundImage = `url(assets/t/${pics[k]}.jpg)`;
+    f.innerHTML = `<span>▸${n}&nbsp;&nbsp;&nbsp;&nbsp;${n}A</span>` + (n === 7 ? '<i class="st">★</i>' : '') + (n === 10 ? '<i class="st">EDITED</i>' : '');
+    s.appendChild(f);
+  }
+  const e = document.createElement('div'); e.className = 'edge'; e.textContent = 'WINDYFILM CN 400 · ROLL 003'; s.appendChild(e);
+  sh.appendChild(s);
+}
+</script>
+</body></html>

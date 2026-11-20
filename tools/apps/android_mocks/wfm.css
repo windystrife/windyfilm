@@ -1,0 +1,82 @@
+/* wfm.css - WindyFilm phone app mockups (stage 1, approval images only; not app code).
+ * One screen = 360 x 800 CSS px, rendered at device scale 3 -> 1080 x 2400 PNG (render.sh).
+ * Identity: apps-handoff README (modernUI session, 21 Nov 2026): ink #0D0E11, surfaces, amber #F4A634, teal = Film LUT,
+ * green = loaded, red = warning, Ubuntu Sans (width 75-100), the 36-tick roll gauge, our own cans. */
+@font-face { font-family: "WFSans"; src: url("assets/UbuntuSans.ttf"); font-weight: 100 900; font-stretch: 75% 100%; }
+:root {
+  --ink: #0D0E11; --s1: #14161A; --s2: #1B1E24; --s3: #23272F; --line: #2A2F38;
+  --t1: #ECEEF0; --t2: #A0A8B4; --t3: #6A7280;
+  --amber: #F4A634; --amber-d: #3A2A12; --teal: #26A89E; --green: #5FCF7A; --red: #E8564A; --safe: #C8322A;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 360px; height: 800px; overflow: hidden; background: var(--ink); color: var(--t1);
+  font-family: "WFSans", sans-serif; font-size: 13px; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
+.screen { position: relative; width: 360px; height: 800px; overflow: hidden; background: var(--ink); }
+.cond { font-stretch: 80%; }
+.xcond { font-stretch: 75%; }
+.caps { text-transform: uppercase; letter-spacing: .12em; }
+.t2 { color: var(--t2); } .t3 { color: var(--t3); } .am { color: var(--amber); } .gr { color: var(--green); } .te { color: var(--teal); }
+.rd { color: var(--red); }
+
+/* Android status bar (24 dp) and gesture bar (16 dp) */
+.status { position: absolute; left: 0; top: 0; width: 360px; height: 24px; display: flex; align-items: center;
+  justify-content: space-between; padding: 0 14px; font-size: 11.5px; font-weight: 500; color: var(--t1); z-index: 20; }
+.status .icons { display: flex; gap: 5px; align-items: center; }
+.status .bat { width: 18px; height: 9px; border: 1.2px solid var(--t1); border-radius: 2px; position: relative; }
+.status .bat::after { content: ""; position: absolute; left: 1px; top: 1px; bottom: 1px; width: 70%; background: var(--t1); border-radius: 1px; }
+.status .sig { width: 12px; height: 10px; background: linear-gradient(135deg, transparent 50%, var(--t1) 50%); }
+.status .wifi { width: 12px; height: 9px; border-radius: 12px 12px 0 0; background: var(--t1); clip-path: polygon(0 0,100% 0,50% 100%); }
+.gesture { position: absolute; left: 0; bottom: 0; width: 360px; height: 16px; display: flex; justify-content: center;
+  align-items: center; z-index: 20; }
+.gesture::after { content: ""; width: 108px; height: 4px; border-radius: 2px; background: #D8DCE2; opacity: .85; }
+
+/* the 36-tick roll gauge: shot ticks light, the current frame amber, left ticks dim */
+.gauge { display: flex; gap: 2px; align-items: flex-end; height: 12px; }
+.gauge i { display: block; width: 2px; height: 8px; background: #3A404B; border-radius: 1px; }
+.gauge i.s { background: #B9C0CA; }
+.gauge i.c { background: var(--amber); height: 12px; }
+.gauge i.q { height: 11px; }
+
+/* generic pieces */
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 11px;
+  background: var(--s3); color: var(--t1); font-size: 11px; font-weight: 500; white-space: nowrap; }
+.chip.am { background: var(--amber); color: #1A1206; font-weight: 700; }
+.chip.ol { background: transparent; border: 1px solid var(--line); color: var(--t2); }
+.chip.te { background: rgba(38,168,158,.18); color: #5FD3C9; }
+.chip.gn { background: rgba(95,207,122,.15); color: var(--green); }
+.pill2 { display: inline-flex; border-radius: 15px; background: var(--s2); padding: 2px; border: 1px solid var(--line); }
+.pill2 span { padding: 4px 11px; border-radius: 13px; font-size: 12px; font-weight: 600; color: var(--t3); }
+.pill2 span.on { background: var(--t1); color: var(--ink); }
+.seg { display: flex; background: var(--s2); border-radius: 9px; padding: 2px; border: 1px solid var(--line); }
+.seg span { flex: 1; text-align: center; padding: 6px 0; font-size: 11.5px; font-weight: 600; color: var(--t2); border-radius: 7px; white-space: nowrap; }
+.seg span.on { background: var(--amber); color: #1A1206; }
+.seg span.dim { color: var(--t3); }
+.btn { display: flex; align-items: center; justify-content: center; height: 44px; border-radius: 22px; font-weight: 700;
+  font-size: 14px; background: var(--amber); color: #1A1206; }
+.btn.ghost { background: var(--s3); color: var(--t1); font-weight: 600; }
+.hdr { position: absolute; left: 0; top: 24px; width: 360px; height: 52px; display: flex; align-items: center;
+  padding: 0 14px; gap: 10px; }
+.hdr h1 { font-size: 19px; font-weight: 700; letter-spacing: .01em; }
+.ico { width: 32px; height: 32px; border-radius: 16px; display: flex; align-items: center; justify-content: center; color: var(--t1); }
+.ico svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tabs { display: flex; gap: 16px; padding: 0 14px; border-bottom: 1px solid var(--line); height: 34px; align-items: flex-end; }
+.tabs span { font-size: 13px; font-weight: 600; color: var(--t3); padding-bottom: 8px; white-space: nowrap; }
+.tabs span b { font-weight: 500; color: var(--t3); font-size: 11px; margin-left: 3px; }
+.tabs span.on { color: var(--t1); border-bottom: 2px solid var(--amber); }
+.sec { font-size: 10.5px; font-weight: 700; letter-spacing: .14em; color: var(--t3); text-transform: uppercase; }
+
+/* slider row */
+.sl { display: grid; grid-template-columns: 92px 1fr 44px; align-items: center; gap: 8px; height: 30px; }
+.sl .n { font-size: 12.5px; color: var(--t1); font-weight: 500; white-space: nowrap; }
+.sl .v { font-size: 12px; color: var(--t2); text-align: right; font-weight: 600; }
+.sl .tr { position: relative; height: 4px; border-radius: 2px; background: var(--s3); }
+.sl .tr .f { position: absolute; top: 0; bottom: 0; background: var(--amber); border-radius: 2px; }
+.sl .tr .k { position: absolute; top: -6px; width: 16px; height: 16px; margin-left: -8px; border-radius: 8px; background: var(--t1);
+  box-shadow: 0 1px 3px rgba(0,0,0,.6); }
+.sl .tr .z { position: absolute; top: -3px; width: 1px; height: 10px; background: var(--t3); left: 50%; }
+.sl.st .n { color: var(--amber); }   /* Film stage knob */
+.sl.new .n::after { content: " NEW"; font-size: 8.5px; color: var(--teal); font-weight: 800; letter-spacing: .08em; vertical-align: 2px; }
+.sl.dim .n, .sl.dim .v { color: var(--t3); } .sl.dim .tr .f { background: var(--t3); }
+
+/* note box used on the mock sheets */
+.tag { position: absolute; font-size: 10px; font-weight: 700; color: #1A1206; background: var(--amber); border-radius: 4px; padding: 1px 5px; }

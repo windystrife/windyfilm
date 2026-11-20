@@ -1,0 +1,79 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm phone: develop, Film tab</title>
+<link rel="stylesheet" href="wfm.css">
+<style>
+.hdr .ttl { font-size: 14px; font-weight: 700; } .hdr .sub { font-size: 10.5px; color: var(--t3); font-weight: 600; }
+.img { position: absolute; left: 0; top: 76px; width: 360px; height: 240px; overflow: hidden; }
+.img .a, .img .b { position: absolute; inset: 0; background-size: cover; background-position: center; }
+.img .a { background-image: url(assets/n/6849.jpg); clip-path: inset(0 210px 0 0); }
+.img .b { background-image: url(assets/f/033_6849.jpg); clip-path: inset(0 0 0 150px); }
+.img .ln { position: absolute; left: 149px; top: 0; bottom: 0; width: 2px; background: var(--t1); }
+.img .hd { position: absolute; left: 136px; top: 106px; width: 28px; height: 28px; border-radius: 14px; background: var(--t1); box-shadow: 0 1px 4px rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; color: var(--ink); font-size: 12px; font-weight: 800; }
+.img .l { position: absolute; top: 8px; font-size: 9.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: rgba(13,14,17,.7); }
+.tools2 { position: absolute; left: 0; top: 322px; width: 360px; display: flex; gap: 6px; padding: 0 12px; align-items: center; }
+.strip { position: absolute; left: 0; top: 354px; width: 360px; height: 84px; display: flex; gap: 6px; padding: 0 12px; overflow: hidden; }
+.strip .lk { flex: none; width: 66px; text-align: center; }
+.strip .lk div { width: 66px; height: 44px; border-radius: 5px; background-size: cover; background-position: center; }
+.strip .lk span { display: block; font-size: 9.5px; color: var(--t2); margin-top: 4px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.strip .lk.on div { outline: 2px solid var(--amber); outline-offset: 1px; } .strip .lk.on span { color: var(--amber); }
+.strip .lk.add div { background: var(--s2); border: 1px dashed var(--line); display: flex; align-items: center; justify-content: center; font-size: 22px; color: var(--t3); }
+.tt { position: absolute; left: 0; top: 444px; width: 360px; height: 52px; display: grid; grid-template-columns: repeat(7, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--s1); }
+.tt div { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--t3); font-size: 9.5px; font-weight: 700; }
+.tt svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.tt .on { color: var(--amber); background: linear-gradient(to top, var(--amber) 0 2px, transparent 2px); }
+.pn { position: absolute; left: 0; top: 502px; width: 360px; padding: 4px 14px 0; }
+.pn .hrow { display: flex; justify-content: space-between; align-items: center; margin: 6px 0 6px; }
+.pn .seg span { padding: 5px 0; }
+.pn .sl { height: 28px; }
+</style></head>
+<body><div class="screen">
+<div class="status"><span>14:41</span><div class="icons"><i class="wifi"></i><i class="sig"></i><i class="bat"></i></div></div>
+<div class="hdr">
+  <span class="ico"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></span>
+  <div><div class="ttl">F04 · ROLL 003</div><div class="sub">IMG_6849.CR2 · ISO 100 · 1/640</div></div>
+  <div style="flex:1"></div>
+  <span class="ico"><svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5"/><path d="M4 12h10a6 6 0 0 1 0 12"/></svg></span>
+  <span class="chip am" style="height:28px;border-radius:14px;padding:0 12px">Print</span>
+</div>
+<div class="img">
+  <div class="a"></div><div class="b"></div><div class="ln"></div><div class="hd">⟷</div>
+  <span class="l" style="left:8px">AS SHOT · neutral develop</span>
+  <span class="l" style="right:8px">Portra 400 · Paper · Warm</span>
+</div>
+<div class="tools2">
+  <span class="chip">Split</span><span class="chip ol">Hold for before</span><span class="chip ol">1:1 grain</span>
+  <div style="flex:1"></div><span class="chip ol">Copy look</span>
+</div>
+<div class="strip" id="strip"></div>
+<div class="tt">
+  <div class="on"><svg viewBox="0 0 24 24"><rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 4v16"/></svg>Film</div>
+  <div><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="14" rx="1"/><rect x="7" y="8" width="10" height="7"/></svg>Print</div>
+  <div><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4v16M12 4a8 8 0 0 1 0 16z" fill="currentColor"/></svg>Tone</div>
+  <div><svg viewBox="0 0 24 24"><circle cx="7" cy="8" r="1"/><circle cx="12" cy="6" r="1"/><circle cx="17" cy="9" r="1"/><circle cx="9" cy="13" r="1"/><circle cx="15" cy="14" r="1"/><circle cx="7" cy="18" r="1"/><circle cx="13" cy="18" r="1"/><circle cx="18" cy="17" r="1"/></svg>Grain</div>
+  <div><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><circle cx="12" cy="12" r="7.5" stroke-dasharray="2 2.5"/></svg>Glow</div>
+  <div><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/></svg>Lens</div>
+  <div><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="1"/><path d="M7 16h6"/></svg>Finish</div>
+</div>
+<div class="pn">
+  <div class="hrow"><span class="sec">Light</span><span class="t3" style="font-size:10.5px">Auto = the white balance as shot</span></div>
+  <div class="seg"><span>Auto</span><span class="on">Day</span><span>Cloudy</span><span>Shade</span><span>Tungsten</span></div>
+  <div class="sl new" style="margin-top:4px"><span class="n">Kelvin</span><div class="tr"><div class="f" style="left:0;width:36%"></div><div class="k" style="left:36%"></div></div><span class="v">5200 K</span></div>
+  <div class="sl new"><span class="n">Tint</span><div class="tr"><i class="z"></i><div class="f" style="left:50%;width:4%"></div><div class="k" style="left:54%"></div></div><span class="v">+4</span></div>
+  <div class="sl new"><span class="n">Exposure</span><div class="tr"><i class="z"></i><div class="f" style="left:50%;width:5.5%"></div><div class="k" style="left:55.5%"></div></div><span class="v">+0.3</span></div>
+  <div class="sl"><span class="n">Strength</span><div class="tr"><div class="f" style="left:0;width:66.7%"></div><div class="k" style="left:66.7%"></div></div><span class="v">100%</span></div>
+  <div class="hrow" style="margin-top:8px"><span class="sec">Print stock · Paper</span><span class="t3" style="font-size:10.5px">as the camera's rows</span></div>
+  <div style="display:grid;grid-template-columns:1fr 1.25fr;gap:8px">
+    <div class="seg"><span>Scan</span><span>Cine</span><span class="on">Paper</span></div>
+    <div class="seg"><span>Gloss</span><span>Matte</span><span class="on">Warm</span><span>Cool</span></div>
+  </div>
+  <div class="t3" style="font-size:10px;margin-top:9px;text-align:center">Kelvin / Tint / Exposure are new: the camera gets the nearest Light step</div>
+</div>
+<div class="gesture"></div>
+</div>
+<script>
+const looks = [['033','Portra 400'],['032','Portra 160'],['044','Pro 400H'],['034','Gold 200'],['039','Ektar 100'],['027','Classic Neg'],['030','Chungking'],['066','Windy EKTA P']];
+const st = document.getElementById('strip');
+const add = document.createElement('div'); add.className = 'lk add'; add.innerHTML = '<div>+</div><span>Shelf</span>'; st.appendChild(add);
+looks.forEach(([id, n]) => { const d = document.createElement('div'); d.className = 'lk' + (id === '033' ? ' on' : ''); d.innerHTML = `<div style="background-image:url(assets/f/${id}_6849.jpg)"></div><span>${n}</span>`; st.appendChild(d); });
+</script>
+</body></html>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm phone: import from the camera card</title>
+<link rel="stylesheet" href="wfm.css">
+<style>
+.dim { position: absolute; inset: 0; background: url(assets/t/40.jpg) center/cover; filter: blur(6px) brightness(.25); }
+.sheet { position: absolute; left: 0; top: 118px; width: 360px; height: 682px; background: var(--s1); border-top-left-radius: 18px; border-top-right-radius: 18px; border-top: 1px solid var(--line); padding: 8px 16px 0; }
+.sheet .h { width: 36px; height: 4px; border-radius: 2px; background: #3A404B; margin: 0 auto 12px; }
+.card { display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center; background: var(--s2); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+.card .ic { width: 44px; height: 44px; border-radius: 10px; background: var(--amber-d); display: flex; align-items: center; justify-content: center; color: var(--amber); }
+.card .ic svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 1.7; }
+.n { font-size: 14px; font-weight: 700; } .d { font-size: 11px; color: var(--t2); margin-top: 2px; line-height: 1.35; }
+.roll { display: grid; grid-template-columns: 22px 40px 1fr auto; gap: 10px; align-items: center; height: 60px; border-bottom: 1px solid var(--line); }
+.roll img { height: 46px; justify-self: center; }
+.ck { width: 20px; height: 20px; border-radius: 5px; border: 1.5px solid var(--t3); }
+.ck.on { background: var(--amber); border-color: var(--amber); position: relative; }
+.ck.on::after { content: ""; position: absolute; left: 6px; top: 2px; width: 5px; height: 10px; border: solid #1A1206; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+.opt { display: flex; justify-content: space-between; align-items: center; height: 36px; font-size: 12.5px; font-weight: 600; }
+</style></head>
+<body><div class="screen">
+<div class="dim"></div>
+<div class="status"><span>15:02</span><div class="icons"><i class="wifi"></i><i class="sig"></i><i class="bat"></i></div></div>
+<div class="sheet">
+  <div class="h"></div>
+  <div style="font-size:19px;font-weight:700;margin-bottom:10px">Camera card</div>
+  <div class="card">
+    <div class="ic"><svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"/><path d="M9 3v4M12 3v4M15 3v4"/></svg></div>
+    <div><div class="n">EOS_DIGITAL · EOS M</div><div class="d">USB OTG reader · exFAT 64 GB · read only<br>WindyFilm RAWB28 card · ML/DATA found</div></div>
+  </div>
+  <div class="sec" style="margin:14px 0 2px">Rolls on the card</div>
+  <div class="roll"><i class="ck on"></i><img src="assets/cans/CLSNEG.png"><div><div class="n" style="font-size:13px">ROLL 021 · Classic Neg</div><div class="d">12/12 · waits for the Darkroom · WFROLL.TXT</div></div><span class="chip am">New</span></div>
+  <div class="roll"><i class="ck on"></i><img src="assets/cans/G38.png"><div><div class="n" style="font-size:13px">ROLL 020 · 8553 250T → 2383</div><div class="d">24/24 · developed on the camera · ROLLS/ROLL020</div></div><span class="chip ol">Again</span></div>
+  <div class="roll"><i class="ck"></i><img src="assets/cans/PRS400.png"><div><div class="n" style="font-size:13px">ROLL 019 · Tri-X 400</div><div class="d">36/36 · on the phone since 18 Nov</div></div><span class="chip gn">Have</span></div>
+  <div class="sec" style="margin:14px 0 2px">Loose frames</div>
+  <div class="roll" style="grid-template-columns:22px 1fr auto"><i class="ck"></i><div><div class="n" style="font-size:13px">DCIM/100CANON · 48 new CR2 + JPG</div><div class="d">since the last import · not on a roll</div></div><span class="chip ol">As a roll</span></div>
+  <div class="sec" style="margin:14px 0 0">How</div>
+  <div class="opt"><span>Copy CR2 + JPG to the phone</span><span class="seg" style="width:118px"><span class="on">Copy</span><span>Read</span></span></div>
+  <div class="opt"><span>Prints of the camera's Darkroom</span><span class="t2">Import too</span></div>
+  <div class="btn" style="margin-top:10px">Import 2 rolls · 36 frames · 0.9 GB</div>
+  <div class="t3" style="text-align:center;font-size:10.5px;margin-top:7px">Nothing on the card is changed. Film LUT cubes and Film stage<br>tables on the card can be linked as your film data (Settings).</div>
+</div>
+<div class="gesture"></div>
+</div></body></html>

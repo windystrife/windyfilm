@@ -1,0 +1,74 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm phone: film shelf</title>
+<link rel="stylesheet" href="wfm.css">
+<style>
+.bar2 { position: absolute; left: 0; top: 76px; width: 360px; height: 36px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; }
+.tabs { position: absolute; left: 0; top: 112px; width: 360px; }
+.grid { position: absolute; left: 0; top: 152px; width: 360px; display: grid; grid-template-columns: repeat(4, 1fr); row-gap: 10px; padding: 0 8px; }
+.cell { position: relative; display: flex; flex-direction: column; align-items: center; padding-top: 6px; border-radius: 10px; height: 122px; }
+.cell img { height: 88px; filter: drop-shadow(0 3px 5px rgba(0,0,0,.7)); }
+.cell .nm { font-size: 10.5px; font-weight: 600; margin-top: 4px; white-space: nowrap; }
+.cell .iso { font-size: 9px; color: var(--t3); font-weight: 600; }
+.cell.sel { background: var(--s2); outline: 1.5px solid var(--amber); }
+.cell .ld { position: absolute; top: 6px; right: 8px; width: 8px; height: 8px; border-radius: 4px; background: var(--green); box-shadow: 0 0 0 2px var(--ink); }
+.cell .fav { position: absolute; top: 3px; left: 7px; color: var(--amber); font-size: 11px; }
+.sheet { position: absolute; left: 0; top: 432px; width: 360px; height: 368px; background: var(--s1); border-top-left-radius: 18px; border-top-right-radius: 18px; border-top: 1px solid var(--line); padding: 8px 16px 0; box-shadow: 0 -10px 24px rgba(0,0,0,.55); }
+.sheet .h { width: 36px; height: 4px; border-radius: 2px; background: #3A404B; margin: 0 auto 10px; }
+.sheet .t { display: flex; justify-content: space-between; align-items: flex-start; }
+.sheet h2 { font-size: 21px; font-weight: 700; line-height: 1.1; }
+.sheet .chips { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+.sheet .chips .chip { height: 20px; font-size: 10px; }
+.sheet p { font-size: 12px; color: var(--t2); margin-top: 8px; line-height: 1.35; }
+.prev { display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 5px; margin-top: 10px; }
+.prev div { height: 66px; border-radius: 6px; background-size: cover; background-position: center; }
+.lab { font-size: 9.5px; color: var(--t3); margin-top: 4px; font-weight: 600; }
+.rowx { display: flex; align-items: center; justify-content: space-between; margin-top: 11px; }
+.rowx .n { font-size: 12px; font-weight: 600; }
+.acts { display: grid; grid-template-columns: 1fr 1.4fr; gap: 8px; margin-top: 12px; }
+</style></head>
+<body><div class="screen">
+<div class="status"><span>14:33</span><div class="icons"><i class="wifi"></i><i class="sig"></i><i class="bat"></i></div></div>
+<div class="hdr">
+  <span class="ico"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></span>
+  <h1>Film shelf</h1><div style="flex:1"></div>
+  <span class="ico"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M16 16l4 4"/></svg></span>
+  <span class="ico"><svg viewBox="0 0 24 24"><path d="M12 4l2.4 5 5.4.7-4 3.7 1 5.4-4.8-2.6-4.8 2.6 1-5.4-4-3.7 5.4-.7z"/></svg></span>
+</div>
+<div class="bar2">
+  <div class="pill2"><span class="on">Film</span><span>Film stage</span></div>
+  <span class="t3" style="font-size:11px;font-weight:600">53 films · 44 in Film stage</span>
+</div>
+<div class="tabs"><span class="on">Colour<b>15</b></span><span>Cine<b>4</b></span><span>B&amp;W<b>11</b></span><span>Film LUT<b>23</b></span><span>★<b>6</b></span></div>
+<div class="grid" id="grid"></div>
+
+<div class="sheet">
+  <div class="h"></div>
+  <div class="t">
+    <div><h2>Portra 400 WS</h2>
+      <div class="chips"><span class="chip">COLOUR NEG</span><span class="chip">ISO 400</span><span class="chip">35mm</span><span class="chip gn">Loaded · ROLL 004</span></div></div>
+    <span class="am" style="font-size:18px">★</span>
+  </div>
+  <p>Warm, soft 400-speed portrait negative: gentle skin, wide latitude. Prints: Scan, Cine, Paper.</p>
+  <div class="prev"><div style="background-image:url(assets/f/033_6849.jpg)"></div><div style="background-image:url(assets/f/033_6839.jpg)"></div><div style="background-image:url(assets/f/033_6856.jpg)"></div></div>
+  <div class="lab">On your last frames · tap to compare with the frame as shot</div>
+  <div class="rowx"><span class="n">Exposures</span>
+    <div class="seg" style="width:208px"><span>3</span><span>6</span><span>12</span><span>24</span><span class="on">36</span></div></div>
+  <div class="acts"><div class="btn ghost">Use free</div><div class="btn">Load new roll</div></div>
+  <div class="lab" style="text-align:center;margin-top:7px">ROLL 004 has 12 frames: loading asks to put it on the shelf first</div>
+</div>
+<div class="gesture"></div>
+</div>
+<script>
+const films = [['PRT160','Portra 160',160],['PRT400','Portra 400',400],['PRT800','Portra 800',800],['PAS400','Pro 400H',400],
+ ['PRONEG','Pro Neg Std',160],['SUN200','Gold 200',200],['SNP200','ColorPlus',200],['EVD400','UltraMax',400],
+ ['TRV400','Superia 400',400],['CLSNEG','Classic Neg',400],['BLD100','Ektar 100',100],['POP800','Lomo 800',800]];
+const fav = { PRT400: 1, CLSNEG: 1, BLD100: 1 };
+const g = document.getElementById('grid');
+films.forEach(([c, n, iso]) => {
+  const d = document.createElement('div'); d.className = 'cell' + (c === 'PRT400' ? ' sel' : '');
+  d.innerHTML = `<img src="assets/cans/${c}.png"><div class="nm">${n}</div><div class="iso">ISO ${iso}</div>` +
+    (c === 'PRT400' ? '<i class="ld"></i>' : '') + (fav[c] ? '<span class="fav">★</span>' : '');
+  g.appendChild(d);
+});
+</script>
+</body></html>
