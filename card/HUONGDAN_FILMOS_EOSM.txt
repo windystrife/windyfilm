@@ -1,0 +1,44 @@
+HƯỚNG DẪN THỬ FILM OS (modernUI M1) TRÊN EOS M
+==============================================
+Thẻ M1, 21/11/2026, nhánh modernUI (từ RAWB28). CHƯA chạy trên máy thật lần nào.
+Mọi thứ khác (Roll, Darkroom, phim, cube) giống thẻ RAWB28: xem HUONGDAN_DARKROOM_EOSM.txt.
+
+M1 có gì mới
+- Hàng mới "Camera interface" trong menu ML > WindyFilm (dưới "Open film browser"):
+  WindyFilm (mặc định) hoặc Canon + ML (y như RAWB28).
+- Với WindyFilm: đang chụp LiveView ảnh tĩnh, bấm MENU mở màn hình Home của WindyFilm
+  thay cho menu Canon. Home có: lon phim, ROLL, tên phim, số khung đã chụp / còn lại,
+  4 ô (Film shelf, Darkroom, Prints, Settings) và dải look của cuộn.
+- Trên Home: bấm MENU lần nữa ra menu Canon. Chạm hai ngón vẫn mở menu ML.
+- Quay phim (chế độ movie) và lúc đang quay: MENU vẫn là menu Canon.
+
+Phím trên Home
+- UP / DOWN: đi giữa 4 ô và dải look. LEFT / RIGHT: đi trong dải look.
+- Xoay vòng: đổi giá trị look đang chọn (Light, Print, Paper, Grain, Halation, Strength).
+- SET (hoặc Q): mở ô đang chọn. INFO: mở trình duyệt phim.
+- PLAY: xem ảnh của Canon (khi Blind roll bật và có cuộn: báo "Blind roll", không mở).
+- Bấm nửa nút chụp: đóng Home, chụp như thường.
+- Trong Film shelf / Darkroom / Settings: MENU quay về Home.
+
+Các bước thử (ghi lại bước nào không đúng)
+a. Chép cả thư mục lên thẻ, bật máy, vào LiveView ảnh tĩnh. Bấm MENU: Home hiện ra,
+   không thấy menu Canon nhấp nháy trước.
+b. Trên Home bấm MENU: menu Canon mở ngay, Home không hiện lại. Thoát menu Canon, bấm MENU
+   lần nữa: lại là Home.
+c. Ở LiveView (không mở Home) chạm hai ngón: menu ML mở (không phải Home).
+d. Mở Home, chạm hai ngón: menu ML mở, KHÔNG thấy menu Canon hiện sau đó.
+e. Mở Film shelf từ Home, chạm hai ngón: về Home; chạm hai ngón lần nữa: menu ML.
+f. Chưa có cuộn trong máy: trên Home xoay vòng đổi Grain, rồi chụp một tấm: ảnh có Grain
+   mới. Mở lại Home: giá trị vẫn giữ. (Có cuộn thì ảnh chụp là JPEG của Canon, màu phim chỉ
+   có ở bản in Darkroom, như RAWB28.)
+g. Settings > Camera interface đổi sang Canon + ML: MENU ra menu Canon như RAWB28. Đổi lại
+   WindyFilm (trong Settings của Home hoặc menu ML > WindyFilm > Camera interface).
+h. Settings > System: dòng Font pack ghi "ok" (nếu ghi "older pack" là thẻ chép thiếu
+   ML/DATA/WFFONTS.DAT mới).
+i. Có cuộn trong máy: Home hiện đúng ROLL và số khung; ô Darkroom mở được Darkroom.
+j. Chuyển sang quay phim: MENU là menu Canon.
+
+Gửi lại
+- ML/LOGS/WINDYFLM.LOG sau khi thử, chép lên share Anh vào thư mục log_m1_eosm.
+- Các dòng cần xem trong log: "ui: MENU on Home: Canon's menu" (bước b),
+  "ui: MENU on Home was the two-finger tap: the ML menu" (bước d).

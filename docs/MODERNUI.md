@@ -331,6 +331,9 @@ Cards are built only on the owner's word.
    - **Checked:** `tests/ui/run.sh` (ui_test and the new os_test, 0 failures under ASan, shots in
      `F:\MagicLatern\_windyfilm_docs\modernui_mocks\m1\`); `build.sh CAM=EOSM` and `CAM=5D2` (checksyms, TCC link,
      provenance gate PASS); `test.sh` EOS M 2331 / 0 then 5D2 1849 / 0 (CFG checks `os=`).
+   - **Cards (21 Nov 2026):** `F:\MagicLatern\EOSM_WindyFilm_M1` and `5D2_WindyFilm_M1` (and on the share), the
+     RAWB28 recipe. They differ from RAWB28 only in `windyflm.mo`, `WFFONTS.DAT` and the owner's step list
+     `card/HUONGDAN_FILMOS_<CAM>.txt` (Vietnamese).
    - **On the camera (first M1 card):**
      - MENU in LV gives Home, MENU on Home gives Canon's menu with no Home in between;
      - the two-finger tap opens the ML menu from shooting and from Home;

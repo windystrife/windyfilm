@@ -1,0 +1,44 @@
+HƯỚNG DẪN THỬ FILM OS (modernUI M1) TRÊN 5D MARK II
+===================================================
+Thẻ M1, 21/11/2026, nhánh modernUI (từ RAWB28). CHƯA chạy trên máy thật lần nào.
+Mọi thứ khác (Roll, Darkroom, phim, cube) giống thẻ RAWB28: xem HUONGDAN_DARKROOM_5D2.txt.
+
+M1 có gì mới
+- Hàng mới "Camera interface" trong menu ML > WindyFilm (dưới "Open film browser"):
+  WindyFilm (mặc định) hoặc Canon + ML (y như RAWB28).
+- Với WindyFilm: đang chụp (qua ống ngắm hoặc LiveView), bấm MENU mở màn hình Home của
+  WindyFilm thay cho menu Canon. Home có: lon phim, ROLL, tên phim, số khung đã chụp /
+  còn lại, 4 ô (Film shelf, Darkroom, Prints, Settings) và dải look của cuộn.
+- Trên Home: bấm MENU lần nữa ra menu Canon. Bấm TRASH mở menu ML (lối vào menu ML trên
+  5D2, vì WindyFilm giữ TRASH lúc chụp).
+- Lúc đang quay phim: MENU vẫn là menu Canon.
+
+Phím trên Home
+- Joystick lên / xuống: đi giữa 4 ô và dải look. Trái / phải: đi trong dải look.
+- Xoay bánh xe: đổi giá trị look đang chọn (Light, Print, Paper, Grain, Halation, Strength).
+- SET hoặc bấm joystick: mở ô đang chọn. INFO: mở trình duyệt phim.
+- PLAY: xem ảnh của Canon (khi Blind roll bật và có cuộn: báo "Blind roll", không mở).
+- TRASH: menu ML. Bấm nửa nút chụp: đóng Home, chụp như thường.
+- Trong Film shelf / Darkroom / Settings: MENU quay về Home.
+
+Các bước thử (ghi lại bước nào không đúng)
+a. Chép cả thư mục lên thẻ, bật máy (chụp qua ống ngắm). Bấm MENU: Home hiện ra, không
+   thấy menu Canon nhấp nháy trước.
+b. Trên Home bấm MENU: menu Canon mở ngay, Home không hiện lại. Thoát menu Canon, bấm MENU
+   lần nữa: lại là Home.
+c. Trên Home bấm TRASH: menu ML mở.
+d. Bật LiveView, làm lại a và b.
+e. Chưa có cuộn trong máy: trên Home xoay bánh xe đổi Grain, rồi chụp một tấm: ảnh có
+   Grain mới. Mở lại Home: giá trị vẫn giữ. (Có cuộn thì ảnh chụp là JPEG của Canon, màu
+   phim chỉ có ở bản in Darkroom, như RAWB28.)
+f. Settings > Camera interface đổi sang Canon + ML: MENU ra menu Canon như RAWB28. Đổi lại
+   WindyFilm (trong Settings của Home hoặc menu ML > WindyFilm > Camera interface).
+g. Settings > System: dòng Font pack ghi "ok" (nếu ghi "older pack" là thẻ chép thiếu
+   ML/DATA/WFFONTS.DAT mới).
+h. Có cuộn trong máy: Home hiện đúng ROLL và số khung; ô Darkroom mở được Darkroom.
+i. Trên Home bấm PLAY: xem ảnh của Canon (Blind roll tắt).
+
+Gửi lại
+- ML/LOGS/WINDYFLM.LOG sau khi thử, chép lên share Anh vào thư mục log_m1_5d2.
+- Các dòng cần xem trong log: "ui: MENU on Home: Canon's menu" (bước b),
+  "ui: closed for the ML menu" (bước c).
