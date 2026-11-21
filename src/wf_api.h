@@ -144,6 +144,8 @@ int  wf_ui_home_key(unsigned int key);    /* 1 = this key opens the film OS's Ho
 int  wf_ui_play_key(unsigned int key);    /* 1 = this key opens the film OS's Prints (PLAY with wf_os + wf_playv) */
 void wf_ui_open_home(void);
 void wf_ui_open_prints(void);             /* the film OS's Prints (M5) */
+int  wf_ui_play_sent(void);               /* 1 = this PLAY is the one the film OS just sent Canon on its way out (Home,
+                                             Prints, the Top plate): the Darkroom's PLAY notice was said there; once */
 void wf_ui_open_refused(unsigned int key, int play);   /* the open key did not open it: log why */
 int  wf_ui_menu_guard(void);              /* EOS M, every ~10 ms (wf_task's waits): the ML menu's Canon dialog; 1 = asked */
 

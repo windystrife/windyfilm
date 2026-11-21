@@ -65,6 +65,7 @@ static volatile int stale_said;
 static volatile int close_after;        /* WFUI_AFTER_*: what the close hands Canon / ML once the screen is theirs */
 static volatile int menu_pass, menu_pass_t;   /* our own MENU for Canon's menu (after Home): not Home again */
 static volatile int play_pass, play_pass_t;   /* our own PLAY for Canon's playback (after Prints): not Prints again */
+static volatile int play_sent_t;              /* that PLAY sent (labfx: its Darkroom notice said then): wf_ui_play_sent */
 static inline void beat(int p) { phase = p; hb = get_ms_clock(); }
 
 /* Pack reads (fonts, cans). Canon may hold the card for a while (owner's log 11-14, EOS M 10 s after boot: "fonts
@@ -2140,6 +2141,9 @@ static void after_close(int what)
     if (what == WFUI_AFTER_PLAY)
     {
         wf_log("ui: closed for Canon's PLAY");
+        if (wf_dark_play_notice())                          /* labfx: Canon's PLAY may miss the new prints (wf_dark.c) */
+            wf_log("ui: Canon's PLAY may miss the new prints: said");
+        play_sent_t = get_ms_clock() | 1;
         play_pass_t = get_ms_clock();                       /* (only a PLAY that would open Prints) */
         play_pass = wf_playv != 0;
         module_send_keypress(MODULE_KEY_PLAY);
@@ -2395,7 +2399,7 @@ void wf_ui_init(void)
     took = 0;
     fonts_held = ui_quit = 0;
     anim_on = lv_after = edit = 0;
-    close_after = menu_pass = play_pass = 0;
+    close_after = menu_pass = play_pass = play_sent_t = 0;
     mg.shown = mg.tries = mg.came = mg.done = mg.undo_until = 0;
 }
 
@@ -2545,6 +2549,14 @@ int wf_ui_play_key(unsigned int key)
     if (gui_menu_shown() || gui_state != GUISTATE_IDLE || RECORDING) return 0;
     if (wf_cam() != WF_CAM_5D2 && (!lv || is_movie_mode())) return 0;
     return 1;
+}
+
+/* wf_main.c, on a PLAY into Canon's PLAY: 1 = the one after_close sent (its notice was said there), within 1.5 s, once */
+int wf_ui_play_sent(void)
+{
+    int t = play_sent_t;
+    play_sent_t = 0;
+    return t && get_ms_clock() - t < 1500;
 }
 
 int wf_ui_open_key(unsigned int key)

@@ -503,6 +503,18 @@ Cards are built only on the owner's word.
      - os_test shots `lab_eosm_*` and `lab_5d2_*` (Home, Details, 8 mm, INFO, the Top plate), with ui_test's
        `lab_rows` / `lab_gauge`;
      - FX:lab checks `wf_row_note` for every case.
+   - **Second merge (labfx 748001d, 21 Nov):** clean. It brings:
+     - the 5D2 Darkroom kept through Screen Off, and the lens name from the MakerNote;
+     - Lab Halation through film-lab's glow composite (no sky rim);
+     - Canon's file catalog told after each frame (`wf_cam_cat_tell`), so Canon's PLAY shows the new prints.
+   - **Canon's PLAY from the film OS:** when Canon's catalog could not be told (`wf_dark_dcim_changed`), the way into
+     Canon's PLAY says so (`wf_dark_play_notice`, "Card out and in, or power off/on").
+     - The film OS hands Canon its PLAY in one place: `wf_ui.c after_close` (Home with PLAY shows = Canon, Prints, the
+       Top plate). The notice is said there.
+     - The core's PLAY fallback in `wf_main.c` skips that one key (`wf_ui_play_sent`), so the notice is not said twice.
+     - Our Prints needs none of this: it reads the `.WFP` files itself.
+     - Checked: os_test counts the notice once on Home's, Prints' and the 5D2 Top plate's PLAY after such a run, and
+       none for the blind roll's word.
 6. **M6: Polish.**
    - The Darkroom's top bar in the film OS style (safelight theme kept).
    - Boot straight to the HUD with the roll toast.

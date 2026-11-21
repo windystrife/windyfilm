@@ -436,8 +436,9 @@ static unsigned int wf_keypress(unsigned int key)
         wf_ui_open();
         return 0;
     }
-    if (key == WF_KEY_PLAY && !gui_menu_shown() && !is_play_mode())
-        wf_dark_play_notice();                   /* into Canon's PLAY after a run: it may miss prints (wf_dark.c) */
+    if (key == WF_KEY_PLAY && !gui_menu_shown() && !is_play_mode() && !wf_ui_play_sent())
+        wf_dark_play_notice();                   /* into Canon's PLAY after a run: it may miss prints (wf_dark.c); the
+                                                    film OS's own PLAY said it as it closed (wf_ui.c after_close) */
     if (key == MODULE_KEY_TRASH)                 /* the next log says why the browser did not come up */
         wf_ui_open_refused(key, is_play_mode());
     return 1;

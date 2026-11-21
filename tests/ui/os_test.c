@@ -543,13 +543,19 @@ int main(int argc, char **argv)
     tick(1);
     CHECK(!closed && wfui_host_scr() == WFUI_SCR_HOME, "MENU in Settings: closed %d, screen %d", closed, wfui_host_scr());
 
-    /* PLAY without a blind roll (PLAY shows = Canon): closes, then Canon gets PLAY */
+    /* PLAY without a blind roll (PLAY shows = Canon): closes, then Canon gets PLAY; after a run Canon's catalog missed
+       (labfx, wf_dark.h) the notice is said on the way out, once: the core's PLAY fallback skips that key */
     host_sent_clear();
+    fake_set_dcim(1);
+    int np0 = fake_nplay_notice();
     key(MODULE_KEY_PLAY);
     tick(2);
     CHECK(closed, "PLAY on Home did not close");
     end_checks();
     CHECK(host_sent_key() == MODULE_KEY_PLAY, "PLAY on Home: Canon got key %d, not PLAY", host_sent_key());
+    CHECK(fake_nplay_notice() == np0 + 1, "PLAY on Home after a run: the PLAY notice %d times", fake_nplay_notice() - np0);
+    CHECK(wf_ui_play_sent() && !wf_ui_play_sent(), "PLAY on Home: the sent PLAY not marked once for the core");
+    fake_set_dcim(0);
 
     /* MENU on Home: closes at once, then Canon's menu (a real MENU key: no ML menu came) */
     open_home();
@@ -771,9 +777,12 @@ int main(int argc, char **argv)
         tick(1);
         CHECK(wfui_host_scr() == WFUI_SCR_PRINTS, "PLAY on Home: screen %d, not Prints", wfui_host_scr());
         wf_blind = 1;
+        fake_set_dcim(1);
+        int np1 = fake_nplay_notice();
         key(MODULE_KEY_PLAY);
         tick(1);
-        CHECK(!closed && *wfpr_host_msg(), "Prints PLAY under a blind roll: closed %d, no word", closed);
+        CHECK(!closed && *wfpr_host_msg() && fake_nplay_notice() == np1,
+              "Prints PLAY under a blind roll: closed %d, no word, PLAY notice %d", closed, fake_nplay_notice() - np1);
         wf_blind = 0;
         host_sent_clear();
         key(MODULE_KEY_PLAY);
@@ -782,6 +791,9 @@ int main(int argc, char **argv)
         end_checks();
         CHECK(host_sent_key() == MODULE_KEY_PLAY && host_nsent() == 1, "PLAY on Prints: Canon got %d (%d keys)",
               host_sent_key(), host_nsent());
+        CHECK(fake_nplay_notice() == np1 + 1 && wf_ui_play_sent(), "PLAY on Prints after a run: PLAY notice %d times",
+              fake_nplay_notice() - np1);
+        fake_set_dcim(0);
         CHECK(!wf_ui_play_key(MODULE_KEY_PLAY), "our own PLAY for Canon's playback opened Prints again");
         CHECK(wf_ui_play_key(MODULE_KEY_PLAY), "the next PLAY does not open Prints");
         /* no prints on the card: the screen says so; Home's tile opens it (PLAY shows = Canon) */
@@ -1046,6 +1058,7 @@ int main(int argc, char **argv)
                 fake_set_lv(&pv);
                 tick(1);
                 shot("m4_5d2_plate_canon");
+                fake_set_dcim(1);
                 key(MODULE_KEY_PLAY);
                 tick(1);
                 CHECK(closed, "5D2 Top plate PLAY did not close");
@@ -1057,7 +1070,12 @@ int main(int argc, char **argv)
             if (round == 3)
                 CHECK(host_nsent() == 0, "5D2 Top plate idle: %d keys sent", host_nsent());
             if (round == 5)
+            {
                 CHECK(host_sent_key() == MODULE_KEY_PLAY, "5D2 Top plate PLAY: Canon got %d", host_sent_key());
+                CHECK(fake_nplay_notice() == 1 && wf_ui_play_sent(), "5D2 Top plate PLAY after a run: PLAY notice %d times",
+                      fake_nplay_notice());
+                fake_set_dcim(0);
+            }
         }
     }
     lv = 1;
