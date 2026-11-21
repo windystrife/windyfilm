@@ -272,7 +272,10 @@ const struct wf_dark_photos *wf_dark_photos(int num, int cam)
     return &ph;
 }
 static int fdark, nwake;
-void fake_set_dark(int d) { fdark = d; }
+int  display_is_on(void);
+void display_on(void);
+void host_display_set(int on);
+void fake_set_dark(int d) { fdark = d; host_display_set(!d); }   /* as the camera: the display off (display_off) */
 int fake_nwake(void) { return nwake; }
 void wf_dk_scr_step(int d) { if (d) wf_dk_scr = !wf_dk_scr; }
 static int frun(void) { return view.state == WF_DR_RUN || view.state == WF_DR_STOPPING; }
@@ -282,6 +285,7 @@ int wf_dark_wake(int now)
     if (!frun() || wf_dk_scr != WF_DS_OFF || !fdark) return 0;
     fdark = 0;
     nwake++;
+    display_on();                                   /* wf_dark.c: on again (ML's display_on) */
     return 1;
 }
 int wf_dark_dark(int now) { (void)now; return frun() && wf_dk_scr == WF_DS_OFF && fdark; }

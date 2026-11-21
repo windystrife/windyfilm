@@ -847,7 +847,12 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     were Y 118 / 150 up to RAWB26; owner 11-18 "sửa info exif cho font chữ nổi hơn tí"). No logo from the repo:
     the maker's wordmark comes only from the owner's card-time pack (Logo, below).
 - **Caption** (`wf_pf_caption`, from `wf_dk_shot`: the Exif of the print's APP1, gaps filled from the CR2's own tags).
-  - Line 1: camera / lens (84 px, medium).
+  - Line 1: camera / lens (84 px, medium). The lens is Exif LensModel (0xA434). The 5D2 writes Exif 2.21 without it,
+    so Canon's MakerNote 0x0095 is read then (`wf_dk_mnlens`, Make Canon; owner 2026-11-21 on a 5D2 print: "ko hiện
+    canon 50mm STM à"). The 5D2 names the lenses it knows there ("EF85mm f/1.8 USM" in the owner's 100EOS5D files) and
+    writes only the focal length for others ("35mm" in Day 10, LensType 255): such a name is left out, line 2 has the
+    focal length. What the 5D2 writes for the EF 50mm f/1.8 STM (2015, newer than its firmware 2.1.2) is not known yet:
+    no 5D2 file with it here (the EOS M writes "EF50mm f/1.8 STM", LensType 4156).
   - Line 2: focal length, f-number, shutter, ISO (62 px, wght 500 since RAWB27, was 400).
   - Line 3: the film, then Print / Grain / Halation / Bloom / Mist from the look's text (62 px, the same).
   - On + roll adds `ROLL 021 · 07/24` at the right of line 1.
@@ -1138,6 +1143,16 @@ screen itself ("one UI"), at its top right.
 - **End.** Done, stopped or failed: no more dark from the tick, an off asked under 2 s before is let land, then
   `dk_screen("after the run")` turns the display on so the result shows; `powersave_permit` then leaves Canon's own
   auto-off to Canon. Unloading after a dark run: one `display_on` (no wait).
+- **5D2: the screen stays** (owner 2026-11-21, a 5D2 roll: "lúc screenoff bật lại ko vào được darkroom nữa"). Canon's
+  dialog lies under the 5D2's UI (3.18: mode 2 without LiveView, 38 in it), and `dlg_lost` (`src/ui/wf_ui.c`) closed
+  the UI when that mode left or the display read off. So the first dark of a Screen Off run closed the Darkroom screen
+  (`ui: 5D2: gui mode 38, display 0: closing`), the run went on, and the key that woke the display showed Canon's
+  screen. Now the Darkroom screen while a run lives (`wfdr_live`: the view RUN / STOPPING, which lasts until the run's
+  end has turned the display on) is kept through a dark display (`ui: 5D2: gui mode N, display 0 while the Darkroom
+  runs: kept`, once), and a key wakes that screen. A mode Canon left meanwhile is asked for again once the display is
+  on (never while dark: Canon's menu mode lights the display), every 2 s, 3 times (`ui: 5D2: gui mode 0, asked for 38
+  again (n)`); not back 2 s after the third, the UI closes as before. Idle, or after the run, a dark display or a lost
+  mode closes it as before. The EOS M has no Canon dialog under the UI: unchanged.
 - **Text.** `dark: Screen Off: the display goes dark 10 s after the last key` at the start, `dark: Screen Off: display
   turned off N times, woken M times` at the end. The footer while running says "Screen Off: any key wakes it for 10 s".
   Screen On: after each frame `dark: Fnn screen: relit N` (`, first off at T ms` = ms into the frame when it first read
@@ -1151,7 +1166,12 @@ screen itself ("one UI"), at its top right.
   ROLL:jpeg roll 001 (a real run, the test standing in for the tick while F02 runs): on = nothing; off = turned on;
   within its second = not looked at; the ask took; stuck off = 3 asks then given up; the F01 / F02 / F03 screen lines
   (F02 `relit 4, first off at`), the give-up line and the end line; roll 002 (Screen Off) has no screen lines.
-  `dr_ui_test.c`: the dark screen's tick calls it on a Screen On run.
+  `dr_ui_test.c`: the dark screen's tick calls it on a Screen On run. 5D2 (11-21), `dr_ui_test.c` 15b on both cameras
+  (`CAM=5D2 dr_run.sh`): kept while dark, a key wakes the Darkroom and does nothing else, no ask while dark, one ask
+  after the wake brings Canon's mode back, a mode lost for good gets 3 asks and then the close; the harness's Screen
+  Off now turns its display off as the camera does, so step 5b checks the screen stays too. With the old `wf_ui.c`
+  `CAM=5D2 dr_run.sh` fails 12 checks. Not checked on the camera: whether Canon leaves its dialog when the display
+  goes off (the log's `kept` line says the mode).
 - **Not checked on the camera:** that Canon keeps the display off while LiveView is paused, and how the EOS M's own
   keys reach ML while it is dark (the first key may also be seen by Canon). The 5D2 has no Darkroom: stubs only.
 

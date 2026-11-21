@@ -166,6 +166,7 @@ static int muted, bmp_offs, muted_at_req = -1, lv_starts;
 int host_recording;
 int display_is_on(void) { gui_step(); return disp; }
 void display_on(void) { disp_ons++; disp = 1; }
+void host_display_set(int on) { disp = on != 0; }           /* the Darkroom's Screen Off (fake_dark.c) */
 int get_gui_mode(void) { gui_step(); return gui_mode; }
 static int gui_drop, gui_last_req = -1;
 void SetGUIRequestMode(int mode)

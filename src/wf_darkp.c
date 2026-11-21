@@ -215,6 +215,36 @@ static int wf_dk_int(const uint8_t *t, uint32_t tn, int le, uint32_t ifd, unsign
     return e[0] == 4 && e[2] < 0x7FFFFFFFu ? (int)e[2] : -1;
 }
 
+/* 1 = a name that only gives the focal length ("35mm", "24-105mm"): what Canon writes for a lens it has no name for */
+static int wf_dk_flonly(const char *s)
+{
+    int k = 0;
+    while ((s[k] >= '0' && s[k] <= '9') || s[k] == '.' || s[k] == '-')
+        k++;
+    return k > 0 && s[k] == 'm' && s[k + 1] == 'm' && !s[k + 2];
+}
+
+/* the lens name in Canon's MakerNote (Exif 0x927C: an IFD, offsets from the TIFF's start; its 0x0095 LensModel) when the
+   Exif IFD has none (owner 11-21: the 5D2 writes Exif 2.21, no LensModel; its MakerNote has "EF85mm f/1.8 USM", or only
+   "35mm" for a lens it does not know: that one is left out, line 2 has the focal length). Make must be Canon. */
+static int wf_dk_mnlens(const uint8_t *t, uint32_t tn, int le, uint32_t i0, uint32_t ex, char *d, int n)
+{
+    char mk[8], b[64];
+    uint32_t e[3];
+    if (!wf_dk_str(t, tn, le, i0, 0x010F, mk, sizeof mk) || mk[0] != 'C' || mk[1] != 'a' || mk[2] != 'n' || mk[3] != 'o'
+        || mk[4] != 'n')
+        return 0;
+    if (!wf_dk_find(t, tn, le, ex, 0x927C, e) || e[0] != 7 || e[1] < 14 || e[2] < 8 || e[2] >= tn)
+        return 0;
+    if (!wf_dk_str(t, tn, le, e[2], 0x0095, b, sizeof b) || wf_dk_flonly(b))
+        return 0;
+    int k = 0;
+    for (; k < n - 1 && b[k]; k++)
+        d[k] = b[k];
+    d[k] = 0;
+    return k > 0;
+}
+
 int wf_dk_shot(const uint8_t *t, uint32_t tn, struct wf_dk_shot *s)
 {
     uint32_t i0, e[3], r[2];
@@ -231,6 +261,8 @@ int wf_dk_shot(const uint8_t *t, uint32_t tn, struct wf_dk_shot *s)
         return got;
     uint32_t ex = e[2];
     if (!s->lens[0] && wf_dk_str(t, tn, le, ex, 0xA434, s->lens, sizeof s->lens))
+        got |= WF_DKS_LENS;
+    if (!s->lens[0] && wf_dk_mnlens(t, tn, le, i0, ex, s->lens, sizeof s->lens))
         got |= WF_DKS_LENS;
     if (!s->fl[1] && wf_dk_rat(t, tn, le, ex, 0x920A, r) && r[0]) {
         s->fl[0] = r[0]; s->fl[1] = r[1];

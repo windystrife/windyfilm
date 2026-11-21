@@ -188,6 +188,43 @@ static int mk_tiff(uint8_t *t, int le, int orient, int ydim_long)
     #undef W32
 }
 
+/* a TIFF as the 5D2 writes it (owner 11-21): IFD0 Make, Model, Exif IFD with FocalLength and Canon's MakerNote (an IFD,
+   offsets from the TIFF's start) whose 0x0095 holds mn (70 bytes, zero padded); a434 = an Exif LensModel too */
+static int mk_tiff5(uint8_t *t, int le, const char *make, const char *mn, const char *a434)
+{
+    memset(t, 0, 512);
+    #define W16(p, v) do { if (le) { (p)[0] = (uint8_t)(v); (p)[1] = (uint8_t)((v) >> 8); } \
+                           else { (p)[0] = (uint8_t)((v) >> 8); (p)[1] = (uint8_t)(v); } } while (0)
+    #define W32(p, v) do { uint32_t v_ = (v); for (int q = 0; q < 4; q++) (p)[le ? q : 3 - q] = (uint8_t)(v_ >> (8 * q)); } while (0)
+    memcpy(t, le ? "II" : "MM", 2); W16(t + 2, 42); W32(t + 4, 8);
+    int o = 8, data = 300;
+    W16(t + o, 3); o += 2;                                   /* IFD0: Make, Model, Exif IFD */
+    W16(t + o, 0x010F); W16(t + o + 2, 2); W32(t + o + 4, 6); W32(t + o + 8, data); o += 12;
+    memcpy(t + data, make, 6); data += 6;
+    W16(t + o, 0x0110); W16(t + o + 2, 2); W32(t + o + 4, 21); W32(t + o + 8, data); o += 12;
+    memcpy(t + data, "Canon EOS 5D Mark II", 21); data += 21;
+    W16(t + o, 0x8769); W16(t + o + 2, 4); W32(t + o + 4, 1); W32(t + o + 8, 50); o += 12;
+    W32(t + o, 0);
+    o = 50;
+    W16(t + o, a434 ? 3 : 2); o += 2;                        /* Exif IFD */
+    W16(t + o, 0x920A); W16(t + o + 2, 5); W32(t + o + 4, 1); W32(t + o + 8, data); o += 12;
+    W32(t + data, 85); W32(t + data + 4, 1); data += 8;
+    W16(t + o, 0x927C); W16(t + o + 2, 7); W32(t + o + 4, 2 + 12 + 4); W32(t + o + 8, 120); o += 12;
+    if (a434) {
+        W16(t + o, 0xA434); W16(t + o + 2, 2); W32(t + o + 4, (uint32_t)strlen(a434) + 1); W32(t + o + 8, data); o += 12;
+        memcpy(t + data, a434, strlen(a434) + 1); data += (int)strlen(a434) + 1;
+    }
+    W32(t + o, 0);
+    o = 120;
+    W16(t + o, 1); o += 2;                                   /* the MakerNote: 0x0095 LensModel */
+    W16(t + o, 0x0095); W16(t + o + 2, 2); W32(t + o + 4, 70); W32(t + o + 8, data); o += 12;
+    W32(t + o, 0);
+    memcpy(t + data, mn, strlen(mn)); data += 70;
+    return data;
+    #undef W16
+    #undef W32
+}
+
 static uint32_t rdv(const uint8_t *p, int n, int le)
 {
     uint32_t v = 0;
@@ -286,6 +323,55 @@ static void punits(void)
         CHECK(xd == 5408 && yd == 4144, "dims le %d: %u x %u", le, xd, yd);
         CHECK(wf_dk_dims(a, (uint32_t)n + 10, 70000, 4144) == -1, "a SHORT cannot hold 70000");
     }
+    /* the 5D2 (owner 11-21: "ko hiện canon 50mm STM à"): no Exif LensModel, Canon's MakerNote 0x0095 names the lens;
+       a name that is only the focal length (a lens the camera does not know) is left out; another Make is not read;
+       an Exif LensModel wins */
+    {
+        static const struct { const char *make, *mn, *a434, *want; } c5[] = {
+            { "Canon", "EF85mm f/1.8 USM", 0, "EF85mm f/1.8 USM" },
+            { "Canon", "35mm", 0, "" },
+            { "Canon", "24-105mm", 0, "" },
+            { "Canon", "EF50mm f/1.8 STM", 0, "EF50mm f/1.8 STM" },
+            { "NIKON", "EF85mm f/1.8 USM", 0, "" },
+            { "Canon", "EF85mm f/1.8 USM", "EF-M22mm f/2 STM", "EF-M22mm f/2 STM" },
+        };
+        int bad5 = 0;
+        for (int le = 0; le < 2; le++)
+            for (int i = 0; i < (int)(sizeof c5 / sizeof c5[0]); i++) {
+                int n = mk_tiff5(t, le, c5[i].make, c5[i].mn, c5[i].a434);
+                struct wf_dk_shot s5;
+                memset(&s5, 0, sizeof s5);
+                int got = wf_dk_shot(t, (uint32_t)n, &s5);
+                int ok = !strcmp(s5.lens, c5[i].want) && !!(got & WF_DKS_LENS) == !!c5[i].want[0]
+                         && !strcmp(s5.model, "Canon EOS 5D Mark II") && s5.fl[0] == 85 && s5.fl[1] == 1;
+                if (!ok) { bad5++; printf("5D2 lens le %d '%s' / '%s': got %x lens '%s'\n", le, c5[i].mn,
+                                          c5[i].a434 ? c5[i].a434 : "-", got, s5.lens); }
+            }
+        CHECK(bad5 == 0, "5D2 MakerNote lens: %d bad", bad5);
+        /* the owner's own 5D2 files when they are on this machine (never in git) */
+        static const struct { const char *p, *want; } r5[] = {
+            { "/mnt/f/MagicLatern/_test mau film/5D2/100EOS5D/IMG_8363.CR2", "EF85mm f/1.8 USM" },
+            { "/mnt/f/MagicLatern/_test mau film/5D2/100EOS5D/IMG_8379.JPG", "EF85mm f/1.8 USM" },
+            { "/mnt/f/MagicLatern/_test mau film/5D2/Day 10/IMG_8527.CR2", "" },
+        };
+        for (int i = 0; i < (int)(sizeof r5 / sizeof r5[0]); i++) {
+            uint32_t fn5 = 0;
+            uint8_t *fb = slurp(r5[i].p, 128 * 1024, &fn5);
+            if (!fb) { printf("INFO 5D2 lens: %s not here\n", r5[i].p); continue; }
+            uint32_t base = 0;
+            if (fn5 > 4 && fb[0] == 0xFF && fb[1] == 0xD8)
+                for (base = 2; base + 10 < fn5 && memcmp(fb + base, "Exif\0\0", 6); base++) {}
+            if (base)
+                base += 6;
+            struct wf_dk_shot s5;
+            memset(&s5, 0, sizeof s5);
+            wf_dk_shot(fb + base, fn5 - base, &s5);
+            CHECK(!strcmp(s5.lens, r5[i].want), "5D2 lens %s: '%s' (want '%s')", r5[i].p, s5.lens, r5[i].want);
+            printf("INFO 5D2 lens %s: '%s'\n", r5[i].p, s5.lens);
+            free(fb);
+        }
+    }
+
     struct wf_dk_shot s, c;
     memset(&s, 0, sizeof s);
     memset(&c, 0, sizeof c);

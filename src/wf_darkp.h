@@ -66,7 +66,8 @@ int wf_dk_app1(const uint8_t *p, uint32_t n, uint32_t *off, uint32_t *len);
 int wf_dk_comment(uint8_t *app1, uint32_t len, const char *txt);
 
 /* the shot's own details for the print finishes (wf_print.h): IFD0 Model / Orientation, Exif ExposureTime, FNumber, ISO,
-   DateTimeOriginal, FocalLength, LensModel */
+   DateTimeOriginal, FocalLength, LensModel (none in the 5D2's Exif: then Canon's MakerNote 0x0095, unless it only says
+   the focal length) */
 struct wf_dk_shot {
     char     model[32], lens[64];                /* "" = none */
     uint32_t fl[2], fn[2], et[2];                /* focal length, f-number, exposure time as num / den (den 0 = none) */

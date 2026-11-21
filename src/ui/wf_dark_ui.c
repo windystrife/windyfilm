@@ -1160,6 +1160,12 @@ int wfdr_tick(int scr, int now)
 
 int wfdr_dark(int scr) { return scr == WFUI_SCR_DARK && dr_dark; }
 
+int wfdr_live(int scr)                                     /* the run's view says RUN / STOPPING until after its end has */
+{                                                          /* turned the display on for the result (wf_dark.c) */
+    const struct wf_dark_view *v = wf_dark_view();
+    return scr == WFUI_SCR_DARK && (v->state == WF_DR_RUN || v->state == WF_DR_STOPPING);
+}
+
 #ifdef WF_HOST
 const char *wfdr_host_msg(void) { return msg ? msg : ""; }
 int wfdr_host_pfoc(void) { return dr_pfoc; }

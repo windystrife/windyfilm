@@ -378,7 +378,8 @@ int main(int argc, char **argv)
     wf_dk_scr = WF_DS_OFF;
     fake_set_dark(1);
     tick(2);
-    CHECK(wfdr_dark(WFUI_SCR_DARK), "Screen Off run, display dark: the UI still draws");
+    CHECK(wfdr_dark(WFUI_SCR_DARK) && !closed, "Screen Off run, display dark: the UI still draws (%d) or closed (%d)",
+          !wfdr_dark(WFUI_SCR_DARK), closed);
     key(MODULE_KEY_MENU);
     CHECK(fake_nwake() == 1 && !wfdr_dark(WFUI_SCR_DARK) && !wfdr_host_stop_ask() && fake_nstop() == 0 && !closed,
           "MENU on the dark screen: woken %d, dark %d, confirm %d, stop %d (want a wake only)", fake_nwake(),
@@ -733,6 +734,71 @@ int main(int argc, char **argv)
     wfui_task_begin();
     wfui_task_end();
     CHECK(host_live_allocs() == 0, "section 15: %ld allocations left", host_live_allocs());
+
+    /* 15b. owner 11-21 (5D2 print, ROLL 002): "lúc screenoff bật lại ko vào được darkroom nữa": a run with Screen Off took
+     * the display dark, the 5D2's check of Canon's dialog closed the UI, and the key that woke the display showed Canon's
+     * screen. While a run lives the Darkroom screen stays through a dark display and a key wakes that same screen; a mode
+     * Canon left meanwhile is asked for again once the display is on (never while dark), 3 times, then closed as before.
+     * The EOS M has no Canon dialog under the UI: the same keys, no mode asked for. */
+    {
+        fake_view()->state = WF_DR_IDLE;
+        fake_view()->nwire = 0;
+        fake_view()->print_ready = 0;
+        host_gui_set(0, 1, 1);
+        open_scr(WF_UI_SCR_DARK);
+        int is5 = wf_cam() == WF_CAM_5D2, want = host_gui_mode(), nq = host_gui_requests(), w0 = fake_nwake(),
+            s0 = fake_nstop();
+        CHECK(!closed && (is5 ? want == (lv ? 38 : 2) && nq == 1 : want == 0 && nq == 0),
+              "15b: the Darkroom screen open: closed %d, gui mode %d, %d asks", closed, want, nq);
+        prints(1, 1);
+        v = fake_view();
+        v->state = WF_DR_RUN; v->phase = WF_DP_EXPOSE; v->frame = 1; v->done = 1; v->total = 3; v->left = 2;
+        v->prog = 300; v->expose = 600; v->t_frame = 52000; v->avg_ms = 120000; v->print_ready = 1; v->nwire = 1;
+        v->wire_frame[0] = 0; v->hung_ms = get_ms_clock() - 100000; v->gen++;
+        wf_dk_scr = WF_DS_OFF;
+        fake_set_dark(1);
+        tick(10);
+        CHECK(!closed && wfdr_dark(WFUI_SCR_DARK) && !display_is_on(), "15b: Screen Off run, display dark: closed %d, "
+              "dark %d, display %d (want the screen kept, dark)", closed, wfdr_dark(WFUI_SCR_DARK), display_is_on());
+        key(MODULE_KEY_PRESS_DOWN);
+        tick(2);
+        CHECK(!closed && display_is_on() && fake_nwake() == w0 + 1 && wfui_host_scr() == WFUI_SCR_DARK
+              && host_gui_requests() == nq && fake_nstop() == s0, "15b: a key on the dark screen: closed %d, display %d, "
+              "woken %d, screen %d, %d more asks, stop %d (want the Darkroom back, nothing else)", closed, display_is_on(),
+              fake_nwake() - w0, wfui_host_scr(), host_gui_requests() - nq, fake_nstop() - s0);
+        shot("dark_run_screen_off_woken");
+        if (is5)
+        {
+            fake_set_dark(1);
+            host_gui_later(0, 0);                              /* Canon leaves its dialog while the display is dark */
+            tick(150);
+            CHECK(!closed && host_gui_requests() == nq && host_gui_mode() == 0, "15b: 5D2 dark, Canon left mode %d: "
+                  "closed %d, %d asks while dark (want kept, none)", want, closed, host_gui_requests() - nq);
+            key(MODULE_KEY_PRESS_DOWN);
+            tick(5);
+            CHECK(!closed && display_is_on() && host_gui_mode() == want && host_gui_requests() == nq + 1,
+                  "15b: 5D2 woken: closed %d, display %d, gui mode %d (want %d), %d asks (want 1)", closed, display_is_on(),
+                  host_gui_mode(), want, host_gui_requests() - nq);
+            host_gui_drop(3);
+            host_gui_later(0, 0);                              /* lost for good while on: 3 asks, then closed */
+            for (int i = 0; i < 1000 && !closed; i++) tick(1);
+            CHECK(closed && host_gui_requests() == nq + 4, "15b: 5D2 mode lost while on: closed %d after %d more asks "
+                  "(want closed after 3)", closed, host_gui_requests() - nq - 1);
+            wfui_task_end();
+            CHECK(!wf_ui_is_open() && !host_front_disabled(), "15b: 5D2 not closed cleanly");
+            v->state = WF_DR_IDLE; v->gen++;
+        }
+        else
+        {
+            v->state = WF_DR_IDLE; v->gen++;
+            close_ui();
+            CHECK(host_gui_requests() == 0, "15b: EOS M: %d gui mode asks", host_gui_requests());
+        }
+        wf_dk_scr = WF_DS_ON;
+        fake_set_dark(0);
+        host_gui_set(0, 1, 1);
+        CHECK(host_live_allocs() == 0, "section 15b: %ld allocations left", host_live_allocs());
+    }
 
     /* 16. the shelf (owner 11-17): "next roll" no longer drops a roll; the Darkroom's ROLL row picks the camera's roll
      * or a shelf roll; a developed roll develops again with a film the browser picks (and comes back) */
