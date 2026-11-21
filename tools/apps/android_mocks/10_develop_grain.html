@@ -1,8 +1,11 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>WindyFilm phone: develop, Grain tab with dust and scratches</title>
+<html><head><meta charset="utf-8"><title>WindyFilm phone: develop, Grain tab (your film model) with dust and scratches</title>
 <link rel="stylesheet" href="wfm.css">
 <style>
 .dust { position: absolute; inset: 0; }
+.seedv { display: flex; align-items: center; gap: 8px; }
+.seedv .chip { min-width: 44px; justify-content: center; }
+.seedv .h { font-size: 10.5px; color: var(--t3); flex: 1; text-align: right; }
 </style></head>
 <body><div class="screen"></div>
 <script src="dev.js"></script>
@@ -11,33 +14,33 @@
 let seed = 1121;
 const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
 let marks = '';
-for (let i = 0; i < 80; i++) {
+for (let i = 0; i < 60; i++) {
   const x = rnd() * 360, y = rnd() * 200, r = 0.5 + rnd() * rnd() * 2.0, o = 0.7 + rnd() * 0.3;
   marks += `<ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="${(r * (0.8 + rnd() * 0.6)).toFixed(2)}" ry="${r.toFixed(2)}" fill="#F3F1EC" opacity="${o.toFixed(2)}"/>`;
 }
 marks += '<path d="M248 38c9 7-5 18 4 29s13 17 3 29c-5 6-2 11 3 14" stroke="#F3F1EC" stroke-width=".7" fill="none" opacity=".85"/>';
-marks += '<path d="M182 132c1.8-1.2 3.6-.4 4.2 1.1s-.9 3-2.6 2.8-2.9-2.6-1.6-3.9z" fill="#F3F1EC" opacity=".9"/>';
-marks += '<path d="M318 60c1.2-.8 2.6 0 2.7 1.2s-1 2-2.2 1.6-1.3-2.1-.5-2.8z" fill="#F3F1EC" opacity=".9"/>';
 marks += '<path d="M58 150c6-3 11 2 17-1s8-6 13-2" stroke="#F3F1EC" stroke-width=".6" fill="none" opacity=".75"/>';
-marks += '<path d="M101 0c1 40-1 80 1 120s-1 60 0 80" stroke="#F3F1EC" stroke-width=".45" fill="none" opacity=".5"/>';
+// Engine Lab: the owner's film model's grain. The gauge chips load that gauge for Grain, Halation and Bloom at once;
+// every row stays editable ("edited" then shows). The picture is the phone preview's shader output; values illustrative.
 wfDev({
-  time: '14:57', title: 'F06 · ROLL 003', sub: 'IMG_6839.CR2 · Tri-X 400', bg: 'assets/f/037_6839.jpg', pos: 'center 40%', imgH: 200,
+  time: '14:57', title: 'F06 · ROLL 003', sub: 'IMG_6839.CR2 · Tri-X 400', bg: 'assets/lab/grain_gpu.png', pos: 'center 40%', imgH: 200,
   img: `<svg class="dust" viewBox="0 0 360 200" preserveAspectRatio="none">${marks}</svg>`,
-  label: 'Tri-X 400 · dust Used', tab: 'Grain',
+  label: 'Tri-X 400 · grain + dust', chip: '1:1 grain', tab: 'Grain',
   panel:
-    gh('Grain', '<span class="chip ol" style="height:20px">Effect alone</span>') +
-    rw('Gauge', seg(['16 mm', '35 mm', '65 mm'], '35 mm')) +
-    sl('Grain speed', 4, 0, 7, 'film\'s', 'new') +
-    rw('Kind', seg(['Off', 'Fine', 'Normal', 'Strong'], 'Normal')) +
-    sws(['Even <span class="t3" style="font-size:10px">· the same size in every tone</span>', false]) +
-    sl('Amount', 100, 0, 200, '100%', 'new') +
-    sl('Size', 100, 50, 300, '100%', 'new', 100) +
+    eng() +
+    gh('Grain', '<span class="chip ol" style="height:20px">Effect alone</span>', 'new') +
+    rw('Gauge', seg(['8 mm', '16 mm', '35 mm', '65 mm'], '35 mm'), 'new') +
+    sl('Amount', 45, 0, 100, '45', 'new') +
+    tri('Tones', [['S', 35, 0, 100, '35'], ['M', 60, 0, 100, '60'], ['H', 60, 0, 100, '60']]) +
+    sl('Colour', 0, 0, 100, 'mono', 'new') +
+    sl('Size', 14, 1, 48, '14', 'new') +
+    sl('Clump', 1.8, 0, 10, '1.8', 'new') +
+    sl('Angle', 2, 0, 360, '2°', 'new') +
+    rw('Seed', '<div class="seedv"><span class="chip ol">7</span><span class="h">new on each frame</span><i class="sw on"></i></div>', 'new') +
     gh('Dust & scratches', 'marks on the negative', 'new') +
     rw('Look', seg(['Clean', 'Light', 'Used', 'Old'], 'Used')) +
     sl('Amount', 60, 0, 100, '60') +
-    sl('Dust', 50, 0, 100, '50') +
-    sl('Hairs', 30, 0, 100, '30') +
-    sl('Scratches', 20, 0, 100, '20') +
+    tri('Marks', [['Dust', 50, 0, 100, '50'], ['Hairs', 30, 0, 100, '30'], ['Scratch', 20, 0, 100, '20']]) +
     sws(['Vary per frame <span class="t3" style="font-size:10px">· new marks on each frame of the roll</span>', true])
 });
 </script>

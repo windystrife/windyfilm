@@ -1,0 +1,122 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm foldable: tabletop (Flex mode) viewfinder (Galaxy Z Fold3, half open)</title>
+<meta name="wf-size" content="841x673">
+<link rel="stylesheet" href="wfm.css">
+<style>
+/* Fold3 inner screen half open on a table, hinge horizontal (WindowManager FoldingFeature: HALF_OPENED, HORIZONTAL).
+   The upper half stands up: the viewfinder. The lower half lies on the table: the controls. Nothing on the hinge. */
+html, body, .screen { width: 841px; height: 673px; }
+.status, .gesture { width: 841px; }
+.up { position: absolute; left: 0; top: 0; width: 841px; height: 330px; background: #0A0B0E; }
+.vf { position: absolute; left: 186px; top: 26px; width: 450px; height: 300px; background: url(assets/f/033_6852.jpg) center/cover; border-radius: 3px; }
+.vf .grid { position: absolute; inset: 0; background:
+   linear-gradient(to right, transparent 33.2%, rgba(255,255,255,.22) 33.2%, rgba(255,255,255,.22) 33.5%, transparent 33.5%,
+     transparent 66.5%, rgba(255,255,255,.22) 66.5%, rgba(255,255,255,.22) 66.8%, transparent 66.8%),
+   linear-gradient(to bottom, transparent 33.2%, rgba(255,255,255,.22) 33.2%, rgba(255,255,255,.22) 33.5%, transparent 33.5%,
+     transparent 66.5%, rgba(255,255,255,.22) 66.5%, rgba(255,255,255,.22) 66.8%, transparent 66.8%); }
+.vf .live { position: absolute; left: 8px; top: 8px; } .vf .live .chip { background: rgba(13,14,17,.72); }
+.vf .live .dot { width: 6px; height: 6px; border-radius: 3px; background: var(--green); }
+.vf .frameno { position: absolute; left: 8px; bottom: 8px; font-size: 10px; font-weight: 700; background: rgba(13,14,17,.6); border-radius: 4px; padding: 2px 6px; }
+.vf .tm { position: absolute; right: 8px; bottom: 8px; font-size: 10px; font-weight: 700; color: #1A1206; background: var(--amber); border-radius: 4px; padding: 2px 6px; }
+.lft { position: absolute; left: 16px; top: 40px; width: 156px; }
+.lft .roll { font-size: 12px; font-weight: 700; letter-spacing: .1em; }
+.lft .roll em { display: block; font-style: normal; color: var(--t2); font-weight: 500; letter-spacing: .02em; font-size: 11px; margin-top: 2px; }
+.lft .gauge { margin-top: 12px; flex-wrap: wrap; width: 150px; row-gap: 4px; height: auto; }
+.lft .cnt { margin-top: 8px; font-size: 12px; font-weight: 700; color: var(--amber); }
+.lft .chips { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.rgt { position: absolute; left: 652px; top: 40px; width: 174px; }
+.rgt .hist { width: 150px; height: 64px; background: rgba(236,238,240,.04); border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
+.rgt .lv { margin-top: 12px; font-size: 10px; color: var(--t3); font-weight: 700; letter-spacing: .1em; }
+.rgt .lvb { margin-top: 6px; width: 150px; height: 26px; position: relative; }
+.rgt .lvb i { position: absolute; left: 0; right: 0; top: 12px; height: 1.5px; background: var(--t2); }
+.rgt .lvb b { position: absolute; left: 50%; top: 4px; width: 2px; height: 18px; margin-left: -1px; background: var(--green); }
+.hinge { position: absolute; left: 0; top: 330px; width: 841px; height: 14px; background: linear-gradient(#050608, #16181D 50%, #050608); }
+.hinge span { position: absolute; left: 50%; top: 1px; transform: translateX(-50%); font-size: 8.5px; letter-spacing: .14em; font-weight: 700; color: #3A404B; }
+.dn { position: absolute; left: 0; top: 344px; width: 841px; height: 313px; }
+.man { position: absolute; left: 0; top: 0; width: 841px; height: 50px; display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--line); }
+.man div { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+.man b { font-size: 9px; font-weight: 700; color: var(--t3); letter-spacing: .12em; }
+.man span { font-size: 14px; font-weight: 600; }
+.man .on b, .man .on span { color: var(--amber); }
+.man .on { background: linear-gradient(to top, var(--amber) 0 2px, transparent 2px); }
+.dial { position: absolute; left: 0; top: 52px; width: 841px; height: 40px; overflow: hidden; }
+.dial .ticks { position: absolute; left: 0; right: 0; top: 4px; height: 14px; background: repeating-linear-gradient(to right, #4A515C 0 1px, transparent 1px 9px); }
+.dial .lab { position: absolute; top: 21px; font-size: 10px; color: var(--t3); font-weight: 600; transform: translateX(-50%); }
+.dial .lab.c { color: var(--amber); font-weight: 800; font-size: 11px; }
+.dial .needle { position: absolute; left: 420px; top: 0; width: 2px; height: 20px; background: var(--amber); margin-left: -1px; }
+.shut { position: absolute; left: 380px; top: 118px; width: 80px; height: 80px; border-radius: 40px; border: 4px solid var(--amber); display: flex; align-items: center; justify-content: center; }
+.shut::after { content: ""; width: 62px; height: 62px; border-radius: 31px; background: var(--t1); }
+.modes { position: absolute; left: 0; width: 841px; top: 210px; text-align: center; font-size: 11px; font-weight: 700; letter-spacing: .14em; color: var(--t3); }
+.modes span { margin: 0 10px; } .modes .on { color: var(--amber); }
+.can { position: absolute; left: 236px; top: 112px; width: 90px; text-align: center; }
+.can img { height: 64px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.6)); }
+.can div { font-size: 10px; font-weight: 600; color: var(--t2); margin-top: 1px; }
+.timer { position: absolute; left: 514px; top: 124px; width: 92px; text-align: center; }
+.timer .chip { height: 30px; border-radius: 15px; padding: 0 12px; font-size: 12px; }
+.timer div { font-size: 10px; color: var(--t3); margin-top: 6px; font-weight: 600; }
+.fx { position: absolute; left: 0; width: 841px; top: 240px; display: flex; justify-content: center; gap: 6px; }
+.fx .chip { background: var(--s2); border: 1px solid var(--line); height: 26px; border-radius: 13px; font-size: 11px; }
+.fx .chip b { color: var(--t3); font-weight: 600; margin-right: 2px; }
+.post { position: absolute; left: 18px; top: 112px; width: 150px; }
+.post div { font-size: 10px; color: var(--t3); line-height: 1.4; margin-top: 6px; }
+.post div b { color: var(--t2); }
+</style></head>
+<body><div class="screen">
+<div class="up">
+  <div class="status"><span>14:36</span><div class="icons"><i class="wifi"></i><i class="sig"></i><i class="bat"></i></div></div>
+  <div class="lft">
+    <div class="roll">ROLL 004<em>Portra 400 · Scan</em></div>
+    <div class="gauge" id="g"></div>
+    <div class="cnt">14 / 36</div>
+    <div class="chips"><span class="chip">DNG + JPG</span><span class="chip ol">Blind</span></div>
+  </div>
+  <div class="vf">
+    <div class="grid"></div>
+    <div class="live"><span class="chip"><i class="dot"></i>LIVE · Lab</span></div>
+    <div class="frameno">F15</div>
+    <div class="tm">10 s timer</div>
+  </div>
+  <div class="rgt">
+    <div class="hist"><svg viewBox="0 0 140 54" width="140" height="54" preserveAspectRatio="none">
+      <path d="M0 54 L0 50 C12 48 18 34 30 32 C44 30 50 14 66 12 C82 10 88 28 102 30 C116 32 124 18 140 22 L140 54 Z" fill="rgba(236,238,240,.45)"/></svg></div>
+    <div class="lv">LEVEL</div>
+    <div class="lvb"><i></i><b></b></div>
+  </div>
+</div>
+<div class="hinge"><span>HINGE · NOTHING DRAWN HERE</span></div>
+<div class="dn">
+  <div class="man">
+    <div class="on"><b>ISO</b><span>400</span></div>
+    <div><b>SHUTTER</b><span>1/125</span></div>
+    <div><b>WB</b><span>Shade</span></div>
+    <div><b>FOCUS</b><span>AF·F</span></div>
+    <div><b>EV</b><span>0.0</span></div>
+  </div>
+  <div class="dial" id="dial"><div class="ticks"></div><div class="needle"></div></div>
+  <div class="post">
+    <svg viewBox="0 0 120 54" width="120" height="54"><path d="M8 48 L112 48" stroke="#4A515C" stroke-width="2"/>
+      <path d="M40 45 L106 45" stroke="#A0A8B4" stroke-width="4" stroke-linecap="round"/>
+      <path d="M40 45 L30 6" stroke="#F4A634" stroke-width="4" stroke-linecap="round"/><circle cx="40" cy="45" r="3" fill="#ECEEF0"/></svg>
+    <div><b>Tabletop.</b> Half open on a table: picture up, controls down. Unfold flat and the full layout comes back.</div>
+  </div>
+  <div class="can"><img src="assets/cans/PRT400.png"><div>Portra 400</div></div>
+  <div class="shut"></div>
+  <div class="timer"><span class="chip">10 s</span><div>timer</div></div>
+  <div class="modes"><span>FREE</span><span class="on">ROLL</span></div>
+  <div class="fx">
+    <span class="chip"><b>Grain</b>35 mm</span><span class="chip"><b>Halation</b>35 mm</span><span class="chip"><b>Bloom</b>35 mm</span>
+    <span class="chip"><b>Light</b>Shade</span><span class="chip"><b>Print</b>Scan</span>
+  </div>
+</div>
+<div class="gesture"></div>
+</div>
+<script>
+const g = document.getElementById('g');
+for (let i = 1; i <= 36; i++) { const t = document.createElement('i'); if (i <= 14) t.className = 's'; if (i === 15) t.className = 'c'; g.appendChild(t); }
+const dial = document.getElementById('dial');
+['25', '50', '100', '200', '400', '800', '1600', '3200', '6400'].forEach((s, i) => {
+  const e = document.createElement('div'); e.className = 'lab' + (s === '400' ? ' c' : ''); e.textContent = s;
+  e.style.left = (420 + (i - 4) * 80) + 'px'; dial.appendChild(e);
+});
+</script>
+</body></html>

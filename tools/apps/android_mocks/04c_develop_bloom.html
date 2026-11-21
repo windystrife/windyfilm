@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm phone: develop, Glow tab, Bloom (your film model)</title>
+<link rel="stylesheet" href="wfm.css">
+</head>
+<body><div class="screen"></div>
+<script src="dev.js"></script>
+<script>
+// Glow, Engine Lab, picker on Bloom: light spill in the light's own colour (Halation owns the red). The picture is the
+// phone preview's shader output for these settings (left: before); the values are illustrative.
+wfDev({
+  time: '14:42', title: 'F10 · ROLL 003', sub: 'IMG_6847.CR2 · Portra 400', bg: 'assets/lab/bloom_gpu.png', pos: 'center 35%', imgH: 190,
+  img: split('assets/f/033_6847.jpg', 150, 'BEFORE', 'BLOOM', 'center 35%'), chip: false, tab: 'Glow',
+  panel:
+    eng() +
+    `<div style="margin-top:4px">${pk([['Halation', true], ['Bloom', true], ['Mist', false]], 'Bloom')}</div>` +
+    gh('Bloom', `<span style="display:flex;gap:8px;align-items:center"><span class="chip ol" style="height:20px">Effect alone</span><i class="sw on"></i></span>`, 'new') +
+    rw('Preset', seg(['8 mm', '16 mm', '35 mm', '65 mm'], '35 mm'), 'new') +
+    sl('Amount', 35, 0, 100, '35', 'new') +
+    sl('Threshold', 82, 0, 100, '82', 'new') +
+    sl('Hard edge', 100, 0, 100, '100', 'new') +
+    sl('Brightness', 0, -3, 3, '0.0 EV', 'new') +
+    sl('Spread', 55, 0, 100, '55', 'new') +
+    sl('Falloff', 30, 0, 100, '30', 'new') +
+    rw('Layers', seg(['1', '2', '3', '4', '5', '6'], '4'), 'new') +
+    sl('Size', 1, 0.25, 2, '1.0×', 'new', 1) +
+    sl('Saturation', 110, 0, 200, '110%', 'new', 100) +
+    sl('Bright roll-off', 30, 0, 100, '30', 'new') +
+    tri('Edge guard', [['Guard', 25, 0, 100, '25'], ['Reach', 5, 0, 32, '5'], ['Detail', 60, 0, 100, '60']]) +
+    '<div class="foot">Live preview is close; the saved print is made by the core</div>'
+});
+</script>
+</body></html>

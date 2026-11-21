@@ -122,9 +122,30 @@ centre, the CMY view of the printer lights with Linked / Keep brightness, Printi
 Split tone, Print range, the continuous grain / halation / bloom controls and Exposure / Kelvin / Tint in front (mocks
 05, 08).
 
-Develop on the phone has **8 tabs**: Film · Print · Tone · Grain · Glow · Lens · Gate · Finish (mocks 04, 04b, 08..12).
-Tone = Developer, Highlights & shadows, Colour, Levels; Grain also holds Dust & scratches; Gate = Film rebate and a
-Per frame group (Same on every frame, Frame drift, Frame variation).
+Develop on the phone has **8 tabs**: Film · Print · Tone · Grain · Glow · Lens · Gate · Finish (mocks 04, 04b, 04c,
+08..12). Grain also holds Dust & scratches; Gate = Film rebate and a Per frame group (Same on every frame, Frame drift,
+Frame variation).
+
+**Owner, 21 Nov (later): the owner's own film model drives Tone, Grain and Glow.** The owner has a measured model of
+five stages in this order: Developer → Compression → Bloom → Halation → Grain. Its numbers and code are private: they
+live in the private desktop repository only, never in this repository or in a public build. The app reads the stages
+from the shared C core.
+- Tone, Grain and Glow each get an **Engine: Lab | Camera** switch. This is a proposal, temporary, and question 14.
+  - Lab is the owner's model and the default.
+  - Camera is the film's own camera-side tools, bit-exact with the camera: the controls in the rows above.
+  - Levels, Print range and Highlight colour show under both engines.
+- Tone (Lab) has two groups:
+  - **Developer**: Contrast, Midtone lift, Colour purity (0..200 %), Lift & toe.
+  - **Shoulder**: Shoulder, Shoulder white, Shoulder width, Colour mute.
+  - Saturation leaves Tone, because Colour purity covers it.
+- Grain (Lab): **gauge chips 8 / 16 / 35 / 65 mm**, which set Bloom, Halation and Grain to that gauge at once. Then
+  Amount, Tones S / M / H, Colour, Size, Clump, Angle, Seed (+ per frame), and Dust & scratches below.
+- Glow (Lab): a segmented control picks **Halation · Bloom · Mist**, each with its own switch.
+  - Halation: Amount, Hue red↔orange, Source gamma, Tight spread, Wide spread, Threshold, Tone range low / high,
+    Blue cut, Softness.
+  - Bloom keeps the light's own colour: Amount, Threshold, Hard edge, Brightness, Spread, Falloff, Layers, Size,
+    Saturation, Bright roll-off, Edge guard, Edge reach, Edge detail.
+  - Mist: White / Black, as before.
 
 ## 4. Architecture
 
@@ -183,9 +204,17 @@ viewfinder                 ^
     light and Edge softness blurs at preview size) and the dust marks (exact positions, thin marks at least 1 px). The
     shader places the picture in the rebate (Frame drift = an affine move, bilinear) and computes the vignette with the
     core's formula in float.
-  - Approximated: grain = a pre-made noise texture per gauge / size / speed, amplitude per level from the `yg` table;
-    halation / bloom = dual-filter blur at 1/4 resolution with the `yh` knee, colours and amounts; mist = one more blur
-    level.
+  - Approximated (Camera engine): grain = a pre-made noise texture per gauge / size / speed, amplitude per level from
+    the `yg` table; halation / bloom = dual-filter blur at 1/4 resolution with the `yh` knee, colours and amounts;
+    mist = one more blur level.
+  - Lab engine (the owner's model): the shaders are written and measured in a real browser GPU against the model's
+    reference code. Both live in the private desktop repository, branch `android-gpu`.
+    - Developer and Compression fold into the cube: 33^3 while dragging, 65^3 on release.
+    - Bloom and Halation: one blur per layer at a reduced size, plus a full-size edge mask.
+    - Grain: the model's noise made in the shader. It is checked by its statistics, because a phone GPU's float maths
+      cannot repeat the reference's bits.
+    - The preview is approximate. **The saved print always comes from the C core.**
+    - The phone needs `EXT_color_buffer_half_float`. All current GLES 3.x phones have it.
   - Tiers: Full (all), Fast (the cube + vignette + rebate: no grain / glow / mist / dust), Off (the phone's picture,
     with a thin frame line when a rebate is on). Film LUT 65^3 cubes are resampled to 33^3 for it. Details per key:
     option model section 13.
@@ -202,6 +231,32 @@ viewfinder                 ^
   camera's UserComment text ("WindyFilm Darkroom: <look> | ROLL 004 F13"), EXIF from the DNG / CR2; the DNG stays in
   `DCIM/WindyFilm` (MediaStore Images may refuse `image/x-adobe-dng` on some phones: Documents as the fall-back);
   Android share sheet; a contact sheet as one JPEG; the sidecar `.wfx` per picture.
+
+### 4.1 Foldable phones (owner, 21 Nov: the owner shoots on a Galaxy Z Fold3)
+
+The Fold3:
+- Cover screen 6.2", 2268 x 832, about 317 dp wide.
+- Inner screen 7.6", 2208 x 1768, with an under-display camera.
+- Snapdragon 888. It shipped with Android 11 and now runs One UI 6.1.
+- Samsung's own Expert RAW app runs on it, so its main camera gives RAW. What Camera2 offers a third-party app (RAW
+  per lens, hardware level) is checked on the phone first, in stage 2.
+
+The app supports foldables from the first build:
+- **No orientation lock, resizable.** The app is never letterboxed. The layout follows the window size class:
+  - Compact (cover screen, or the phone folded): the phone layout of the mocks. Mock 16 checks the 317 dp width.
+  - Medium or Expanded (inner screen: 673 dp wide upright, 841 dp sideways): the viewfinder with its controls in a
+    side column, and Develop in two panes (the picture and the roll on the left, the tabs on the right). Mocks 13
+    and 14.
+- **Tabletop (Flex mode).** Jetpack WindowManager's `FoldingFeature` reports half open with a horizontal hinge. The
+  viewfinder moves above the hinge and the shutter, settings and roll counter move below it. Nothing sits on the
+  hinge band. Mock 15.
+  - Book posture (vertical hinge) keeps the two-pane layout and keeps controls off the hinge.
+- **Folding or unfolding mid-shot keeps everything.**
+  - The camera keeps running: it feeds our own texture, so only the screen surface is replaced.
+  - The roll and its frame counter carry on.
+  - Develop keeps its edit, tab and scroll position.
+- Each screen's rotation is read on its own. Cutout and under-display-camera insets are respected, so nothing is
+  drawn under the inner camera.
 
 ## 5. Performance targets (mid-range: Snapdragon 7s Gen 2 / Dimensity 7300 class, 8 GB)
 
@@ -245,11 +300,15 @@ All of these are targets to measure in stage 2, not measurements.
 
 ## 7. Staged plan
 
-1. **Stage 1 (this):** research, feature map, the shared option model, 13 mockups, this plan. Owner approval.
+1. **Stage 1 (this):** research, feature map, the shared option model, 18 mockups (14 phone screens, 4 foldable), this plan. Owner approval.
 2. **Stage 2, core + preview skeleton:** the core as `libwfcore.so` (arm64 / x86_64) with the wasm kit's shims; host
    test: the ref17 CR2 frames give the camera's prints (bit-exact gate, section 4); a bare Kotlin app with Camera2
    PRIV + RAW + JPEG, the GL preview with the baked cube, the shutter writing DNG. Measure section 5 on the owner's
-   phone(s).
+   phone(s): the **Galaxy Z Fold3** first. Steps on it:
+   - a Camera2 probe of every lens;
+   - fold and unfold while the camera runs;
+   - tabletop;
+   - the Lab-engine shaders' frame time on its GPU.
 3. **Stage 3, develop + roll:** `wf_dng.c` and B on DNG; Free mode; rolls (film lock, Blind, exposures), the shelf, the
    Darkroom service, the contact sheet, gallery, export, share.
 4. **Stage 4, Develop tools:** the 8 tabs; the H rows everywhere, then the A controls in this order: Light K / Tint,
@@ -273,6 +332,17 @@ gathers the inputs, `render.sh` = Edge headless at 360 x 800 x3, `mk_sheet.py` =
 EOS M CR2s (the look-sweep galleries); the Film stage strip uses the private chain renders, so the PNGs stay private.
 The rebate in 12 and the dust in 10 are drawn by the mock itself (our own shapes from public format sizes).
 
+Redrawn on 21 Nov (later) for the owner's film model:
+- `04_develop` (Glow · Halation), `04c_develop_bloom` (Glow · Bloom), `09_develop_tone` and `10_develop_grain`.
+- Their pictures (`assets/lab/*.png`) are the phone preview's own shader output, made by the private repository's
+  browser test (`run_edge.mjs --render`). `mk_assets.py` does not make them.
+- The slider values are illustrative, not the model's presets.
+
+Foldable screens (`<meta name="wf-size">` sets the window; `render.sh` reads it):
+- `13_fold_viewfinder`, `14_fold_develop`, `15_fold_tabletop`: 841 x 673 dp.
+- `16_fold_cover`: 317 x 864 dp.
+- The overview sheet has them in their own row.
+
 ## 9. Open questions for the owner
 
 1. OK that the camera (live film viewfinder, RAW, roll) is our own design and the reference plugin gives only the
@@ -295,3 +365,11 @@ The rebate in 12 and the dust in 10 are drawn by the mock itself (our own shapes
     get, mock 01 would change per shot), or keep the viewfinder clean and show them only in Develop?
 13. Edge print text on the rebate: "WINDYFILM · film name · frame number" (mock 12), or something else (roll number,
     your name)?
+14. Tone, Grain and Glow get an **Engine: Lab | Camera** switch.
+    - Lab is your film model: Developer, Shoulder, Bloom, Halation and Grain with your numbers.
+    - Camera is the film's own camera-side tools, bit-exact with the camera.
+    - Proposed, and taken for now: Lab as the default. Or should Camera be the default for frames shot on the EOS M
+      / 5D2?
+15. On the Fold3, the viewfinder on the inner screen: sideways with the camera column on the right (mock 13), or
+    upright like a big phone?
+16. Tabletop (mock 15): only the camera, or Develop too (picture above the hinge, the tool panel below)?

@@ -1,0 +1,76 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm foldable: Develop in two panes on the inner screen (Galaxy Z Fold3)</title>
+<meta name="wf-size" content="841x673">
+<link rel="stylesheet" href="wfm.css">
+<style>
+/* Fold3 inner screen, landscape (841 x 673 dp): the picture and the roll on the left, the 8 tabs and the tool panel
+   on the right; the same rows as the phone (mock 04). */
+html, body, .screen { width: 841px; height: 673px; }
+.status, .gesture { width: 841px; }
+.hdr { width: 500px; }
+.hdr .ttl { font-size: 14px; font-weight: 700; } .hdr .sub { font-size: 10.5px; color: var(--t3); font-weight: 600; }
+.pic { position: absolute; left: 0; top: 76px; width: 500px; height: 333px; overflow: hidden; background: url(assets/lab/glow_gpu.png) center/cover; }
+.pic .l { position: absolute; top: 8px; font-size: 9.5px; font-weight: 700; padding: 3px 8px; border-radius: 5px; background: rgba(13,14,17,.75); }
+.tools2 { position: absolute; left: 0; top: 419px; width: 500px; display: flex; gap: 6px; padding: 0 12px; align-items: center; }
+.strip { position: absolute; left: 0; top: 457px; width: 500px; padding: 0 12px; }
+.strip .h { display: flex; justify-content: space-between; font-size: 10px; color: var(--t3); font-weight: 700; letter-spacing: .1em; margin-bottom: 6px; }
+.strip .row { display: flex; gap: 5px; }
+.strip .fr { flex: none; width: 74px; height: 50px; border-radius: 4px; background-size: cover; background-position: center; position: relative; }
+.strip .fr span { position: absolute; left: 3px; bottom: 2px; font-size: 8.5px; font-weight: 700; color: #fff; text-shadow: 0 0 3px #000; }
+.strip .fr.on { outline: 2px solid var(--amber); outline-offset: 1px; }
+.hist { position: absolute; left: 12px; top: 540px; width: 476px; height: 64px; background: var(--s1); border: 1px solid var(--line); border-radius: 8px; padding: 6px; }
+.rt { position: absolute; left: 500px; top: 24px; width: 341px; height: 52px; display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 0 14px; border-left: 1px solid var(--line); }
+.dtt { left: 500px !important; width: 341px; border-left: 1px solid var(--line); }
+.dtt div { font-size: 9px; }
+.dpn { left: 500px; width: 341px; border-left: 1px solid var(--line); height: 531px; }
+.split { position: absolute; left: 500px; top: 76px; width: 1px; height: 581px; background: var(--line); }
+</style></head>
+<body><div class="screen">
+<div class="status"><span>14:41</span><div class="icons"><i class="wifi"></i><i class="sig"></i><i class="bat"></i></div></div>
+<div class="hdr">
+  <span class="ico"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></span>
+  <div><div class="ttl">F10 · ROLL 003</div><div class="sub">IMG_6847.CR2 · Portra 400 · ISO 200 · 1/1000</div></div>
+</div>
+<div class="pic" id="pic"></div>
+<div class="tools2">
+  <span class="chip">Split</span><span class="chip ol">Hold for before</span><span class="chip ol">1:1 grain</span>
+  <div style="flex:1"></div><span class="chip ol">Copy look to the roll</span>
+</div>
+<div class="strip">
+  <div class="h"><span>ROLL 003 · 12 FRAMES</span><span>developed 10 / 12</span></div>
+  <div class="row" id="row"></div>
+</div>
+<div class="hist"><svg viewBox="0 0 464 50" width="464" height="50" preserveAspectRatio="none">
+  <path d="M0 50 L0 46 C30 44 50 30 80 28 C120 26 140 12 180 10 C220 8 240 24 280 26 C320 28 350 8 390 12 C420 15 440 34 464 40 L464 50 Z" fill="rgba(236,238,240,.45)"/>
+  <path d="M0 50 L0 48 C40 47 60 38 100 34 C140 30 170 20 210 22 C250 24 290 34 330 30 C370 26 410 40 464 44 L464 50 Z" fill="rgba(244,166,52,.4)"/></svg></div>
+<div class="rt">
+  <span class="ico"><svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5"/><path d="M4 12h10a6 6 0 0 1 0 12"/></svg></span>
+  <span class="chip am" style="height:28px;border-radius:14px;padding:0 14px">Print</span>
+</div>
+<div class="dtt" id="tt" style="top:76px"></div>
+<div class="dpn" id="pn" style="top:126px"></div>
+<div class="gesture"></div>
+</div>
+<script src="dev.js"></script>
+<script>
+document.getElementById('pic').innerHTML = split('assets/f/033_6847.jpg', 200, 'BEFORE', 'HALATION');
+document.getElementById('tt').innerHTML = WF_TABS.map(([n, svg]) => `<div${n === 'Glow' ? ' class="on"' : ''}><svg viewBox="0 0 24 24">${svg}</svg>${n}</div>`).join('');
+const frames = [['033_6839', 'F01'], ['033_6844', 'F02'], ['033_6852', 'F03'], ['033_6856', 'F04'], ['033_6847', 'F10'], ['033_6849', 'F11']];
+document.getElementById('row').innerHTML = frames.map(([f, n]) => `<div class="fr${n === 'F10' ? ' on' : ''}" style="background-image:url(assets/f/${f}.jpg)"><span>${n}</span></div>`).join('');
+document.getElementById('pn').innerHTML =
+  eng() +
+  `<div style="margin-top:4px">${pk([['Halation', true], ['Bloom', true], ['Mist', false]], 'Halation')}</div>` +
+  gh('Halation', `<span style="display:flex;gap:8px;align-items:center"><span class="chip ol" style="height:20px">Effect alone</span><i class="sw on"></i></span>`, 'new') +
+  rw('Preset', seg(['8 mm', '16 mm', '35 mm', '65 mm'], '35 mm'), 'new') +
+  sl('Amount', 75, 0, 100, '75', 'new') +
+  sl('Hue', 45, 0, 100, 'red 45', 'new hue') +
+  sl('Source gamma', 70, 0, 100, '70', 'new') +
+  sl('Tight spread', 20, 0, 100, '20', 'new') +
+  sl('Wide spread', 35, 0, 100, '35', 'new') +
+  sl('Threshold', 75, 0, 100, '75', 'new') +
+  sl2('Tone range', 15, 80, 0, 100, '15–80', 'new') +
+  sl('Blue cut', 80, 0, 100, '80', 'new') +
+  sl('Softness', 50, 0, 100, '50', 'new') +
+  '<div class="foot">Live preview is close; the saved print is made by the core</div>';
+</script>
+</body></html>

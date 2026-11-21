@@ -1,0 +1,126 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm foldable: viewfinder on the inner screen (Galaxy Z Fold3, unfolded, landscape)</title>
+<meta name="wf-size" content="841x673">
+<link rel="stylesheet" href="wfm.css">
+<style>
+/* Fold3 inner screen, landscape: 2208 x 1768 px = 841 x 673 dp. Expanded width: the viewfinder on the left, the
+   camera column on the right (no letterbox, no orientation lock). */
+html, body, .screen { width: 841px; height: 673px; }
+.status, .gesture { width: 841px; }
+.vf { position: absolute; left: 0; top: 24px; width: 633px; height: 422px; background: url(assets/f/033_6844.jpg) center/cover; }
+.vf .grid { position: absolute; inset: 0; background:
+   linear-gradient(to right, transparent 33.2%, rgba(255,255,255,.22) 33.2%, rgba(255,255,255,.22) 33.4%, transparent 33.4%,
+     transparent 66.6%, rgba(255,255,255,.22) 66.6%, rgba(255,255,255,.22) 66.8%, transparent 66.8%),
+   linear-gradient(to bottom, transparent 33.2%, rgba(255,255,255,.22) 33.2%, rgba(255,255,255,.22) 33.5%, transparent 33.5%,
+     transparent 66.5%, rgba(255,255,255,.22) 66.5%, rgba(255,255,255,.22) 66.8%, transparent 66.8%); }
+.vf .live { position: absolute; left: 10px; top: 10px; display: flex; gap: 6px; }
+.vf .live .chip { background: rgba(13,14,17,.72); }
+.vf .live .dot { width: 6px; height: 6px; border-radius: 3px; background: var(--green); }
+.vf .hist { position: absolute; right: 10px; top: 10px; width: 74px; height: 38px; background: rgba(13,14,17,.62); border-radius: 6px; padding: 4px; }
+.vf .af { position: absolute; left: 330px; top: 170px; width: 52px; height: 60px; border: 1.5px solid var(--amber); border-radius: 4px; }
+.vf .af::after { content: "Face"; position: absolute; left: -1px; top: -16px; font-size: 9.5px; font-weight: 700; color: #1A1206; background: var(--amber); padding: 0 4px; border-radius: 2px; }
+.vf .lens { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; gap: 6px; background: rgba(13,14,17,.55); padding: 3px; border-radius: 16px; }
+.vf .lens span { width: 30px; height: 26px; border-radius: 13px; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; color: var(--t1); }
+.vf .lens span.on { background: rgba(244,166,52,.95); color: #1A1206; width: 36px; }
+.vf .frameno { position: absolute; left: 10px; bottom: 14px; font-size: 10px; font-weight: 700; color: var(--t1); background: rgba(13,14,17,.6); border-radius: 4px; padding: 2px 6px; }
+.vf .ladder { position: absolute; right: 10px; top: 120px; width: 22px; height: 180px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; }
+.vf .ladder i { display: block; height: 1.5px; background: rgba(236,238,240,.8); width: 8px; }
+.vf .ladder i.m { width: 14px; } .vf .ladder i.c { background: var(--amber); width: 18px; height: 2.5px; }
+.man { position: absolute; left: 0; top: 448px; width: 633px; height: 50px; display: grid; grid-template-columns: repeat(5, 1fr); border-bottom: 1px solid var(--line); }
+.man div { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; }
+.man b { font-size: 9px; font-weight: 700; color: var(--t3); letter-spacing: .12em; }
+.man span { font-size: 14px; font-weight: 600; }
+.man .on b, .man .on span { color: var(--amber); }
+.man .on { background: linear-gradient(to top, var(--amber) 0 2px, transparent 2px); }
+.dial { position: absolute; left: 0; top: 500px; width: 633px; height: 40px; overflow: hidden; }
+.dial .ticks { position: absolute; left: 0; right: 0; top: 4px; height: 14px; background: repeating-linear-gradient(to right, #4A515C 0 1px, transparent 1px 9px); }
+.dial .lab { position: absolute; top: 21px; font-size: 10px; color: var(--t3); font-weight: 600; transform: translateX(-50%); }
+.dial .lab.c { color: var(--amber); font-weight: 800; font-size: 11px; }
+.dial .needle { position: absolute; left: 316px; top: 0; width: 2px; height: 20px; background: var(--amber); margin-left: -1px; }
+.fx { position: absolute; left: 0; top: 546px; width: 633px; height: 30px; display: flex; gap: 6px; padding: 0 12px; }
+.fx .chip { background: var(--s2); border: 1px solid var(--line); height: 26px; border-radius: 13px; font-size: 11px; }
+.fx .chip b { color: var(--t3); font-weight: 600; margin-right: 2px; }
+.note { position: absolute; left: 12px; top: 592px; width: 610px; font-size: 10.5px; color: var(--t3); line-height: 1.45; }
+.note b { color: var(--t2); }
+.side { position: absolute; left: 633px; top: 24px; width: 208px; height: 633px; background: var(--s1); border-left: 1px solid var(--line); }
+.side .roll { position: absolute; left: 14px; top: 12px; font-size: 12px; font-weight: 700; letter-spacing: .1em; }
+.side .roll em { display: block; font-style: normal; color: var(--t2); font-weight: 500; letter-spacing: .02em; font-size: 11px; margin-top: 2px; }
+.side .g { position: absolute; left: 14px; top: 54px; display: flex; align-items: center; gap: 8px; }
+.side .cnt { font-size: 12px; font-weight: 700; color: var(--amber); }
+.side .chips { position: absolute; left: 14px; top: 78px; display: flex; gap: 6px; }
+.side .can { position: absolute; left: 0; width: 208px; top: 128px; text-align: center; }
+.side .can img { height: 70px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.6)); }
+.side .can div { font-size: 10px; font-weight: 600; color: var(--t2); margin-top: 2px; }
+.side .shut { position: absolute; left: 62px; top: 262px; width: 84px; height: 84px; border-radius: 42px; border: 4px solid var(--amber); display: flex; align-items: center; justify-content: center; }
+.side .shut::after { content: ""; width: 66px; height: 66px; border-radius: 33px; background: var(--t1); }
+.side .modes { position: absolute; left: 0; width: 208px; top: 368px; text-align: center; font-size: 11px; font-weight: 700; letter-spacing: .14em; color: var(--t3); }
+.side .modes span { margin: 0 9px; } .side .modes .on { color: var(--amber); }
+.side .last { position: absolute; left: 76px; top: 412px; width: 56px; height: 56px; border-radius: 10px; background: #0A0A0B; border: 1px solid var(--line); display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.side .last b { font-size: 16px; color: var(--t2); font-weight: 700; }
+.side .last span { font-size: 8.5px; color: var(--t3); font-weight: 700; letter-spacing: .1em; }
+.side .tools { position: absolute; left: 14px; right: 14px; bottom: 16px; display: flex; justify-content: space-between; }
+.side .tools .ico { background: var(--s2); border: 1px solid var(--line); width: 40px; height: 40px; border-radius: 20px; }
+</style></head>
+<body><div class="screen">
+<div class="status"><span>14:32</span><div class="icons"><i class="wifi"></i><i class="sig"></i><i class="bat"></i></div></div>
+
+<div class="vf">
+  <div class="grid"></div>
+  <div class="live"><span class="chip"><i class="dot"></i>LIVE · full look · Lab</span></div>
+  <div class="hist"><svg viewBox="0 0 66 30" width="66" height="30">
+    <path d="M0 30 L0 27 C6 25 8 18 12 17 C17 16 19 9 24 8 C29 7 31 14 36 15 C41 16 44 6 49 7 C54 8 57 19 61 24 L64 22 L66 30 Z" fill="rgba(236,238,240,.55)"/>
+    <path d="M0 30 L0 28 C7 27 10 22 15 20 C20 18 25 12 30 13 C35 14 40 20 46 18 C52 16 56 25 62 27 L66 30 Z" fill="rgba(244,166,52,.45)"/></svg></div>
+  <div class="af"></div>
+  <div class="ladder" id="lad"></div>
+  <div class="frameno">F13</div>
+  <div class="lens"><span>.6</span><span class="on">1×</span><span>3</span></div>
+</div>
+
+<div class="man">
+  <div class="on"><b>ISO</b><span>200</span></div>
+  <div><b>SHUTTER</b><span>1/250</span></div>
+  <div><b>WB</b><span>Day</span></div>
+  <div><b>FOCUS</b><span>AF·F</span></div>
+  <div><b>EV</b><span>+0.3</span></div>
+</div>
+<div class="dial" id="dial"><div class="ticks"></div><div class="needle"></div></div>
+<div class="fx">
+  <span class="chip"><b>Grain</b>35 mm</span>
+  <span class="chip"><b>Halation</b>35 mm</span>
+  <span class="chip"><b>Bloom</b>35 mm</span>
+  <span class="chip"><b>Light</b>Day</span>
+  <span class="chip"><b>Print</b>Scan</span>
+  <span class="chip"><b>Strength</b>100%</span>
+</div>
+<div class="note"><b>Inner screen, unfolded.</b> The same camera session as on the cover screen: fold the phone and the
+cover screen takes over at once, the roll and frame counter carry on. Nothing is drawn under the inner camera.</div>
+
+<div class="side">
+  <div class="roll">ROLL 004<em>Portra 400 · Scan</em></div>
+  <div class="g"><div class="gauge" id="g"></div></div>
+  <div class="chips"><span class="chip ol">Blind</span><span class="chip">DNG + JPG</span></div>
+  <div class="can"><img src="assets/cans/PRT400.png"><div>Portra 400</div></div>
+  <div class="shut"></div>
+  <div class="modes"><span>FREE</span><span class="on">ROLL</span></div>
+  <div class="last"><b>12</b><span>LATENT</span></div>
+  <div class="tools">
+    <span class="ico"><svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg></span>
+    <span class="ico"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg></span>
+    <span class="ico"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/></svg></span>
+  </div>
+</div>
+<div class="gesture"></div>
+</div>
+<script>
+const g = document.getElementById('g');
+for (let i = 1; i <= 36; i++) { const t = document.createElement('i'); if (i <= 12) t.className = 's'; if (i === 13) t.className = 'c'; if (i % 6 === 0 && i > 13) t.className = 'q'; g.appendChild(t); }
+const cnt = document.createElement('span'); cnt.className = 'cnt'; cnt.textContent = '12 / 36'; g.parentNode.appendChild(cnt);
+const lad = document.getElementById('lad');
+for (let i = 0; i <= 12; i++) { const t = document.createElement('i'); if (i % 3 === 0) t.className = 'm'; if (i === 5) t.className = 'c'; lad.appendChild(t); }
+const dial = document.getElementById('dial');
+['12', '25', '50', '100', '200', '400', '800', '1600', '3200', '6400'].forEach((s, i) => {
+  const e = document.createElement('div'); e.className = 'lab' + (s === '200' ? ' c' : ''); e.textContent = s;
+  e.style.left = (316 + (i - 4) * 62) + 'px'; dial.appendChild(e);
+});
+</script>
+</body></html>

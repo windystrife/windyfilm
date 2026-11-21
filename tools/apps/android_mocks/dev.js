@@ -60,3 +60,38 @@ function rw(name, ctl, cls) {
 function sws(...pairs) {
   return '<div class="rw2">' + pairs.map(([n, on]) => `<span><span>${n}</span><i class="sw${on ? ' on' : ''}"></i></span>`).join('') + '</div>';
 }
+
+// two-knob range (fill between lo and hi)
+function sl2(name, lo, hi, min, max, txt, cls) {
+  const c = x => Math.max(0, Math.min(1, (x - min) / (max - min))), a = c(lo), b = c(hi);
+  return `<div class="sl ${cls || ''}"><span class="n">${name}</span><div class="tr">` +
+    `<div class="f" style="left:${a * 100}%;width:${(b - a) * 100}%"></div><div class="k" style="left:${a * 100}%"></div>` +
+    `<div class="k" style="left:${b * 100}%"></div></div><span class="v">${txt}</span></div>`;
+}
+
+// three small sliders in one row: tri(name, [[label, v, min, max, txt], x3])
+function tri(name, items) {
+  const c = (x, a, b) => Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return `<div class="tri"><span class="n">${name}</span>` + items.map(([l, v, a, b, t]) =>
+    `<div><span>${l}<b>${t}</b></span><div class="tr"><div class="f" style="width:${c(v, a, b) * 100}%"></div>` +
+    `<div class="k" style="left:${c(v, a, b) * 100}%"></div></div></div>`).join('') + '</div>';
+}
+
+// effect picker: pk([[name, switchedOn], ...], shown)
+function pk(items, shown) {
+  return '<div class="pk">' + items.map(([n, on]) => `<span${n === shown ? ' class="on"' : ''}><i${on ? ' class="on"' : ''}></i>${n}</span>`).join('') + '</div>';
+}
+
+// the Engine row of Tone / Grain / Glow: the owner's model (Lab) or the camera's own tools
+function eng(hint) {
+  return `<div class="rw"><span class="n">Engine</span><div class="eng">${seg(['Lab', 'Camera'], 'Lab')}` +
+    `<span class="h">${hint || 'your film model'}</span></div></div>`;
+}
+
+// before / after split over the picture: `before` on the left of x (CSS px), placed like the picture (pos)
+function split(before, x, lb, la, pos) {
+  return `<div style="position:absolute;inset:0;background:url(${before}) ${pos || 'center'}/cover no-repeat;clip-path:inset(0 calc(100% - ${x}px) 0 0)"></div>` +
+    `<div style="position:absolute;left:${x - 1}px;top:0;bottom:0;width:2px;background:var(--t1)"></div>` +
+    `<span class="l" style="left:8px;top:8px;bottom:auto;font-size:9.5px">${lb}</span>` +
+    `<span class="l" style="left:auto;right:8px;top:8px;bottom:auto;font-size:9.5px">${la}</span>`;
+}

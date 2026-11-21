@@ -113,3 +113,23 @@ html, body { width: 360px; height: 800px; overflow: hidden; background: var(--in
 .rgb.r .n::before { background: #E0605A; } .rgb.g .n::before { background: #5FBF6A; } .rgb.b .n::before { background: #5A8DE0; }
 .rgb.c .n::before { background: #4FC3D9; } .rgb.m .n::before { background: #D95FB4; } .rgb.y .n::before { background: #E5C84A; }
 .fmt { display: flex; gap: 5px; height: 30px; align-items: center; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, #000 80%, transparent); }
+
+/* the owner's film model on Tone / Grain / Glow (21 Nov, later): three small sliders in one row, the hue track,
+   a two-knob range, the effect picker with on-dots */
+.tri { display: grid; grid-template-columns: 112px repeat(3, 1fr); gap: 9px; align-items: center; height: 32px; }
+.tri .n { font-size: 12px; font-stretch: 87%; font-weight: 500; white-space: nowrap; }
+.tri > div { display: flex; flex-direction: column; gap: 4px; }
+.tri > div span { font-size: 9.5px; color: var(--t3); font-weight: 700; display: flex; justify-content: space-between; }
+.tri > div span b { color: var(--t2); font-weight: 700; }
+.tri .tr { position: relative; height: 3px; border-radius: 2px; background: var(--s3); }
+.tri .tr .f { position: absolute; left: 0; top: 0; bottom: 0; background: var(--amber); border-radius: 2px; }
+.tri .tr .k { position: absolute; top: -4px; width: 11px; height: 11px; margin-left: -5.5px; border-radius: 6px; background: var(--t1); }
+.sl.hue .tr { background: linear-gradient(90deg, #D9442E, #F29A3A); } .sl.hue .tr .f { display: none; }
+.pk { display: flex; background: var(--s2); border-radius: 9px; padding: 2px; border: 1px solid var(--line); height: 30px; }
+.pk span { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: var(--t2); border-radius: 7px; }
+.pk span.on { background: var(--s3); color: var(--t1); box-shadow: inset 0 -2px 0 var(--amber); }
+.pk i { width: 6px; height: 6px; border-radius: 3px; background: var(--t3); } .pk i.on { background: var(--amber); }
+.eng { display: flex; align-items: center; gap: 8px; }
+.eng .seg { width: 132px; }
+.eng .h { font-size: 10px; color: var(--t3); }
+.foot { font-size: 9.5px; color: var(--t3); text-align: center; margin-top: 6px; }
