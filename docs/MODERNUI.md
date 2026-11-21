@@ -431,10 +431,18 @@ Cards are built only on the owner's word.
      - the dials under the plate change Canon's values without a Canon redraw over ours;
      - what INFO does after the close;
      - the battery % and the clock.
-5. **M5: Prints.**
+5. **M5: Prints (not started).**
    - The Darkroom writes the screen previews and the sheet strip. The Prints / Contact sheet viewer (display filter
      in LV, Canon's PLAY buffer otherwise).
    - "PLAY shows" option, default Camera JPEG.
+   - **Why it is its own stage:** it changes the Darkroom's output (a 720 x 480 UYVY preview per print, about 675 KB,
+     24 MB a roll on the card, plus one strip file per roll) and draws into the YUV layer (`CBR_DISPLAY_FILTER` in
+     LiveView, `get_yuv422_vram()` in Canon's PLAY). The host harness can check the files and our bitmap's chrome, not
+     the YUV path: that needs a probe card on each camera first (does Canon redraw PLAY over us; the 5D2 has no display
+     filter without LV).
+   - **Until then:** Home's Prints tile and PLAY open Canon's PLAY; Camera JPEG "Over + print" / "Print + over" put the
+     prints in DCIM, so Canon's own PLAY already shows them. The Darkroom keeps its luma contact sheet of the CR2s
+     (`wf_dark_photos`).
 6. **M6: Polish.**
    - The Darkroom's top bar in the film OS style (safelight theme kept).
    - Boot straight to the HUD with the roll toast.
