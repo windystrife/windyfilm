@@ -7,7 +7,8 @@
  * MENU on Home closes the UI at once and hands Canon its MENU (wf_ui.c after_close; the EOS M two-finger tap arrives as
  * MENU too and opens the ML menu instead). 5D2: TRASH on Home opens the ML menu (its only way in while WindyFilm takes
  * TRASH in shooting). Settings: the Interface section (Camera interface, Quick keys, Blind roll, the fixed keys) and a
- * System section (what the packs say). MENU there goes back to Home.
+ * System section (what the packs say). MENU there goes back to Home. The 5D2's Top plate (M4): Canon's shooting screen
+ * through the viewfinder as a film camera's top plate (below Settings).
  *
  * Drawing: the browser's canvas, palette and fonts (wf_gfx.c, wf_font.c with the display sizes F_D20 / F_D30 / F_D80 /
  * F_L12, wf_cans.c). Our own layout and marks (DESIGN 1: nothing of M-Film). Threads: UI task only (wf_dark_ui.c's
@@ -409,7 +410,7 @@ static int home_key(int k)
 }
 
 /* ------------------------------------------------------------------ Settings */
-enum { SR_OS = 0, SR_VF, SR_QK, SR_BLIND, SR_MLMENU, SR_MENUKEY, SR_N };
+enum { SR_OS = 0, SR_VF, SR_QK, SR_BLIND, SR_MLMENU, SR_MENUKEY, SR_PLATE, SR_N };
 enum { SY_FILMS = 0, SY_FONTS, SY_CANS, SY_N };
 static const char *const sec_name[2] = { "Interface", "System" };
 
@@ -420,7 +421,7 @@ static int set_rows(int sec, uint8_t *out)
     {
         out[n++] = SR_OS;
         out[n++] = SR_VF;
-        if (!is5d2()) out[n++] = SR_QK;                     /* the quick keys are the EOS M's */
+        out[n++] = is5d2() ? SR_PLATE : SR_QK;              /* the quick keys are the EOS M's, the Top plate the 5D2's */
         out[n++] = SR_BLIND;
         out[n++] = SR_MLMENU;
         out[n++] = SR_MENUKEY;
@@ -487,6 +488,13 @@ static int set_row(int sec, int r, const char **name, const char **val, const ch
         *val = qk_v[wf_qk >= 0 && wf_qk < WF_QK_N ? wf_qk : 0];
         *sub = qk_s[wf_qk >= 0 && wf_qk < WF_QK_N ? wf_qk : 0];
         return 1;
+    case SR_PLATE:
+        *name = "Top plate";
+        *val = wf_plate ? "On" : "Off";
+        *sub = !wf_os ? "With Camera interface WindyFilm"
+             : wf_plate ? "Through the viewfinder: Canon's screen as the camera's top plate"
+                        : "Through the viewfinder: Canon's own shooting screen";
+        return 1;
     case SR_BLIND:
         *name = "Blind roll";
         *val = wf_blind ? "On" : "Off";
@@ -511,6 +519,7 @@ static void set_step(int r, int d)
     else if (r == SR_VF) wf_vf_set((wf_vf + WF_VF_N + d) % WF_VF_N);
     else if (r == SR_QK) wf_qk_set((wf_qk + WF_QK_N + d) % WF_QK_N);
     else if (r == SR_BLIND) wf_blind_set(!wf_blind);
+    else if (r == SR_PLATE) wf_plate_set(!wf_plate);
 }
 
 static void set_render(void)
@@ -591,12 +600,208 @@ static int set_key(int k)
         set_step(rows[sfoc], k == MODULE_KEY_WHEEL_LEFT || k == MODULE_KEY_WHEEL_UP ? -1 : 1);
         if (rows[sfoc] == SR_OS) wf_log("ui: Camera interface %s", wf_os ? "WindyFilm" : "Canon + ML");
         if (rows[sfoc] == SR_VF) wf_log("ui: LiveView finder %d", wf_vf);
+        if (rows[sfoc] == SR_PLATE) wf_log("ui: Top plate %s", wf_plate ? "on" : "off");
         break;
     case MODULE_KEY_MENU: case MODULE_KEY_TRASH:
         wfui_goto(WFUI_SCR_HOME);
         break;
     case MODULE_KEY_LV:
         return 1;
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------ the 5D2's Top plate (M4, mock 06)
+ * Shooting through the viewfinder, the back LCD as a film camera's top plate: shutter and aperture large, ISO (FROM FILM
+ * when the film set it), the exposure scale (M: Canon's meter at the last half-press; P / Tv / Av: the compensation),
+ * the mode, the roll's look, the next frame, the card's shots left, the drive, the blind roll; on the right the film's
+ * card: can, name, ROLL nnn, frames shot and the gauge. It comes up by itself on Canon's shooting screen (wf_osvf.c
+ * wf_plate_poll: power on, the display back on, back from a Canon screen; Settings > Top plate) and opens nothing
+ * else. Half-press closes it (wf_ui_key: Canon meters, as ever); the dials pass to Canon (wf_ui_key: shutter, aperture,
+ * compensation change under it and it shows them); without a key or a change it gives the screen back after
+ * PLATE_IDLE_MS (Canon's own screen and its LCD timer again). Keys: MENU Home, TRASH the Film shelf, INFO Canon's
+ * screen (closed, Canon gets INFO), PLAY Prints. */
+#define PLATE_IDLE_MS 20000
+static int plate_t, plate_sig;                              /* the last key / change (or the open); the values' sum */
+
+/* digits, "/" and "." in the large display size up to xmax (F_D80 has nothing else: "f" in F_D30; a long time, BULB or
+   anything wider than xmax all F_D30) */
+static int big_val(int x, int by, const char *s, int c, int xmax)
+{
+    if (s[0] == 'f')
+    {
+        int w = ui_text(F_D30, x, by - ui_textasc(F_D30), "f", c) + 2;
+        return w + big_val(x + w, by, s + 1, c, xmax);
+    }
+    int big = ui_textw(F_D80, s) <= xmax - x;
+    for (const char *p = s; *p && big; p++)
+        if (!((*p >= '0' && *p <= '9') || *p == '/' || *p == '.')) big = 0;
+    int f = big ? F_D80 : F_D30;
+    return ui_text(f, x, by - ui_textasc(f), s, c);
+}
+
+/* the exposure scale: -2 .. +2 in thirds (13 ticks), the marker under it, red past either end */
+static void plate_scale(int x, int y, int m8)
+{
+    for (int i = 0; i < 13; i++)
+    {
+        int tx = x + i * 10, whole = i % 3 == 0;
+        wfg_rect(tx, y + (whole ? 0 : 3), tx + 1, y + 10, i == 6 ? C_TXT : whole ? C_TXT2 : C_TXT3);
+    }
+    ui_text(F_13, x - 4, y + 24, "-2", C_TXT3);
+    ui_text(F_13, x + 112, y + 24, "+2", C_TXT3);
+    if (m8 == WFOS_NOMETER) return;
+    int t = m8 >= 0 ? (m8 * 3 + 4) / 8 : -((-m8 * 3 + 4) / 8), over = t > 6 || t < -6;
+    if (t > 6) t = 6;
+    if (t < -6) t = -6;
+    int mx = x + (t + 6) * 10;
+    wfg_tri(mx - 5, y + 21, mx + 6, y + 21, mx, y + 14, over ? C_WARN : C_AMBER);
+}
+
+static void plate_cell(int x, int y, const char *cap, const char *val, int vc)
+{
+    ui_caps(x, y, cap, C_TXT3);
+    ui_text_clip(F_15, x, y + 18, val, vc, x + 100);
+}
+
+static int plate_hash(const struct wfos_lv *v)
+{
+    unsigned h = 2166136261u;
+    const char *s[5] = { v->sh, v->ap, v->iso, v->mode, v->drive };
+    for (int k = 0; k < 5; k++)
+        for (const char *p = s[k]; *p; p++)
+            h = (h ^ (unsigned char)*p) * 16777619u;
+    int n[3] = { v->iso_film, v->meter, v->shots };
+    for (int k = 0; k < 3; k++)
+        h = (h ^ (unsigned)n[k]) * 16777619u;
+    return (int)h;
+}
+
+static void plate_render(void)
+{
+    struct wfos_roll h;
+    struct wfos_lv v;
+    wfos_roll_info(&h);
+    wf_osvf_values(&v);
+    plate_sig = plate_hash(&v);
+    const struct wf_film *f = h.f;
+    int gid = f ? f->id : 0;
+    if (gid != glow_film)
+    {
+        uint8_t rgb[3] = { 60, 64, 72 };
+        if (f) wfc_glow(f, rgb);
+        wfg_glow_centre(594, 174, 594, 298);
+        wfp_set_glow(rgb);
+        glow_film = gid;
+    }
+    wfg_background(0, WFUI_H);
+    top_bar("Top plate");
+    char s[48];
+    /* shutter, aperture */
+    ui_caps(24, 58, "SHUTTER", C_TXT3);
+    ui_caps(258, 58, "APERTURE", C_TXT3);
+    big_val(22, 150, v.sh, C_TXT, 246);
+    big_val(256, 150, v.ap, C_TXT, 468);
+    /* ISO, the exposure scale, the mode */
+    ui_caps(24, 186, "ISO", C_TXT3);
+    int iw = ui_text(F_D30, 22, 202, v.iso, C_TXT);
+    if (v.iso_film)
+    {
+        int tw = ui_capsw("FROM FILM");
+        wfg_rrect(22 + iw + 10, 214, 22 + iw + 10 + tw + 17, 232, 9, -1, C_AMBER, 1);
+        ui_caps(22 + iw + 19, 218, "FROM FILM", C_AMBER);
+    }
+    ui_caps(258, 186, "EXPOSURE", C_TXT3);
+    plate_scale(262, 210, v.meter);
+    ui_caps(406, 186, "MODE", C_TXT3);
+    ui_text(F_D30, 404, 202, v.mode, C_AMBER);
+    /* the roll's look */
+    wfg_rrect(16, 268, 463, 336, 10, C_FRAME, C_SEP, 1);
+    static const uint8_t pr[4] = { WF_ROW_LIGHT, WF_ROW_PRINT, WF_ROW_GRAIN, WF_ROW_PAPER };
+    static const char *const pc[4] = { "LIGHT", "PRINT", "GRAIN", "PAPER" };
+    int id = f ? f->id : wf_loaded();
+    for (int i = 0; i < 4; i++)
+    {
+        int x = 32 + i * 110;
+        const char *t = id && wf_row_avail_for(pr[i], id) ? wf_row_text_for(pr[i], id) : 0;
+        plate_cell(x, 282, pc[i], t ? t : "-", t ? C_TXT : C_TXT3);
+        if (i) wfg_rect(x - 12, 282, x - 12, 322, C_SEP);
+    }
+    /* next frame, card, drive, blind roll */
+    if (h.open && !h.done) snprintf(s, sizeof s, "%d", h.shot + 1);
+    else snprintf(s, sizeof s, "%s", h.open ? "End" : "-");
+    plate_cell(32, 362, "NEXT FRAME", s, h.done ? C_WARN : C_TXT);
+    if (v.shots >= 0) snprintf(s, sizeof s, "%d", v.shots);
+    else snprintf(s, sizeof s, "-");
+    plate_cell(142, 362, "CARD", s, C_TXT);
+    plate_cell(252, 362, "DRIVE", v.drive, C_TXT);
+    plate_cell(362, 362, "BLIND ROLL", wf_blind ? "On" : "Off", wf_blind ? C_AMBER : C_TXT);
+    /* the film's card */
+    wfg_rrect(484, 50, 703, 432, 12, -1, C_SEP, 1);
+    if (f) wfc_draw(f, CAN_BIG, 514, 60, C_BG0);
+    else
+    {
+        wfg_rrect(514, 60, 673, 285, 14, -1, C_SEP, 1);
+        ui_caps(594 - ui_capsw("EMPTY") / 2, 166, "EMPTY", C_TXT3);
+    }
+    const char *nm = f ? f->name : "No film loaded";
+    int nw = ui_textw(F_D20, nm);
+    if (nw > 200) nw = 200;
+    ui_text_clip(F_D20, 594 - nw / 2, 292, nm, f ? C_TXT : C_TXT2, 698);
+    if (h.open) snprintf(s, sizeof s, "ROLL %03d", h.num);
+    else snprintf(s, sizeof s, "%s", f ? "NO ROLL" : "CANON");
+    ui_caps(594 - ui_capsw(s) / 2, 322, s, h.done ? C_WARN : h.open ? C_AMBER : C_TXT3);
+    if (h.open)
+    {
+        char d[12];
+        snprintf(s, sizeof s, "%d", h.shot);
+        snprintf(d, sizeof d, "/%d", h.exp);
+        int w = ui_textw(F_D30, s) + 4 + ui_textw(F_15, d), x = 594 - w / 2;
+        x += ui_text(F_D30, x, 344, s, h.done ? C_WARN : C_TXT) + 4;
+        ui_text(F_15, x, 360, d, C_TXT3);
+        ticks(500, 400, 188, 12, h.shot, h.exp);
+    }
+    else
+    {
+        const char *t = f ? "Every shot gets the look" : "TRASH: a film from the shelf";
+        ui_text(F_13, 594 - ui_textw(F_13, t) / 2, 352, t, C_TXT2);
+    }
+    static const char *const kp[] = { "MENU", "Home", "TRASH", "Film shelf", "INFO", "Canon screen", "PLAY", "Prints",
+                                      0 };
+    footer(kp);
+    toast();
+}
+
+static int plate_key(int k)
+{
+    plate_t = get_ms_clock();
+    msg = 0;
+    switch (k)
+    {
+    case MODULE_KEY_MENU:  wfui_goto(WFUI_SCR_HOME); break;
+    case MODULE_KEY_TRASH: wfui_shelf(); break;
+    case MODULE_KEY_INFO:  wf_log("ui: Top plate: INFO, Canon's screen"); wfui_close_after(WFUI_AFTER_INFO); break;
+    case MODULE_KEY_PLAY:  open_tile(HF_PRINTS); break;
+    case MODULE_KEY_LV:    return 1;
+    }
+    return 0;
+}
+
+/* a change (the dials under it, a frame, the card) redraws and keeps it up; nothing for PLATE_IDLE_MS: Canon's screen */
+static int plate_tick(int now)
+{
+    struct wfos_lv v;
+    wf_osvf_values(&v);
+    if (plate_hash(&v) != plate_sig)
+    {
+        plate_t = now;
+        return 1;
+    }
+    if (now - plate_t >= PLATE_IDLE_MS)
+    {
+        plate_t = now;
+        wf_log("ui: Top plate: %d s without a key, Canon's screen", PLATE_IDLE_MS / 1000);
+        wfui_close_after(WFUI_AFTER_NONE);
     }
     return 0;
 }
@@ -613,6 +818,12 @@ void wfos_enter(int scr)
     {
         wf_log("ui: Home");
         if (hfoc >= HF_LOOK + NLOOK) hfoc = HF_SHELF;
+    }
+    else if (scr == WFUI_SCR_PLATE)
+    {
+        plate_t = get_ms_clock();
+        plate_sig = 0;
+        wf_log("ui: Top plate");
     }
     else
     {
@@ -632,20 +843,21 @@ void wfos_render(int scr, int now)
 {
     (void)now;
     if (scr == WFUI_SCR_HOME) home_render();
+    else if (scr == WFUI_SCR_PLATE) plate_render();
     else set_render();
 }
 
 int wfos_key(int scr, int key)
 {
-    return scr == WFUI_SCR_HOME ? home_key(key) : set_key(key);
+    return scr == WFUI_SCR_HOME ? home_key(key) : scr == WFUI_SCR_PLATE ? plate_key(key) : set_key(key);
 }
 
 int wfos_tick(int scr, int now)
 {
-    (void)scr;
     int moved = 0;
     if (msg && now - msg_until >= 0) { msg = 0; moved = 1; }
     if (wf_gen() != seen_gen) { seen_gen = wf_gen(); moved = 1; }
+    if (scr == WFUI_SCR_PLATE) moved |= plate_tick(now);
     return moved;
 }
 

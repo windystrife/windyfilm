@@ -807,6 +807,7 @@ void wf_roll_poll(void)
     if (roll_dirty && idle && get_ms_clock() - roll_save_fail_t > 3000 && roll_save() != 0)
         roll_save_fail_t = get_ms_clock();       /* (roll_save logged it) */
     roll_hud();
+    wf_plate_poll(get_ms_clock());               /* the 5D2's Top plate (wf_osvf.c) */
 }
 
 /* ================================================================== the darkroom (wf_task) */

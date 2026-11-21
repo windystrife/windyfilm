@@ -1129,7 +1129,7 @@ void wfdr_pick_done(int film)
 
 /* =================================================================== dispatch (wf_ui.c); the film OS's Home and Settings
  * (wf_os_ui.c) come through here too */
-static int os_scr(int scr) { return scr == WFUI_SCR_HOME || scr == WFUI_SCR_SET; }
+static int os_scr(int scr) { return scr == WFUI_SCR_HOME || scr == WFUI_SCR_SET || scr == WFUI_SCR_PLATE; }
 
 void wfdr_enter(int scr)
 {

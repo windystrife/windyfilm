@@ -2515,7 +2515,7 @@ static void t_cfg(void)
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
             "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=PrintOver\njpeg2=Folder\ndkscreen=Off\ndkphoto=Off\n"
             "rolllook=ON\nshoulder=D\n"
-            "qkeys=LR\nos=OFF\nfinder=Lines\ncr2=Move\nuserwb=1,5600,2,-3\n",
+            "qkeys=LR\nos=OFF\nfinder=Lines\nplate=OFF\ncr2=Move\nuserwb=1,5600,2,-3\n",
             wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
@@ -2534,6 +2534,7 @@ static void t_cfg(void)
     chk(wf_qk == WF_QK_LR, "qkeys=LR read: Quick keys L/R ISO (%d)", wf_qk);
     chk(wf_os == 0, "os=OFF read: Camera interface Canon + ML (%d)", wf_os);
     chk(wf_vf == WF_VF_LINES, "finder=Lines read: the LiveView finder Bright lines (%d)", wf_vf);
+    chk(wf_plate == 0, "plate=OFF read: the Top plate off (%d)", wf_plate);
     chk(wf_pr_cr2 == WF_PC_MOVE, "cr2=Move read: RAW after Darkroom Move to ROLLS (%d)", wf_pr_cr2);
     chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_PRINT && wf_pr_jpg2 == WF_J2_FOLDER
         && wf_dk_scr == WF_DS_OFF, "print finishes read: frame %d info %d date %d jpeg %d jpeg2 %d dkscreen %d (want 4 2 2 "
@@ -2557,6 +2558,7 @@ static void t_cfg(void)
              "qkeys=lr\n"
              "os=off\n"
              "finder=lines\n"
+             "plate=off\n"
              "stage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
@@ -7648,6 +7650,104 @@ static void t_osvf(void)
     wf_stub_hud_fonts = 0;
 }
 
+/* the 5D2's Top plate (docs/MODERNUI.md M4): wf_task opens the UI on it (the stub logs "browser: not in this build
+   (screen 4)") when Canon's shooting screen without LiveView has been up for 300 ms; once per screen (re-armed when that
+   screen goes); never with Top plate off, Camera interface Canon + ML, in LiveView, under a menu / PLAY / a Canon
+   screen; never on the EOS M. The config keeps plate=on|off */
+static int plate_opened(int ms)
+{
+    return LOGW("plate: Canon's shooting screen: the Top plate", ms) && LOGW("browser: not in this build (screen 4)", 500);
+}
+
+static void plate_screen_again(volatile int *flag, int off, int on)
+{
+    *flag = off;
+    usleep(300000);
+    log_mark();
+    *flag = on;
+}
+
+static void t_plate(void)
+{
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\nos=on\nplate=on\n", wf_films[fC].id);
+    shooting_mode = 2;                           /* Av */
+    lv = 1;
+    h_menu_shown = h_play = h_movie = 0;
+    h_disp = 1;
+    gui_state = 0;
+    h_gui_mode = 0;
+    mod_init(0);
+    chk(wf_plate == 1, "config: plate=on (%d)", wf_plate);
+    log_mark();
+    usleep(800000);
+    chk(!log_has("plate:"), "LiveView: no Top plate");
+    lv = 0;
+#ifdef WF_BUILD_5D2
+    chk(plate_opened(3000), "out of LiveView, Canon's shooting screen: the Top plate ('%s')", log_line("plate:"));
+    log_mark();
+    usleep(900000);
+    chk(!log_has("plate:"), "once per screen ('%s')", log_line("plate:"));
+    plate_screen_again(&h_disp, 0, 1);
+    chk(plate_opened(3000), "the display off and on again: the Top plate again");
+    plate_screen_again(&h_gui_mode, 3, 0);
+    chk(plate_opened(3000), "back from a Canon screen (gui mode 3): the Top plate again");
+    plate_screen_again(&gui_state, 1, 0);
+    chk(plate_opened(3000), "Canon's GUI busy and idle again: the Top plate again");
+    /* not while something is on top; once it goes, the plate */
+    static const char *const top_name[3] = { "the ML menu", "PLAY", "a Canon screen" };
+    volatile int *const top_flag[3] = { &h_menu_shown, &h_play, &h_gui_mode };
+    for (int k = 0; k < 3; k++) {
+        h_disp = 0;
+        usleep(300000);
+        *top_flag[k] = k == 2 ? 3 : 1;
+        h_disp = 1;
+        log_mark();
+        usleep(800000);
+        chk(!log_has("plate:"), "under %s: no Top plate", top_name[k]);
+        *top_flag[k] = 0;
+        chk(plate_opened(3000), "%s gone: the Top plate", top_name[k]);
+    }
+    /* Canon saving a shot: not yet */
+    h_disp = 0;
+    usleep(300000);
+    h_li_set("job", 1);
+    log_mark();
+    h_disp = 1;
+    usleep(800000);
+    chk(!log_has("plate:"), "Canon saving a shot: no Top plate yet");
+    h_li_set("job", 0);
+    chk(plate_opened(3000), "the shot saved: the Top plate");
+    /* Top plate off: never; on again while the screen is up: not this screen, the next one */
+    wf_plate_set(0);
+    plate_screen_again(&h_disp, 0, 1);
+    usleep(900000);
+    chk(!log_has("plate:"), "Top plate off: no Top plate");
+    wf_plate_set(1);
+    usleep(900000);
+    chk(!log_has("plate:"), "Top plate on again: not over the screen that is up");
+    plate_screen_again(&h_disp, 0, 1);
+    chk(plate_opened(3000), "Top plate on, the next screen: the Top plate");
+    /* Camera interface Canon + ML: never */
+    wf_os_set(0);
+    plate_screen_again(&h_disp, 0, 1);
+    usleep(900000);
+    chk(!log_has("plate:"), "Camera interface Canon + ML: no Top plate");
+    wf_os_set(1);
+#else
+    usleep(1200000);
+    chk(!log_has("plate:"), "EOS M: no Top plate ('%s')", log_line("plate:"));
+#endif
+    wf_plate_set(0);
+    usleep(1500000);
+    mod_deinit();
+    long n;
+    char *cfg = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(cfg && strstr(cfg, "plate=off\n"), "config saved with plate=off");
+    free(cfg);
+    lv = 1;
+    shooting_mode = 3;
+}
+
 static void t_iso(void)
 {
     int k400 = k_speed(400), k50 = k_speed(50), k250 = k_speed(250);
@@ -8743,6 +8843,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "ISO")) t_iso();
     else if (!strcmp(mode, "QKEYS")) t_qkeys();
     else if (!strcmp(mode, "OSVF")) t_osvf();
+    else if (!strcmp(mode, "PLATE")) t_plate();
     /* test.sh passes "PRINT:chain" as MODE PRINT, CASE chain (until 11-15 that ran t_print a second time) */
     else if (!strcmp(mode, "PRINT") && !strcmp(cs, "chain")) t_print_chain();
     else if (!strcmp(mode, "PRINT")) t_print();

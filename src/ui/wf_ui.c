@@ -2127,6 +2127,12 @@ static void after_close(int what)
         module_send_keypress(MODULE_KEY_PLAY);
         return;
     }
+    if (what == WFUI_AFTER_INFO)                            /* the Top plate's INFO: Canon's own screen key */
+    {
+        wf_log("ui: closed for Canon's INFO");
+        module_send_keypress(MODULE_KEY_INFO);
+        return;
+    }
     if (what != WFUI_AFTER_MENU) return;
     if (wf_cam() == WF_CAM_EOSM)            /* a two-finger tap came as MENU (patch 0003): ML opens its menu at the end of */
     {                                       /* canon_gui_enable_front_buffer (module_ui_after_release); a real MENU does not */
@@ -2390,7 +2396,8 @@ int wf_ui_is_open(void) { return st != ST_CLOSED; }
 void wf_ui_open_scr(int s)
 {
     if (s == WF_UI_NEW_ROLL) nr_req = 1;
-    s = s == WF_UI_SCR_DARK ? WFUI_SCR_DARK : s == WF_UI_SCR_HOME ? WFUI_SCR_HOME : WFUI_SCR_BROWSER;
+    s = s == WF_UI_SCR_DARK ? WFUI_SCR_DARK : s == WF_UI_SCR_HOME ? WFUI_SCR_HOME
+      : s == WF_UI_SCR_PLATE ? WFUI_SCR_PLATE : WFUI_SCR_BROWSER;
     if (st == ST_OPEN)
     {
         scr_req = s;                                        /* the UI task makes the switch on its next tick */
@@ -2426,11 +2433,16 @@ unsigned int wf_ui_key(unsigned int key)
     case MODULE_KEY_UNPRESS_HALFSHUTTER:
     case MODULE_KEY_UNPRESS_FULLSHUTTER:
         return 1;
-    case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:
     case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_UP: case MODULE_KEY_WHEEL_DOWN:
+        if (scr == WFUI_SCR_PLATE && scr_req < 0 && st == ST_OPEN)
+            return 1;                                       /* the 5D2's Top plate: the dials stay Canon's (shutter,
+                                                               aperture, compensation; the plate shows the change) */
+        goto queue;
+    case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:
     case MODULE_KEY_PRESS_SET: case MODULE_KEY_JOY_CENTER: case MODULE_KEY_Q: case MODULE_KEY_PICSTYLE:
     case MODULE_KEY_TOUCH_1_FINGER: case MODULE_KEY_INFO: case MODULE_KEY_MENU: case MODULE_KEY_TRASH:
     case MODULE_KEY_PLAY: case MODULE_KEY_LV:
+    queue:
     {
         int w = kq_w, nw = (w + 1) % KQ_N;
         if (nw != kq_r) { kq[w] = key; kq_w = nw; }

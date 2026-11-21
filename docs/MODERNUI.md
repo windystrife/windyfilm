@@ -150,10 +150,12 @@ Picture Style, LV.
 | where | key | action |
 |---|---|---|
 | shooting, viewfinder | (none) | Top plate on the back screen while Canon would show its shooting-settings screen |
-| | INFO | Top plate on / off (Canon's own screen) |
+| | INFO | Canon's own screen (the plate closes, Canon gets INFO) |
 | | MENU | Home |
-| | TRASH | Film shelf (today) |
-| | PLAY | Prints / Canon PLAY (option) |
+| | TRASH | Film shelf |
+| | PLAY | Prints (Canon's PLAY; a blind roll says why not) |
+| | main dial, rear wheel | Canon's (shutter, aperture, compensation); the plate shows the change |
+| | half-press | closes it (Canon meters and shoots as ever) |
 | shooting, LV | INFO | HUD Full -> Minimal -> Canon's own |
 | | MENU / TRASH / PLAY | as above |
 | Home | joystick | move |
@@ -233,14 +235,23 @@ says so.
     - **Bright lines:** a 3:2 bright-line frame with a focus patch, and one strip (shutter, aperture, three meter
       lamps, frames).
     - **Canon + ML:** ML's own bars as before.
-- **5D2 Top plate (no LiveView).** Shown when `!lv`, gui_state IDLE, the display is on, and Canon is on its
-  shooting-settings screen (power on, INFO, after a shot).
-  - It takes the screen with GUI mode 2, as the browser does without LV, and follows Canon's display: at half-press it
-    gives the screen back and Canon turns the LCD off.
-  - After a shot (the roll count changes; CBR_SHOOT_TASK) it shows the new count for 2 s, then lets Canon's power
-    saving run.
-  - Values: `lens_info`. Without a half-press the 5D2 does not meter, so EXPOSURE shows the exposure compensation in
-    P / Tv / Av and the last metered value in M.
+- **5D2 Top plate (no LiveView), built in M4.** `wf_osvf.c` `wf_plate_poll` (wf_task, after the roll HUD) opens the UI
+  on `WFUI_SCR_PLATE` when Canon's shooting screen has been up for 300 ms: `!lv`, the display on, gui_state 0
+  (GUISTATE_IDLE), `get_gui_mode() == 0`, no ML menu, no PLAY, no Darkroom run, no shot being saved
+  (`lens_info.job_state`). With Camera interface WindyFilm and Settings > Top plate On (`plate=on|off`, default on).
+  - **Once per screen.** It opens, then waits until that screen goes (display off, LiveView, a menu, PLAY, a review,
+    Canon busy) before it can open again. So it comes back after power-on, after the display wakes, after a shot's
+    review and after a Canon screen, but never over a screen the owner chose to keep (INFO, or the plate's own idle
+    close). For 1.5 s after any close of our UI it does not re-arm (the 5D2's GUI-mode hand-back settles first).
+    Turning the option on does not open it over the screen that is up; the next one gets it.
+  - It takes the screen as the browser does without LV (GUI mode 2, the 5D2 open path in `wf_ui.c`) and gives it
+    back at half-press (`wf_ui_key`). The dials pass to Canon while it is up (`wf_ui_key`: WHEEL keys return 1 on the
+    plate), and the plate redraws when a value changes (`plate_tick` sums the values).
+  - With no key and no change for 20 s it closes with nothing sent: Canon's screen and Canon's LCD timer again.
+  - Values: `wf_osvf_values` (the finder's `lens_info` values plus `mode` and `drive`). Without a half-press the 5D2
+    does not meter, so EXPOSURE shows the exposure compensation in P / Tv / Av and the last metered value in M.
+  - The roll count after a shot: the half-press closed the plate, the review and the display-on bring it back with the
+    new count (no separate 2 s view).
 - **PLAY: Prints.**
   - **Pictures.** The Darkroom already holds each print in memory when it writes `ROLLS/ROLLnnn/Fnn_nnnn.JPG`. Stage 5
     makes it also write:
@@ -396,7 +407,30 @@ Cards are built only on the owner's word.
      - `test.sh` OSVF (both cameras): the items as ML calls them, every way up and down, redraw requests, the middle,
        the config.
    - **On the camera:** AE_VALUE's sign (+ = over), the bar rows, Canon's AF box over the corners.
-4. **M4: 5D2 Top plate.** Display following, values, after-shot count, battery check on the camera.
+4. **M4: 5D2 Top plate (built 21 Nov 2026, see section 4).**
+   - **Layout (mock 06):**
+     - Film OS top bar "Top plate".
+     - Left: SHUTTER and APERTURE in the large display size (BULB and long times smaller), ISO with FROM FILM when the
+       film set it, the EXPOSURE scale (-2 .. +2 in thirds, red past either end), MODE in amber.
+     - The roll's look in a box (Light, Print, Grain, Paper); NEXT FRAME, CARD (shots left), DRIVE, BLIND ROLL.
+     - Right: the film's card (can, name, ROLL nnn, frames shot / exposures and the gauge; no film: an empty can's
+       place and "TRASH: a film from the shelf").
+   - **Keys:** MENU Home, TRASH the Film shelf, INFO Canon's screen (close + Canon's INFO), PLAY Prints, the dials
+     Canon's, half-press closes.
+   - **Settings:** Interface > Top plate On / Off on the 5D2, in the row the EOS M uses for Quick keys.
+   - **Checked:**
+     - `tests/ui/run.sh`: os_test opens the plate six times (shots `m4_5d2_plate`, `_dial`, `_end`, `_canon`,
+       `m4_5d2_settings_plate_off`). The dials pass; a change at 8 s keeps it up past 20 s; TRASH, MENU, INFO
+       (Canon gets INFO), PLAY (Canon gets PLAY; a blind roll keeps it with a word); idle for 20 s closes with nothing
+       sent. Everything given back each time.
+     - `test.sh` PLATE (both cameras): the auto-open and its re-arming (display, gui mode, gui_state, the ML menu,
+       PLAY, a Canon screen, a shot being saved), plate off, on again over an open screen, Camera interface Canon + ML,
+       never in LiveView, never on the EOS M; `plate=` saved. CFG reads and saves `plate=`.
+   - **On the camera:**
+     - Canon's shooting screen really reads gui mode 0 with the display on (the 5D2's INFO screens);
+     - the dials under the plate change Canon's values without a Canon redraw over ours;
+     - what INFO does after the close;
+     - the battery % and the clock.
 5. **M5: Prints.**
    - The Darkroom writes the screen previews and the sheet strip. The Prints / Contact sheet viewer (display filter
      in LV, Canon's PLAY buffer otherwise).

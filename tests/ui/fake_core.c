@@ -66,7 +66,7 @@ static int films_state = 1;                 /* wf_films_state(): 1 read, 0 start
 void fake_reset(void)
 {
     cam = WF_CAM_EOSM; loaded = 0; gen++; grey_mask = 0; nmissing = 0; status = ""; films_state = 1;
-    wf_os = 0; wf_qk = WF_QK_DOWN; wf_vf = WF_VF_FULL;
+    wf_os = 0; wf_qk = WF_QK_DOWN; wf_vf = WF_VF_FULL; wf_plate = 1;
     film_grey_id = film_grey_mask = 0;
     busy_n = 0;
     dev_ms = dev_path = 0;
@@ -99,6 +99,8 @@ volatile int wf_os;
 void wf_os_set(int on) { wf_os = on != 0; gen++; }
 volatile int wf_vf;
 void wf_vf_set(int v) { wf_vf = v >= 0 && v < WF_VF_N ? v : WF_VF_FULL; gen++; }
+volatile int wf_plate = 1;
+void wf_plate_set(int on) { wf_plate = on != 0; gen++; }
 volatile int wf_qk = WF_QK_DOWN;
 void wf_qk_set(int v) { wf_qk = v >= 0 && v < WF_QK_N ? v : WF_QK_DOWN; gen++; }
 

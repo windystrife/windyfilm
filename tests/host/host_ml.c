@@ -761,6 +761,8 @@ int streq(const char *a, const char *b) { return !strcmp(a, b); }
 int is_play_mode(void) { return h_play; }
 int is_movie_mode(void) { return h_movie; }
 int gui_menu_shown(void) { return h_menu_shown; }
+int h_gui_mode;                                   /* Canon's GUI mode (0 = the shooting screen; the Top plate) */
+int get_gui_mode(void) { return h_gui_mode; }
 void gui_stop_menu(void) { h_menu_shown = 0; }
 int get_global_draw(void) { return h_gdraw; }
 int get_global_draw_setting(void) { return h_gdraw; }

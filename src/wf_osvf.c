@@ -26,7 +26,8 @@
 #include "wf_core.h"
 #include "wf_dark.h"
 
-extern int lv, shooting_mode, battery_level_bars, avail_shot;
+extern int lv, shooting_mode, battery_level_bars, avail_shot, drive_mode, gui_state;
+extern int get_gui_mode(void);
 extern int get_global_draw(void);
 extern int gui_menu_shown(void);
 extern int is_play_mode(void);
@@ -42,6 +43,8 @@ extern int get_ml_bottombar_pos(void);
 #define SM_P        0                            /* Canon's mode dial (ML propvalues.h SHOOTMODE_*) */
 #define SM_AV       2
 #define SM_M        3
+#define PLATE_MS    300                          /* Canon's shooting screen this long: the Top plate */
+#define PLATE_HOLD  1500                         /* after the UI closes: Canon's screen settles (no re-arm) */
 
 static struct semaphore *hud_sem;
 static volatile int vf_up, vf_dead;
@@ -99,6 +102,22 @@ static void vf_values(struct wfos_lv *v)
     v->batt = battery_level_bars >= 0 && battery_level_bars <= 9 ? battery_level_bars : -1;
     v->shots = avail_shot >= 0 && avail_shot < 100000 ? avail_shot : -1;
     v->wind = wf_roll_wind();
+    static const struct { int m; const char *s; } md[] = {
+        { 0, "P" }, { 1, "Tv" }, { 2, "Av" }, { 3, "M" }, { 4, "B" }, { 5, "A-DEP" }, { 7, "C1" }, { 0x10, "C2" },
+        { 0x11, "C3" }, { 0x13, "CA" }, { 9, "Auto" }, { 0xF, "Auto" },
+    };                                           /* ML propvalues.h SHOOTMODE_* */
+    snprintf(v->mode, sizeof v->mode, "--");
+    for (unsigned k = 0; k < sizeof md / sizeof md[0]; k++)
+        if (md[k].m == shooting_mode)
+            snprintf(v->mode, sizeof v->mode, "%s", md[k].s);
+    snprintf(v->drive, sizeof v->drive, "%s", drive_mode == 0 ? "Single" : drive_mode == 1 ? "Cont."
+                                            : drive_mode == 0x10 ? "Timer 10s" : drive_mode == 0x11 ? "Timer 2s"
+                                            : drive_mode == 7 ? "Timer cont." : "--");   /* ML DRIVE_* */
+}
+
+void wf_osvf_values(struct wfos_lv *v)
+{
+    vf_values(v);
 }
 
 static int vf_hash(const struct wfos_lv *v)
@@ -169,6 +188,46 @@ void wf_osvf_deinit(void)
 int wf_osvf_wants(void)
 {
     return wf_os && wf_vf != WF_VF_OFF && !vf_dead;
+}
+
+/* ------------------------------------------------------------------ the 5D2's Top plate (M4) */
+static int pl_armed = 1, pl_t0, pl_ui_t = -100000;
+
+int wf_plate_poll(int now)
+{
+    if (wf_cam() != WF_CAM_5D2 || !wf_os || !wf_plate || vf_dead) {
+        pl_armed = 0;                            /* turned on again: the next screen, not this one */
+        return 0;
+    }
+    if (wf_ui_is_open()) {                       /* ours: Canon's screen comes back after it, give it time */
+        pl_ui_t = now;
+        pl_t0 = 0;
+        return 0;
+    }
+    if (now - pl_ui_t < PLATE_HOLD)
+        return 0;
+    /* Canon's shooting screen through the viewfinder: no LiveView, the display on, Canon's GUI idle (gui_state 0 =
+       GUISTATE_IDLE, gui mode 0: no Canon menu / dialog / review), no ML menu, no PLAY, no run, no shot being saved */
+    int canon = !lv && display_is_on() && gui_state == 0 && get_gui_mode() == 0 && !gui_menu_shown()
+                && !is_play_mode() && !wf_dark_busy() && !lens_info.job_state;
+    if (!canon) {
+        pl_armed = 1;
+        pl_t0 = 0;
+        return 0;
+    }
+    if (!pl_armed)
+        return 0;
+    if (!pl_t0) {
+        pl_t0 = now ? now : 1;
+        return 0;
+    }
+    if (now - pl_t0 < PLATE_MS)
+        return 0;
+    pl_armed = 0;
+    pl_t0 = 0;
+    wf_log("plate: Canon's shooting screen: the Top plate");
+    wf_ui_open_scr(WF_UI_SCR_PLATE);
+    return 1;
 }
 
 int wf_osvf_poll(int now)

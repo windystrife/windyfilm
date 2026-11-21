@@ -116,7 +116,7 @@ void wfui_render_anim(int t, int first);/* the load animation at t ms over it (f
 
 /* ------------------------------------------------------------------ wf_dark_ui.c: the Darkroom screen (DESIGN 3.6) */
 /* (owner 11-17: the Roll picker screen is gone; a roll is picked in the browser's Darkroom mode, DESIGN 3.12) */
-enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_DARK, WFUI_SCR_HOME, WFUI_SCR_SET, WFUI_SCR_N };
+enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_DARK, WFUI_SCR_HOME, WFUI_SCR_SET, WFUI_SCR_PLATE, WFUI_SCR_N };
 void wfdr_enter(int scr);               /* the screen becomes active: palette theme, its state */
 void wfdr_render(int scr, int now);     /* draw it into the idle buffer */
 int  wfdr_key(int scr, int key);        /* 1 = close the UI */
@@ -136,7 +136,8 @@ void wfui_pick_film(int film, int num, int dev);
 void wfdr_pick_done(int film);
 
 /* ------------------------------------------------------------------ wf_os_ui.c: the film OS screens (docs/MODERNUI.md) */
-/* Home (the MENU key with Camera interface = WindyFilm) and Settings; wf_dark_ui.c's wfdr_* pass these two screens on */
+/* Home (the MENU key with Camera interface = WindyFilm), Settings and the 5D2's Top plate (M4); wf_dark_ui.c's wfdr_*
+   pass these screens on */
 void wfos_enter(int scr);
 void wfos_leave(int scr);
 void wfos_render(int scr, int now);
@@ -153,7 +154,7 @@ struct wfos_roll {
 void wfos_roll_info(struct wfos_roll *h);
 /* wf_ui.c, for the screens (UI task): switch to another screen; close and then hand Canon / ML a key (WFUI_AFTER_*);
    the browser with the focus on a row (the Home look strip) */
-enum { WFUI_AFTER_NONE = 0, WFUI_AFTER_MENU, WFUI_AFTER_MLMENU, WFUI_AFTER_PLAY };
+enum { WFUI_AFTER_NONE = 0, WFUI_AFTER_MENU, WFUI_AFTER_MLMENU, WFUI_AFTER_PLAY, WFUI_AFTER_INFO };
 void wfui_goto(int scr);
 void wfui_close_after(int what);
 void wfui_browse(int row);

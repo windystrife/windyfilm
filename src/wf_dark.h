@@ -192,6 +192,7 @@ const struct wf_dark_photos *wf_dark_photos(int num, int cam);
 #define WF_UI_NEW_ROLL 1
 #define WF_UI_SCR_DARK 2
 #define WF_UI_SCR_HOME 3                         /* the film OS's Home (docs/MODERNUI.md) */
+#define WF_UI_SCR_PLATE 4                        /* the 5D2's Top plate (docs/MODERNUI.md M4) */
 void wf_ui_open_scr(int scr);
 /* the HUD over LiveView (src/ui/wf_dark_ui.c; wf_task draws it while a roll is in the camera): wfdr_hud_fonts(1) loads
    the font pack once (0 frees it, 2 reads it again; 1 back = the read may pass later: card busy), wfdr_hud draws into ML's bitmap with ML's own colour indices; blink = the "wind on"
@@ -232,6 +233,8 @@ struct wfos_lv {
     int batt;                                    /* ML's battery_level_bars (0 low .. 2+ full), -1 unknown */
     int shots;                                   /* the card's shots left, -1 unknown */
     int wind;                                    /* 1 = the wind-on cue (a frame just counted) */
+    char mode[6];                                /* Canon's mode dial: "P" "Tv" "Av" "M" "B" "A-DEP" "C1" .. "Auto" */
+    char drive[12];                              /* the drive: "Single" "Cont." "Timer 10s" "Timer 2s" ("--") */
 };
 void wfos_hud_top(uint8_t *vram, int pitch, int y, const struct wfos_lv *v);      /* the top band, rows y .. y + 31 */
 void wfos_hud_bottom(uint8_t *vram, int pitch, int y, const struct wfos_lv *v);   /* the bottom band */
@@ -244,6 +247,11 @@ void wf_osvf_init(void);
 void wf_osvf_deinit(void);
 int  wf_osvf_poll(int now);
 int  wf_osvf_wants(void);                        /* the finder could come up (it holds the font pack) */
+void wf_osvf_values(struct wfos_lv *v);          /* the values now (the 5D2's Top plate, the UI task: plain reads) */
+/* the 5D2's Top plate (M4): wf_task, after the roll HUD. Canon's shooting screen without LiveView (display on, nothing
+   on top) for 300 ms opens the UI on the Top plate; once per screen (it re-arms when that screen goes: display off,
+   LiveView, a menu, PLAY, a review). 1 back = it opened the plate now */
+int  wf_plate_poll(int now);
 /* the lock: ms >= 0 takes it (waits up to ms; 1 = taken), ms < 0 gives it back. Before the lock exists: always 1 */
 int  wf_hud_lock(int ms);
 int  wf_roll_wind(void);                         /* wf_dark.c: 1 while the wind-on cue shows (1 s after a frame) */

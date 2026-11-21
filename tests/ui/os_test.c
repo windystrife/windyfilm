@@ -499,6 +499,14 @@ int main(int argc, char **argv)
     tick(1);
     CHECK(wfui_host_scr() == WFUI_SCR_SET, "5D2: joystick press on Settings: screen %d", wfui_host_scr());
     shot("m1_5d2_settings");
+    key(MODULE_KEY_PRESS_DOWN);                             /* 5D2: the Top plate row where the EOS M has Quick keys */
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfos_host_sfoc() == 2 && wf_plate == 1, "5D2 Settings: row %d, plate %d", wfos_host_sfoc(), wf_plate);
+    key(MODULE_KEY_JOY_CENTER);
+    CHECK(wf_plate == 0, "5D2 Settings: the joystick press did not turn the Top plate off");
+    shot("m4_5d2_settings_plate_off");
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wf_plate == 1, "5D2 Settings: the dial did not turn the Top plate on again");
     key(MODULE_KEY_MENU);
     tick(1);
     CHECK(wfui_host_scr() == WFUI_SCR_HOME, "5D2: MENU in Settings: screen %d", wfui_host_scr());
@@ -518,6 +526,111 @@ int main(int argc, char **argv)
     tick(1);
     end_checks();
     CHECK(host_sent_key() == MODULE_KEY_MENU, "5D2 MENU on Home: Canon got %d", host_sent_key());
+
+    /* ---------------------------------------------------------------- 5D2 Top plate (M4): Canon's shooting screen
+       through the viewfinder opens it (wf_osvf.c wf_plate_poll, tests/host OSVF): the values, the roll's look, the
+       film's card. The dials stay Canon's and a change under it redraws and keeps it up; TRASH the Film shelf, INFO
+       Canon's INFO, PLAY Prints (Canon's PLAY), 20 s without a key or a change Canon's screen (nothing sent) */
+    {
+        struct wfos_lv pv = lv_vals(WF_VF_FULL, "1/250", "f/5.6", "400", 1, -5, 2, 1204, 0);
+        snprintf(pv.mode, sizeof pv.mode, "Av");
+        snprintf(pv.drive, sizeof pv.drive, "Single");
+        fake_set_lv(&pv);
+        for (int round = 0; round < 6; round++)
+        {
+            host_gui_set(0, 1, 1);
+            host_sent_clear();
+            closed = 0;
+            wf_ui_open_scr(WF_UI_SCR_PLATE);
+            CHECK(wf_ui_is_open(), "5D2 Top plate %d did not open", round);
+            wfui_task_begin();
+            CHECK(wfui_host_scr() == WFUI_SCR_PLATE, "5D2 Top plate %d: opened on screen %d", round, wfui_host_scr());
+            tick(1);
+            if (round == 0)
+            {
+                shot("m4_5d2_plate");
+                CHECK(wf_ui_key(MODULE_KEY_WHEEL_LEFT) == 1 && wf_ui_key(MODULE_KEY_WHEEL_DOWN) == 1,
+                      "5D2 Top plate: a dial not passed to Canon");
+                tick(400);                                  /* 8 s, then the dial's change shows */
+                snprintf(pv.sh, sizeof pv.sh, "1/500");
+                pv.meter = -13;
+                fake_set_lv(&pv);
+                tick(600);                                  /* 20 s after the open, 12 s after the change: still up */
+                CHECK(!closed && wfui_host_scr() == WFUI_SCR_PLATE, "5D2 Top plate: closed 12 s after a change");
+                shot("m4_5d2_plate_dial");
+                key(MODULE_KEY_TRASH);
+                tick(1);
+                CHECK(!closed && wfui_host_scr() == WFUI_SCR_BROWSER && wfui_host_shelf(),
+                      "5D2 Top plate TRASH: screen %d, shelf %d", wfui_host_scr(), wfui_host_shelf());
+                key(MODULE_KEY_MENU);
+                tick(1);
+                CHECK(!closed && wfui_host_scr() == WFUI_SCR_HOME, "5D2 Top plate's shelf, MENU: screen %d",
+                      wfui_host_scr());
+                wf_ui_key(MODULE_KEY_PRESS_HALFSHUTTER);
+                tick(1);
+                CHECK(closed && host_nsent() == 0, "5D2 Home from the plate, half-press: closed %d, keys %d", closed,
+                      host_nsent());
+            }
+            else if (round == 1)
+            {
+                key(MODULE_KEY_INFO);
+                tick(1);
+                CHECK(closed, "5D2 Top plate INFO did not close");
+            }
+            else if (round == 2)
+            {
+                key(MODULE_KEY_MENU);
+                tick(1);
+                CHECK(!closed && wfui_host_scr() == WFUI_SCR_HOME, "5D2 Top plate MENU: screen %d", wfui_host_scr());
+                wf_ui_key(MODULE_KEY_PRESS_HALFSHUTTER);
+                tick(1);
+            }
+            else if (round == 3)
+            {
+                tick(1010);                                 /* 20 s, nothing: Canon's own screen */
+                CHECK(closed, "5D2 Top plate: still up after 20 s without a key");
+            }
+            else if (round == 4)                            /* the roll at its end, blind roll on, no meter, BULB */
+            {
+                roll_in("PRS400", 21, 36, 36);
+                wf_blind = 1;
+                struct wfos_lv bv = lv_vals(WF_VF_FULL, "BULB", "f/11", "AUTO", 0, WFOS_NOMETER, 1, 96, 0);
+                snprintf(bv.mode, sizeof bv.mode, "B");
+                snprintf(bv.drive, sizeof bv.drive, "Timer 2s");
+                fake_set_lv(&bv);
+                tick(1);
+                shot("m4_5d2_plate_end");
+                key(MODULE_KEY_PLAY);
+                tick(1);
+                CHECK(!closed && wfos_host_msg()[0], "5D2 Top plate PLAY, blind roll: closed %d, no word", closed);
+                wf_ui_key(MODULE_KEY_PRESS_HALFSHUTTER);
+                tick(1);
+            }
+            else                                            /* no roll, no film: Canon's camera, the plate as ever */
+            {
+                fake_dark_reset();
+                fake_set_loaded(0);
+                wf_blind = 0;
+                pv = lv_vals(WF_VF_FULL, "1/60", "f/4", "800", 0, 3, 2, 2210, 0);
+                snprintf(pv.mode, sizeof pv.mode, "M");
+                snprintf(pv.drive, sizeof pv.drive, "Cont.");
+                fake_set_lv(&pv);
+                tick(1);
+                shot("m4_5d2_plate_canon");
+                key(MODULE_KEY_PLAY);
+                tick(1);
+                CHECK(closed, "5D2 Top plate PLAY did not close");
+            }
+            CHECK(closed, "5D2 Top plate %d: not closed", round);
+            end_checks();
+            if (round == 1)
+                CHECK(host_sent_key() == MODULE_KEY_INFO, "5D2 Top plate INFO: Canon got %d", host_sent_key());
+            if (round == 3)
+                CHECK(host_nsent() == 0, "5D2 Top plate idle: %d keys sent", host_nsent());
+            if (round == 5)
+                CHECK(host_sent_key() == MODULE_KEY_PLAY, "5D2 Top plate PLAY: Canon got %d", host_sent_key());
+        }
+    }
     lv = 1;
 
     /* 5D2 LiveView: the same finder */

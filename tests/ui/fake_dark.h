@@ -7,6 +7,7 @@ struct wf_roll *fake_roll(void);            /* write access (bumps the roll's ge
 struct wf_dark_view *fake_view(void);       /* write access (bumps the view's gen) */
 void fake_set_clock(int hm);
 void fake_set_batt(int pct);                /* wf_battery_pct() (the film OS top bar; -1 unknown) */
+void fake_set_lv(const struct wfos_lv *v);  /* wf_osvf_values() (the 5D2's Top plate) */
 int  fake_load_print(const char *path);     /* WF_DR_PW x WF_DR_PH luma file */
 int  fake_load_wire(int i, const char *path);
 int  fake_req_film(void);

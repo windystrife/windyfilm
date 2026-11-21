@@ -143,6 +143,10 @@ int wf_clock_hm(void) { return clock_hm; }
 static int batt_pct = 70;
 void fake_set_batt(int pct) { batt_pct = pct; }
 int wf_battery_pct(void) { return batt_pct; }
+/* the finder's values now (wf_osvf.c wf_osvf_values): the 5D2's Top plate reads them */
+static struct wfos_lv lvv = { 0, "1/125", "f/2.8", "400", 1, -3, 2, 812, 0, "M", "Single" };
+void fake_set_lv(const struct wfos_lv *v) { lvv = *v; }
+void wf_osvf_values(struct wfos_lv *v) { *v = lvv; }
 
 /* ------------------------------------------------------------------ print finishes (wf_menu.c's rows, DESIGN 3.9) */
 volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg, wf_pr_cr2;

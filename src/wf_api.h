@@ -106,6 +106,10 @@ void wf_os_set(int on);
 enum { WF_VF_FULL = 0, WF_VF_MIN, WF_VF_LINES, WF_VF_OFF, WF_VF_N };
 extern volatile int wf_vf;
 void wf_vf_set(int v);
+/* the 5D2's Top plate (docs/MODERNUI.md M4), with Camera interface = WindyFilm: shooting through the viewfinder, Canon's
+   shooting screen becomes the film camera's top plate (wf_osvf.c wf_plate_poll). config plate=on|off (default on) */
+extern volatile int wf_plate;
+void wf_plate_set(int on);
 int  wf_loaded(void);                     /* the active film id, 0 = none (output is plain log, Log + LUT or Off) */
 int  wf_avail(int id);                    /* 1 = loadable now (its table is in the pack / its cube is on the card) */
 int  wf_films_state(void);                /* the film tables: 1 read, 0 starting (worker / pack not up yet), -1 the
