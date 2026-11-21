@@ -129,6 +129,7 @@ int wf_roll_shelve(int on)
     return 0;
 }
 int wf_dark_busy(void) { return dk_running; }
+int wf_roll_wind(void) { return wf_roll_open(&roll) && get_ms_clock() - wind_t < 1000; }   /* the finder's wind-on cue */
 const struct wf_shelf *wf_shelf_now(void) { return &shv; }
 void wf_shelf_rescan(void) { sh_scan = 1; }
 
@@ -542,14 +543,18 @@ static void roll_notice(int want, int now)
     if (gui_menu_shown() || wf_ui_is_open())     /* (again right before the pixels) */
         return;
     if (mode == WF_HUD_CLEAR) {
-        wfdr_notice(bmp_vram(), WF_BMPPITCH, WF_HUD_CLEAR);
+        if (wf_hud_lock(50)) {
+            wfdr_notice(bmp_vram(), WF_BMPPITCH, WF_HUD_CLEAR);
+            wf_hud_lock(-1);
+        }
         redraw();                                /* Canon's own LiveView marks under the box come back */
         hud_mode = -1;                           /* (the HUD paints again after it) */
         nt_len = nt_drop = nt_up = 0;
         return;
     }
-    if (mode != nt_mode || now - nt_pt >= 500) {
+    if ((mode != nt_mode || now - nt_pt >= 500) && wf_hud_lock(50)) {
         wfdr_notice(bmp_vram(), WF_BMPPITCH, mode);
+        wf_hud_lock(-1);
         nt_mode = mode;
         nt_pt = now;
     }
@@ -563,7 +568,10 @@ void wf_dark_toast(const char *big, const char *k1, const char *t1, const char *
         wfdr_toast(0, 0, 0, 0, 0, 0, 0, WF_HUD_CLEAR);
         return;
     }
+    if (!wf_hud_lock(50))
+        return;
     wfdr_toast(bmp_vram(), WF_BMPPITCH, big, k1, t1, k2, t2, mode);
+    wf_hud_lock(-1);
     if (mode == WF_HUD_CLEAR) {
         redraw();                                /* Canon's own LiveView marks under the box come back */
         hud_mode = -1;                           /* (the roll HUD paints again after it) */
@@ -580,17 +588,21 @@ static void roll_hud(void)
     int want = wf_roll_open(&roll) && !wf_roll_shelved() && !dk_running && lv && !gui_menu_shown() && !wf_ui_is_open()
                && !is_play_mode();          /* a shelved roll (wf_roll_shelve): no HUD, no end notice */
     int now = get_ms_clock();
-    if (wf_roll_open(&roll) && !hud_fonts_on && !wf_ui_is_open()) {
+    int fwant = wf_roll_open(&roll) || wf_osvf_wants();   /* the roll HUD's, or the film OS's LiveView finder's */
+    if (fwant && !hud_fonts_on && !wf_ui_is_open() && wf_hud_lock(200)) {
         hud_font_again = wfdr_hud_fonts(1) == 1;
+        wf_hud_lock(-1);
         hud_fonts_on = 1;
         hud_font_t = now;
         hud_font_n = 0;
-    } else if (!wf_roll_open(&roll) && hud_fonts_on && !wf_ui_is_open()) {
-        wfdr_hud_fonts(0);
+    } else if (!fwant && hud_fonts_on && !wf_ui_is_open() && !wf_osvf_poll(now) && wf_hud_lock(200)) {
+        wfdr_hud_fonts(0);                       /* (the finder is down first: it paints with them) */
+        wf_hud_lock(-1);
         hud_fonts_on = 0;
-    } else if (hud_fonts_on && hud_font_again && !wf_ui_is_open() && now - hud_font_t >= 2000) {
+    } else if (hud_fonts_on && hud_font_again && !wf_ui_is_open() && now - hud_font_t >= 2000 && wf_hud_lock(200)) {
         hud_font_t = now;                        /* (the UI reads it again itself while it is open) */
         hud_font_again = wfdr_hud_fonts(2) == 1;
+        wf_hud_lock(-1);
         if (++hud_font_n >= 5 || !hud_font_again) {
             wf_log("roll: HUD fonts %s after %d reads again", hud_font_again ? "still not read" : "read", hud_font_n);
             hud_font_again = 0;
@@ -610,15 +622,25 @@ static void roll_hud(void)
     if (want && !hud_on)
         info_t = now;                            /* LiveView is back */
     roll_notice(want, now);
+    if (wf_osvf_poll(now)) {                     /* the film OS's LiveView finder has the screen (wf_osvf.c) */
+        if (hud_on && hud_mode >= 0 && !wf_ui_is_open())
+            redraw();                            /* the roll HUD's chip and counter go (the finder paints again) */
+        hud_on = 0;
+        hud_mode = -1;
+        return;
+    }
     if (want) {
         int blink = now - wind_t < 1000, t = now - info_t;
         int mode = t < HUD_INFO_MS ? WF_HUD_FULL : t < HUD_INFO_MS + HUD_FADE_MS ? WF_HUD_FADE : WF_HUD_SMALL;
         if ((!hud_on || mode != hud_mode || blink || now - hud_t >= 500) && !gui_menu_shown() && !wf_ui_is_open()) {
             /* (again right before the pixels: the ML menu or the UI may have come since the top; never over them) */
             /* the first small pass clears what the full HUD drew (only our own rectangles) */
-            wfdr_hud(bmp_vram(), WF_BMPPITCH, blink, mode == WF_HUD_SMALL && hud_mode != WF_HUD_SMALL ? WF_HUD_CLEAR : mode);
-            hud_t = now;
-            hud_mode = mode;
+            if (wf_hud_lock(50)) {
+                wfdr_hud(bmp_vram(), WF_BMPPITCH, blink, mode == WF_HUD_SMALL && hud_mode != WF_HUD_SMALL ? WF_HUD_CLEAR : mode);
+                wf_hud_lock(-1);
+                hud_t = now;
+                hud_mode = mode;
+            }
         }
     } else {
         if (hud_on && !wf_ui_is_open())
@@ -739,6 +761,7 @@ void wf_roll_poll(void)
         roll_changed();
     }
     if (dk_running) {
+        wf_osvf_poll(get_ms_clock());            /* the LiveView finder goes down for the run (wf_dark_busy) */
         hud_on = 0;
         nt_state = -1;                           /* a run rewinds the roll: no end notice for that */
         nt_req = nt_len = nt_up = 0;

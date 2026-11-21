@@ -493,6 +493,7 @@ static unsigned int wf_init(void)
     if (!wf_cam_ok)
         wf_status_set("Unsupported firmware");
     wf_ui_init();
+    wf_osvf_init();                              /* the film OS's LiveView finder: its lock, ML's bar items */
     wf_dark_init();
     wf_menu_init();                              /* config, ML menu */
     uint32_t tt = task_create("wf_task", WF_TASK_PRIO, 0x2000, (void *)wf_task, 0);
@@ -504,6 +505,7 @@ static unsigned int wf_init(void)
 static unsigned int wf_deinit(void)
 {
     wf_unloading = 1;                            /* hooks return at once (never unpatched: a Canon task may be inside) */
+    wf_osvf_deinit();                            /* ML's bars are its own again (our items stay, 0 px wide) */
     if (wf_ui_is_open())
         wf_ui_close();
     wf_menu_deinit();                            /* the user's white balance back, menu removed */

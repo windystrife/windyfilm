@@ -213,6 +213,40 @@ int  wfdr_toast_fonts(int on);
 void wfdr_toast(uint8_t *vram, int pitch, const char *big, const char *k1, const char *t1, const char *k2, const char *t2,
                 int mode);
 void wf_dark_toast(const char *big, const char *k1, const char *t1, const char *k2, const char *t2, int mode);
+int  wfdr_hud_fonts_on(void);                    /* the roll HUD / finder holds the font pack (wfdr_hud_fonts(1)) */
+
+/* the film OS's LiveView finder (docs/MODERNUI.md M3; wf_api.h wf_vf). Up while Camera interface = WindyFilm, the finder
+ * is not "Canon + ML", and ML's overlays are on in photo LiveView (Global Draw on, Canon's clean view; no menu, UI, PLAY,
+ * recording or darkroom run). ML's two info bars (32 px, top and bottom) are taken by two lvinfo items of ours as wide
+ * as the screen (wf_osvf.c): ML hides its own items for them and calls ours to paint the band, so the bands follow
+ * ML's own redraws and never fight them. wf_task paints the middle (frame corners / bright lines) every 500 ms. Colours
+ * are ML's own palette indices (COLOR_TRANSPARENT_BLACK for the scrims): the palette is never written in LiveView.
+ * Pixels: one lock (wf_hud_lock) for every painter that switches the canvas (ML's task in the bands, wf_task, the UI's
+ * open) and for the font pack's open / close. */
+#define WFOS_NOMETER (-1000)
+struct wfos_lv {
+    int vf;                                      /* WF_VF_* */
+    char sh[12], ap[12], iso[12];                /* "1/125", "f/2.8", "400" / "AUTO" ("--": not known) */
+    int iso_film;                                /* the ISO is the film's speed (wf_iso_film) */
+    int meter;                                   /* 1/8 EV: M = Canon's exposure level, P / Tv / Av = compensation */
+    int batt;                                    /* ML's battery_level_bars (0 low .. 2+ full), -1 unknown */
+    int shots;                                   /* the card's shots left, -1 unknown */
+    int wind;                                    /* 1 = the wind-on cue (a frame just counted) */
+};
+void wfos_hud_top(uint8_t *vram, int pitch, int y, const struct wfos_lv *v);      /* the top band, rows y .. y + 31 */
+void wfos_hud_bottom(uint8_t *vram, int pitch, int y, const struct wfos_lv *v);   /* the bottom band */
+/* the middle between the bands (y0 .. y1 - 1): frame corners (Full, Minimal) or the bright lines (Bright lines);
+   vf -1 = give every pixel a finder ever draws there back to 0 */
+void wfos_hud_mid(uint8_t *vram, int pitch, int y0, int y1, int vf);
+/* the core side (wf_osvf.c): init registers the lvinfo items; poll (wf_task, from the roll HUD) decides, paints the
+   middle, asks ML for a band redraw when a value changed; 1 back = the finder is up (no roll HUD then) */
+void wf_osvf_init(void);
+void wf_osvf_deinit(void);
+int  wf_osvf_poll(int now);
+int  wf_osvf_wants(void);                        /* the finder could come up (it holds the font pack) */
+/* the lock: ms >= 0 takes it (waits up to ms; 1 = taken), ms < 0 gives it back. Before the lock exists: always 1 */
+int  wf_hud_lock(int ms);
+int  wf_roll_wind(void);                         /* wf_dark.c: 1 while the wind-on cue shows (1 s after a frame) */
 int  wf_clock_hm(void);                          /* the camera clock as h * 100 + m, -1 = unknown (wf_dark.c) */
 
 #endif

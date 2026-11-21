@@ -2515,7 +2515,7 @@ static void t_cfg(void)
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
             "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=PrintOver\njpeg2=Folder\ndkscreen=Off\ndkphoto=Off\n"
             "rolllook=ON\nshoulder=D\n"
-            "qkeys=LR\nos=OFF\ncr2=Move\nuserwb=1,5600,2,-3\n",
+            "qkeys=LR\nos=OFF\nfinder=Lines\ncr2=Move\nuserwb=1,5600,2,-3\n",
             wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
@@ -2533,6 +2533,7 @@ static void t_cfg(void)
     chk(wf_rb_hue == WF_DEV_HUE_D, "shoulder=D read: the chain films' shoulder D (%d)", wf_rb_hue);
     chk(wf_qk == WF_QK_LR, "qkeys=LR read: Quick keys L/R ISO (%d)", wf_qk);
     chk(wf_os == 0, "os=OFF read: Camera interface Canon + ML (%d)", wf_os);
+    chk(wf_vf == WF_VF_LINES, "finder=Lines read: the LiveView finder Bright lines (%d)", wf_vf);
     chk(wf_pr_cr2 == WF_PC_MOVE, "cr2=Move read: RAW after Darkroom Move to ROLLS (%d)", wf_pr_cr2);
     chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_PRINT && wf_pr_jpg2 == WF_J2_FOLDER
         && wf_dk_scr == WF_DS_OFF, "print finishes read: frame %d info %d date %d jpeg %d jpeg2 %d dkscreen %d (want 4 2 2 "
@@ -2555,6 +2556,7 @@ static void t_cfg(void)
              "shoulder=d\n"
              "qkeys=lr\n"
              "os=off\n"
+             "finder=lines\n"
              "stage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
@@ -2581,6 +2583,7 @@ static void t_cfg(void)
     free(b);
     wf_qk = WF_QK_DOWN;
     wf_os = 1;                                   /* the default: Camera interface WindyFilm */
+    wf_vf = WF_VF_FULL;                          /* the default: the LiveView finder Full */
     wf_pr_cr2 = WF_PC_KEEP;
     wf_roll_look8 = 0;                           /* the other checks: a roll keeps Canon's JPEG */
     put_cfg("film=99999\noutput=nope\nlutei=77\nexptrim=99\ncurve=x\nprint=\nhl=7\nsh=\n");
@@ -7521,6 +7524,130 @@ static void t_qkeys(void)
     chk(h_mz_cd == 0, "unload: Magic Zoom from the keys goes with the module (%d)", h_mz_cd);
 }
 
+/* OSVF: the film OS's LiveView finder (src/wf_osvf.c, docs/MODERNUI.md M3). Its two lvinfo items, called as ML's
+   lvinfo.c calls them (0 px wide while it is down, the whole bar and custom drawing while it is up, painting at the
+   bar's row); when it comes up and goes down from wf_task (each logged): the ML menu, Global Draw off / Canon's own
+   view (INFO), the finder set to Canon + ML, Camera interface Canon + ML, PLAY, movie mode, the display off, out of
+   LiveView; ML asked to redraw its bars on each change and when a value changes; the middle painted every 500 ms and
+   at once in a new mode, given back when it goes in plain LiveView, left alone outside LiveView. */
+extern int wf_stub_hud_fonts, wf_stub_hud_n[3], wf_stub_hud_y[3], wf_stub_hud_vf[3];
+void wf_t_lvi_call(void *items, int i, int can_draw, int y, int *w, int *h, int *custom, int *bar, int *prio);
+const char *wf_t_lvi_name(void *items, int i);
+static int vf_item(int i, int can_draw, int bar_y, int *w)
+{
+    int h, custom, bar, prio;
+    wf_t_lvi_call(h_lvinfo_items, i, can_draw, bar_y + 2, w, &h, &custom, &bar, &prio);
+    return *w == 0 ? custom == 0 : h == 32 && custom == 1 && prio == 127;
+}
+static void vf_flip(const char *what, volatile int *knob, int down_v, int up_v)
+{
+    log_mark();
+    int d0 = h_lens_dirty;
+    *knob = down_v;
+    chk(LOGW("osvf: LiveView finder down", 3000), "%s: the finder goes down ('%s')", what, log_line("osvf:"));
+    int w = -1;
+    chk(vf_item(0, 0, 0, &w) && w == 0 && vf_item(1, 0, 448, &w) && w == 0, "%s: both items 0 px (ML's own items back)",
+        what);
+    chk(h_lens_dirty > d0, "%s: ML asked to redraw its bars", what);
+    log_mark();
+    *knob = up_v;
+    chk(LOGW("osvf: LiveView finder up", 3000), "%s back: the finder up again ('%s')", what, log_line("osvf:"));
+    chk(vf_item(0, 0, 0, &w) && w == 720, "%s back: the top item takes the bar (%d px)", what, w);
+}
+static void t_osvf(void)
+{
+    put_cfg("film=%d\noutput=film\ngrain=off\nhalation=off\nmist=off\nos=on\nfinder=full\n", wf_films[fC].id);
+    shooting_mode = 3;                           /* M */
+    lv = 1;
+    h_gdraw = 1;
+    h_menu_shown = 0;
+    h_play = 0;
+    h_movie = 0;
+    h_disp = 1;
+    wf_stub_hud_fonts = 1;
+    mod_init(0);
+    chk(h_lvinfo_n == 2 && h_lvinfo_items, "two lvinfo items registered (%d)", h_lvinfo_n);
+    chk(h_lvinfo_items && !strcmp(wf_t_lvi_name(h_lvinfo_items, 0), "WindyFilm finder")
+        && strcmp(wf_t_lvi_name(h_lvinfo_items, 0), wf_t_lvi_name(h_lvinfo_items, 1)),
+        "the items: 'WindyFilm finder' + a second name of its own (ML's menu lists them by name)");
+    chk(wf_os == 1 && wf_vf == WF_VF_FULL, "config: os=on finder=full (%d %d)", wf_os, wf_vf);
+    chk(LOGW("osvf: LiveView finder up (mode 0, bars at 0 / 448)", 3000), "the finder comes up ('%s')",
+        log_line("osvf:"));
+    int w = -1, n0[3];
+    chk(vf_item(0, 0, 0, &w) && w == 720, "top item: the whole bar, priority 127, custom drawing (%d px)", w);
+    chk(vf_item(1, 0, 448, &w) && w == 720, "bottom item: the whole bar (%d px)", w);
+    memcpy(n0, wf_stub_hud_n, sizeof n0);
+    vf_item(0, 1, 0, &w);
+    vf_item(1, 1, 448, &w);
+    chk(wf_stub_hud_n[0] == n0[0] + 1 && wf_stub_hud_y[0] == 0 && wf_stub_hud_vf[0] == WF_VF_FULL,
+        "can_draw: the top band painted at row 0 (%d calls, row %d)", wf_stub_hud_n[0] - n0[0], wf_stub_hud_y[0]);
+    chk(wf_stub_hud_n[1] == n0[1] + 1 && wf_stub_hud_y[1] == 448, "can_draw: the bottom band at row 448 (row %d)",
+        wf_stub_hud_y[1]);
+    chk(WAIT(wf_stub_hud_n[2] > 0, 2000) && wf_stub_hud_y[2] == 32 && wf_stub_hud_vf[2] == WF_VF_FULL,
+        "the middle painted from wf_task, under the top bar (row %d, mode %d)", wf_stub_hud_y[2], wf_stub_hud_vf[2]);
+    int m1 = wf_stub_hud_n[2];
+    usleep(1300000);
+    chk(wf_stub_hud_n[2] >= m1 + 2, "the middle again every 500 ms (%d in 1.3 s)", wf_stub_hud_n[2] - m1);
+    /* a value of ours changes: ML asked to redraw its bars (our bands) */
+    int d0 = h_lens_dirty;
+    h_ae_value = -12;
+    chk(WAIT(h_lens_dirty > d0, 2000), "the meter moved: ML asked to redraw its bars");
+    usleep(300000);
+    d0 = h_lens_dirty;
+    usleep(600000);
+    chk(h_lens_dirty == d0, "nothing changed: no redraw asked (%d)", h_lens_dirty - d0);
+    /* a mode change: the middle again at once in the new mode (the old marks cleared first) */
+    wf_vf_set(WF_VF_LINES);
+    chk(WAIT(wf_stub_hud_vf[2] == WF_VF_LINES, 1000), "Bright lines: the middle in the new mode (%d)", wf_stub_hud_vf[2]);
+    vf_item(0, 1, 0, &w);
+    chk(wf_stub_hud_vf[0] == WF_VF_LINES, "Bright lines: the bands in the new mode");
+    wf_vf_set(WF_VF_FULL);
+    /* the ways down and back */
+    vf_flip("the ML menu", &h_menu_shown, 1, 0);
+    vf_flip("Global Draw off / Canon's view (INFO)", &h_gdraw, 0, 1);
+    vf_flip("PLAY", &h_play, 1, 0);
+    vf_flip("movie mode", &h_movie, 1, 0);
+    vf_flip("the display off", &h_disp, 0, 1);
+    /* the finder set to Canon + ML, Camera interface Canon + ML (the setters: no knob) */
+    log_mark();
+    int mc = wf_stub_hud_n[2];
+    wf_vf_set(WF_VF_OFF);
+    chk(LOGW("osvf: LiveView finder down", 3000), "finder Canon + ML: down");
+    chk(WAIT(wf_stub_hud_n[2] > mc && wf_stub_hud_vf[2] == -1, 1000), "down in plain LiveView: the middle given back (%d)",
+        wf_stub_hud_vf[2]);
+    chk(vf_item(0, 0, 0, &w) && w == 0, "finder Canon + ML: 0 px");
+    log_mark();
+    wf_vf_set(WF_VF_MIN);
+    chk(LOGW("osvf: LiveView finder up (mode 1", 3000), "Minimal: up ('%s')", log_line("osvf:"));
+    log_mark();
+    wf_os_set(0);
+    chk(LOGW("osvf: LiveView finder down", 3000), "Camera interface Canon + ML: down");
+    log_mark();
+    wf_os_set(1);
+    chk(LOGW("osvf: LiveView finder up", 3000), "Camera interface WindyFilm: up");
+    /* outside LiveView: down, no middle painted or cleared (the screen is not LiveView's) */
+    log_mark();
+    lv = 0;
+    chk(LOGW("osvf: LiveView finder down", 3000), "out of LiveView: down");
+    mc = wf_stub_hud_n[2];
+    usleep(300000);
+    chk(wf_stub_hud_n[2] == mc, "out of LiveView: the middle left alone (%d calls)", wf_stub_hud_n[2] - mc);
+    log_mark();
+    lv = 1;
+    chk(LOGW("osvf: LiveView finder up", 3000), "LiveView back: up");
+    /* the config keeps the finder's mode */
+    wf_vf_set(WF_VF_LINES);
+    usleep(1500000);
+    mod_deinit();
+    long n;
+    char *cfg = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(cfg && strstr(cfg, "finder=lines\n"), "config saved with finder=lines");
+    free(cfg);
+    chk(vf_item(0, 0, 0, &w) && w == 0 && vf_item(1, 0, 448, &w) && w == 0,
+        "unloaded: both items 0 px for good (ML never frees module items)");
+    wf_stub_hud_fonts = 0;
+}
+
 static void t_iso(void)
 {
     int k400 = k_speed(400), k50 = k_speed(50), k250 = k_speed(250);
@@ -8615,6 +8742,7 @@ int main(int argc, char **argv)
     else if (!strcmp(mode, "LIGHT")) t_light();
     else if (!strcmp(mode, "ISO")) t_iso();
     else if (!strcmp(mode, "QKEYS")) t_qkeys();
+    else if (!strcmp(mode, "OSVF")) t_osvf();
     /* test.sh passes "PRINT:chain" as MODE PRINT, CASE chain (until 11-15 that ran t_print a second time) */
     else if (!strcmp(mode, "PRINT") && !strcmp(cs, "chain")) t_print_chain();
     else if (!strcmp(mode, "PRINT")) t_print();

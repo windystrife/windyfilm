@@ -9,6 +9,11 @@ extern char __camera_model_short[16], firmware_version[16];
 extern int pic_quality, shooting_mode, lv;
 extern uint8_t lens_info[];                      /* ML struct lens_info bytes (layout from wf_expoff.c) */
 extern volatile int h_play, h_movie, h_menu_shown, h_gdraw, h_expsim, h_expsim_stuck;
+/* ML's LiveView info bars (OSVF): the items lvinfo_add_items got, lens_display_set_dirty calls, AE_VALUE (1/8 EV), the
+   bars' rows; avail_shot = the card's shots left */
+extern void *h_lvinfo_items;
+extern volatile int h_lvinfo_n, h_lens_dirty, h_ae_value, h_topbar, h_botbar;
+extern int avail_shot;
 extern volatile int h_task_fail, h_tasks_live, h_nsem;   /* task_create("film_yuv") refusals; live tasks; semaphores */
 extern volatile int h_task_slots, h_task_refused;        /* free task table slots (-1 no limit); task_create refused */
 int task_create(const char *name, uint32_t prio, uint32_t stack, void *entry, void *arg);   /* a task of the test's own */

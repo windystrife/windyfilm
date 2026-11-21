@@ -35,3 +35,19 @@ const int wf_t_me_select = offsetof(struct menu_entry, select);
 const int wf_t_me_children = offsetof(struct menu_entry, children);
 const int wf_t_me_help = offsetof(struct menu_entry, help);           /* MIST:levels: the Mist entry's help line */
 int wf_t_me_shidden(const void *e) { return ((const struct menu_entry *)e)->shidden; }   /* a bit field: no offsetof */
+/* struct lvinfo_item (OSVF: the film OS's LiveView finder, src/wf_osvf.c): item i of an lvinfo_add_items array called as
+   ML's lvinfo.c calls it, at bar row y (ML puts item->y = bar_y + (32 - height) / 2 + 2); back: its width, height,
+   custom_drawing, its bar (which_bar) and priority */
+#include <lvinfo.h>
+void wf_t_lvi_call(void *items, int i, int can_draw, int y, int *w, int *h, int *custom, int *bar, int *prio)
+{
+    struct lvinfo_item *it = (struct lvinfo_item *)items + i;
+    it->y = y;
+    it->update(it, can_draw);
+    *w = it->width;
+    *h = it->height;
+    *custom = it->custom_drawing;
+    *bar = it->which_bar;
+    *prio = it->priority;
+}
+const char *wf_t_lvi_name(void *items, int i) { return ((struct lvinfo_item *)items)[i].name; }

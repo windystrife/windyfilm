@@ -26,13 +26,13 @@ python3 -I -B -c 'import sys,struct; b=bytearray(open(sys.argv[1],"rb").read());
 SAN="-fsanitize=address,undefined -fno-omit-frame-pointer"
 gcc -std=gnu99 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-comment $SAN -DWF_HOST -DWF_HOST_PURE \
     -I$REPO/tests/ui -I$REPO/src -I$REPO/src/ui \
-    $REPO/src/ui/wf_gfx.c $REPO/src/ui/wf_font.c $REPO/src/ui/wf_cans.c $REPO/src/ui/wf_ui.c $REPO/src/ui/wf_dark_ui.c $REPO/src/ui/wf_os_ui.c \
+    $REPO/src/ui/wf_gfx.c $REPO/src/ui/wf_font.c $REPO/src/ui/wf_cans.c $REPO/src/ui/wf_ui.c $REPO/src/ui/wf_dark_ui.c $REPO/src/ui/wf_os_ui.c $REPO/src/ui/wf_os_hud.c \
     $REPO/src/wf_roll.c $REPO/src/wf_photo.c $REPO/tests/ui/host_ml.c $REPO/tests/ui/fake_core.c $REPO/tests/ui/fake_dark.c \
     build/fake_catalog.c $REPO/tests/ui/ui_test.c \
     -o build/ui_test
 gcc -std=gnu99 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-comment $SAN -DWF_HOST -DWF_HOST_PURE \
     -I$REPO/tests/ui -I$REPO/src -I$REPO/src/ui \
-    $REPO/src/ui/wf_gfx.c $REPO/src/ui/wf_font.c $REPO/src/ui/wf_cans.c $REPO/src/ui/wf_ui.c $REPO/src/ui/wf_dark_ui.c $REPO/src/ui/wf_os_ui.c \
+    $REPO/src/ui/wf_gfx.c $REPO/src/ui/wf_font.c $REPO/src/ui/wf_cans.c $REPO/src/ui/wf_ui.c $REPO/src/ui/wf_dark_ui.c $REPO/src/ui/wf_os_ui.c $REPO/src/ui/wf_os_hud.c \
     $REPO/src/wf_roll.c $REPO/src/wf_photo.c $REPO/tests/ui/host_ml.c $REPO/tests/ui/fake_core.c $REPO/tests/ui/fake_dark.c \
     build/fake_catalog.c $REPO/tests/ui/os_test.c \
     -o build/os_test

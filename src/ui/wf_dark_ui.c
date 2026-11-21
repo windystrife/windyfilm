@@ -892,6 +892,7 @@ int wfdr_hud_fonts(int on)
     else if (on == 2 && hud_fonts && wff_again()) wff_reload();   /* Canon held the card: read it again */
     return hud_fonts && wff_again();
 }
+int wfdr_hud_fonts_on(void) { return hud_fonts; }
 
 /* the HUD's rectangles go back to 0 (LiveView shows through): every pixel (CLEAR), or every other one (FADE: a dither,
  * the palette has no alpha) */

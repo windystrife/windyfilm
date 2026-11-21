@@ -280,6 +280,59 @@ static void entry_rgb(uint32_t e, uint8_t *o)
     o[2] = b < 0 ? 0 : b > 255 ? 255 : b;
 }
 
+/* the LiveView finder (src/ui/wf_os_hud.c): ML's own palette indices over a stand-in LiveView frame. ML's colours as its
+ * default palette shows them (bmp.h names); COLOR_TRANSPARENT_BLACK darkens what is under it by half. bg: a 720 x 480
+ * binary PPM (the owner's LiveView photo, outside the repo) or 0 for a plain sky-to-ground gradient. */
+static int ml_rgb(int c, uint8_t *o)
+{
+    static const uint8_t named[][4] = {
+        { 0x01, 255, 255, 255 }, { 0x02, 0, 0, 0 }, { 0x05, 0, 220, 220 }, { 0x06, 40, 210, 60 }, { 0x07, 30, 160, 40 },
+        { 0x08, 235, 40, 40 }, { 0x09, 120, 170, 255 }, { 0x0B, 40, 60, 230 }, { 0x0C, 150, 20, 20 },
+        { 0x0E, 230, 40, 230 }, { 0x0F, 250, 230, 40 }, { 0x13, 255, 150, 30 },
+    };
+    for (unsigned i = 0; i < sizeof named / sizeof named[0]; i++)
+        if (named[i][0] == c) { o[0] = named[i][1]; o[1] = named[i][2]; o[2] = named[i][3]; return 1; }
+    if (c >= 38 && c <= 79) { o[0] = o[1] = o[2] = (uint8_t)((c - 38) * 255 / 41); return 1; }
+    return 0;
+}
+int host_dump_lv(const char *path, const uint8_t *vram, int pitch, const char *bg)
+{
+    static uint8_t img[480][720][3];
+    int have = 0;
+    FILE *fb = bg && *bg ? fopen(bg, "rb") : 0;
+    if (fb)
+    {
+        int w = 0, h = 0, mx = 0;
+        if (fscanf(fb, "P6 %d %d %d", &w, &h, &mx) == 3 && w == 720 && h == 480 && mx == 255 && fgetc(fb) != EOF)
+            have = fread(img, 1, sizeof img, fb) == sizeof img;
+        fclose(fb);
+    }
+    if (!have)
+        for (int y = 0; y < 480; y++)
+            for (int x = 0; x < 720; x++)
+            {
+                int sky = y < 300;
+                img[y][x][0] = sky ? 150 + y / 6 : 90 + (x % 97) / 4;
+                img[y][x][1] = sky ? 175 + y / 8 : 110 + (y % 53) / 3;
+                img[y][x][2] = sky ? 205 : 70;
+            }
+    FILE *fp = fopen(path, "wb");
+    if (!fp) return -1;
+    fprintf(fp, "P6\n720 480\n255\n");
+    int stray = 0;
+    for (int y = 0; y < 480; y++)
+        for (int x = 0; x < 720; x++)
+        {
+            int c = vram[y * pitch + x];
+            uint8_t o[3] = { img[y][x][0], img[y][x][1], img[y][x][2] };
+            if (c == 0x03) { o[0] /= 2; o[1] /= 2; o[2] /= 2; }
+            else if (c && !ml_rgb(c, o)) { o[0] = 255; o[1] = 0; o[2] = 255; stray++; }
+            fwrite(o, 1, 3, fp);
+        }
+    fclose(fp);
+    return stray;
+}
+
 int host_dump(const char *path)
 {
     FILE *fp = fopen(path, "wb");

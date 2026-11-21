@@ -204,16 +204,35 @@ says so.
   - 5D2: Canon's GUI mode 2 without LV and 38 in LV, as the browser asks today (DESIGN 5), and
     `canon_gui_disable_front_buffer`.
   - The Film shelf can reuse the browser's data and rows. The browser itself stays as the "look editor" behind INFO.
-- **LiveView HUD.** Drawn from wf_task like today's roll HUD (`wfdr_hud`, into ML's bitmap), only when `lv`, no ML
-  menu, no UI, not recording, and the display is on.
-  - Canon's own LV info is hidden by Canon's clean INFO view, or by ML's own lvinfo bars (which already replace
-    Canon's bottom bar on both cameras).
-  - Values: `lens_info` (raw_shutter, raw_aperture, raw_iso, ae) and `shooting_mode`, as `wf_expsim.c` reads them; the
-    count from `wf_roll`.
-  - Colours, two choices (R3):
-    - (a) ML's palette indices, as the roll HUD does now: safe, opaque chips;
-    - (b) our palette while the HUD is up: the mock's look, translucent scrims if the opacity byte works.
-  - Fallback HUD: items in ML's own lvinfo bars (`lvinfo_add_items`), which need no palette.
+- **LiveView finder (M3, built).** `src/wf_osvf.c` (core side, ML headers) and `src/ui/wf_os_hud.c` (drawing).
+  - **When it is up:** Camera interface WindyFilm, the finder not set to "Canon + ML", photo LiveView with ML's
+    overlays on (`get_global_draw`), the display on. Also: no ML menu, no WindyFilm screen, no PLAY, no Darkroom run,
+    and the HUD font pack held.
+  - **INFO stays Canon's.** Canon's INFO switches between its own info view and the clean view, and ML draws (global
+    draw) only on the clean view. So INFO switches between Canon's info and our finder, with no key of ours.
+  - **ML's two bars are ours** through two lvinfo items (`lvinfo_add_items`), each 720 px wide at priority 127.
+    - ML's layout hides every other item of that bar, clears our box and calls us to paint. So the bands change
+      exactly when ML redraws its bars and never flicker against them.
+    - A value of ours that changes (the count, the meter) asks for a redraw with `lens_display_set_dirty`.
+    - Down, the items measure 0 px and ML's own items come back.
+  - **The middle** (frame corners, bright lines) is painted from wf_task every 500 ms, at once on a mode change, and
+    given back (0) when the finder goes down in plain LiveView.
+  - **One lock** (`wf_hud_lock`) covers every painter that points the drawing canvas at ML's bitmap: ML's task (the
+    bands), wf_task (middle, roll HUD, notices, font pack) and the UI's open.
+  - **Values:**
+    - `lens_info` shutter / aperture / ISO numbers. We format them ourselves: ML's `lens_format_*` use its symbol font.
+    - The meter is `get_ae_value()` in M (AE_VALUE, 1/8 EV) and the exposure compensation in P / Tv / Av; scene modes
+      have none.
+    - `battery_level_bars`, `avail_shot` (the card's shots left), and the roll from `wf_roll`.
+  - **Colours:** ML's own palette indices only (white, greys, orange, red), with `COLOR_TRANSPARENT_BLACK` for the
+    scrims. Nothing writes the palette (R3 avoided).
+  - **Modes** are set in Settings > LiveView finder (`finder=` in the config):
+    - **Full:** film pill + roll, battery + card count; SHUTTER / APERTURE / ISO (+ FILM tag), a -2..+2 meter scale,
+      the frame counter (WIND ON amber for 1 s, END / REWOUND red); four frame corners.
+    - **Minimal:** film pill, battery + counter.
+    - **Bright lines:** a 3:2 bright-line frame with a focus patch, and one strip (shutter, aperture, three meter
+      lamps, frames).
+    - **Canon + ML:** ML's own bars as before.
 - **5D2 Top plate (no LiveView).** Shown when `!lv`, gui_state IDLE, the display is on, and Canon is on its
   shooting-settings screen (power on, INFO, after a shot).
   - It takes the screen with GUI mode 2, as the browser does without LV, and follows Canon's display: at half-press it
@@ -238,8 +257,8 @@ says so.
     Canon's own PLAY shows prints.
   - The option "PLAY shows: Camera JPEG" leaves Canon's PLAY alone (the owner likes it). That is the default (Q2).
 - **Settings and the switch back.**
-  - Config keys in `WINDYFLM.CFG`: `os=on|off` (Camera interface), `play=prints|canon`, `hud=full|min|canon`,
-    `plate=on|off`.
+  - Config keys in `WINDYFLM.CFG`: `os=on|off` (Camera interface), `finder=full|min|lines|off` (M3), and later
+    `play=prints|canon`, `plate=on|off`.
   - The same "Camera interface" item sits in ML's menu (Shoot > WindyFilm), so the film OS can be turned off without
     it.
   - Movie mode: off (Canon + ML only).
@@ -260,13 +279,17 @@ says so.
   - EOS M: patch 0003 skips `_redraw_do` while a module owns the screen.
   - 5D2: no such patch. Canon or ML (global draw) can draw for up to 1 s until our next full render (the browser's
     heal timer); the Top plate on the 5D2 also has Canon's own screen under it.
-  - LV HUD: Canon redraws its LV info on events, so the HUD redraws after each key and every 1 s, as the roll HUD does.
+  - LiveView finder (M3): the bands are drawn by ML's own bar redraw (lvinfo), so they do not fight it. The middle is
+    painted again every 500 ms. On the camera, still to see: Canon's AF frame and focus box over the corners, and
+    whether ML's bars sit at rows 0 / 448 on both cameras (logged: "osvf: LiveView finder up (mode, bars at y / y)").
 - **R3. Palette in LiveView.**
   - Our entries 0x50..0xFE are safe while we own the screen. In LV, Canon still draws its AF frame / focus box with its
     own entries.
   - Translucent scrims need the palette's opacity byte to work per entry (DIGIC 4 / 5), which is unchecked.
   - Plan: a probe card that writes a test HUD with opacity 1 / 2 / 3, photographed by the owner. If it fails, opaque
     dark chips (today's roll HUD look).
+  - M3: the finder needs no probe. It uses ML's own indices, and ML's `COLOR_TRANSPARENT_BLACK` (0x03) is already
+    translucent on both cameras.
 - **R4. 5D2 viewfinder shooting, no LiveView.**
   - The back LCD on while shooting costs battery, so it follows Canon's display: off at half-press, 2 s after a shot.
   - No metering without a half-press.
@@ -342,9 +365,17 @@ Cards are built only on the owner's word.
      - free memory at open;
      - Camera interface = Canon + ML gives back the old MENU.
 2. **M2: Film shelf.** The new shelf layout over the browser's list. The browser stays as the INFO look editor.
-3. **M3: LiveView HUD.**
-   - The palette probe card (R3), then the HUD in the chosen colours: EOS M stills LV, then 5D2 LV.
-   - INFO cycles Full / Minimal / Canon.
+3. **M3: LiveView finder (built 21 Nov 2026, see section 4).**
+   - Full / Minimal / Bright lines / Canon + ML in Settings. INFO stays Canon's: it switches Canon's info view and the
+     finder.
+   - Takes ML's bars through lvinfo; the middle from wf_task. ML's colours only, so no palette probe.
+   - **Checked:**
+     - `tests/ui/run.sh`: os_test has 13 finder shots (`m3_*`) over a stand-in LiveView frame (`WF_LVBG` = a 720 x 480
+       PPM of a real LiveView photo, or a gradient). Each band is checked to stay in its 32 rows and the middle to
+       clear back to 0. Every pixel is one of ML's colours. Settings has the new row.
+     - `test.sh` OSVF (both cameras): the items as ML calls them, every way up and down, redraw requests, the middle,
+       the config.
+   - **On the camera:** AE_VALUE's sign (+ = over), the bar rows, Canon's AF box over the corners.
 4. **M4: 5D2 Top plate.** Display following, values, after-shot count, battery check on the camera.
 5. **M5: Prints.**
    - The Darkroom writes the screen previews and the sheet strip. The Prints / Contact sheet viewer (display filter

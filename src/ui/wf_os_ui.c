@@ -143,11 +143,7 @@ static void bars(int x, int y, int lev, int max, int on, int off)
 }
 
 /* ------------------------------------------------------------------ the roll in the camera */
-struct home_roll {
-    const struct wf_film *f;                                /* the roll's film, else the loaded one, else 0 */
-    int open, num, shot, exp, done;                         /* done: full / rewound (no more frames) */
-};
-static void home_roll(struct home_roll *h)
+void wfos_roll_info(struct wfos_roll *h)
 {
     const struct wf_roll *r = wf_roll_now();
     h->open = wf_roll_open(r) && !wf_roll_shelved();
@@ -157,6 +153,7 @@ static void home_roll(struct home_roll *h)
     h->shot = h->open ? r->nshot : 0;
     h->exp = h->open ? r->exp : 0;
     h->done = h->open && !wf_roll_can_shoot(r);
+    h->rewound = h->open && r->state == WF_RS_REWOUND;
 }
 
 /* the Darkroom tile's line: frames to develop, or why not */
@@ -193,8 +190,8 @@ static void open_tile(int t)
 /* ------------------------------------------------------------------ Home */
 static void home_render(void)
 {
-    struct home_roll h;
-    home_roll(&h);
+    struct wfos_roll h;
+    wfos_roll_info(&h);
     const struct wf_film *f = h.f;
     int gid = f ? f->id : 0;
     if (gid != glow_film)
@@ -267,7 +264,7 @@ static void home_render(void)
     sub[HF_SHELF] = sb;
     sub[HF_DARK] = dark_line(db, sizeof db);
     sub[HF_PRINTS] = wf_roll_blocks_play() ? "After the Darkroom" : "Canon's playback";
-    sub[HF_SET] = "Camera interface, keys";
+    sub[HF_SET] = "Interface, LiveView finder, keys";
     for (int i = 0; i < HF_NTILE; i++)
     {
         int y0 = 54 + i * 66, foc = i == hfoc;
@@ -378,7 +375,7 @@ static int home_key(int k)
 }
 
 /* ------------------------------------------------------------------ Settings */
-enum { SR_OS = 0, SR_QK, SR_BLIND, SR_MLMENU, SR_MENUKEY, SR_N };
+enum { SR_OS = 0, SR_VF, SR_QK, SR_BLIND, SR_MLMENU, SR_MENUKEY, SR_N };
 enum { SY_FILMS = 0, SY_FONTS, SY_CANS, SY_N };
 static const char *const sec_name[2] = { "Interface", "System" };
 
@@ -388,6 +385,7 @@ static int set_rows(int sec, uint8_t *out)
     if (sec == 0)
     {
         out[n++] = SR_OS;
+        out[n++] = SR_VF;
         if (!is5d2()) out[n++] = SR_QK;                     /* the quick keys are the EOS M's */
         out[n++] = SR_BLIND;
         out[n++] = SR_MLMENU;
@@ -437,6 +435,19 @@ static int set_row(int sec, int r, const char **name, const char **val, const ch
         *sub = wf_os ? "MENU opens this Home; MENU on Home: Canon's menu"
                      : "MENU opens Canon's menu; WindyFilm stays in the ML menu";
         return 1;
+    case SR_VF:
+    {
+        static const char *const vf_v[WF_VF_N] = { "Full", "Minimal", "Bright lines", "Canon + ML" };
+        static const char *const vf_s[WF_VF_N] = { "Film, roll, shutter, aperture, ISO, meter and frames over LiveView",
+                                                   "Only the film and the frame counter over LiveView",
+                                                   "A rangefinder's frame, the values in a strip under it",
+                                                   "ML's own info bars over LiveView, as before" };
+        int v = wf_vf >= 0 && wf_vf < WF_VF_N ? wf_vf : 0;
+        *name = "LiveView finder";
+        *val = vf_v[v];
+        *sub = !wf_os ? "With Camera interface WindyFilm" : vf_s[v];
+        return 1;
+    }
     case SR_QK:
         *name = "Quick keys";
         *val = qk_v[wf_qk >= 0 && wf_qk < WF_QK_N ? wf_qk : 0];
@@ -463,6 +474,7 @@ static int set_row(int sec, int r, const char **name, const char **val, const ch
 static void set_step(int r, int d)
 {
     if (r == SR_OS) wf_os_set(!wf_os);
+    else if (r == SR_VF) wf_vf_set((wf_vf + WF_VF_N + d) % WF_VF_N);
     else if (r == SR_QK) wf_qk_set((wf_qk + WF_QK_N + d) % WF_QK_N);
     else if (r == SR_BLIND) wf_blind_set(!wf_blind);
 }
@@ -544,6 +556,7 @@ static int set_key(int k)
         if (!ed) { say(ssec ? "This section only shows" : "This one is fixed"); break; }
         set_step(rows[sfoc], k == MODULE_KEY_WHEEL_LEFT || k == MODULE_KEY_WHEEL_UP ? -1 : 1);
         if (rows[sfoc] == SR_OS) wf_log("ui: Camera interface %s", wf_os ? "WindyFilm" : "Canon + ML");
+        if (rows[sfoc] == SR_VF) wf_log("ui: LiveView finder %d", wf_vf);
         break;
     case MODULE_KEY_MENU: case MODULE_KEY_TRASH:
         wfui_goto(WFUI_SCR_HOME);

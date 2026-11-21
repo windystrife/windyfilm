@@ -92,7 +92,7 @@ void wfg_rrect(int x0, int y0, int x1, int y1, int r, int fill, int outline, int
     if (r > mr) r = mr;
     if (r > mh) r = mh;
     if (r < 0) r = 0;
-    if (outline < 0 || width <= 0)
+    if (outline == -1 || width <= 0)        /* only -1 is none: ML's low indices are negative offsets (wf_os_hud.c) */
     {
         for (int y = y0; y <= y1; y++)
         {
@@ -111,7 +111,7 @@ void wfg_rrect(int x0, int y0, int x1, int y1, int r, int fill, int outline, int
         {
             hspan(l, il - 1, y, outline);
             hspan(irt + 1, rt, y, outline);
-            if (fill >= 0) hspan(il, irt, y, fill);
+            if (fill != -1) hspan(il, irt, y, fill);
         }
         else
         {

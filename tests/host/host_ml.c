@@ -829,6 +829,15 @@ int ResumeLiveView(void)
 void powersave_prohibit(void) { }
 void powersave_permit(void) { }
 unsigned char *bmp_vram(void) { static unsigned char b[960 * 480]; return b; }
+/* ML's LiveView info bars (lvinfo.c) and what the film OS's finder reads (src/wf_osvf.c) */
+int avail_shot = 812;
+void *h_lvinfo_items;
+volatile int h_lvinfo_n, h_lens_dirty, h_ae_value, h_topbar = 0, h_botbar = 448;
+void lvinfo_add_items(void *items, int count) { h_lvinfo_items = items; h_lvinfo_n += count; }
+int  get_ml_topbar_pos(void) { return h_topbar; }
+int  get_ml_bottombar_pos(void) { return h_botbar; }
+void lens_display_set_dirty(void) { h_lens_dirty++; }
+int  get_ae_value(void) { return h_ae_value; }
 void redraw(void) { }
 int  FIO_CreateDirectory(const char *d) { return mkdir(h_path(d), 0777) == 0 ? 0 : -1; }
 int  is_dir(const char *p) { struct stat st; return stat(h_path(p), &st) == 0 && S_ISDIR(st.st_mode); }

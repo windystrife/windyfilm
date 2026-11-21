@@ -118,6 +118,7 @@ cc wf_photo.o  $MODFLAGS -O2 $S/wf_photo.c
 # Roll + Darkroom: the roll state machine and the core (both cameras: DESIGN 3.6, 3.18)
 cc wf_roll.o     $MODFLAGS $S/wf_roll.c
 cc wf_dark.o     $MODFLAGS $S/wf_dark.c
+cc wf_osvf.o     $MODFLAGS $MLFLAGS $S/wf_osvf.c                # the film OS's LiveView finder (ML's bars: lvinfo)
 # log outputs: tables at the module flags, the kernel in ARMv5TE asm; one object (lenc_layout below)
 $CC $MODFLAGS -c -o $O/wf_logout_tab.o $S/wf_logout_tab.c
 $CC -mcpu=arm946e-s -marm -c -o $O/wf_logout_arm.o $S/wf_logout_arm.S

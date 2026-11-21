@@ -142,6 +142,13 @@ void wfos_leave(int scr);
 void wfos_render(int scr, int now);
 int  wfos_key(int scr, int key);        /* 1 = close the UI (nothing after it) */
 int  wfos_tick(int scr, int now);       /* 1 = redraw */
+/* the roll in the camera, as Home and the LiveView finder (wf_os_hud.c) show it; any task (plain reads) */
+struct wfos_roll {
+    const struct wf_film *f;            /* the roll's film, else the loaded one, else 0 */
+    int open, num, shot, exp, done;     /* done: full / rewound (no more frames) */
+    int rewound;
+};
+void wfos_roll_info(struct wfos_roll *h);
 /* wf_ui.c, for the screens (UI task): switch to another screen; close and then hand Canon / ML a key (WFUI_AFTER_*);
    the browser with the focus on a row (the Home look strip) */
 enum { WFUI_AFTER_NONE = 0, WFUI_AFTER_MENU, WFUI_AFTER_MLMENU, WFUI_AFTER_PLAY };

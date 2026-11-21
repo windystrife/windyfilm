@@ -100,6 +100,12 @@ void wf_qk_set(int v);                    /* WF_QK_*: the film OS's Settings (th
    open the WindyFilm Home screen (src/ui/wf_os_ui.c); 0 = Canon + ML, the camera as before. config os=on|off */
 extern volatile int wf_os;
 void wf_os_set(int on);
+/* the film OS's LiveView finder (docs/MODERNUI.md M3), with Camera interface = WindyFilm: Full (film + roll, shutter,
+   aperture, ISO, meter, frame counter, frame corners), Minimal (film + counter), Bright lines (a rangefinder's frame and
+   a strip under it), or Canon + ML (ML's own info bars, the RAWB28 roll HUD). config finder=full|min|lines|off */
+enum { WF_VF_FULL = 0, WF_VF_MIN, WF_VF_LINES, WF_VF_OFF, WF_VF_N };
+extern volatile int wf_vf;
+void wf_vf_set(int v);
 int  wf_loaded(void);                     /* the active film id, 0 = none (output is plain log, Log + LUT or Off) */
 int  wf_avail(int id);                    /* 1 = loadable now (its table is in the pack / its cube is on the card) */
 int  wf_films_state(void);                /* the film tables: 1 read, 0 starting (worker / pack not up yet), -1 the

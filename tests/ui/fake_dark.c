@@ -97,6 +97,9 @@ int wf_roll_req_swap(int film, int exp, int devd)
     return wf_roll_req_load(film, exp);
 }
 int wf_roll_hud(char *line, int n) { (void)line; (void)n; return 0; }
+static int hud_locks;
+int wf_hud_lock(int ms) { hud_locks += ms >= 0 ? 1 : -1; return 1; }   /* (the finder's lock: one task here) */
+int fake_hud_locks(void) { return hud_locks; }
 const struct wf_dark_view *wf_dark_view(void) { return &view; }
 int wf_dark_start(void) { nstart++; st_num = 0; return wf_roll_left(&roll) ? 0 : -1; }
 int wf_dark_start_roll(int num, int again, int film)

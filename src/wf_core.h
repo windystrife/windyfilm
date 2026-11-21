@@ -107,6 +107,8 @@ void wf_log_flush(void);                          /* wf_task: append the log rin
 int wf_job_state(void);
 /* Roll + Darkroom (wf_dark.c, docs/DESIGN.md 3.6; the UI's part is wf_dark.h) */
 void wf_dark_init(void);                          /* module init: the view, no allocation */
+void wf_osvf_init(void);                          /* module init: the film OS's LiveView finder (wf_osvf.c, wf_dark.h) */
+void wf_osvf_deinit(void);
 void wf_roll_poll(void);                          /* wf_task: roll file, requests, frames, RAW+L / review, HUD */
 void wf_dark_poll(void);                          /* wf_task, after wf_roll_poll: a darkroom run asked for, carried out
                                                      here (minutes; no task of its own, owner RAWB9 "dark: no task (5)") */

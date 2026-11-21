@@ -1721,6 +1721,9 @@ void wfui_task_begin(void)
     rd_until = get_ms_clock() + PACK_WAIT_MS;
     rd_tries = 0;
     beat(PH_FONTS);
+    /* the LiveView finder (wf_dark.h): a band or the middle being painted right now finishes before the canvas and the
+       font pack are ours (wf_ui_is_open() already holds them off from here on) */
+    if (wf_hud_lock(1000)) wf_hud_lock(-1);
     int fs = wff_open();
     fonts_held = 1;
     wfp_init_fixed();

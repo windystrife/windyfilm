@@ -34,6 +34,7 @@ ALL="$ALL ROLL:save ROLL:short ROLL:back ROLL:lock" # the roll file on RAWB8's c
 ALL="$ALL ROLL:dark ROLL:boot"                     # RAWB9: roll frames without the look, the Darkroom with a full task table
 ALL="$ALL FX:bloom"                                # RAWB11: Bloom on its own row (halation alone, bloom alone, the old config)
 ALL="$ALL MIST:levels"                             # owner 11-15: every Mist level, the combo with Bloom + Halation, the long shot line
+ALL="$ALL OSVF"                                    # modernUI M3: the film OS LiveView finder (lvinfo items, up / down)
 ALL="$ALL STAGE:dark"                              # 11-15: the Darkroom's stage of a chain film, knob rows set, vs the camera's shot
 ALL="$ALL STAGE:v1"                                # 11-16: a version 1 stage pack (no knob data): the last four knob rows hidden
 ALL="$ALL ROLL:mem"                               # 11-16: RAWB17 "no memory": the camera's one SRM chunk, the frame split, real RAW+L pairs
@@ -74,13 +75,13 @@ MLFLAGS="-D__ARM__ -I$ML/include -I$ML/src -I$ML/platform/$PLAT -DCONFIG_MAGICLA
  -Wno-unused-parameter"
 set -e
 arm-none-eabi-gcc $MODFLAGS -DWF_HOST -c -o $T/obj/wf_cam_host.o $S/$CAMSRC
-arm-none-eabi-gcc $MODFLAGS -c -o $T/obj/wf_ui_stub.o $S/wf_ui_stub.c
+arm-none-eabi-gcc $MODFLAGS -DWF_HOST -c -o $T/obj/wf_ui_stub.o $S/wf_ui_stub.c   # (-DWF_HOST: the finder's counters)
 arm-none-eabi-gcc $MODFLAGS $MLFLAGS -Wno-unused-function -c -o $T/obj/wf_expoff.o $H/wf_expoff.c
 HCC="arm-linux-gnueabi-gcc -O1 -marm -march=armv5te -Wall -Wno-unused-function -Wno-comment -Wno-format-truncation $CAMDEF -I$S -I$H -I$G"
 $HCC -c -o $T/obj/host_ml.o $H/host_ml.c
 $HCC -c -o $T/obj/wf_test.o $H/wf_test.c
 MOD="wf_main.o wf_menu.o wf_shot.o wf_pv.o wf_probe.o wf_loglut.o wf_llk.o wf_llk_arm.o wf_film.o wf_stagek.o yh_halo.o wf_mist.o yg_grain.o yg_stocks.o
- wf_fx.o wf_expsim.o wf_catalog.o wf_logout.o wf_rawb.o wf_roll.o wf_dark.o"
+ wf_fx.o wf_expsim.o wf_catalog.o wf_logout.o wf_rawb.o wf_roll.o wf_dark.o wf_osvf.o"
 [ -f $O/wf_expk.o ] && MOD="$MOD wf_expk.o"
 MOD="$MOD wf_dev.o wf_rsrc.o"                                     # RAW develop "B": the develop and the buffer check
 MOD="$MOD wf_darkp.o wf_cr2.o wf_jpe.o wf_print.o wf_photo.o"   # Roll + Darkroom (DESIGN 3.6, 3.9, 3.18): both cameras

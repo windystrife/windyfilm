@@ -9,6 +9,7 @@
 #include "wf_ui_int.h"
 #include "fake_core.h"
 #include "fake_dark.h"
+#include "wf_api.h"
 
 int wfui_host_scr(void);
 int wfui_host_after(void);
@@ -106,6 +107,98 @@ static void to_tile(int t)
     CHECK(wfos_host_hfoc() == t, "DOWN did not reach Home focus %d (%d)", t, wfos_host_hfoc());
 }
 
+/* ---------------------------------------------------------------- the LiveView finder (src/ui/wf_os_hud.c, M3) */
+#define LV_P    960                                 /* ML's bitmap pitch */
+#define LV_TOP  0                                   /* ML's bars on a 3:2 LCD (get_ml_topbar_pos / bottombar_pos) */
+#define LV_BOT  448
+static uint8_t lvb[480 * LV_P];
+
+static struct wfos_lv lv_vals(int vf, const char *sh, const char *ap, const char *iso, int iso_film, int meter, int batt,
+                              int shots, int wind)
+{
+    struct wfos_lv v;
+    memset(&v, 0, sizeof v);
+    v.vf = vf;
+    snprintf(v.sh, sizeof v.sh, "%s", sh);
+    snprintf(v.ap, sizeof v.ap, "%s", ap);
+    snprintf(v.iso, sizeof v.iso, "%s", iso);
+    v.iso_film = iso_film;
+    v.meter = meter;
+    v.batt = batt;
+    v.shots = shots;
+    v.wind = wind;
+    return v;
+}
+
+/* pixels set outside rows y0 .. y1 or columns 0 .. 719 */
+static int lv_outside(int y0, int y1)
+{
+    int n = 0;
+    for (int y = 0; y < 480; y++)
+        for (int x = 0; x < LV_P; x++)
+            if (lvb[y * LV_P + x] && (y < y0 || y > y1 || x > 719)) n++;
+    return n;
+}
+
+static int lv_count(int y0, int y1)
+{
+    int n = 0;
+    for (int y = y0; y <= y1; y++)
+        for (int x = 0; x < 720; x++) n += lvb[y * LV_P + x] != 0;
+    return n;
+}
+
+/* the three pieces as the camera paints them (ML's task the bands, wf_task the middle), each checked to stay in its own
+   rows, then the screen over a stand-in LiveView frame (WF_LVBG: a 720 x 480 PPM) */
+static void lv_shot(const char *name, const struct wfos_lv *v)
+{
+    CHECK(wfdr_hud_fonts(1) == 0 && wfdr_hud_fonts_on(), "%s: the font pack did not open", name);
+    memset(lvb, 0, sizeof lvb);
+    wfos_hud_top(lvb, LV_P, LV_TOP, v);
+    CHECK(lv_outside(LV_TOP, LV_TOP + 31) == 0, "%s: the top band paints outside its 32 rows", name);
+    CHECK(lv_count(LV_TOP, LV_TOP + 31) > 0, "%s: the top band is empty", name);
+    wfos_hud_bottom(lvb, LV_P, LV_BOT, v);
+    CHECK(lv_outside(LV_TOP, LV_TOP + 31) == lv_count(LV_BOT, LV_BOT + 31), "%s: the bottom band paints outside its rows",
+          name);
+    CHECK((lv_count(LV_BOT, LV_BOT + 31) == 0) == (v->vf == WF_VF_MIN), "%s: bottom band %d px in mode %d", name,
+          lv_count(LV_BOT, LV_BOT + 31), v->vf);
+    int bands = lv_count(0, 479);
+    wfos_hud_mid(lvb, LV_P, LV_TOP + 32, LV_BOT, v->vf);
+    int mid = lv_count(LV_TOP + 32, LV_BOT - 1);
+    CHECK(mid > 0 && lv_count(0, 479) == bands + mid, "%s: the middle paints %d px, or outside its rows", name, mid);
+    char p[700];
+    snprintf(p, sizeof(p), "%s/%s.ppm", outdir, name);
+    int stray = host_dump_lv(p, lvb, LV_P, getenv("WF_LVBG"));
+    CHECK(stray == 0, "%s: %d pixels in none of ML's colours", name, stray);
+    printf("shot %s\n", p);
+    /* the finder going down: the middle back to 0 */
+    wfos_hud_mid(lvb, LV_P, LV_TOP + 32, LV_BOT, -1);
+    CHECK(lv_count(LV_TOP + 32, LV_BOT - 1) == 0, "%s: the middle not cleared (%d px left)", name,
+          lv_count(LV_TOP + 32, LV_BOT - 1));
+    wfdr_hud_fonts(0);
+}
+
+static void lv_shots(const char *cam)
+{
+    char n[64];
+    struct wfos_lv v = lv_vals(WF_VF_FULL, "1/125", "f/2.8", "160", 1, -3, 2, 812, 0);
+    snprintf(n, sizeof n, "m3_%s_lv_full", cam);
+    lv_shot(n, &v);
+    v.wind = 1;
+    v.meter = 20;                                           /* 2.5 stops over: the marker red at the end */
+    snprintf(v.sh, sizeof v.sh, "1/4000");
+    snprintf(v.iso, sizeof v.iso, "3200");
+    v.iso_film = 0;
+    snprintf(n, sizeof n, "m3_%s_lv_full_wind", cam);
+    lv_shot(n, &v);
+    v = lv_vals(WF_VF_MIN, "1/60", "f/5.6", "400", 0, 0, 1, 812, 0);
+    snprintf(n, sizeof n, "m3_%s_lv_min", cam);
+    lv_shot(n, &v);
+    v = lv_vals(WF_VF_LINES, "1/250", "f/8", "160", 1, 8, 2, 812, 0);
+    snprintf(n, sizeof n, "m3_%s_lv_lines", cam);
+    lv_shot(n, &v);
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 5) { fprintf(stderr, "usage: os_test OUTDIR CARD OLDFONTS RBFDIR\n"); return 2; }
@@ -195,6 +288,16 @@ int main(int argc, char **argv)
     shot("m1_eosm_settings_off");
     key(MODULE_KEY_PRESS_SET);
     CHECK(wf_os, "SET on Camera interface did not turn it back");
+    key(MODULE_KEY_PRESS_DOWN);                             /* LiveView finder */
+    CHECK(wfos_host_sfoc() == 1, "DOWN from Camera interface: row %d, not LiveView finder", wfos_host_sfoc());
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wf_vf == WF_VF_MIN, "the ring on LiveView finder: %d, not Minimal", wf_vf);
+    shot("m3_eosm_settings_finder");
+    key(MODULE_KEY_WHEEL_LEFT);
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wf_vf == WF_VF_OFF, "the ring back past Full: %d, not Canon + ML", wf_vf);
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wf_vf == WF_VF_FULL, "LiveView finder not back to Full (%d)", wf_vf);
     key(MODULE_KEY_PRESS_DOWN);                             /* Quick keys */
     int q0 = wf_qk;
     key(MODULE_KEY_WHEEL_RIGHT);
@@ -291,6 +394,28 @@ int main(int argc, char **argv)
     end_checks();
     wf_os_set(1);
 
+    /* ---------------------------------------------------------------- EOS M: the LiveView finder */
+    fake_dark_reset();
+    roll_in("PRT160", 24, 12, 36);
+    lv_shots("eosm");
+    {
+        /* the roll at its end, a scene mode (no meter), the battery low, a long exposure */
+        roll_in("PRT160", 24, 36, 36);
+        struct wfos_lv v = lv_vals(WF_VF_FULL, "2.5\"", "f/16", "160", 1, WFOS_NOMETER, 0, 812, 0);
+        lv_shot("m3_eosm_lv_end", &v);
+        v.vf = WF_VF_LINES;
+        lv_shot("m3_eosm_lv_lines_end", &v);
+        /* no roll: the film's look only, the card's shots left */
+        fake_dark_reset();
+        v = lv_vals(WF_VF_FULL, "1/30", "f/1.4", "AUTO", 0, -9, -1, 1543, 0);
+        lv_shot("m3_eosm_lv_look", &v);
+        fake_set_loaded(0);
+        v.vf = WF_VF_MIN;
+        lv_shot("m3_eosm_lv_canon", &v);
+        v.shots = -1;                                       /* no card count either: the counter goes */
+        lv_shot("m3_eosm_lv_canon_nocard", &v);
+    }
+
     /* ---------------------------------------------------------------- 5D2, through the viewfinder */
     fake_reset();
     fake_dark_reset();
@@ -329,6 +454,9 @@ int main(int argc, char **argv)
     end_checks();
     CHECK(host_sent_key() == MODULE_KEY_MENU, "5D2 MENU on Home: Canon got %d", host_sent_key());
     lv = 1;
+
+    /* 5D2 LiveView: the same finder */
+    lv_shots("5d2");
 
     printf("os_test: %d failure(s)\n", fails);
     return fails ? 1 : 0;

@@ -32,6 +32,8 @@ uint32_t shamem_read(uint32_t addr);
 #define COLOR_RED 8                             /* ML bmp.h default palette indices (the HUD) */
 #define COLOR_YELLOW 0x0F
 #define COLOR_GRAY(p) (38 + ((p) * 41) / 100)
+#define COLOR_TRANSPARENT_BLACK 0x03            /* the LiveView finder's scrims (ML bmp.h) */
+#define COLOR_ORANGE 0x13
 
 /* RBF fonts (rbf_font.h / font.h / bmp.h) */
 #define RBF_MAX_NAME 64
@@ -112,6 +114,9 @@ static inline void sei(uint32_t old) { (void)old; }
 /* harness side */
 void host_init(const char *rbf_dir, uint32_t canon_white, uint32_t canon_black);
 int  host_dump(const char *ppm_path);           /* front buffer through the hardware palette -> PPM; returns stray px */
+/* the LiveView finder: a 720 x 480 canvas of ML palette indices over a stand-in LiveView frame (bg PPM or 0) -> PPM;
+   returns the pixels in none of ML's colours */
+int  host_dump_lv(const char *ppm_path, const uint8_t *vram, int pitch, const char *bg_ppm);
 int  host_front_disabled(void);
 /* the ML menu: on now, gone after off_after_ms (-1 = stays), sticky = gui_stop_menu does not close it; it paints one
  * pixel at the front's top-left. px_kept: that pixel was still there when it went (1), cleared under it (0), -1 none */
