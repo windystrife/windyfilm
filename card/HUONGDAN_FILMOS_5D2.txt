@@ -1,44 +1,74 @@
-HƯỚNG DẪN THỬ FILM OS (modernUI M1) TRÊN 5D MARK II
-===================================================
-Thẻ M1, 21/11/2026, nhánh modernUI (từ RAWB28). CHƯA chạy trên máy thật lần nào.
+HƯỚNG DẪN THỬ FILM OS (modernUI M1 - M5) TRÊN 5D MARK II
+=======================================================
+Thẻ M5, 21/11/2026, nhánh modernUI (từ RAWB28). CHƯA chạy trên máy thật lần nào.
 Mọi thứ khác (Roll, Darkroom, phim, cube) giống thẻ RAWB28: xem HUONGDAN_DARKROOM_5D2.txt.
 
-M1 có gì mới
-- Hàng mới "Camera interface" trong menu ML > WindyFilm (dưới "Open film browser"):
-  WindyFilm (mặc định) hoặc Canon + ML (y như RAWB28).
-- Với WindyFilm: đang chụp (qua ống ngắm hoặc LiveView), bấm MENU mở màn hình Home của
-  WindyFilm thay cho menu Canon. Home có: lon phim, ROLL, tên phim, số khung đã chụp /
-  còn lại, 4 ô (Film shelf, Darkroom, Prints, Settings) và dải look của cuộn.
-- Trên Home: bấm MENU lần nữa ra menu Canon. Bấm TRASH mở menu ML (lối vào menu ML trên
-  5D2, vì WindyFilm giữ TRASH lúc chụp).
-- Lúc đang quay phim: MENU vẫn là menu Canon.
+Thẻ M5 có gì (so với RAWB28)
+- M1 Home: hàng "Camera interface" trong menu ML > WindyFilm: WindyFilm (mặc định) hoặc
+  Canon + ML (y như RAWB28). Với WindyFilm, đang chụp bấm MENU mở Home thay cho menu Canon;
+  trên Home bấm MENU lần nữa ra menu Canon; bấm TRASH trên Home mở menu ML.
+- M2 Film shelf: trình duyệt phim mở ra kệ lon phim (lưới 4 cột, tab, phim đang chọn bên
+  trái). Thanh trên của mọi màn film OS có pin (cả %), đồng hồ máy và tên máy.
+- M3 LiveView finder: Settings > LiveView finder: Full (mặc định) / Minimal / Bright lines /
+  Canon + ML (thanh ML như cũ). INFO vẫn là INFO của Canon.
+- M4 Top plate: chụp qua ống ngắm, màn hình chụp của Canon tự đổi thành "Top plate" của
+  WindyFilm (tốc độ, khẩu, ISO, thang đo sáng, look của cuộn, phim). Bánh xe chính đổi tốc độ
+  (Tv / M) hoặc khẩu (Av); bánh xe sau đổi khẩu (M) hoặc bù sáng (P / Tv / Av). Bấm nửa nút
+  chụp: đóng; 20 giây không bấm gì: trả lại màn của Canon. Tắt ở Settings > Top plate.
+- M5 Prints: Darkroom ghi thêm file Fnn_nnnn.WFP (156 KB) cạnh mỗi bản in trong ROLLS/ROLLnnn.
+  Màn Prints xem các bản in đó, SET mở contact sheet của cuộn (6 khung một dải).
+  Ô Prints trên Home luôn mở Prints. Nút PLAY chỉ mở Prints khi Settings > PLAY shows = Prints;
+  mặc định là Canon (PLAY như RAWB28).
+- Lưu ý: bản in làm bằng thẻ cũ không có file .WFP nên KHÔNG hiện trong Prints. Phải tráng
+  (Darkroom) một cuộn bằng thẻ M5 trước.
 
-Phím trên Home
-- Joystick lên / xuống: đi giữa 4 ô và dải look. Trái / phải: đi trong dải look.
-- Xoay bánh xe: đổi giá trị look đang chọn (Light, Print, Paper, Grain, Halation, Strength).
-- SET hoặc bấm joystick: mở ô đang chọn. INFO: mở trình duyệt phim.
-- PLAY: xem ảnh của Canon (khi Blind roll bật và có cuộn: báo "Blind roll", không mở).
-- TRASH: menu ML. Bấm nửa nút chụp: đóng Home, chụp như thường.
-- Trong Film shelf / Darkroom / Settings: MENU quay về Home.
+Phím
+- Home: joystick lên / xuống giữa 4 ô và dải look; trái / phải trong dải look; xoay bánh xe
+  đổi giá trị look. SET hoặc bấm joystick mở ô. INFO mở trình duyệt phim. MENU: menu Canon.
+  TRASH: menu ML. Bấm nửa nút chụp: đóng.
+- Top plate: MENU Home; TRASH Film shelf; INFO màn INFO của Canon; PLAY Prints (khi PLAY shows
+  = Prints, nếu không là xem ảnh của Canon).
+- Film shelf: joystick trái / phải hoặc bánh xe đổi phim; lên / xuống đổi hàng; Picture Style
+  sang tab sau; SET nạp phim; INFO mở màn chi tiết của trình duyệt; MENU về Home.
+- Prints: bánh xe chính, bánh xe sau, joystick trái / phải: bản in trước / sau (hết cuộn thì
+  sang cuộn kế); joystick lên / xuống hoặc Picture Style: đổi cuộn; SET hoặc bấm joystick:
+  contact sheet; INFO: ảnh to cả màn hình (INFO hoặc MENU để thoát); PLAY: xem ảnh của Canon;
+  MENU: Home; bấm nửa nút chụp: đóng.
+- Contact sheet: joystick hoặc bánh xe: đổi khung; Picture Style: contact sheet của cuộn kế;
+  SET, bấm joystick, INFO hoặc MENU: mở bản in của khung đang chọn; PLAY: xem ảnh của Canon.
 
 Các bước thử (ghi lại bước nào không đúng)
-a. Chép cả thư mục lên thẻ, bật máy (chụp qua ống ngắm). Bấm MENU: Home hiện ra, không
-   thấy menu Canon nhấp nháy trước.
-b. Trên Home bấm MENU: menu Canon mở ngay, Home không hiện lại. Thoát menu Canon, bấm MENU
-   lần nữa: lại là Home.
-c. Trên Home bấm TRASH: menu ML mở.
-d. Bật LiveView, làm lại a và b.
-e. Chưa có cuộn trong máy: trên Home xoay bánh xe đổi Grain, rồi chụp một tấm: ảnh có
-   Grain mới. Mở lại Home: giá trị vẫn giữ. (Có cuộn thì ảnh chụp là JPEG của Canon, màu
-   phim chỉ có ở bản in Darkroom, như RAWB28.)
-f. Settings > Camera interface đổi sang Canon + ML: MENU ra menu Canon như RAWB28. Đổi lại
-   WindyFilm (trong Settings của Home hoặc menu ML > WindyFilm > Camera interface).
-g. Settings > System: dòng Font pack ghi "ok" (nếu ghi "older pack" là thẻ chép thiếu
-   ML/DATA/WFFONTS.DAT mới).
-h. Có cuộn trong máy: Home hiện đúng ROLL và số khung; ô Darkroom mở được Darkroom.
-i. Trên Home bấm PLAY: xem ảnh của Canon (Blind roll tắt).
+a. Chép cả thư mục lên thẻ, bật máy (chụp qua ống ngắm). Bấm nút INFO cho màn chụp của Canon
+   hiện lên: Top plate phải tự hiện thay nó. Màn của Canon có vẽ đè lên Top plate không.
+b. Trên Top plate xoay bánh xe chính và bánh xe sau ở Tv, Av và M: giá trị đổi đúng 1/3 bước
+   (hoặc 1/2 nếu máy đặt 1/2), chụp một tấm xem EXIF có đúng giá trị không.
+c. Top plate: MENU về Home, TRASH ra kệ phim, INFO ra màn của Canon (ghi lại INFO làm gì sau
+   đó), để yên 20 giây thì màn của Canon trở lại.
+d. Trên Home bấm MENU: menu Canon mở ngay, Home không hiện lại. Bấm TRASH: menu ML mở.
+e. Thanh trên: số % pin và giờ có đúng với máy không.
+f. Home > Film shelf: đi qua vài phim, đổi tab bằng Picture Style, nạp một phim. MENU về Home.
+g. Bật LiveView: thử 4 kiểu LiveView finder trong Settings. Với Full: dư sáng thì thang đo lệch
+   về "+" (không bị ngược). Top plate không được hiện trong LiveView.
+h. Nạp phim, chụp vài khung (nên có một tấm chụp dọc), tráng trong Darkroom. Log có dòng
+   "dark: Fnn Prints picture Fnn_nnnn.WFP, 156 KB, oN" cho mỗi khung.
+i. Home > ô Prints: hiện bản in mới nhất. Ảnh chụp dọc phải đứng đúng chiều. Đi qua các bản
+   in bằng bánh xe và joystick, joystick lên / xuống đổi cuộn (ghi lại nếu joystick lên /
+   xuống không làm gì), INFO xem cả màn hình. Ghi lại mở một bản in mất bao lâu và ảnh trên
+   LCD trông thế nào (ảnh có 103 màu, có chấm dither nhỏ).
+j. Bấm SET: contact sheet. Ghi lại cuộn 36 khung đầy hình mất bao lâu. Chọn một khung, SET:
+   về đúng bản in đó. Ảnh dọc trong contact sheet nằm nghiêng (như trên phim) là đúng.
+k. Trong Prints bấm PLAY: ra màn xem ảnh của Canon, KHÔNG bật lại Prints.
+l. Settings > PLAY shows = Prints. Bấm PLAY lúc đang chụp (qua ống ngắm, trên Top plate và
+   trong LiveView): Prints mở. Đổi lại Canon: PLAY như RAWB28.
+m. Blind roll bật, có cuộn trong máy: PLAY (với PLAY shows = Prints) vẫn mở Prints; PLAY trong
+   Prints báo chữ, không ra màn xem ảnh của Canon.
+n. Settings > Top plate = Off: màn chụp của Canon như RAWB28. Settings > Camera interface =
+   Canon + ML: MENU ra menu Canon như RAWB28. Đổi lại cả hai.
+o. Settings > System: dòng Font pack ghi "ok".
 
 Gửi lại
-- ML/LOGS/WINDYFLM.LOG sau khi thử, chép lên share Anh vào thư mục log_m1_5d2.
-- Các dòng cần xem trong log: "ui: MENU on Home: Canon's menu" (bước b),
-  "ui: closed for the ML menu" (bước c).
+- ML/LOGS/WINDYFLM.LOG sau khi thử, chép lên share Anh vào thư mục log_m5_5d2.
+- Các dòng cần xem trong log: "plate: Canon's shooting screen: the Top plate" (bước a),
+  "plate: dial ..." (bước b), "ui: Prints: n rolls, m prints", "ui: contact sheet ROLLnnn"
+  rồi "ui: contact sheet: ROLLnnn, n frames" (giờ ở đầu hai dòng này cho biết contact sheet
+  dựng mất bao lâu), "no memory" (nếu có: thiếu bộ nhớ), "ui: Prints -> Canon's PLAY" (bước k).

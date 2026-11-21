@@ -1,44 +1,64 @@
-HƯỚNG DẪN THỬ FILM OS (modernUI M1) TRÊN EOS M
-==============================================
-Thẻ M1, 21/11/2026, nhánh modernUI (từ RAWB28). CHƯA chạy trên máy thật lần nào.
+HƯỚNG DẪN THỬ FILM OS (modernUI M1 - M5) TRÊN EOS M
+===================================================
+Thẻ M5, 21/11/2026, nhánh modernUI (từ RAWB28). CHƯA chạy trên máy thật lần nào.
 Mọi thứ khác (Roll, Darkroom, phim, cube) giống thẻ RAWB28: xem HUONGDAN_DARKROOM_EOSM.txt.
 
-M1 có gì mới
-- Hàng mới "Camera interface" trong menu ML > WindyFilm (dưới "Open film browser"):
-  WindyFilm (mặc định) hoặc Canon + ML (y như RAWB28).
-- Với WindyFilm: đang chụp LiveView ảnh tĩnh, bấm MENU mở màn hình Home của WindyFilm
-  thay cho menu Canon. Home có: lon phim, ROLL, tên phim, số khung đã chụp / còn lại,
-  4 ô (Film shelf, Darkroom, Prints, Settings) và dải look của cuộn.
-- Trên Home: bấm MENU lần nữa ra menu Canon. Chạm hai ngón vẫn mở menu ML.
-- Quay phim (chế độ movie) và lúc đang quay: MENU vẫn là menu Canon.
+Thẻ M5 có gì (so với RAWB28)
+- M1 Home: hàng "Camera interface" trong menu ML > WindyFilm: WindyFilm (mặc định) hoặc
+  Canon + ML (y như RAWB28). Với WindyFilm, đang chụp LiveView ảnh tĩnh bấm MENU mở Home
+  thay cho menu Canon; trên Home bấm MENU lần nữa ra menu Canon; chạm hai ngón vẫn mở menu ML.
+  Quay phim: MENU vẫn là menu Canon.
+- M2 Film shelf: trình duyệt phim mở ra kệ lon phim (lưới 4 cột, tab, phim đang chọn bên
+  trái). Thanh trên của mọi màn film OS có pin, đồng hồ máy và tên máy.
+- M3 LiveView finder: Settings > LiveView finder: Full (mặc định) / Minimal / Bright lines /
+  Canon + ML (thanh ML như cũ). INFO vẫn là INFO của Canon.
+- M5 Prints: Darkroom ghi thêm file Fnn_nnnn.WFP (156 KB) cạnh mỗi bản in trong ROLLS/ROLLnnn.
+  Màn Prints xem các bản in đó, SET mở contact sheet của cuộn (6 khung một dải).
+  Ô Prints trên Home luôn mở Prints. Nút PLAY chỉ mở Prints khi Settings > PLAY shows = Prints;
+  mặc định là Canon (PLAY như RAWB28).
+- Lưu ý: bản in làm bằng thẻ cũ không có file .WFP nên KHÔNG hiện trong Prints. Phải tráng
+  (Darkroom) một cuộn bằng thẻ M5 trước.
 
-Phím trên Home
-- UP / DOWN: đi giữa 4 ô và dải look. LEFT / RIGHT: đi trong dải look.
-- Xoay vòng: đổi giá trị look đang chọn (Light, Print, Paper, Grain, Halation, Strength).
-- SET (hoặc Q): mở ô đang chọn. INFO: mở trình duyệt phim.
-- PLAY: xem ảnh của Canon (khi Blind roll bật và có cuộn: báo "Blind roll", không mở).
-- Bấm nửa nút chụp: đóng Home, chụp như thường.
-- Trong Film shelf / Darkroom / Settings: MENU quay về Home.
+Phím
+- Home: UP / DOWN giữa 4 ô và dải look; LEFT / RIGHT trong dải look; xoay vòng đổi giá trị
+  look. SET hoặc Q mở ô. INFO mở trình duyệt phim. MENU: menu Canon. Bấm nửa nút chụp: đóng.
+- Film shelf: LEFT / RIGHT hoặc xoay vòng đổi phim; UP / DOWN đổi hàng; chạm hoặc Q sang tab
+  sau; SET nạp phim; INFO mở màn chi tiết của trình duyệt (MENU ở đó về lại kệ); MENU về Home.
+- Prints: LEFT / RIGHT hoặc xoay vòng: bản in trước / sau (hết cuộn thì sang cuộn kế);
+  UP / DOWN: cuộn mới hơn / cũ hơn; SET hoặc Q: contact sheet; INFO: ảnh to cả màn hình
+  (INFO hoặc MENU để thoát); PLAY: xem ảnh của Canon; MENU: Home; bấm nửa nút chụp: đóng.
+- Contact sheet: LEFT / RIGHT hoặc xoay vòng: khung trước / sau; UP / DOWN: dải trên / dưới;
+  SET, INFO hoặc MENU: mở bản in của khung đang chọn; PLAY: xem ảnh của Canon.
 
 Các bước thử (ghi lại bước nào không đúng)
-a. Chép cả thư mục lên thẻ, bật máy, vào LiveView ảnh tĩnh. Bấm MENU: Home hiện ra,
-   không thấy menu Canon nhấp nháy trước.
-b. Trên Home bấm MENU: menu Canon mở ngay, Home không hiện lại. Thoát menu Canon, bấm MENU
-   lần nữa: lại là Home.
-c. Ở LiveView (không mở Home) chạm hai ngón: menu ML mở (không phải Home).
-d. Mở Home, chạm hai ngón: menu ML mở, KHÔNG thấy menu Canon hiện sau đó.
-e. Mở Film shelf từ Home, chạm hai ngón: về Home; chạm hai ngón lần nữa: menu ML.
-f. Chưa có cuộn trong máy: trên Home xoay vòng đổi Grain, rồi chụp một tấm: ảnh có Grain
-   mới. Mở lại Home: giá trị vẫn giữ. (Có cuộn thì ảnh chụp là JPEG của Canon, màu phim chỉ
-   có ở bản in Darkroom, như RAWB28.)
-g. Settings > Camera interface đổi sang Canon + ML: MENU ra menu Canon như RAWB28. Đổi lại
-   WindyFilm (trong Settings của Home hoặc menu ML > WindyFilm > Camera interface).
-h. Settings > System: dòng Font pack ghi "ok" (nếu ghi "older pack" là thẻ chép thiếu
-   ML/DATA/WFFONTS.DAT mới).
-i. Có cuộn trong máy: Home hiện đúng ROLL và số khung; ô Darkroom mở được Darkroom.
-j. Chuyển sang quay phim: MENU là menu Canon.
+a. Chép cả thư mục lên thẻ, bật máy, vào LiveView ảnh tĩnh. Bấm MENU: Home hiện ra, không
+   thấy menu Canon nhấp nháy trước. Trên Home bấm MENU: menu Canon mở ngay.
+b. Ở LiveView chạm hai ngón: menu ML mở. Mở Home rồi chạm hai ngón: menu ML mở, KHÔNG thấy
+   menu Canon hiện sau đó.
+c. Thanh trên của Home: pin và giờ có đúng với máy không.
+d. Home > Film shelf: đi qua vài phim, đổi tab, nạp một phim. MENU về Home.
+e. LiveView finder: thử cả 4 kiểu trong Settings. Với Full: chỉnh bù sáng / chụp cảnh sáng hơn,
+   thang đo lệch về "+" khi dư sáng (không bị ngược). Xem các thanh có che khung lấy nét
+   của Canon không.
+f. Nạp phim, chụp vài khung (nên có một tấm chụp dọc), hết cuộn hoặc tráng ngay trong Darkroom.
+   Log có dòng "dark: Fnn Prints picture Fnn_nnnn.WFP, 156 KB, oN" cho mỗi khung.
+g. Home > ô Prints: hiện bản in mới nhất. Ảnh chụp dọc phải đứng đúng chiều. Đi qua các bản in,
+   đổi cuộn, bấm INFO xem cả màn hình. Ghi lại mở một bản in mất bao lâu và ảnh trên LCD
+   trông thế nào (ảnh có 103 màu, có chấm dither nhỏ).
+h. Bấm SET: contact sheet. Ghi lại cuộn 36 khung đầy hình mất bao lâu. Chọn một khung, SET:
+   về đúng bản in đó. Ảnh dọc trong contact sheet nằm nghiêng (như trên phim) là đúng.
+i. Trong Prints bấm PLAY: ra màn xem ảnh của Canon, KHÔNG bật lại Prints. Thoát xem ảnh của Canon.
+j. Settings > PLAY shows = Prints. Ở LiveView bấm PLAY: Prints mở. Trong Prints bấm PLAY: ra
+   màn xem ảnh của Canon. Đổi lại Canon: PLAY như RAWB28.
+k. Blind roll bật, có cuộn trong máy: PLAY (với PLAY shows = Prints) vẫn mở Prints; PLAY trong
+   Prints báo chữ, không ra màn xem ảnh của Canon.
+l. Settings > Camera interface = Canon + ML: MENU ra menu Canon như RAWB28. Đổi lại WindyFilm.
+m. Settings > System: dòng Font pack ghi "ok".
+n. Chuyển sang quay phim: MENU là menu Canon, PLAY như cũ.
 
 Gửi lại
-- ML/LOGS/WINDYFLM.LOG sau khi thử, chép lên share Anh vào thư mục log_m1_eosm.
-- Các dòng cần xem trong log: "ui: MENU on Home: Canon's menu" (bước b),
-  "ui: MENU on Home was the two-finger tap: the ML menu" (bước d).
+- ML/LOGS/WINDYFLM.LOG sau khi thử, chép lên share Anh vào thư mục log_m5_eosm.
+- Các dòng cần xem trong log: "ui: Prints: n rolls, m prints" (mở Prints), "ui: Prints: ROLLnnn
+  Fnn, k colours" (mỗi bản in), "ui: contact sheet ROLLnnn" rồi "ui: contact sheet: ROLLnnn,
+  n frames" (giờ ở đầu hai dòng này cho biết contact sheet dựng mất bao lâu), "no memory"
+  (nếu có: thiếu bộ nhớ), "ui: Prints -> Canon's PLAY" (bước i).
