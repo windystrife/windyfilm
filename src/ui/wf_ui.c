@@ -2433,16 +2433,11 @@ unsigned int wf_ui_key(unsigned int key)
     case MODULE_KEY_UNPRESS_HALFSHUTTER:
     case MODULE_KEY_UNPRESS_FULLSHUTTER:
         return 1;
-    case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_UP: case MODULE_KEY_WHEEL_DOWN:
-        if (scr == WFUI_SCR_PLATE && scr_req < 0 && st == ST_OPEN)
-            return 1;                                       /* the 5D2's Top plate: the dials stay Canon's (shutter,
-                                                               aperture, compensation; the plate shows the change) */
-        goto queue;
     case MODULE_KEY_PRESS_LEFT: case MODULE_KEY_PRESS_RIGHT: case MODULE_KEY_PRESS_UP: case MODULE_KEY_PRESS_DOWN:
+    case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_RIGHT: case MODULE_KEY_WHEEL_UP: case MODULE_KEY_WHEEL_DOWN:
     case MODULE_KEY_PRESS_SET: case MODULE_KEY_JOY_CENTER: case MODULE_KEY_Q: case MODULE_KEY_PICSTYLE:
     case MODULE_KEY_TOUCH_1_FINGER: case MODULE_KEY_INFO: case MODULE_KEY_MENU: case MODULE_KEY_TRASH:
     case MODULE_KEY_PLAY: case MODULE_KEY_LV:
-    queue:
     {
         int w = kq_w, nw = (w + 1) % KQ_N;
         if (nw != kq_r) { kq[w] = key; kq_w = nw; }

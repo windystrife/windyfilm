@@ -44,6 +44,7 @@ extern int gui_state, lv_dispsize, af_mode;
 extern int h_gui_mode;                                   /* get_gui_mode() (the 5D2's Top plate: 0 = the shooting screen) */
 extern volatile int h_disp_idle, h_mz_cd, h_mz_n, h_mz_en, h_av_n, h_av_refuse;
 extern volatile int h_tv_n, h_tv_refuse;                 /* lens_set_rawshutter calls / a body that keeps its Tv */
+extern volatile int h_ae_n;                              /* lens_set_ae calls */
 
 /* lens_info fields by name */
 int  h_li_get(const char *field);

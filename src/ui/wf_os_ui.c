@@ -617,8 +617,8 @@ static int set_key(int k)
  * the mode, the roll's look, the next frame, the card's shots left, the drive, the blind roll; on the right the film's
  * card: can, name, ROLL nnn, frames shot and the gauge. It comes up by itself on Canon's shooting screen (wf_osvf.c
  * wf_plate_poll: power on, the display back on, back from a Canon screen; Settings > Top plate) and opens nothing
- * else. Half-press closes it (wf_ui_key: Canon meters, as ever); the dials pass to Canon (wf_ui_key: shutter, aperture,
- * compensation change under it and it shows them); without a key or a change it gives the screen back after
+ * else. Half-press closes it (wf_ui_key: Canon meters, as ever); the dials set the exposure (wf_plate_dial: the plate
+ * holds Canon's MENU mode, so they come to us); without a key or a change it gives the screen back after
  * PLATE_IDLE_MS (Canon's own screen and its LCD timer again). Keys: MENU Home, TRASH the Film shelf, INFO Canon's
  * screen (closed, Canon gets INFO), PLAY Prints. */
 #define PLATE_IDLE_MS 20000
@@ -782,12 +782,18 @@ static int plate_key(int k)
     case MODULE_KEY_TRASH: wfui_shelf(); break;
     case MODULE_KEY_INFO:  wf_log("ui: Top plate: INFO, Canon's screen"); wfui_close_after(WFUI_AFTER_INFO); break;
     case MODULE_KEY_PLAY:  open_tile(HF_PRINTS); break;
+    case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_RIGHT:   /* the main dial */
+        wf_plate_dial(0, k == MODULE_KEY_WHEEL_RIGHT ? 1 : -1);
+        break;
+    case MODULE_KEY_WHEEL_UP: case MODULE_KEY_WHEEL_DOWN:      /* the rear wheel */
+        wf_plate_dial(1, k == MODULE_KEY_WHEEL_DOWN ? 1 : -1);
+        break;
     case MODULE_KEY_LV:    return 1;
     }
     return 0;
 }
 
-/* a change (the dials under it, a frame, the card) redraws and keeps it up; nothing for PLATE_IDLE_MS: Canon's screen */
+/* a change (the dials, a frame, the card) redraws and keeps it up; nothing for PLATE_IDLE_MS: Canon's screen */
 static int plate_tick(int now)
 {
     struct wfos_lv v;

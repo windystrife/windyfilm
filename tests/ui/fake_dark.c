@@ -147,6 +147,10 @@ int wf_battery_pct(void) { return batt_pct; }
 static struct wfos_lv lvv = { 0, "1/125", "f/2.8", "400", 1, -3, 2, 812, 0, "M", "Single" };
 void fake_set_lv(const struct wfos_lv *v) { lvv = *v; }
 void wf_osvf_values(struct wfos_lv *v) { *v = lvv; }
+static int dial_n[2], dial_last;
+int wf_plate_dial(int dial, int dir) { dial_n[dial & 1]++; dial_last = dir; return 1; }
+int fake_plate_dials(int dial) { return dial_n[dial & 1]; }
+int fake_plate_dial_dir(void) { return dial_last; }
 
 /* ------------------------------------------------------------------ print finishes (wf_menu.c's rows, DESIGN 3.9) */
 volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg, wf_pr_cr2;

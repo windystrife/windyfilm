@@ -733,6 +733,8 @@ int lens_set_rawshutter(int s)
     h_li_set("shutter", s);
     return 1;
 }
+volatile int h_ae_n;                             /* lens_set_ae calls (the 5D2 Top plate's rear wheel) */
+int lens_set_ae(int ae) { h_ae_n++; h_li_set("ae", ae); return 1; }
 void lens_set_wbs_gm(int v) { h_gm_last = v; h_li_set("gm", v); }
 void lens_set_wbs_ba(int v) { h_ba_last = v; h_li_set("ba", v); }
 int get_expsim(void) { return h_expsim; }

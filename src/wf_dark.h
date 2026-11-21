@@ -252,6 +252,7 @@ void wf_osvf_values(struct wfos_lv *v);          /* the values now (the 5D2's To
    on top) for 300 ms opens the UI on the Top plate; once per screen (it re-arms when that screen goes: display off,
    LiveView, a menu, PLAY, a review). 1 back = it opened the plate now */
 int  wf_plate_poll(int now);
+int  wf_plate_dial(int dial, int dir);           /* the plate's dials (UI task): 0 main, 1 rear; 1 = a new value */
 /* the lock: ms >= 0 takes it (waits up to ms; 1 = taken), ms < 0 gives it back. Before the lock exists: always 1 */
 int  wf_hud_lock(int ms);
 int  wf_roll_wind(void);                         /* wf_dark.c: 1 while the wind-on cue shows (1 s after a frame) */

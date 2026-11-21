@@ -549,8 +549,11 @@ int main(int argc, char **argv)
             if (round == 0)
             {
                 shot("m4_5d2_plate");
-                CHECK(wf_ui_key(MODULE_KEY_WHEEL_LEFT) == 1 && wf_ui_key(MODULE_KEY_WHEEL_DOWN) == 1,
-                      "5D2 Top plate: a dial not passed to Canon");
+                int d0 = fake_plate_dials(0), d1 = fake_plate_dials(1);
+                CHECK(key(MODULE_KEY_WHEEL_RIGHT) == 0 && fake_plate_dials(0) == d0 + 1 && fake_plate_dial_dir() == 1,
+                      "5D2 Top plate: the main dial did not step (Canon would get it in its menu mode)");
+                CHECK(key(MODULE_KEY_WHEEL_UP) == 0 && fake_plate_dials(1) == d1 + 1 && fake_plate_dial_dir() == -1,
+                      "5D2 Top plate: the rear wheel did not step");
                 tick(400);                                  /* 8 s, then the dial's change shows */
                 snprintf(pv.sh, sizeof pv.sh, "1/500");
                 pv.meter = -13;

@@ -7727,6 +7727,30 @@ static void t_plate(void)
     chk(!log_has("plate:"), "Top plate on again: not over the screen that is up");
     plate_screen_again(&h_disp, 0, 1);
     chk(plate_opened(3000), "Top plate on, the next screen: the Top plate");
+    /* the plate's dials: main = shutter (M, Tv) / aperture (Av); rear = aperture (M) / compensation (P, Tv, Av) */
+    h_li_set("name0", 'E');
+    h_li_set("amin", 24);
+    h_li_set("amax", 80);
+    shooting_mode = 3;
+    h_li_set("shutter", 96);
+    h_li_set("aperture", 40);
+    int tv0 = h_tv_n, av0 = h_av_n, ae0 = h_ae_n;
+    chk(wf_plate_dial(0, 1) == 1 && h_li_get("shutter") == 99 && h_tv_n == tv0 + 1, "M, main dial right: shutter 96 -> "
+        "99 (%d)", h_li_get("shutter"));
+    chk(wf_plate_dial(1, -1) == 1 && h_li_get("aperture") == 37 && h_av_n == av0 + 1, "M, rear wheel up: aperture 40 -> "
+        "37 (%d)", h_li_get("aperture"));
+    shooting_mode = 2;
+    chk(wf_plate_dial(0, 1) == 1 && h_li_get("aperture") == 40, "Av, main dial: aperture back to 40 (%d)",
+        h_li_get("aperture"));
+    h_li_set("ae", 0);
+    chk(wf_plate_dial(1, 1) == 1 && h_li_get("ae") == 3 && h_ae_n == ae0 + 1, "Av, rear wheel down: +1/3 EV (ae %d)",
+        h_li_get("ae"));
+    h_li_set("ae", 16);
+    chk(wf_plate_dial(1, 1) == 0 && h_li_get("ae") == 16, "+2 EV: the end (ae %d)", h_li_get("ae"));
+    shooting_mode = 4;
+    chk(wf_plate_dial(0, 1) == 0 && wf_plate_dial(1, 1) == 0, "BULB: the dials change nothing");
+    h_li_set("ae", 0);
+    shooting_mode = 2;
     /* Camera interface Canon + ML: never */
     wf_os_set(0);
     plate_screen_again(&h_disp, 0, 1);

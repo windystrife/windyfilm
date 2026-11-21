@@ -191,6 +191,38 @@ int wf_osvf_wants(void)
 }
 
 /* ------------------------------------------------------------------ the 5D2's Top plate (M4) */
+/* the Top plate's dials (UI task): the plate holds Canon's MENU mode (2, as the browser without LiveView), so the dials
+   come to us and would only move Canon's hidden menu. dial 0 = the main dial: Tv / M the shutter, Av the aperture; dial
+   1 = the rear wheel: M the aperture, P / Tv / Av the compensation. One 1/3 stop (a half-stop body: 1/2) each way.
+   1 back = Canon took a new value; 0 = nothing to change here (that mode, an end, not taken: logged) */
+int wf_plate_dial(int dial, int dir)
+{
+    int m = shooting_mode, d = dir > 0 ? 1 : -1;
+    const char *what = 0;
+    int c0 = 0, c = 0, ok = 0;
+    if (dial == 0 && (m == 1 || m == SM_M)) {
+        what = "shutter";
+        c0 = lens_info.raw_shutter;
+        c = c0 > 0 ? wf_roll_av_step(c0, d, 16, 160, (c0 & 7) == 4) : c0;   /* 30" .. 1/8000 */
+        ok = c != c0 && lens_set_rawshutter(c);
+    } else if ((dial == 0 && m == SM_AV) || (dial == 1 && m == SM_M)) {
+        what = "aperture";
+        c0 = lens_info.raw_aperture;
+        int lo = lens_info.raw_aperture_min ? lens_info.raw_aperture_min : 8;
+        int hi = lens_info.raw_aperture_max ? lens_info.raw_aperture_max : 96;
+        c = lens_info.name[0] && c0 > 0 ? wf_roll_av_step(c0, d, lo, hi, (c0 & 7) == 4) : c0;
+        ok = c != c0 && lens_set_rawaperture(c);
+    } else if (dial == 1 && m >= SM_P && m <= SM_AV) {
+        what = "compensation";
+        c0 = lens_info.ae;
+        c = wf_roll_av_step(c0 + 64, d, 64 - 16, 64 + 16, (c0 & 7) == 4) - 64;   /* -2 .. +2 EV (1/8 EV codes) */
+        ok = c != c0 && lens_set_ae(c);
+    }
+    if (what)
+        wf_log("plate: dial %d %s %d -> %d%s", dial, what, c0, c, ok ? "" : c == c0 ? " (an end)" : " (not taken)");
+    return ok;
+}
+
 static int pl_armed = 1, pl_t0, pl_ui_t = -100000;
 
 int wf_plate_poll(int now)

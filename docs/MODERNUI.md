@@ -154,7 +154,8 @@ Picture Style, LV.
 | | MENU | Home |
 | | TRASH | Film shelf |
 | | PLAY | Prints (Canon's PLAY; a blind roll says why not) |
-| | main dial, rear wheel | Canon's (shutter, aperture, compensation); the plate shows the change |
+| | main dial | Tv / M: shutter, Av: aperture (1/3 stop) |
+| | rear wheel | M: aperture, P / Tv / Av: compensation (1/3 stop, -2 .. +2) |
 | | half-press | closes it (Canon meters and shoots as ever) |
 | shooting, LV | INFO | HUD Full -> Minimal -> Canon's own |
 | | MENU / TRASH / PLAY | as above |
@@ -245,8 +246,10 @@ says so.
     close). For 1.5 s after any close of our UI it does not re-arm (the 5D2's GUI-mode hand-back settles first).
     Turning the option on does not open it over the screen that is up; the next one gets it.
   - It takes the screen as the browser does without LV (GUI mode 2, the 5D2 open path in `wf_ui.c`) and gives it
-    back at half-press (`wf_ui_key`). The dials pass to Canon while it is up (`wf_ui_key`: WHEEL keys return 1 on the
-    plate), and the plate redraws when a value changes (`plate_tick` sums the values).
+    back at half-press (`wf_ui_key`). In Canon's MENU mode the dials come to us, not to Canon's exposure (passed on,
+    they would only move Canon's hidden menu), so the plate sets the exposure itself (`wf_osvf.c wf_plate_dial`, ML's
+    `lens_set_rawshutter` / `lens_set_rawaperture` / `lens_set_ae`, one 1/3 stop a click, a half-stop body 1/2). It
+    redraws when a value changes (`plate_tick` sums the values).
   - With no key and no change for 20 s it closes with nothing sent: Canon's screen and Canon's LCD timer again.
   - Values: `wf_osvf_values` (the finder's `lens_info` values plus `mode` and `drive`). Without a half-press the 5D2
     does not meter, so EXPOSURE shows the exposure compensation in P / Tv / Av and the last metered value in M.
@@ -415,20 +418,22 @@ Cards are built only on the owner's word.
      - The roll's look in a box (Light, Print, Grain, Paper); NEXT FRAME, CARD (shots left), DRIVE, BLIND ROLL.
      - Right: the film's card (can, name, ROLL nnn, frames shot / exposures and the gauge; no film: an empty can's
        place and "TRASH: a film from the shelf").
-   - **Keys:** MENU Home, TRASH the Film shelf, INFO Canon's screen (close + Canon's INFO), PLAY Prints, the dials
-     Canon's, half-press closes.
+   - **Keys:** MENU Home, TRASH the Film shelf, INFO Canon's screen (close + Canon's INFO), PLAY Prints, the main
+     dial the shutter (Tv / M) or aperture (Av), the rear wheel the aperture (M) or compensation (P / Tv / Av),
+     half-press closes.
    - **Settings:** Interface > Top plate On / Off on the 5D2, in the row the EOS M uses for Quick keys.
    - **Checked:**
      - `tests/ui/run.sh`: os_test opens the plate six times (shots `m4_5d2_plate`, `_dial`, `_end`, `_canon`,
-       `m4_5d2_settings_plate_off`). The dials pass; a change at 8 s keeps it up past 20 s; TRASH, MENU, INFO
+       `m4_5d2_settings_plate_off`). Each dial steps its value; a change at 8 s keeps it up past 20 s; TRASH, MENU, INFO
        (Canon gets INFO), PLAY (Canon gets PLAY; a blind roll keeps it with a word); idle for 20 s closes with nothing
        sent. Everything given back each time.
      - `test.sh` PLATE (both cameras): the auto-open and its re-arming (display, gui mode, gui_state, the ML menu,
-       PLAY, a Canon screen, a shot being saved), plate off, on again over an open screen, Camera interface Canon + ML,
+       PLAY, a Canon screen, a shot being saved), the dials' steps and ends, plate off, on again over an open screen,
+       Camera interface Canon + ML,
        never in LiveView, never on the EOS M; `plate=` saved. CFG reads and saves `plate=`.
    - **On the camera:**
      - Canon's shooting screen really reads gui mode 0 with the display on (the 5D2's INFO screens);
-     - the dials under the plate change Canon's values without a Canon redraw over ours;
+     - which dial sends WHEEL LEFT / RIGHT and which UP / DOWN (ML 5D2: main dial assumed LEFT / RIGHT);
      - what INFO does after the close;
      - the battery % and the clock.
 5. **M5: Prints (not started).**
