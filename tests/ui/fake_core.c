@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "../../src/wf_api.h"
+#include "../../src/wf_fx.h"                    /* labfx: the Lab values and the run rules, for wf_row_note */
 #include "fake_core.h"
 
 static int cam = WF_CAM_EOSM, loaded, gen = 1, grey_mask, missing[8], nmissing;
@@ -154,6 +155,34 @@ int wf_row_level(int r, int *max)
 {
     if (max) *max = STRENGTH_MAX;
     return r == WF_ROW_STRENGTH ? val[r] : 0;
+}
+
+/* wf_menu.c's wf_row_note over the fake rows (the same rules and words) */
+const char *wf_row_note(int row, int *kind)
+{
+    int g = val[WF_ROW_GRAIN], h = val[WF_ROW_HALO], b = val[WF_ROW_BLOOM], ga = val[WF_ROW_GAUGE], k = WF_NOTE_NONE;
+    const char *t = 0;
+    switch (row)
+    {
+    case WF_ROW_HALO:
+        if (h && !WF_HALO_RUN(h, b)) k = WF_NOTE_UNUSED, t = "not used: Bloom is Lab";
+        else if (h && h != WF_HALO_LAB && ga == WF_GAUGE_8) k = WF_NOTE_AS16, t = "runs as 16 mm";
+        break;
+    case WF_ROW_BLOOM:
+        if (b && !WF_BLOOM_RUN(h, b))
+            k = WF_NOTE_UNUSED, t = h == WF_HALO_LAB ? "not used: Halation is Lab" : "not used: Wrap has no bloom";
+        else if (b && b != WF_BLOOM_LAB && ga == WF_GAUGE_8) k = WF_NOTE_AS16, t = "runs as 16 mm";
+        break;
+    case WF_ROW_GRAIN:
+        if (g && g != WF_GRAIN_LAB && ga == WF_GAUGE_8) k = WF_NOTE_AS16, t = "runs as 16 mm";
+        break;
+    case WF_ROW_GAUGE:
+        if (ga == WF_GAUGE_8 && (g || h || b) && g != WF_GRAIN_LAB && h != WF_HALO_LAB && b != WF_BLOOM_LAB)
+            k = WF_NOTE_LABGAUGE, t = "a Lab gauge: WindyFilm runs as 16 mm";
+        break;
+    }
+    if (kind) *kind = k;
+    return t;
 }
 
 int wf_avail(int id)

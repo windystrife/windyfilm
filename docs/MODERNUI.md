@@ -480,6 +480,29 @@ Cards are built only on the owner's word.
      `windyflm.mo` and `card/HUONGDAN_FILMOS_<CAM>.txt` differ: the step lists now walk M1 - M5 (M2 shelf, M3 finder,
      M4 Top plate on the 5D2, M5 Prints and the contact sheet; a roll must be developed with the M5 card first, older
      prints have no `.WFP`). Logs come back to share Anh `log_m5_eosm` / `log_m5_5d2`.
+5b. **Lab in the film OS (labfx merged 21 Nov 2026, owner's word through the top session).**
+   - **The merge:** labfx c1aacce (on 6e7f700) brings `src/yl_lab.c`: Halation, Bloom and Grain with the film-lab numbers.
+     It adds Lab as the last choice of those three rows and Gauge 8 mm, and its config words, EXIF and shot lines.
+     FX:lab and DESIGN 3.20 come with it (see there). Conflicts were only test.sh's object list and the gate's branch list.
+   - **The film OS reads the same rows,** so Lab and 8 mm show and step wherever a screen has the row:
+     - Home's look strip (Grain, Halation);
+     - Details from the shelf or from SET on the strip (all four);
+     - the INFO page (all four);
+     - the 5D2 Top plate (Grain, shown only).
+   - **What does not run as shown is said by the value,** from one core rule set (`wf_menu.c wf_row_note`, the halation
+     stage's `WF_HALO_RUN` / `WF_BLOOM_RUN`, the ML menu's advice):
+     - a WindyFilm Halation with Bloom Lab, or a WindyFilm Bloom with Halation Lab or with Wrap, is greyed with "not
+       used: Bloom is Lab" (red);
+     - a WindyFilm Grain / Halation / Bloom at Gauge 8 mm says "runs as 16 mm" (amber);
+     - Gauge 8 mm with no Lab value says "a Lab gauge: WindyFilm runs as 16 mm".
+     Where each screen shows it:
+     - Home: the focused item's note in the strip's hint, an unused value grey;
+     - Details: the note before the value;
+     - INFO: "(not used)", "(as 16 mm)", "(Lab only)".
+   - **Checked:**
+     - os_test shots `lab_eosm_*` and `lab_5d2_*` (Home, Details, 8 mm, INFO, the Top plate), with ui_test's
+       `lab_rows` / `lab_gauge`;
+     - FX:lab checks `wf_row_note` for every case.
 6. **M6: Polish.**
    - The Darkroom's top bar in the film OS style (safelight theme kept).
    - Boot straight to the HUD with the roll toast.

@@ -73,6 +73,13 @@ const char *wf_row_text_long(int row);    /* the same, with a print stock by its
 int  wf_row_avail(int row);               /* 0 = has no effect with the current output or camera: the UI greys it */
 int  wf_row_step(int row, int delta);     /* delta -1 / +1; 1 = the value changed (and was saved) */
 int  wf_row_level(int row, int *max);     /* bar rows (Strength): the level 0..*max */
+/* labfx in the film OS: why a value does not run as shown, 0 = it does. *kind (may be 0): WF_NOTE_UNUSED, a WindyFilm
+   Halation / Bloom value that the other row's Lab takes out, or Bloom with Wrap ("not used: Bloom is Lab");
+   WF_NOTE_AS16, a WindyFilm Grain / Halation / Bloom value at Gauge 8 mm ("runs as 16 mm"); WF_NOTE_LABGAUGE, Gauge 8 mm
+   with no Lab value on. The rules the halation stage runs by (wf_fx.h WF_HALO_RUN / WF_BLOOM_RUN); one set for all films,
+   as the values. */
+enum { WF_NOTE_NONE = 0, WF_NOTE_UNUSED, WF_NOTE_AS16, WF_NOTE_LABGAUGE };
+const char *wf_row_note(int row, int *kind);
 /* the same four for film id as SET would load it (Film for a film, its cube's Log + LUT for a can; the loaded film or an
    unknown id: as above). The WindyFilm UI's rows follow the film under the cursor with these, before SET (owner 11-16):
    a film-stage film lights its knob rows, a can greys Print stock, and Print stock shows and steps that film's prints.

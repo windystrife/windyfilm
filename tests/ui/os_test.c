@@ -11,6 +11,7 @@
 #include "fake_dark.h"
 #include "wf_api.h"
 #include "../../src/wf_dark.h"
+#include "../../src/wf_fx.h"                    /* labfx: the Lab values (WF_GRAIN_LAB, ...) */
 #include <stdlib.h>
 #include <sys/stat.h>
 
@@ -18,6 +19,7 @@ int wfui_host_scr(void);
 int wfui_host_sel_id(void);
 int wfui_host_tab(void);
 int wfui_host_shelf(void);
+int wfui_host_focus(void);
 int wfui_host_sh_top(void);
 int wfui_host_sh_row(void);
 int wfui_host_sh_cur(void);
@@ -832,6 +834,67 @@ int main(int argc, char **argv)
         }
     }
 
+    /* ---------------------------------------------------------------- EOS M: Lab (labfx) on the film OS screens:
+       Grain / Halation / Bloom Lab and Gauge 8 mm show and step on Home and in Details; a WindyFilm Halation with Bloom
+       Lab is greyed with "not used" (the core's wf_row_note), WindyFilm values at 8 mm say "runs as 16 mm" */
+    {
+        fake_reset();
+        fake_dark_reset();
+        fake_set_card(card);
+        host_sent_clear();
+        roll_in("PRT160", 12, 12, 36);
+        wf_blind = 0;
+        wf_os_set(1);
+        lv = 1;
+        gui_state = GUISTATE_IDLE;
+        fake_set_row(WF_ROW_GRAIN, WF_GRAIN_LAB);
+        fake_set_row(WF_ROW_HALO, 1);                       /* Wide: Bloom Lab takes it out */
+        fake_set_row(WF_ROW_BLOOM, WF_BLOOM_LAB);
+        fake_set_row(WF_ROW_GAUGE, WF_GAUGE_8);
+        open_home();
+        for (int i = 0; i < 6 && wfos_host_hfoc() < 4; i++) key(MODULE_KEY_PRESS_DOWN);   /* the look strip */
+        for (int i = 0; i < 6 && wfos_host_hfoc() != 7; i++) key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(wfos_host_hfoc() == 7 && !strcmp(wf_row_text(WF_ROW_GRAIN), "Lab"), "Lab: Home on Grain %d '%s'",
+              wfos_host_hfoc(), wf_row_text(WF_ROW_GRAIN));
+        shot("lab_eosm_home_grain");
+        key(MODULE_KEY_PRESS_RIGHT);
+        int k = 0, warn = 0;
+        CHECK(wfos_host_hfoc() == 8 && wf_row_note(WF_ROW_HALO, &k) && k == WF_NOTE_UNUSED,
+              "Lab: Home on Halation %d, Wide with Bloom Lab not 'not used' (%d)", wfos_host_hfoc(), k);
+        for (int y = 330; y < 350; y++)
+            for (int x = 300; x < 690; x++) warn += host_px(x, y) == PX(C_WARN);
+        CHECK(warn > 40, "Lab: Home's hint does not say why Halation is not used (%d px)", warn);
+        shot("lab_eosm_home_halo_unused");
+        for (int i = 0; i < 6 && fake_row_value(WF_ROW_HALO) != WF_HALO_LAB; i++) key(MODULE_KEY_WHEEL_RIGHT);
+        CHECK(fake_row_value(WF_ROW_HALO) == WF_HALO_LAB && !wf_row_note(WF_ROW_HALO, 0) && !strcmp(wf_row_text(WF_ROW_HALO), "Lab"),
+              "Lab: the ring did not reach Halation Lab (%d)", fake_row_value(WF_ROW_HALO));
+        shot("lab_eosm_home_halo_lab");
+        key(MODULE_KEY_PRESS_SET);                          /* SET on the strip: Details on that row */
+        tick(1);
+        CHECK(wfui_host_scr() == WFUI_SCR_BROWSER && !wfui_host_shelf() && wfui_host_focus() == WF_ROW_HALO,
+              "Lab: SET on Halation: screen %d, shelf %d, row %d", wfui_host_scr(), wfui_host_shelf(), wfui_host_focus());
+        shot("lab_eosm_details");
+        fake_set_row(WF_ROW_HALO, 1);
+        key(MODULE_KEY_PRESS_DOWN);                         /* Bloom: Lab; Halation above it greyed, "not used" */
+        CHECK(wfui_host_focus() == WF_ROW_BLOOM, "Lab: DOWN from Halation not on Bloom (%d)", wfui_host_focus());
+        shot("lab_eosm_details_unused");
+        key(MODULE_KEY_PRESS_DOWN);
+        CHECK(wfui_host_focus() == WF_ROW_GAUGE && !strcmp(wf_row_text(WF_ROW_GAUGE), "8 mm"), "Lab: Gauge row %d '%s'",
+              wfui_host_focus(), wf_row_text(WF_ROW_GAUGE));
+        fake_set_row(WF_ROW_GRAIN, 2);                      /* WindyFilm values at 8 mm: "runs as 16 mm" */
+        fake_set_row(WF_ROW_BLOOM, 2);
+        tick(1);
+        shot("lab_eosm_details_8mm");
+        key(MODULE_KEY_INFO);
+        tick(1);
+        shot("lab_eosm_info");
+        wf_ui_key(MODULE_KEY_PRESS_HALFSHUTTER);
+        tick(1);
+        CHECK(closed, "Lab: half-press did not close");
+        end_checks();
+        wf_blind = 1;
+    }
+
     /* ---------------------------------------------------------------- 5D2, through the viewfinder */
     fake_reset();
     fake_dark_reset();
@@ -1043,6 +1106,56 @@ int main(int argc, char **argv)
         prv_clean(card);
         wf_playv_set(0);
         lv = 1;
+    }
+
+    /* 5D2: Lab on the Top plate, Home and Details (labfx) */
+    {
+        fake_reset();
+        fake_dark_reset();
+        fake_set_card(card);
+        fake_set_cam(WF_CAM_5D2);
+        wf_os_set(1);
+        host_sent_clear();
+        roll_in("PRT160", 12, 12, 36);
+        wf_blind = 0;
+        lv = 0;
+        fake_set_row(WF_ROW_GRAIN, WF_GRAIN_LAB);
+        fake_set_row(WF_ROW_HALO, WF_HALO_LAB);
+        fake_set_row(WF_ROW_BLOOM, 2);                      /* Normal: Halation Lab takes it out */
+        fake_set_row(WF_ROW_GAUGE, WF_GAUGE_8);
+        struct wfos_lv pv = lv_vals(WF_VF_FULL, "1/125", "f/2.8", "400", 1, 0, 2, 1204, 0);
+        snprintf(pv.mode, sizeof pv.mode, "Av");
+        snprintf(pv.drive, sizeof pv.drive, "Single");
+        fake_set_lv(&pv);
+        host_gui_set(0, 1, 1);
+        closed = 0;
+        wf_ui_open_scr(WF_UI_SCR_PLATE);
+        CHECK(wf_ui_is_open(), "5D2 Lab: the Top plate did not open");
+        wfui_task_begin();
+        tick(1);
+        CHECK(wfui_host_scr() == WFUI_SCR_PLATE && !strcmp(wf_row_text(WF_ROW_GRAIN), "Lab"), "5D2 Lab: plate %d, Grain '%s'",
+              wfui_host_scr(), wf_row_text(WF_ROW_GRAIN));
+        shot("lab_5d2_plate");
+        CHECK(key(MODULE_KEY_MENU) == 0, "5D2 Lab: MENU on the plate not consumed");
+        tick(1);
+        CHECK(wfui_host_scr() == WFUI_SCR_HOME, "5D2 Lab: MENU on the plate, screen %d", wfui_host_scr());
+        for (int i = 0; i < 6 && wfos_host_hfoc() < 4; i++) key(MODULE_KEY_PRESS_DOWN);   /* the look strip */
+        for (int i = 0; i < 6 && wfos_host_hfoc() != 8; i++) key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(wfos_host_hfoc() == 8 && !strcmp(wf_row_text(WF_ROW_HALO), "Lab"), "5D2 Lab: Home on Halation %d '%s'",
+              wfos_host_hfoc(), wf_row_text(WF_ROW_HALO));
+        shot("lab_5d2_home");
+        key(MODULE_KEY_PRESS_SET);
+        tick(1);
+        key(MODULE_KEY_PRESS_DOWN);
+        int k = 0;
+        CHECK(wfui_host_focus() == WF_ROW_BLOOM && wf_row_note(WF_ROW_BLOOM, &k) && k == WF_NOTE_UNUSED,
+              "5D2 Lab: Bloom Normal with Halation Lab (row %d, note %d)", wfui_host_focus(), k);
+        shot("lab_5d2_details");
+        wf_ui_key(MODULE_KEY_PRESS_HALFSHUTTER);
+        tick(1);
+        CHECK(closed, "5D2 Lab: half-press did not close");
+        end_checks();
+        wf_blind = 1;
     }
 
     /* 5D2 LiveView: the same finder */

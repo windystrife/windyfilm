@@ -1165,7 +1165,8 @@ static void draw_info_column(const struct wf_film *f, int g)
             else draw_blind_line(y, A, AD, li == rtop + ROWS_VIS - 1);
             continue;
         }
-        int foc = r == focus, av = wf_row_avail_for(r, f->id);
+        int foc = r == focus, av = wf_row_avail_for(r, f->id), nk = 0;
+        const char *nt = av ? wf_row_note(r, &nk) : 0;      /* labfx: a glow value the other's Lab takes out, 8 mm */
         if (foc)
         {
             wfg_rrect(258, y - 1, 708, y + 18, 6, AD, edit ? A : -1, 1);  /* 5D2 edit: outlined, LEFT / RIGHT step */
@@ -1180,7 +1181,7 @@ static void draw_info_column(const struct wf_film *f, int g)
         const char *val = wf_row_text_long_for(r, f->id);
         if (!val || ui_textw(F_15, val) > vx - 18 - (294 + ui_textw(F_15, nm ? nm : "") + 16)) val = wf_row_text_for(r, f->id);
         if (!val) val = "";
-        int xl = vx - text_r(F_15, vx, y, val, !av ? C_TXT3 : foc ? C_TXT : C_TXT2);   /* left edge of the value */
+        int xl = vx - text_r(F_15, vx, y, val, !av || nk == WF_NOTE_UNUSED ? C_TXT3 : foc ? C_TXT : C_TXT2);   /* left edge of the value */
         if (r == WF_ROW_STRENGTH)
         {
             int max = 0, lv = wf_row_level(r, &max);
@@ -1196,6 +1197,12 @@ static void draw_info_column(const struct wf_film *f, int g)
         {
             wfg_tri(694, y + 4, 699, y + 9, 694, y + 14, A);
             wfg_tri(xl - 7, y + 4, xl - 12, y + 9, xl - 7, y + 14, A);
+        }
+        if (nt)                                             /* the note before the value, where it fits after the name */
+        {
+            int nx = xl - (live ? 20 : 10) - ui_textw(F_13, nt);
+            if (nx > 294 + ui_textw(F_15, nm ? nm : "") + 12)
+                ui_text(F_13, nx, y + 2, nt, nk == WF_NOTE_UNUSED ? C_WARN : C_AMBER);
         }
         if (!foc && li != rtop + ROWS_VIS - 1) wfg_rect(294, y + 18, 700, y + 18, C_SEP);
     }
@@ -1466,6 +1473,13 @@ static void info_row(int r, int id, int st)
     if (!wf_row_avail_for(r, id)) return;
     const char *nm = wf_row_name(r), *v = wf_row_text_long_for(r, id);
     if (!v || ui_textw(F_15, v) > 220) v = wf_row_text_for(r, id);
+    char b[48];
+    int nk = 0;
+    if (v && wf_row_note(r, &nk))                           /* labfx: the short word for why it does not run as shown */
+    {
+        snprintf(b, sizeof b, "%s (%s)", v, nk == WF_NOTE_UNUSED ? "not used" : nk == WF_NOTE_AS16 ? "as 16 mm" : "Lab only");
+        v = b;
+    }
     info_pair(nm ? nm : "", v, st ? C_AMBER : C_TXT3);
 }
 

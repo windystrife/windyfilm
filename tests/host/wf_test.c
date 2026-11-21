@@ -1394,6 +1394,38 @@ static void t_fx_lab(void)
     chk(wf_gauge == WF_GAUGE_8, "Gauge 65 mm + 1 wraps to 8 mm (%d)", wf_gauge);
     wf_row_step(WF_ROW_GAUGE, -1);
     chk(wf_gauge == 2, "Gauge 8 mm - 1 = 65 mm (%d)", wf_gauge);
+    {                                            /* modernUI: the film OS's notes (wf_row_note), what does not run as shown */
+        int g0 = wf_grain, h0 = wf_halo, b0 = wf_bloom, ga0 = wf_gauge, k = -1;
+        const char *t;
+        wf_grain = WF_GRAIN_LAB;
+        wf_gauge = WF_GAUGE_8;
+        chk(!wf_row_note(WF_ROW_GRAIN, 0) && !wf_row_note(WF_ROW_HALO, 0) && !wf_row_note(WF_ROW_BLOOM, 0)
+            && !wf_row_note(WF_ROW_GAUGE, &k) && k == WF_NOTE_NONE, "notes: all three Lab at 8 mm, none (%d)", k);
+        wf_halo = 1;
+        t = wf_row_note(WF_ROW_HALO, &k);
+        chk(t && k == WF_NOTE_UNUSED && strstr(t, "Bloom is Lab"), "notes: Halation Wide with Bloom Lab not used ('%s')", t ? t : "");
+        wf_halo = WF_HALO_LAB;
+        wf_bloom = 2;
+        t = wf_row_note(WF_ROW_BLOOM, &k);
+        chk(t && k == WF_NOTE_UNUSED && strstr(t, "Halation is Lab"), "notes: Bloom Normal with Halation Lab not used ('%s')",
+            t ? t : "");
+        wf_halo = 3;
+        t = wf_row_note(WF_ROW_BLOOM, &k);
+        chk(t && k == WF_NOTE_UNUSED && strstr(t, "Wrap"), "notes: Bloom with Wrap not used ('%s')", t ? t : "");
+        wf_grain = 2;
+        wf_halo = 1;
+        int kg = 0, kh = 0, kb = 0, kga = 0;
+        chk(wf_row_note(WF_ROW_GRAIN, &kg) && wf_row_note(WF_ROW_HALO, &kh) && wf_row_note(WF_ROW_BLOOM, &kb)
+            && wf_row_note(WF_ROW_GAUGE, &kga) && kg == WF_NOTE_AS16 && kh == WF_NOTE_AS16 && kb == WF_NOTE_AS16
+            && kga == WF_NOTE_LABGAUGE, "notes: WindyFilm at 8 mm run as 16 mm, the gauge a Lab one (%d %d %d %d)", kg, kh, kb, kga);
+        wf_gauge = 0;
+        chk(!wf_row_note(WF_ROW_GRAIN, 0) && !wf_row_note(WF_ROW_HALO, 0) && !wf_row_note(WF_ROW_BLOOM, 0)
+            && !wf_row_note(WF_ROW_GAUGE, 0), "notes: WindyFilm at 16 mm, none");
+        wf_grain = g0;
+        wf_halo = h0;
+        wf_bloom = b0;
+        wf_gauge = ga0;
+    }
     wf_row_step(WF_ROW_GAUGE, 1);
     h_clock_add_ms += 2000;
     usleep(400000);

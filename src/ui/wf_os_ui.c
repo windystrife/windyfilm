@@ -325,14 +325,27 @@ static void home_render(void)
     wfg_rrect(16, 322, 703, 422, 12, C_FRAME, lf ? C_AMBER : C_SEP, 1);
     ui_caps(32, 334, h.open ? "LOOK OF THIS ROLL" : "LOOK", C_TXT3);
     const char *hint = lf ? (is5d2() ? "DIAL  CHANGE   SET  MORE" : "RING  CHANGE   SET  MORE") : "DOWN  TO CHANGE";
-    ui_caps(688 - ui_capsw(hint), 334, hint, C_TXT3);
+    int hc = C_TXT3, hk = 0;
+    char hb[48];
+    const char *ht = lf && f && wf_row_avail(look_row[hfoc - HF_LOOK]) ? wf_row_note(look_row[hfoc - HF_LOOK], &hk) : 0;
+    if (ht)                                                 /* labfx: why the focused value does not run as shown */
+    {
+        int i = 0;
+        for (; ht[i] && i < (int)sizeof hb - 1; i++) hb[i] = ht[i] >= 'a' && ht[i] <= 'z' ? ht[i] - 32 : ht[i];
+        hb[i] = 0;
+        hint = hb;
+        hc = hk == WF_NOTE_UNUSED ? C_WARN : C_AMBER;
+    }
+    ui_caps(688 - ui_capsw(hint), 334, hint, hc);
     for (int i = 0; i < NLOOK; i++)
     {
         int cx = 32 + i * 112, row = look_row[i], foc = hfoc == HF_LOOK + i, av = f && wf_row_avail(row);
         if (i) wfg_rect(cx - 12, 362, cx - 12, 406, C_SEP);
         if (foc) wfg_rrect(cx - 8, 356, cx + 96, 412, 8, C_AMBERD, C_AMBER, 1);
         ui_caps(cx, 362, look_cap[i], foc ? C_AMBER : C_TXT3);
-        int tc = !av ? C_TXT3 : foc ? C_AMBER : C_TXT;
+        int nk = 0;
+        if (av) wf_row_note(row, &nk);                      /* labfx: a glow value the other row's Lab takes out: grey */
+        int tc = !av || nk == WF_NOTE_UNUSED ? C_TXT3 : foc ? C_AMBER : C_TXT;
         if (row == WF_ROW_STRENGTH)
         {
             int max = 1, lev = wf_row_level(row, &max);
