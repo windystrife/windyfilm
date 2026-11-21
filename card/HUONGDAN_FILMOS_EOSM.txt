@@ -1,7 +1,8 @@
-HƯỚNG DẪN THỬ FILM OS (modernUI M1 - M5) TRÊN EOS M
-===================================================
-Thẻ M5, 21/11/2026, nhánh modernUI (từ RAWB28). CHƯA chạy trên máy thật lần nào.
-Mọi thứ khác (Roll, Darkroom, phim, cube) giống thẻ RAWB28: xem HUONGDAN_DARKROOM_EOSM.txt.
+HƯỚNG DẪN THỬ FILM OS (modernUI M1 - M5 + Lab) TRÊN EOS M
+=========================================================
+Thẻ M5LAB, 22/11/2026, nhánh modernUI 4c840ab: thẻ M5 + labfx 748001d (Lab, sửa PLAY sau khi
+tráng). Thẻ M5, 21/11/2026, nhánh modernUI (từ RAWB28). CHƯA chạy trên máy thật lần nào.
+Mọi thứ khác (Roll, Darkroom, phim, cube) giống thẻ PLAYFIX: xem HUONGDAN_DARKROOM_EOSM.txt.
 
 Thẻ M5 có gì (so với RAWB28)
 - M1 Home: hàng "Camera interface" trong menu ML > WindyFilm: WindyFilm (mặc định) hoặc
@@ -18,6 +19,23 @@ Thẻ M5 có gì (so với RAWB28)
   mặc định là Canon (PLAY như RAWB28).
 - Lưu ý: bản in làm bằng thẻ cũ không có file .WFP nên KHÔNG hiện trong Prints. Phải tráng
   (Darkroom) một cuộn bằng thẻ M5 trước.
+
+Thẻ M5LAB thêm gì (so với thẻ M5)
+- Lab: Grain, Halation, Bloom có thêm nấc cuối "Lab", Gauge có thêm nấc "8 mm" (như thẻ
+  PLAYFIX). Film OS hiện và đổi được các nấc này ở dải look của Home (Grain, Halation), ở màn
+  chi tiết Details (cả 4 hàng) và trang INFO (cả 4 hàng).
+- Giá trị nào sẽ không chạy như đang hiện thì film OS nói ngay ở giá trị đó:
+  - Halation kiểu WindyFilm khi Bloom = Lab: Halation mờ, chữ đỏ "not used: Bloom is Lab".
+    Bloom kiểu WindyFilm khi Halation = Lab (hoặc Halation = Wrap): Bloom mờ, chữ đỏ "not used:
+    Halation is Lab" (hoặc "not used: Wrap has no bloom").
+  - Gauge 8 mm: Grain / Halation / Bloom kiểu WindyFilm có chữ vàng "runs as 16 mm". Gauge 8 mm
+    mà không hàng nào là Lab: Gauge ghi "a Lab gauge: WindyFilm runs as 16 mm".
+  Trên Home chữ đó hiện ở dòng gợi ý dưới dải look khi đứng ở ô đó; ở Details hiện trước giá
+  trị; ở INFO là "(not used)", "(as 16 mm)", "(Lab only)".
+- PLAY sau khi tráng: sau mỗi kiểu module bảo Canon đọc lại danh sách file, nên PLAY thấy bản
+  in ngay, không cần tắt máy hay rút thẻ. Chỉ khi việc đó không làm được thì lần PLAY đầu tiên
+  (bấm ở LiveView, trên Home hay trong Prints) hiện hộp "PLAY may miss new prints: / Card out
+  and in, or power off/on" 3 giây, rồi PLAY vẫn mở.
 
 Phím
 - Home: UP / DOWN giữa 4 ô và dải look; LEFT / RIGHT trong dải look; xoay vòng đổi giá trị
@@ -55,10 +73,33 @@ k. Blind roll bật, có cuộn trong máy: PLAY (với PLAY shows = Prints) v�
 l. Settings > Camera interface = Canon + ML: MENU ra menu Canon như RAWB28. Đổi lại WindyFilm.
 m. Settings > System: dòng Font pack ghi "ok".
 n. Chuyển sang quay phim: MENU là menu Canon, PLAY như cũ.
+o. (M5LAB) Lab. Home, dải look: đứng ở Grain, xoay vòng tới nấc cuối "Lab"; Halation cũng tới
+   "Lab". SET trên dải look mở Details: Bloom tới "Lab", Gauge tới "8 mm". Rồi thử từng trường hợp:
+   1. Bloom = Lab, Halation một kiểu WindyFilm: Halation mờ, chữ đỏ "not used: Bloom is Lab"
+      (Home: ở dòng gợi ý khi đứng ở ô Halation; Details: trước giá trị).
+   2. Halation = Lab, Bloom một kiểu WindyFilm: Bloom mờ, chữ đỏ "not used: Halation is Lab".
+   3. Gauge 8 mm, Grain một kiểu WindyFilm: chữ vàng "runs as 16 mm". Gauge 8 mm và không hàng
+      nào là Lab: Gauge ghi "a Lab gauge: WindyFilm runs as 16 mm".
+   4. Trang INFO: các dòng ghi "(not used)", "(as 16 mm)", "(Lab only)" đúng như trên.
+   Chữ có nằm gọn, không đè lên giá trị không. Chụp một cuộn có Lab rồi tráng: log có "halation
+   lab + bloom lab, grain lab", tráng lâu hơn (ghi lại thời gian mỗi kiểu).
+p. (M5LAB) PLAY sau khi tráng, như bước an của HUONGDAN_DARKROOM_EOSM.txt: Camera JPEG =
+   Overwrite, RAW after Darkroom = Move to ROLLS, nạp cuộn 3 kiểu, chụp 3 tấm, tráng.
+   1. Màn "Roll developed" KHÔNG có hai dòng vàng.
+   2. Đóng Darkroom, bấm PLAY ngay (chưa tắt máy, chưa rút thẻ): không có hộp nhắc. Cả 3 tấm
+      hiện bản tráng, không báo lỗi, không ô trống, không còn CR2 cũ của 3 tấm đó.
+   3. Làm lại với cuộn khác nhưng vào PLAY từ film OS: Home (PLAY shows = Canon) và trong
+      Prints bấm PLAY. Vẫn như bước 2.
+   4. Tắt máy bật lại, PLAY: vẫn như bước 2.
+   Log mỗi kiểu một dòng "dark: Fnn Canon's file list read again (PLAY shows the new print),
+   N ms". Nếu thấy "Canon's file list not read again (...)": lần PLAY đầu tiên hiện hộp nhắc
+   một lần (vào từ Home / Prints thì log thêm "ui: Canon's PLAY may miss the new prints:
+   said"); gửi log, rút thẻ ra cắm lại để PLAY thấy bản in.
 
 Gửi lại
 - ML/LOGS/WINDYFLM.LOG sau khi thử, chép lên share Anh vào thư mục log_m5_eosm.
 - Các dòng cần xem trong log: "ui: Prints: n rolls, m prints" (mở Prints), "ui: Prints: ROLLnnn
   Fnn, k colours" (mỗi bản in), "ui: contact sheet ROLLnnn" rồi "ui: contact sheet: ROLLnnn,
   n frames" (giờ ở đầu hai dòng này cho biết contact sheet dựng mất bao lâu), "no memory"
-  (nếu có: thiếu bộ nhớ), "ui: Prints -> Canon's PLAY" (bước i).
+  (nếu có: thiếu bộ nhớ), "ui: Prints -> Canon's PLAY" (bước i), "Canon's file list read
+  again" (bước p). Thẻ M5LAB: thư mục log_m5lab_eosm.

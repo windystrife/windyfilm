@@ -1,7 +1,9 @@
-HƯỚNG DẪN THỬ FILM OS (modernUI M1 - M5) TRÊN 5D MARK II
-=======================================================
+HƯỚNG DẪN THỬ FILM OS (modernUI M1 - M5 + Lab) TRÊN 5D MARK II
+=============================================================
+Thẻ M5LAB, 22/11/2026, nhánh modernUI 4c840ab: thẻ M5 + labfx 748001d (Lab, Darkroom giữ được
+khi Screen Off, tên ống kính trên bản in, sửa PLAY sau khi tráng).
 Thẻ M5, 21/11/2026, nhánh modernUI (từ RAWB28). CHƯA chạy trên máy thật lần nào.
-Mọi thứ khác (Roll, Darkroom, phim, cube) giống thẻ RAWB28: xem HUONGDAN_DARKROOM_5D2.txt.
+Mọi thứ khác (Roll, Darkroom, phim, cube) giống thẻ PLAYFIX: xem HUONGDAN_DARKROOM_5D2.txt.
 
 Thẻ M5 có gì (so với RAWB28)
 - M1 Home: hàng "Camera interface" trong menu ML > WindyFilm: WindyFilm (mặc định) hoặc
@@ -21,6 +23,28 @@ Thẻ M5 có gì (so với RAWB28)
   mặc định là Canon (PLAY như RAWB28).
 - Lưu ý: bản in làm bằng thẻ cũ không có file .WFP nên KHÔNG hiện trong Prints. Phải tráng
   (Darkroom) một cuộn bằng thẻ M5 trước.
+
+Thẻ M5LAB thêm gì (so với thẻ M5)
+- Lab: Grain, Halation, Bloom có thêm nấc cuối "Lab", Gauge có thêm nấc "8 mm" (như thẻ
+  PLAYFIX). Film OS hiện và đổi được các nấc này ở dải look của Home (Grain, Halation), ở màn
+  chi tiết Details (cả 4 hàng) và trang INFO (cả 4 hàng).
+- Giá trị nào sẽ không chạy như đang hiện thì film OS nói ngay ở giá trị đó:
+  - Halation kiểu WindyFilm khi Bloom = Lab: Halation mờ, chữ đỏ "not used: Bloom is Lab".
+    Bloom kiểu WindyFilm khi Halation = Lab (hoặc Halation = Wrap): Bloom mờ, chữ đỏ "not used:
+    Halation is Lab" (hoặc "not used: Wrap has no bloom").
+  - Gauge 8 mm: Grain / Halation / Bloom kiểu WindyFilm có chữ vàng "runs as 16 mm". Gauge 8 mm
+    mà không hàng nào là Lab: Gauge ghi "a Lab gauge: WindyFilm runs as 16 mm".
+  Trên Home chữ đó hiện ở dòng gợi ý dưới dải look khi đứng ở ô đó; ở Details hiện trước giá
+  trị; ở INFO là "(not used)", "(as 16 mm)", "(Lab only)".
+- PLAY sau khi tráng: sau mỗi kiểu module bảo Canon đọc lại danh sách file, nên PLAY thấy bản
+  in ngay, không cần tắt máy hay rút thẻ. Chỉ khi việc đó không làm được thì lần PLAY đầu tiên
+  (bấm ở LiveView, trên Home hay trong Prints) hiện hộp "PLAY may miss new prints: / Card out
+  and in, or power off/on" 3 giây, rồi PLAY vẫn mở.
+- Darkroom với Screen Off: bấm một phím cho màn hình sáng lại thì Darkroom vẫn còn đó (thẻ cũ
+  trả về màn của Canon).
+- Tên ống kính: 5D2 không ghi tên ống kính vào chỗ EXIF thường đọc, nên module đọc nó từ phần
+  riêng của Canon trong file (vd "EF50mm f/1.8 STM"). Ống kính máy chỉ biết tiêu cự (chỉ ghi
+  "35mm", "24-105mm") thì bỏ tên.
 
 Phím
 - Home: joystick lên / xuống giữa 4 ô và dải look; trái / phải trong dải look; xoay bánh xe
@@ -65,10 +89,43 @@ m. Blind roll bật, có cuộn trong máy: PLAY (với PLAY shows = Prints) v�
 n. Settings > Top plate = Off: màn chụp của Canon như RAWB28. Settings > Camera interface =
    Canon + ML: MENU ra menu Canon như RAWB28. Đổi lại cả hai.
 o. Settings > System: dòng Font pack ghi "ok".
+p. (M5LAB) Lab. Home, dải look: đứng ở Grain, xoay bánh xe tới nấc cuối "Lab"; Halation cũng
+   tới "Lab". SET trên dải look mở Details: Bloom tới "Lab", Gauge tới "8 mm". Thử từng trường
+   hợp:
+   1. Bloom = Lab, Halation một kiểu WindyFilm: Halation mờ, chữ đỏ "not used: Bloom is Lab"
+      (Home: ở dòng gợi ý khi đứng ở ô Halation; Details: trước giá trị).
+   2. Halation = Lab, Bloom một kiểu WindyFilm: Bloom mờ, chữ đỏ "not used: Halation is Lab".
+   3. Gauge 8 mm, Grain một kiểu WindyFilm: chữ vàng "runs as 16 mm". Gauge 8 mm và không hàng
+      nào là Lab: Gauge ghi "a Lab gauge: WindyFilm runs as 16 mm".
+   4. Trang INFO: các dòng ghi "(not used)", "(as 16 mm)", "(Lab only)" đúng như trên.
+   5. Top plate (chụp qua ống ngắm): ô Grain ghi Lab khi Grain = Lab.
+   Chữ có nằm gọn, không đè lên giá trị không. Chụp một cuộn có Lab rồi tráng: log có "halation
+   lab + bloom lab, grain lab", tráng lâu hơn (ghi lại thời gian mỗi kiểu).
+q. (M5LAB) PLAY sau khi tráng, như bước p của HUONGDAN_DARKROOM_5D2.txt: Camera JPEG =
+   Overwrite, RAW after Darkroom = Move to ROLLS, nạp cuộn 3 kiểu, chụp 3 tấm, tráng.
+   1. Màn "Roll developed" KHÔNG có hai dòng vàng.
+   2. MENU đóng Darkroom, bấm PLAY ngay (chưa tắt máy, chưa rút thẻ): không có hộp nhắc. Cả 3
+      tấm hiện bản tráng, không báo lỗi, không ô trống, không còn CR2 cũ của 3 tấm đó.
+   3. Làm lại với cuộn khác nhưng vào PLAY từ film OS: trên Top plate, trên Home (PLAY shows =
+      Canon) và trong Prints. Vẫn như bước 2.
+   4. Tắt máy bật lại, PLAY: vẫn như bước 2.
+   Log mỗi kiểu một dòng "dark: Fnn Canon's file list read again (PLAY shows the new print),
+   N ms". Nếu thấy "Canon's file list not read again (...)": lần PLAY đầu tiên hiện hộp nhắc
+   một lần (vào từ Top plate / Home / Prints thì log thêm "ui: Canon's PLAY may miss the new
+   prints: said"); gửi log, rút thẻ ra cắm lại để PLAY thấy bản in.
+r. (M5LAB) Screen Off: trong Darkroom nút góc trên phải = Screen Off, tráng cuộn 3 kiểu. Màn
+   hình tắt; bấm một phím: màn hình sáng lại và vẫn là Darkroom (không phải màn của Canon),
+   tráng vẫn chạy, rồi tắt lại. Làm vài lần trong một cuộn. Nếu Darkroom mất: gửi log (dòng
+   "ui: 5D2: gui mode ..., display ...: closing" và "ui: 5D2: gui mode ..., asked for ...").
+s. (M5LAB) Tên ống kính: gắn EF 50mm f/1.8 STM, PRINT Frame White, Info On + roll, tráng cuộn
+   3 kiểu. Dòng thông số dưới bản in (mở trong ROLLS/ROLL00n trên máy tính) phải có
+   "EF50mm f/1.8 STM". Thử thêm một ống kính khác nếu có.
 
 Gửi lại
 - ML/LOGS/WINDYFLM.LOG sau khi thử, chép lên share Anh vào thư mục log_m5_5d2.
 - Các dòng cần xem trong log: "plate: Canon's shooting screen: the Top plate" (bước a),
   "plate: dial ..." (bước b), "ui: Prints: n rolls, m prints", "ui: contact sheet ROLLnnn"
   rồi "ui: contact sheet: ROLLnnn, n frames" (giờ ở đầu hai dòng này cho biết contact sheet
-  dựng mất bao lâu), "no memory" (nếu có: thiếu bộ nhớ), "ui: Prints -> Canon's PLAY" (bước k).
+  dựng mất bao lâu), "no memory" (nếu có: thiếu bộ nhớ), "ui: Prints -> Canon's PLAY" (bước k),
+  "Canon's file list read again" (bước q), "ui: 5D2: gui mode" (bước r). Thẻ M5LAB: thư mục
+  log_m5lab_5d2.
