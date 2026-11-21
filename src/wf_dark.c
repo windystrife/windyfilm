@@ -2765,7 +2765,7 @@ static void dk_hang(int i)
  * camera has no memory for stays out of the prints; the log line says what is in ("-" = wanted, not ready). */
 static void dk_look(const struct wf_look *lk)
 {
-    static const char *const bn[WF_BLOOM_MAX + 1] = { "", "bloom low", "bloom normal", "bloom strong" };
+    static const char *const bn[WF_BLOOM_MAX + 1] = { "", "bloom low", "bloom normal", "bloom strong", "bloom lab" };
     int t0 = get_ms_clock(), hk = 0, gk = 0, mk = 0, n = 0;
     char b[96];
     dv.frame = -1;
@@ -2779,11 +2779,13 @@ static void dk_look(const struct wf_look *lk)
     b[0] = 0;
     if (lk->output == WF_OUT_FILM)
         n += snprintf(b + n, sizeof b - n, wf_ws_table(lk->row, lk->variant, lk->stk) ? ", film table" : ", film table -");
-    if (hk && n < (int)sizeof b)                 /* the halation stage: what runs in it ("halation + bloom normal") */
-        n += snprintf(b + n, sizeof b - n, ", %s%s%s%s", WF_FXK_HALO(hk) ? "halation" : "",
-                      WF_FXK_HALO(hk) && WF_FXK_BLOOM(hk) ? " + " : "", bn[WF_FXK_BLOOM(hk)], wf_fx_hk == hk ? "" : " -");
+    if (hk && n < (int)sizeof b) {               /* the halation stage: what runs in it ("halation + bloom normal") */
+        int hh = WF_FXK_HALO(hk) || WF_FXK_HLAB(hk), hb = WF_FXK_BLAB(hk) ? WF_BLOOM_LAB : WF_FXK_BLOOM(hk);
+        n += snprintf(b + n, sizeof b - n, ", %s%s%s%s", hh ? WF_FXK_HLAB(hk) ? "halation lab" : "halation" : "",
+                      hh && hb ? " + " : "", bn[hb], wf_fx_hk == hk ? "" : " -");
+    }
     if (gk && n < (int)sizeof b)
-        n += snprintf(b + n, sizeof b - n, wf_fx_gk == gk ? ", grain" : ", grain -");
+        n += snprintf(b + n, sizeof b - n, "%s%s", WF_FXK_GLAB(gk) ? ", grain lab" : ", grain", wf_fx_gk == gk ? "" : " -");
     if (mk && n < (int)sizeof b)
         snprintf(b + n, sizeof b - n, wf_fx_mk == mk ? ", mist" : ", mist -");
     wf_log("dark: look ready %dms: %s", get_ms_clock() - t0, b[0] ? b + 2 : "nothing to build");

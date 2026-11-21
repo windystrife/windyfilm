@@ -396,6 +396,26 @@ int main(int argc, char **argv)
     CHECK(wfui_host_focus() == WF_ROW_PRINT, "DOWN not on Print stock");
     shot("fs_print_long");
     close_ui(MODULE_KEY_MENU, 0);
+    /* 2f. labfx: the film-lab choices, Lab on Grain / Halation / Bloom and Gauge 8 mm, on a colour negative; the focus on
+     * Grain, then on Gauge */
+    fake_reset();
+    fake_set_card(card);
+    fake_set_loaded(id_of("SUN200"));
+    fake_set_row(WF_ROW_GRAIN, 7);
+    fake_set_row(WF_ROW_HALO, 4);
+    fake_set_row(WF_ROW_BLOOM, 4);
+    fake_set_row(WF_ROW_GAUGE, 3);
+    open_ui();
+    for (int i = 0; i < WF_ROW_GRAIN; i++) key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_GRAIN && !strcmp(wf_row_text(WF_ROW_GRAIN), "Lab") && !strcmp(wf_row_text(WF_ROW_HALO), "Lab")
+          && !strcmp(wf_row_text(WF_ROW_BLOOM), "Lab") && !strcmp(wf_row_text(WF_ROW_GAUGE), "8 mm"),
+          "Lab rows: '%s' '%s' '%s' '%s'", wf_row_text(WF_ROW_GRAIN), wf_row_text(WF_ROW_HALO), wf_row_text(WF_ROW_BLOOM),
+          wf_row_text(WF_ROW_GAUGE));
+    shot("lab_rows");
+    for (int i = WF_ROW_GRAIN; i < WF_ROW_GAUGE; i++) key(MODULE_KEY_PRESS_DOWN);
+    CHECK(wfui_host_focus() == WF_ROW_GAUGE, "DOWN x3 from Grain not on Gauge (%d)", wfui_host_focus());
+    shot("lab_gauge");
+    close_ui(MODULE_KEY_MENU, 0);
 
     /* 2b. Highlights / Shadows: WF_NROWS rows (18 since 11-15), 7 shown, the list scrolls with the focus (the font
      * keeps its size) */

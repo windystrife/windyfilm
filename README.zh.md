@@ -62,6 +62,11 @@ Cool）、Grain、Halation、Bloom、Gauge，以及用于胶卷的 Exposures。
 *Light Auto* 保留你的白平衡；其他选项按胶片设定白平衡，回到 Auto 或关闭模块时，你自己的白平衡会恢复。
 装入胶片或胶卷时，会**按胶片设定相机的 ISO**。
 
+**Lab**（Grain、Halation、Bloom）：按 film-lab 数值、分四种胶片画幅的模型；Gauge 增加 **8 mm**（8 · 16 · 35 ·
+65 mm）。画幅越小，Lab 颗粒越大越明显，Lab 光晕越宽；其他选项不变。Lab 更慢：在 EOS M 上同时开 Halation 和
+Bloom 每张多约 18–21 秒（逆光天空等几乎整幅都有光晕时可达约 50 秒），Grain 多约 3.5–4 秒；5D2 上约 26–33 秒。
+以上为相机模型上的估算，尚未在相机上实测。
+
 ## Darkroom
 
 ![拍完一卷，在相机里冲洗](docs/img/en/darkroom.jpg)

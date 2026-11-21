@@ -264,24 +264,27 @@ static const char *const wf_print_full[16] = {
 /* the last three grain choices and the last halation choice are the film-stage model (docs/DESIGN.md 1a); their
  * WINDYFLM.CFG words until 11-15 (genfine .. gen) still parse */
 static const char *wf_grain_name[WF_GRAIN_MAX + 1] = { "Off", "Fine", "Normal", "Strong", "Even Fine", "Even Normal",
-                                                       "Even Strong" };
+                                                       "Even Strong", "Lab" };
 static const char *const wf_grain_key[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "evenfine", "evennormal",
-                                                            "evenstrong" };
+                                                            "evenstrong", "lab" };
 static const char *const wf_grain_old[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "genfine", "gennormal",
-                                                            "genstrong" };
+                                                            "genstrong", "lab" };
 /* Halation by the look of the halo: the per-film fitted profiles (prof, cfg halation) reach 40..134 px (90 % of the
- * halo energy at 5184 px, 35 mm), the 3-bounce ones (sprof, cfg spk) 31..35 px; Wrap is the light wrap */
-static const char *wf_halo_name[WF_HALO_MAX + 1] = { "Off", "Wide", "Tight", "Wrap" };
-static const char *const wf_halo_key[WF_HALO_MAX + 1] = { "off", "halation", "spk", "wrap" };
+ * halo energy at 5184 px, 35 mm), the 3-bounce ones (sprof, cfg spk) 31..35 px; Wrap is the light wrap; Lab the film-lab
+ * model (wf_fx.h, yl_lab.c), as the last Grain and Bloom choices */
+static const char *wf_halo_name[WF_HALO_MAX + 1] = { "Off", "Wide", "Tight", "Wrap", "Lab" };
+static const char *const wf_halo_key[WF_HALO_MAX + 1] = { "off", "halation", "spk", "wrap", "lab" };
 /* every halation word ever written (bloom was a halation choice until 11-15, wrap was gen): the halation and the
  * bloom each one means */
-#define WF_HALO_NOLD 7
-static const char *const wf_halo_old[WF_HALO_NOLD] = { "off", "halation", "bloom", "spk", "spkbloom", "wrap", "gen" };
-static const uint8_t wf_halo_old_h[WF_HALO_NOLD] = { 0, 1, 1, 2, 2, 3, 3 }, wf_halo_old_b[WF_HALO_NOLD] = { 0, 0, 2, 0, 2, 0, 0 };
-static const char *wf_bloom_name[WF_BLOOM_MAX + 1] = { "Off", "Low", "Normal", "Strong" };
-static const char *const wf_bloom_key[WF_BLOOM_MAX + 1] = { "off", "low", "normal", "strong" };
-static const char *wf_gauge_name[WF_GAUGE_MAX + 1] = { "16 mm", "35 mm", "65 mm" };
-static const char *const wf_gauge_key[WF_GAUGE_MAX + 1] = { "16", "35", "65" };
+#define WF_HALO_NOLD 8
+static const char *const wf_halo_old[WF_HALO_NOLD] = { "off", "halation", "bloom", "spk", "spkbloom", "wrap", "gen", "lab" };
+static const uint8_t wf_halo_old_h[WF_HALO_NOLD] = { 0, 1, 1, 2, 2, 3, 3, 4 }, wf_halo_old_b[WF_HALO_NOLD] = { 0, 0, 2, 0, 2, 0, 0, 0 };
+static const char *wf_bloom_name[WF_BLOOM_MAX + 1] = { "Off", "Low", "Normal", "Strong", "Lab" };
+static const char *const wf_bloom_key[WF_BLOOM_MAX + 1] = { "off", "low", "normal", "strong", "lab" };
+/* the gauges by value (wf_fx.h: 8 mm is the 4th), shown and stepped in the order of the film width */
+static const char *wf_gauge_name[WF_GAUGE_MAX + 1] = { "16 mm", "35 mm", "65 mm", "8 mm" };
+static const char *const wf_gauge_key[WF_GAUGE_MAX + 1] = { "16", "35", "65", "8" };
+static const uint8_t wf_gauge_ord[WF_GAUGE_MAX + 1] = { WF_GAUGE_8, 0, 1, 2 }, wf_gauge_pos[WF_GAUGE_MAX + 1] = { 1, 2, 3, 0 };
 static const char *wf_mist_name[WF_MIST_MAX + 1] = { "Off", "1/8", "1/4", "1/2", "1", "Black 1/8", "Black 1/4", "Black 1/2",
                                                      "Black 1" };
 static const char *const wf_mist_key[WF_MIST_MAX + 1] = { "off", "w8", "w4", "w2", "w1", "b8", "b4", "b2", "b1" };
@@ -761,7 +764,10 @@ int wf_row_step_for(int row, int delta, int id)
     case WF_ROW_GRAIN:    wf_grain = wf_wrap(wf_grain, delta, WF_GRAIN_MAX + 1); break;
     case WF_ROW_HALO:     wf_halo = wf_wrap(wf_halo, delta, WF_HALO_MAX + 1); break;
     case WF_ROW_BLOOM:    wf_bloom = wf_wrap(wf_bloom, delta, WF_BLOOM_MAX + 1); break;
-    case WF_ROW_GAUGE:    wf_gauge = wf_wrap(wf_gauge, delta, WF_GAUGE_MAX + 1); break;
+    case WF_ROW_GAUGE:
+        wf_gauge = wf_gauge_ord[wf_wrap(wf_gauge >= 0 && wf_gauge <= WF_GAUGE_MAX ? wf_gauge_pos[wf_gauge] : wf_gauge_pos[WF_GAUGE_DEF],
+                                        delta, WF_GAUGE_MAX + 1)];
+        break;
     case WF_ROW_MIST:
         if (!WF_MIST_CAN)
             return 0;
@@ -1332,8 +1338,9 @@ const char *wf_exif_text(const struct wf_look *lk, int g, int h, int bl, int m, 
         n += snprintf(b + n, bn - n, " | Halation %s", wf_halo_name[h]);
     if (bl > 0 && bl <= WF_BLOOM_MAX && n < bn)
         n += snprintf(b + n, bn - n, " | Bloom %s", wf_bloom_name[bl]);
-    if ((g > 0 || h > 0 || bl > 0) && lk->gauge != WF_GAUGE_DEF && lk->gauge <= WF_GAUGE_MAX && n < bn)
-        n += snprintf(b + n, bn - n, " | Gauge %s", wf_gauge_name[lk->gauge]);
+    int ga = g == WF_GRAIN_LAB || h == WF_HALO_LAB || bl == WF_BLOOM_LAB ? lk->gauge : WF_GAUGE_CLASSIC(lk->gauge);   /* 8 mm: Lab only */
+    if ((g > 0 || h > 0 || bl > 0) && ga != WF_GAUGE_DEF && ga <= WF_GAUGE_MAX && n < bn)
+        n += snprintf(b + n, bn - n, " | Gauge %s", wf_gauge_name[ga]);
     if (m > 0 && m <= WF_MIST_MAX && n < bn)
         n += snprintf(b + n, bn - n, m > 4 ? " | Black Mist %s" : " | Mist %s", wf_mist_name[m] + (m > 4 ? 6 : 0));
     if (ev != WF_EV_NONE && n < bn)
@@ -1753,10 +1760,17 @@ static MENU_UPDATE_FUNC(wf_row_update)
         MENU_SET_WARNING(MENU_WARN_INFO, "No effect with the current output (or camera).");
     else if (row == WF_ROW_GAUGE && !wf_grain && !wf_halo && !wf_bloom)
         MENU_SET_WARNING(MENU_WARN_INFO, "Grain, Halation and Bloom are off: no effect.");
+    else if (row == WF_ROW_GAUGE && wf_gauge == WF_GAUGE_8 && wf_grain != WF_GRAIN_LAB && wf_halo != WF_HALO_LAB
+             && wf_bloom != WF_BLOOM_LAB)
+        MENU_SET_WARNING(MENU_WARN_ADVICE, "8 mm is a Lab gauge: the other choices run as 16 mm.");
     else if (row == WF_ROW_GRAIN || row == WF_ROW_HALO || row == WF_ROW_BLOOM || row == WF_ROW_MIST) {
         int s = wf_fx_state(row == WF_ROW_GRAIN ? WF_FX_GRN : row == WF_ROW_HALO ? WF_FX_HAL : row == WF_ROW_BLOOM ? WF_FX_BLM
                             : WF_FX_MST);
-        if (row == WF_ROW_BLOOM && s == WF_FXS_UNUSED && WF_HALO_GEN(wf_halo))
+        if (row == WF_ROW_BLOOM && s == WF_FXS_UNUSED && wf_halo == WF_HALO_LAB)
+            MENU_SET_WARNING(MENU_WARN_ADVICE, "Halation Lab: Bloom runs as Lab or Off.");
+        else if (row == WF_ROW_HALO && s == WF_FXS_UNUSED && wf_bloom == WF_BLOOM_LAB)
+            MENU_SET_WARNING(MENU_WARN_ADVICE, "Bloom Lab: Halation runs as Lab or Off.");
+        else if (row == WF_ROW_BLOOM && s == WF_FXS_UNUSED && WF_HALO_GEN(wf_halo))
             MENU_SET_WARNING(MENU_WARN_ADVICE, "Wrap has no bloom: Bloom runs with Wide or Tight.");
         else if (s == WF_FXS_LOADING)
             MENU_SET_WARNING(MENU_WARN_INFO, "Being prepared (a few s); shots meanwhile go without it.");
@@ -2018,10 +2032,10 @@ static struct menu_entry wf_menu[] = {
             WF_ROWE("Light", WF_ROW_LIGHT, wf_light_select, WF_LIGHT_HELP),
             WF_ROWE("Print", WF_ROW_PRINT, wf_print_select, "Scan, cine print or paper print of the loaded film."),
             WF_ROWE("Paper", WF_ROW_PAPER, wf_paper_select, "Glossy: deep black. Matte: softer black. Warm / Cool: base tint."),
-            WF_ROWE("Grain", WF_ROW_GRAIN, wf_grain_select, "Grain: Fine / Normal / Strong follow the tone, Even ... does not."),
-            WF_ROWE("Halation", WF_ROW_HALO, wf_halo_select, "Red-orange halo round highlights: Wide, Tight; Wrap: edge spill."),
-            WF_ROWE("Bloom", WF_ROW_BLOOM, wf_bloom_select, "Soft glow in the light's own colour, apart from the halo (3:2)."),
-            WF_ROWE("Gauge", WF_ROW_GAUGE, wf_gauge_select, "Film gauge: 16 mm coarser grain, wider halo; 65 mm finer, tighter."),
+            WF_ROWE("Grain", WF_ROW_GRAIN, wf_grain_select, "Fine/Normal/Strong follow the tone, Even does not; Lab = film-lab."),
+            WF_ROWE("Halation", WF_ROW_HALO, wf_halo_select, "Red-orange halo: Wide, Tight; Wrap: edge spill; Lab = film-lab."),
+            WF_ROWE("Bloom", WF_ROW_BLOOM, wf_bloom_select, "Glow in the light's own colour, apart from the halo (3:2); Lab."),
+            WF_ROWE("Gauge", WF_ROW_GAUGE, wf_gauge_select, "Film gauge: 8, 16 mm coarser, wider halo; 65 mm finer, tighter."),
             WF_ROWE("Mist", WF_ROW_MIST, wf_mist_select, "Diffusion filter: glow on lights, veil on shadows."),
             { .name = "Strength", .priv = (void *)&wf_strength, .max = WF_NSTRENGTH - 1, .choices = wf_strength_name,
               .select = wf_strength_select, .help = "How strongly the film look is applied." },

@@ -92,6 +92,7 @@ cc yh_halo.o     $MODFLAGS -O2 -DYH_BAKED $S/yh_halo.c
 cc wf_mist.o     $MODFLAGS -O2 -DYH_BAKED $S/wf_mist.c
 cc yg_grain.o    $MODFLAGS -O2 $S/yg_grain.c
 cc yg_stocks.o   $MODFLAGS $S/yg_stocks.c
+cc yl_lab.o      $MODFLAGS -O2 $S/yl_lab.c                     # the Lab effects (film-lab numbers, DESIGN 3.20)
 cc wf_fx.o       $MODFLAGS $S/wf_fx.c
 cc wf_expsim.o   $MODFLAGS $MLFLAGS $S/wf_expsim.c
 [ $CAM = EOSM ] && cc wf_expk.o $MODFLAGS -O2 $S/wf_expk.c     # 5D2: wf_expsim.c has the no-op wf_exp_words

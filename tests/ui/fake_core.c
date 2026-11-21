@@ -17,7 +17,8 @@ static int val[WF_NROWS];
 static int dev_ms, dev_path;               /* wf_dev_last */
 
 /* the names and choices of src/wf_menu.c (film-stage: print stocks, Grain / Halation with the Even / Wrap choices,
- * Bloom and Gauge; the print stocks' full names of wf_row_text_long) */
+ * Bloom and Gauge; the print stocks' full names of wf_row_text_long; labfx: Lab on Grain / Halation / Bloom, the
+ * gauges by value with 8 mm the 4th, as the core keeps them) */
 static const char *const names[WF_NROWS] = { "Light", "Print stock", "Paper", "Grain", "Halation", "Bloom", "Gauge", "Mist",
                                              "Strength", "Highlights", "Shadows", "Film LUT", "Film exp", "Push / pull",
                                              "Exp comp", "Printer R", "Printer G", "Printer B", "Interlayer",
@@ -32,10 +33,10 @@ static const char *const v_print_full[16] = {
     "Eastman Color Print 5381 (1972)", "Eastman Color Print 5382", "Eastman Color Print 5384 (1982)",
     "Eastman Color Print 5384 (1992)", "Eastman Color Print LC 5385 (1993)", "Eastman Color Print 5385 (1962)",
     "Eastman EXR Color Print 5386", "Eastman Color Print 5383", "Fuji Eterna-CP Type 3513D", "Fuji Eterna-CP 3523XD" };
-static const char *const v_grain[] = { "Off", "Fine", "Normal", "Strong", "Even Fine", "Even Normal", "Even Strong", 0 };
-static const char *const v_halo[] = { "Off", "Wide", "Tight", "Wrap", 0 };
-static const char *const v_bloom[] = { "Off", "Low", "Normal", "Strong", 0 };
-static const char *const v_gauge[] = { "16 mm", "35 mm", "65 mm", 0 };
+static const char *const v_grain[] = { "Off", "Fine", "Normal", "Strong", "Even Fine", "Even Normal", "Even Strong", "Lab", 0 };
+static const char *const v_halo[] = { "Off", "Wide", "Tight", "Wrap", "Lab", 0 };
+static const char *const v_bloom[] = { "Off", "Low", "Normal", "Strong", "Lab", 0 };
+static const char *const v_gauge[] = { "16 mm", "35 mm", "65 mm", "8 mm", 0 };
 static const char *const v_mist[] = { "Off", "1/8", "1/4", "1/2", "1", "Black 1/8", "Black 1/4", "Black 1/2", "Black 1", 0 };
 static const char *const v_flut[] = { "Off", "Vision3 250D", "Vision3 500T", "Portra 400", "Leica Vivid", "Windy 250D P", 0 };
 static const char *const v_hs[] = { "-5", "-4", "-3", "-2", "-1", "0", "+1", "+2", "+3", "+4", "+5", 0 };

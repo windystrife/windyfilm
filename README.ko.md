@@ -63,6 +63,12 @@ Grain, Halation, Bloom, Gauge, 그리고 롤용 Exposures. *Light Auto*는 지�
 선택지는 필름에 맞춰 WB를 설정하며, Auto로 돌아가거나 모듈을 끄면 원래의 WB가 돌아옵니다. 필름이나 롤을 넣으면
 카메라에 **필름 기준 ISO**가 설정됩니다.
 
+**Lab** (Grain, Halation, Bloom): film-lab 수치를 따르는 네 가지 필름 폭의 모델이며, Gauge에 **8 mm**가 더해집니다
+(8 · 16 · 35 · 65 mm). 폭이 작을수록 Lab 입자는 더 크고 뚜렷하며 Lab 번짐은 더 넓습니다. 다른 선택지는 그대로입니다.
+Lab은 느립니다: EOS M에서 Halation과 Bloom을 함께 켜면 한 장에 약 18~21초(역광 하늘처럼 화면 거의 전체가 번지면
+약 50초까지), Grain은 약 3.5~4초가 더 걸리고, 5D2에서는 약 26~33초입니다. 카메라 모델로 추정한 값이며 실제 카메라에서는
+아직 재지 않았습니다.
+
 ## Darkroom
 
 ![롤을 찍고 카메라 안에서 현상하기](docs/img/en/darkroom.jpg)

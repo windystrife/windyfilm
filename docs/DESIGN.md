@@ -1643,6 +1643,101 @@ tùy chọn cho nhìn thấy"), image 05. Print + over is 3.9.
 - **Not checked on the camera:** how long a sheet takes to fill (the card's seek time per frame), the photos' look
   against the camera's own playback, and Blind roll Off with PLAY in LiveView during a roll.
 
+### 3.20 Lab: the film-lab Halation, Bloom and Grain (owner 2026-11-21, branch `labfx`)
+The owner's request: Halation / Bloom / Grain options with the numbers of film-lab, the existing ones kept. film-lab is
+the owner's film-look reference: formulas and preset tables (one set per gauge, 8 / 16 / 35 / 65 mm), its own
+C++ and JS code and a CLI that renders PPM files. Its tone stages before the bloom are not on the camera (the film's
+own table does that part). Nothing of film-lab is copied here: `src/yl_lab.c` is a separate fixed-point
+implementation (ARMv5TE, no FPU, no divide per pixel; soft float only once per setting), the presets are its tables.
+Bloom follows film-lab's Bloom stage as well (my call: film-lab runs Bloom, then Halation, then Grain, and its presets
+hold all three per gauge).
+- **Choices.** The last choice of Grain (7), Halation (4) and Bloom (4) is **Lab**; Gauge gains **8 mm** (value 3, the
+  menu steps 8 -> 16 -> 35 -> 65 mm). Config words `grain=lab`, `halation=lab`, `bloom=lab`, `gauge=8`. The Lab values
+  are the same for every film (film-lab's presets know no film). Rules (`wf_fx.h`): a Lab value in the Halation or the
+  Bloom row makes the stage the Lab one, and a WindyFilm value in the other row does not run (the menu shows it unused,
+  as Bloom with Wrap); 8 mm is a Lab gauge: the WindyFilm choices run as 16 mm there (`WF_GAUGE_CLASSIC`, menu advice,
+  the EXIF writes 16 mm). EXIF / shot line: `| Grain Lab | Halation Lab | Bloom Lab | Gauge 8 mm`, `+ halation
+  lab+bloom lab + grain`; the Darkroom's look line `halation lab + bloom lab, grain lab`. Keys: the Lab stage `(set + 1)
+  | 4096 Lab halation | 8192 Lab bloom | gauge << 10`, the Lab grain `(set + 1) | 2048 | gauge << 9`.
+- **Where it runs** (`wf_shot.c` wf_colour_fx). The Lab stage gathers the coloured frame (film-lab works on the finished
+  image; the WindyFilm stage gathers the camera's words before the colour pass). With both on, a second read-only pass
+  gathers the halation layer again from the bloomed frame (`yl_gather2_chunk`, as film-lab blurs the halation of the
+  bloomed image), then one apply pass writes both. Grain after them, per row. Halves (every 5D2 shot, Diana): the BOT
+  fades from the TOP's glow over 256 rows (`YL_XF`), checked against the whole frame at the seam (FX:lab).
+- **What the camera does differently**, each measured against the reference CLI (`tools/lab_check.sh`):
+  - halation and bloom are blurred on grids of cell means, 1/8 (halation) and 1/16 (bloom), then interpolated per
+    pixel pair; the blur variance is the reference's three-box Gaussian minus what the grid adds;
+  - the halation core, the colour, the clamps and the bloom's ease-off in the highlights are per pixel, on the camera's UYVY words
+    (full-range BT.601), as deltas: a word without glow is kept bit-exact; a word whose channels cannot clamp and that
+    has no halation core takes the linear path (its Y / U / V change from the word's glow once), the others the exact
+    per-pixel path;
+  - the bloom's edge mask uses the largest luma step per 16-px cell instead of a per-pixel Sobel;
+  - both glows are gathered from the frame before the bloom (the per-pixel core uses the bloomed pixel);
+  - the grain is film-lab's lattice noise (its hash at whole cells of the cell size s, bilinear in between over the weights'
+    root sum of squares, R G B on their shifted lattices, the clump blur, the gain that keeps the strength of the
+    800-row preview at any size) on a **periodic lattice**: the field's 256 x 256 samples over one period, computed once
+    per gauge with the exact kernel per axis, d px apart (an even whole number near 0.5 sqrt(sigma^2 + 0.22 s^2)),
+    a pixel mixing the four samples round it, the variance this loses put back ((2 + rho) / 3 per axis); a random
+    offset per shot; the lattice's turn (1 degree in the presets) is left out. Per row the sample rows are mixed once into a
+    period-long row (Y per pixel, U / V per word). Measured: within ~3 % rms of the exact field (same lattice).
+
+    | | 8 mm | 16 mm | 35 mm | 65 mm |
+    |---|---|---|---|---|
+    | EOS M (3456 rows): cell px, d, period px | 38.2, 10, 2560 | 21.0, 6, 1536 | 11.4, 4, 1024 | 3.9, 2, 512 |
+    | 5D2 (3744 rows): cell px, d, period px | 41.3, 10, 2560 | 22.9, 6, 1536 | 12.3, 4, 1024 | 4.3, 2, 512 |
+    | strength gain (EOS M / 5D2) | 0.347 / 0.350 | 0.375 / 0.385 | 0.461 / 0.487 | 0.982 / 1.082 |
+- **Accuracy** (`tools/lab_check.sh`, the camera's code built for the host against the reference CLI on the same RGB
+  input; EOS M frame unless noted). Glows: PSNR over the frame and the largest difference in levels:
+
+    | IMG_6851 | 8 mm | 16 mm | 35 mm | 65 mm |
+    |---|---|---|---|---|
+    | Halation | 53.3 dB, 22 | 53.7 dB, 21 | 54.4 dB, 22 | 54.6 dB, 22 |
+    | Bloom | 55.8 dB, 12 | 58.1 dB, 11 | 58.8 dB, 10 | 60.6 dB, 9 |
+    | both | 50.0 dB, 37 | 51.4 dB, 34 | 52.3 dB, 30 | 53.3 dB, 31 |
+
+  Grain (its pattern is another draw, so the statistics): the luma change's sd in the mid tones, camera / reference
+  through the camera's UYVY round trip (the camera's grain is rounded to whole codes, which adds near-white noise):
+  8 mm 1.94 / 1.90, 16 mm 2.10 / 2.07, 35 mm 1.66 / 1.64, 65 mm 0.75 / 0.79; autocorrelation at 12 px 0.83 / 0.82, 0.46 /
+  0.43 (8, 35 mm). The other frames (glows at 35 mm; both, over the four gauges):
+
+    | frame | Halation | Bloom | both | both, 8 .. 65 mm |
+    |---|---|---|---|---|
+    | IMG_6853 (EOS M, street at sunset) | 45.5 dB, 20 | 46.5 dB, 22 | 43.6 dB, 37 | 42.9 .. 43.6 dB |
+    | IMG_0216 (EOS M, backlit tree, Darkroom set) | 38.9 dB, 35 | 46.8 dB, 43 | 39.4 dB, 41 | 39.1 .. 39.6 dB |
+    | IMG_0214 (EOS M, the same) | 39.7 dB, 36 | 45.8 dB, 49 | 40.0 dB, 44 | 39.7 .. 40.3 dB |
+    | IMG_8553 (5D2, two halves) | 47.0 dB, 46 | 41.2 dB, 64 | 42.3 dB, 64 | 42.3 .. 45.1 dB |
+
+  Where most of the frame glows (the backlit trees: 73 .. 97 % of the pixels) the mean difference inside the glow is
+  still about one level (0.9 .. 1.2), p99 14 .. 16: the differences sit on thin edges (wires, twigs), where the 1/8
+  grid's glow and the per-pixel core part from the reference's full-resolution blur; crops of the camera's and the
+  reference's frames look the same. The 5D2's Bloom as one whole frame: 54.5 .. 57.9 dB, at most 9 levels; the rest is
+  the halves: the TOP is graded before the BOT's light exists, so the TOP's rows within the bloom's reach of the seam
+  miss it (the mirror guesses only wide light at the seam), as with the WindyFilm stage. Grain on every frame: the mid
+  tones' sd within 1 .. 4 % of the reference through UYVY at 8 / 16 / 35 mm, 65 mm 3 .. 5 % under it.
+- **Time per shot** (memsim, the EOS M's ARM946 model; the 5D2 is ~0.83x of its memsim): EOS M, 35 mm, both glows
+  18.1 s (gather 3.5, build 2.0, gather2 2.9, build2 1.0, apply 8.7), 8 mm 20.8 s, 65 mm 17.7 s; halation alone 9.5 s,
+  bloom alone 9.8 s; grain 3.6 s (8 mm 4.2, 65 mm 3.4). The glows' time follows how much of the frame glows: IMG_0216
+  (backlit, ~97 % of the pixels in the glow) takes 48.2 s at 35 mm (8 mm 51.4 s; halation alone 25.5, bloom alone
+  24.5), mostly the per-pixel paths of the apply (27.7 s) and gather2 (11.2 s). 5D2 (IMG_8553, two halves, memsim x
+  0.83): both 28.5 s at 35 mm (8 mm 32.9, 65 mm 26.3), halation alone 13.9, bloom alone 14.7, grain 3.4 (3.3 .. 3.9).
+  Once per setting: 1.1 .. 1.4 s.
+- **Memory.** The glows: one block of `yl_mem_bytes` (EOS M 3.79 MB both, 2.34 halation, 1.38 bloom; 5D2 4.44 / 2.74 /
+  1.62 MB), as the WindyFilm stage's. Grain: 213 KB + 1.4 KB (the samples, the period row, the tables), and 665 KB of
+  shoot memory while it is built.
+- **Checks.** `test.sh` FX:lab (both cameras): config words, rows and keys, each glow alone and both on the disc frame
+  (a red-orange halo, a glow in the light's colour, both more than either), halves = whole frame at the seam (EOS M;
+  again with a white band over the frame's top: at most 12 levels apart over the YL_XF rows, as the TOP's halation and
+  bloom rows round the seam are kept in blocks of their own; sharing one block put the band's glow into the BOT's first
+  rows), the rows' rules, 8 mm, the grain on a mid grey (8 mm sd 1.2 .. 3, 65 mm 0.35 .. 1.2), EXIF, steps, the config
+  written back, the memory given back. The WindyFilm models bit-exact with the RAWB28 tree (6e7f700): `WF_SHOT_HASH`
+  over SHOT, FX, FXAB, FX:bloom, MIST, MIST:levels, EXIF, STAGE, STAGE:dark, PRINT, PRINT:chain, PAPER, HS, RAWB and
+  ROLL:dark, 167 shots, all the same (EOS M; the frame's post time fixed in the host build of the camera file for the
+  run, since every shot's grain seed mixes it in: without that, base against base differs). `tools/lab_check.sh` (accuracy), `tools/lab_bench.sh` (memsim
+  phases), `tests/ui/lab_strip.sh` (the comparison sheets: Off / WindyFilm / Lab, the gauges), `tests/ui/run.sh` shots
+  `lab_rows`, `lab_gauge`.
+- **Not checked on the camera:** the times (memsim only), the memory at the shot on a full card, and the look on the
+  camera's own screen.
+
 ## 4. Interfaces
 
 ### 4.1 `src/wf_api.h`

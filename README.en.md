@@ -63,6 +63,12 @@ Halation, Bloom, Gauge, and Exposures for a roll. *Light Auto* keeps your white 
 from the film, and your own WB comes back when you return to Auto or turn the module off. Loading a film or roll sets
 the camera's **ISO from the film**.
 
+**Lab** (Grain, Halation, Bloom): a model with the film-lab numbers at four film gauges; Gauge gains **8 mm** (8 · 16 ·
+35 · 65 mm). Lab grain is larger and clearer on the small gauges, the Lab glows reach further; the other choices are
+unchanged. Lab is slower: on the EOS M about 18–21 s more per shot with Halation and Bloom on (up to about 50 s when
+nearly the whole frame glows, e.g. a backlit sky), about 3.5–4 s for Grain; on the 5D2 about 26–33 s. Estimated on the
+camera model, not yet timed on the cameras.
+
 ## Darkroom
 
 ![Shoot a roll, develop it in the camera](docs/img/en/darkroom.jpg)
