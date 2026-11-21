@@ -10,8 +10,8 @@
  *   FX                 grain + halation through the shot: ready keys, glow round a light, grain texture, no memory, free
  *   FX bloom           Bloom on its own row (RAWB11): halation alone, bloom alone, both, both off, levels, rows, EXIF text;
  *                      WF_FX_DUMP=1 [WF_FX_UYVY=frame] also writes bloom_<level>.ppm (the harness strip)
- *   FX lab             the film-lab Halation / Bloom / Grain (yl_lab.c): config words, rows, keys, the glows, 8 mm, grain,
- *                      EXIF; WF_FX_DUMP=1 [WF_FX_UYVY=frame] also writes lab_<set>.ppm (tests/ui/lab_strip.sh)
+ *   FX lab             the film-lab Halation / Bloom / Grain (yl_lab.c): the glow composite and the sky edge, config words,
+ *                      rows, keys, the glows, 8 mm, grain, EXIF; WF_FX_DUMP=1 [WF_FX_UYVY=frame] also writes lab_<set>.ppm (tests/ui/lab_strip.sh)
  *   FXAB             Even grain / Wrap (the Genesis Pro 1.6.6 model, DESIGN 1a) against the stages before; Bloom alone,
  *                      the Gauge (16 / 35 / 65 mm: halo reach, grain size)
  *                      them on the same frame: the halo round a light, the core of a light (difference of blur keeps
@@ -99,6 +99,7 @@
 #include "wf_darkp.h"
 #include "wf_cr2.h"
 #include "wf_print.h"
+#include "yl_lab.h"
 /* this build's input curve decode tables (generated header, static copies for the checks) */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-const-variable"
@@ -1232,12 +1233,67 @@ static double fx_lab_shot(const char *what, int halo, int bloom, double *rv)
         *rv = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'v', 0);
     return ry;
 }
+/* the halo's glow composite (film-lab 11-21: the halo is the whole scattered light, added as it is up to half the
+ * headroom, then rolled off towards white) on the camera's arithmetic: against the formula in double, and the sky
+ * edge of film-lab's own check (until then the halo left out the sharp core, 0.75 x the layer: just inside every
+ * highlight edge a band got no halo, a pale rim between the orange outside and the halo inside) */
+static double fx_glow_ref(double v, double a)
+{
+    double hd = 1.0 - v;
+    if (a <= 0.5 * hd) return v + a > 1.0 ? 1.0 : v + a;
+    if (hd <= 0.0) return 1.0;
+    return v + hd * (0.5 + 0.5 * (1.0 - exp(-(a / hd - 0.5) / 0.5)));
+}
+static int fx_r_of(uint32_t w) { return clampi(WY0(w) + ((359 * WV(w)) >> 8), 0, 255); }
+static void t_fx_lab_glow(void)
+{
+    const int W = 320, H = 544, edge = 160;      /* film-lab's frame at 1080 / 2 rows: sky left of the edge, leaves right */
+    yl_params lp = { 1, 0, 2 };                  /* Halation alone, 35 mm */
+    yl_ctx *g = malloc(sizeof *g);
+    void *mem = malloc(yl_mem_bytes(W, H, 1, 0));
+    uint32_t *f = malloc((size_t)W * H * 2), *o = malloc((size_t)W * H * 2);
+    yl_init(g, &lp, W, H, mem);
+    double me = 0.0;
+    int exact = 1, mono = 1;
+    for (int v = 0; v <= 4080; v += 5)
+        for (int a = 0, pv = v; a <= 4080; a += 7) {
+            int c = yl_glow(g, v, a);
+            double e = fabs(c - 4080.0 * fx_glow_ref(v / 4080.0, a / 4080.0));
+            if (e > me) me = e;
+            if (2 * a <= 4080 - v && c != v + a) exact = 0;
+            if (c < pv || c > 4080) mono = 0;
+            pv = c;
+        }
+    chk(me <= 2.0 && exact && mono, "Lab glow composite: within %.2f Q4 levels of the formula, the halo as it is below the"
+        " knee (%s), rising and never past white (%s)", me, exact ? "yes" : "NO", mono ? "yes" : "NO");
+    int Ys = (299 * 230 + 587 * 240 + 114 * 228 + 500) / 1000, Yl = (299 * 40 + 587 * 60 + 114 * 40 + 500) / 1000;
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x += 2)
+            f[(y * W + x) / 2] = x < edge ? word(564 * (228 - Ys) / 1000, Ys, 713 * (230 - Ys) / 1000, Ys)
+                                          : word(564 * (40 - Yl) / 1000, Yl, 713 * (40 - Yl) / 1000, Yl);
+    memcpy(o, f, (size_t)W * H * 2);
+    yl_begin_frame(g);
+    for (int y = 0; y < H; y++) yl_gather_chunk(g, o + y * W / 2, W, 0, y);
+    yl_build(g, 0, H, YL_WHOLE);
+    for (int y = 0; y < H; y++) yl_apply_chunk(g, o + y * W / 2, W, 0, y);
+    const int r = H / 2 * W / 2;
+    int in = fx_r_of(o[r + 20]) - fx_r_of(f[r + 20]), near = fx_r_of(o[r + edge / 2 - 2]) - fx_r_of(f[r + edge / 2 - 2]);
+    int out = fx_r_of(o[r + edge / 2 + 2]) - fx_r_of(f[r + edge / 2 + 2]);
+    /* 11-21: the old composite (core left out, hard clamp) gave inside +25, 4 px inside the edge +8, outside +43 */
+    chk(in > 10 && near * 2 >= in && out > 0, "Lab Halation, sky edge: red added inside %+d, 4 px inside the edge %+d (at least"
+        " half: no pale rim), 4 px outside %+d", in, near, out);
+    free(o);
+    free(f);
+    free(mem);
+    free(g);
+}
 static void t_fx_lab(void)
 {
     struct pk e[] = { { fC, 0, tab_make(0, 0, 0, 0) } };
     int hk = 0, gk = 0, hk16 = 0, post;
     double rvh, rvb, rvhb, sd, sd8, sd65, cm;
     char tb[200];
+    t_fx_lab_glow();
     pack_write(e, 1, 0);
     put_cfg("film=%d\noutput=film\ngrain=lab\nhalation=lab\nbloom=lab\ngauge=8\nmist=off\n", wf_films[fC].id);
     wf_fx_retry_ms = 500;

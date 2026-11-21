@@ -1684,15 +1684,24 @@ hold all three per gauge).
   gathers the halation layer again from the bloomed frame (`yl_gather2_chunk`, as film-lab blurs the halation of the
   bloomed image), then one apply pass writes both. Grain after them, per row. Halves (every 5D2 shot, Diana): the BOT
   fades from the TOP's glow over 256 rows (`YL_XF`), checked against the whole frame at the seam (FX:lab).
+- **The halo's glow composite** (film-lab 2026-11-21; owner: the sky rim first). The halo is the whole scattered light,
+  (near glow x its weight + far glow x its weight) x mix, added per channel through film-lab's glow composite: as it is
+  while it fills at most half the headroom 1 - v (the knee), past that 1 - (1 - v) / 2 x exp(1 - 2a / (1 - v)), the
+  same value and slope at the knee, towards white without reaching it. Until then the sharp core (0.75 x the layer) was
+  left out of the halo and the sum clamped: that kept highlights from clipping, but just inside every highlight edge a
+  band got no halo at all, a pale rim (cyan on a sky) between the orange halo outside and the halo inside. On the
+  camera, per pixel and without a divide: 2a / (1 - v) from the reciprocal of the headroom's top 11 bits (a table of
+  1024; ARMv5TE's CLZ), the exp from a table at 1/64 steps, linear in between: within 1.6 Q4 levels (a tenth of a
+  level) of the formula in double. The linear path's limit counts the halo twice, so a word takes it only where the
+  composite adds the halo as it is. Bloom and Grain are unchanged.
 - **What the camera does differently**, each measured against the reference CLI (`tools/lab_check.sh`):
   - halation and bloom are blurred on grids of cell means, 1/8 (halation) and 1/16 (bloom), then interpolated per
     pixel pair; the blur variance is the reference's three-box Gaussian minus what the grid adds;
-  - the halation core, the colour, the clamps and the bloom's ease-off in the highlights are per pixel, on the camera's UYVY words
-    (full-range BT.601), as deltas: a word without glow is kept bit-exact; a word whose channels cannot clamp and that
-    has no halation core takes the linear path (its Y / U / V change from the word's glow once), the others the exact
-    per-pixel path;
+  - the colour, the clamps, the halo's glow composite and the bloom's ease-off in the highlights are per pixel, on the
+    camera's UYVY words (full-range BT.601), as deltas: a word without glow is kept bit-exact; a word whose channels
+    cannot clamp and whose halo stays under the knee on every channel takes the linear path (its Y / U / V change from
+    the word's glow once), the others the exact per-pixel path;
   - the bloom's edge mask uses the largest luma step per 16-px cell instead of a per-pixel Sobel;
-  - both glows are gathered from the frame before the bloom (the per-pixel core uses the bloomed pixel);
   - the grain is film-lab's lattice noise (its hash at whole cells of the cell size s, bilinear in between over the weights'
     root sum of squares, R G B on their shifted lattices, the clump blur, the gain that keeps the strength of the
     800-row preview at any size) on a **periodic lattice**: the field's 256 x 256 samples over one period, computed once
@@ -1711,9 +1720,13 @@ hold all three per gauge).
 
     | IMG_6851 | 8 mm | 16 mm | 35 mm | 65 mm |
     |---|---|---|---|---|
-    | Halation | 53.3 dB, 22 | 53.7 dB, 21 | 54.4 dB, 22 | 54.6 dB, 22 |
+    | Halation | 54.6 dB, 6 | 55.0 dB, 6 | 56.0 dB, 6 | 56.3 dB, 7 |
     | Bloom | 55.8 dB, 12 | 58.1 dB, 11 | 58.8 dB, 10 | 60.6 dB, 9 |
-    | both | 50.0 dB, 37 | 51.4 dB, 34 | 52.3 dB, 30 | 53.3 dB, 31 |
+    | both | 51.9 dB, 16 | 53.0 dB, 17 | 54.2 dB, 15 | 55.1 dB, 16 |
+
+  (With the glow composite, against the reference's own; the old composite measured against its old reference gave
+  Halation 53.3 .. 54.6 dB, at most 22 levels, both 50.0 .. 53.3 dB, at most 37: the largest differences were where the
+  1/8 grid's glow and the per-pixel core met the reference's full-resolution layer.)
 
   Grain (its pattern is another draw, so the statistics): the luma change's sd in the mid tones, camera / reference
   through the camera's UYVY round trip (the camera's grain is rounded to whole codes, which adds near-white noise):
@@ -1722,29 +1735,34 @@ hold all three per gauge).
 
     | frame | Halation | Bloom | both | both, 8 .. 65 mm |
     |---|---|---|---|---|
-    | IMG_6853 (EOS M, street at sunset) | 45.5 dB, 20 | 46.5 dB, 22 | 43.6 dB, 37 | 42.9 .. 43.6 dB |
-    | IMG_0216 (EOS M, backlit tree, Darkroom set) | 38.9 dB, 35 | 46.8 dB, 43 | 39.4 dB, 41 | 39.1 .. 39.6 dB |
-    | IMG_0214 (EOS M, the same) | 39.7 dB, 36 | 45.8 dB, 49 | 40.0 dB, 44 | 39.7 .. 40.3 dB |
-    | IMG_8553 (5D2, two halves) | 47.0 dB, 46 | 41.2 dB, 64 | 42.3 dB, 64 | 42.3 .. 45.1 dB |
+    | IMG_6853 (EOS M, street at sunset) | 51.1 dB, 13 | 46.5 dB, 22 | 46.1 dB, 22 | 45.3 .. 46.1 dB |
+    | IMG_0216 (EOS M, backlit tree, Darkroom set) | 43.3 dB, 32 | 46.8 dB, 43 | 40.4 dB, 41 | 40.1 .. 40.5 dB |
+    | IMG_0214 (EOS M, the same) | 43.9 dB, 33 | 45.8 dB, 49 | 41.0 dB, 44 | 41.0 .. 41.1 dB |
+    | IMG_8553 (5D2, two halves) | 50.6 dB, 30 | 41.2 dB, 64 | 42.7 dB, 64 | 42.4 .. 45.7 dB |
 
-  Where most of the frame glows (the backlit trees: 73 .. 97 % of the pixels) the mean difference inside the glow is
-  still about one level (0.9 .. 1.2), p99 14 .. 16: the differences sit on thin edges (wires, twigs), where the 1/8
-  grid's glow and the per-pixel core part from the reference's full-resolution blur; crops of the camera's and the
+  Where most of the frame glows (the backlit trees: 89 .. 99 % of the pixels) the mean difference inside the glow is
+  under one level (0.75 .. 0.94), p99 7 .. 8 (Halation) and 12 .. 13 (both): the differences sit on thin edges (wires,
+  twigs), where the grids' glows part from the reference's full-resolution blur; crops of the camera's and the
   reference's frames look the same. The 5D2's Bloom as one whole frame: 54.5 .. 57.9 dB, at most 9 levels; the rest is
   the halves: the TOP is graded before the BOT's light exists, so the TOP's rows within the bloom's reach of the seam
   miss it (the mirror guesses only wide light at the seam), as with the WindyFilm stage. Grain on every frame: the mid
   tones' sd within 1 .. 4 % of the reference through UYVY at 8 / 16 / 35 mm, 65 mm 3 .. 5 % under it.
-- **Time per shot** (memsim, the EOS M's ARM946 model; the 5D2 is ~0.83x of its memsim): EOS M, 35 mm, both glows
-  18.1 s (gather 3.5, build 2.0, gather2 2.9, build2 1.0, apply 8.7), 8 mm 20.8 s, 65 mm 17.7 s; halation alone 9.5 s,
-  bloom alone 9.8 s; grain 3.6 s (8 mm 4.2, 65 mm 3.4). The glows' time follows how much of the frame glows: IMG_0216
-  (backlit, ~97 % of the pixels in the glow) takes 48.2 s at 35 mm (8 mm 51.4 s; halation alone 25.5, bloom alone
-  24.5), mostly the per-pixel paths of the apply (27.7 s) and gather2 (11.2 s). 5D2 (IMG_8553, two halves, memsim x
-  0.83): both 28.5 s at 35 mm (8 mm 32.9, 65 mm 26.3), halation alone 13.9, bloom alone 14.7, grain 3.4 (3.3 .. 3.9).
-  Once per setting: 1.1 .. 1.4 s.
+- **Time per shot** (memsim, the EOS M's ARM946 model; the 5D2 is ~0.83x of its memsim; with the glow composite):
+  EOS M, 35 mm, both glows 17.0 s (gather 3.5, build 2.0, gather2 2.9, build2 1.0, apply 7.6), 8 mm 19.4 s; halation
+  alone 9.1 s; grain 3.5 s (8 mm 4.1). The glows' time follows how much of the frame glows: IMG_0216 (backlit, ~97 % of
+  the pixels in the glow) takes 45.5 s at 35 mm, mostly the per-pixel paths of the apply (25.1 s) and gather2 (11.1
+  s); halation alone 30.5 s there (25.5 with the old composite): most of its sky passes the knee, so most words take
+  the apply's per-pixel path. 5D2 (IMG_8553, two halves, memsim x 0.83): both 25.4 s at 35 mm. Measured with the old
+  composite and not again (the code they time is unchanged or close): 65 mm both 17.7 s, bloom alone 9.8 s (IMG_0216
+  24.5), 5D2 8 / 65 mm 32.9 / 26.3 s, halation alone 13.9, bloom alone 14.7, grain 3.4 (3.3 .. 3.9). Once per setting:
+  1.1 .. 1.4 s.
 - **Memory.** The glows: one block of `yl_mem_bytes` (EOS M 3.79 MB both, 2.34 halation, 1.38 bloom; 5D2 4.44 / 2.74 /
   1.62 MB), as the WindyFilm stage's. Grain: 213 KB + 1.4 KB (the samples, the period row, the tables), and 665 KB of
   shoot memory while it is built.
-- **Checks.** `test.sh` FX:lab (both cameras): config words, rows and keys, each glow alone and both on the disc frame
+- **Checks.** `test.sh` FX:lab (both cameras): the glow composite against its formula in double (within 2 Q4 levels,
+  the halo as it is below the knee, rising, never past white) and film-lab's sky edge (a bright sky against dark
+  leaves, 35 mm: 4 px inside the edge at least half the red the inside gets; the old composite gave +8 against +25),
+  config words, rows and keys, each glow alone and both on the disc frame
   (a red-orange halo, a glow in the light's colour, both more than either), halves = whole frame at the seam (EOS M;
   again with a white band over the frame's top: at most 12 levels apart over the YL_XF rows, as the TOP's halation and
   bloom rows round the seam are kept in blocks of their own; sharing one block put the band's glow into the BOT's first

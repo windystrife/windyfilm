@@ -7,13 +7,15 @@
  * reference, and why, is docs/DESIGN.md 3.20 (each point is measured against the reference CLI by tools/lab_check.sh):
  *   - halation and bloom are blurred on a 1/8 (halation) and a 1/16 (bloom) grid of cell means, then interpolated
  *     per pixel pair; the blur variance is the reference's three-box Gaussian minus what the grid adds;
- *   - the halation core (0.75 x layer) and the colour, the clamps and the bloom's ease-off in the highlights are per pixel, on the
- *     camera's own UYVY words (full-range BT.601, as Canon writes them), as deltas: a word without any glow is kept
- *     bit-exact;
+ *   - the colour, the clamps, the halo's soft composite (the reference's glow composite: the halo added as it is while
+ *     it fills at most half the headroom, then a roll-off towards white with the same slope; here the headroom's
+ *     reciprocal from its top 11 bits and the exp from a table) and the bloom's ease-off in the highlights are per
+ *     pixel, on the camera's own UYVY words (full-range BT.601, as Canon writes them), as deltas: a word without any
+ *     glow is kept bit-exact;
  *   - the bloom's edge mask uses the largest luma step per 16-px cell instead of a per-pixel Sobel (the
  *     reference dilates and blurs that map over 16 + 46 px anyway);
- *   - both glows are gathered from the frame before the bloom (the reference blurs the halation layer of the bloomed
- *     frame; the per-pixel core uses the bloomed pixel, as the reference does);
+ *   - with both glows on, the halation layer is gathered again from the bloomed frame in a second read-only pass (no
+ *     bloomed frame is kept), as the reference blurs the halation layer of the bloomed frame;
  *   - the grain is the reference's lattice noise (its hash at whole cells of the cell size, bilinear in between over the
  *     weights' root sum of squares, R G B on their shifted lattices, the clump blur, the strength gain of the 800-row
  *     preview) on a periodic lattice of P x P cells: its 256 x 256 samples of that period are computed once per gauge
@@ -35,6 +37,7 @@
 #define YL_TOP    1
 #define YL_BOTTOM 2
 #define YL_BLK    64             /* apply: words per block of yl_ctx.blk */
+#define YL_GE     544            /* apply, the soft glow: exp table steps of 1/64 (past 8.5 the glow rounds to white) */
 
 typedef struct {
     int hal, bloom;              /* 1 = on */
@@ -59,6 +62,8 @@ typedef struct {
     int kr, kg, kb;              /* halo colour x 4080 (Q4 levels per unit halo) */
     int hmin;                    /* lowest luma (eighth levels) with a non-zero mask */
     yl_plan pl_l, pl_g;          /* halation: local blur of the layer, then the step from local to global */
+    uint16_t grcp[1024];         /* the soft glow (yl_glow): (2^26 - 1) / m for m = 1024 + i, the headroom's top 11 bits */
+    uint16_t gexp[YL_GE + 1];    /* the soft glow: exp(-i / 64), Q15 */
     /* bloom tables */
     int bthr;                    /* start level, luma in quarter levels: pixels at or above it are the bloom layer */
     int bgain_q12;               /* 2^gain (EV), Q12 */
@@ -87,8 +92,8 @@ typedef struct {
     int32_t  *ln0, *ln1;         /* blur lines */
     uint16_t *sv, *svb;          /* halves: the TOP's halation / bloom rows round the seam (each its own block) */
     int16_t  *hlo, *hhi, *blo, *bhi;   /* non-zero cells per glow row (lo > hi: none) */
-    uint16_t *vh, *vb;           /* apply: the current pixel row's glow, between its two grid rows */
-    uint16_t *vq;                /* apply: that row's halo of a pixel without a core, per 1/8 cell (Q15) */
+    uint16_t *vb;                /* apply: the current pixel row's bloom glow, between its two grid rows */
+    uint16_t *vq;                /* apply: that row's halo (near and far glow x their weights), per 1/8 cell (Q15) */
     int16_t  *vb4;               /* apply: that row's bloom glow per 1/16 cell as Y, U, V and its largest channel */
     int32_t  blk[3 * YL_BLK];    /* apply, per word of a block: the halo (Q15); the bloom's Y; its U << 16 | V */
     int pj, bj, prow_y;          /* gather: current cell rows, last pixel row */
@@ -107,6 +112,8 @@ void yl_build(yl_ctx *g, int y_begin, int y_end, int mode);
 void yl_gather2_chunk(yl_ctx *g, const uint32_t *words, int npix, int x0, int y);
 void yl_build2(yl_ctx *g, int y_begin, int y_end, int mode);
 void yl_apply_chunk(yl_ctx *g, uint32_t *words, int npix, int x0, int y);
+/* the halo's soft composite on one channel, Q4 levels (v <= 4080, a >= 0): what yl_apply_chunk adds (for the tests) */
+int  yl_glow(const yl_ctx *g, int v, int a);
 
 /* grain: a tile of YL_TS x YL_TS x 3 int8 (per tile row: Y, U, V planes: the field's samples over one period of lp px)
  * and a row of that period (int16 Y per pixel, U and V per word) in the caller's memory (YL_GBYTES), built once per
