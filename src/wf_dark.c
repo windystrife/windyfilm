@@ -1893,6 +1893,172 @@ static void dk_finish(int i, uint32_t ao, uint32_t al, const char *look, struct 
 #define DK_XT_JN   (48u * 1024)
 #define DK_XT_OB   (DK_XT_JPG + DK_XT_JN)
 #define DK_XT_OBN  (8u * 1024)
+#define DK_PV_OFF  (DK_XT_OB + DK_XT_OBN)       /* the Prints picture in M.in after the Exif thumbnail's (M5), then */
+#define DK_PV_SOFF (DK_PV_OFF + WF_PRV_W * WF_PRV_H * 2)   /* its contact sheet picture: to 252.2 KB of DK_IN's 256 */
+typedef char dk_pv_fits[DK_PV_SOFF + WF_PRV_SW * WF_PRV_SH * 2 <= DK_IN ? 1 : -1];
+typedef char dk_pv_same[WF_PRV_W == WF_DK_VW && WF_PRV_H == WF_DK_VH && WF_PRV_SW == WF_DK_VSW && WF_PRV_SH == WF_DK_VSH ? 1 : -1];
+
+int wf_prv_head_ok(const struct wf_prv_head *h)
+{
+    return h->magic == WF_PRV_MAGIC && h->w == WF_PRV_W && h->h == WF_PRV_H && h->sw == WF_PRV_SW && h->sh == WF_PRV_SH
+        && h->px + h->pw <= WF_PRV_W && h->py + h->ph <= WF_PRV_H && h->pw && h->ph;
+}
+
+/* the Prints screens' picture beside the print (M5): path's .JPG as .WFP, a new file. A failure is logged, the print
+   stays (the screens show "no picture" for that frame) */
+static const char *dk_base(const char *p);
+static void dk_prv_write(int i, const char *path, const struct wf_dk_vth *vt, int film, int orient)
+{
+    char p[96];
+    int k = snprintf(p, sizeof p, "%s", path);
+    if (k < 5 || k >= (int)sizeof p || p[k - 4] != '.') {
+        wf_log("dark: F%02d no Prints picture: path %s", i + 1, path);
+        return;
+    }
+    p[k - 3] = 'W';
+    p[k - 2] = 'F';
+    p[k - 1] = 'P';
+    if (!wf_dk_vth_done(vt)) {
+        wf_log("dark: F%02d no Prints picture: rows missing", i + 1);
+        return;
+    }
+    uint32_t *pic = (uint32_t *)(M.in + DK_PV_OFF), *sh = (uint32_t *)(M.in + DK_PV_SOFF);
+    wf_dk_vth_sheet(pic, sh);
+    struct wf_prv_head h;
+    memset(&h, 0, sizeof h);
+    h.magic = WF_PRV_MAGIC;
+    h.w = WF_PRV_W;
+    h.h = WF_PRV_H;
+    h.sw = WF_PRV_SW;
+    h.sh = WF_PRV_SH;
+    h.px = (uint16_t)vt->ox;
+    h.py = (uint16_t)vt->oy;
+    h.pw = (uint16_t)vt->tw;
+    h.ph = (uint16_t)vt->th;
+    h.film = (uint16_t)film;
+    h.frame = (uint16_t)i;
+    h.orient = (uint16_t)(orient == 3 || orient == 6 || orient == 8 ? orient : 1);
+    struct wf_fe e = { 0, 0 };
+    uint32_t osz = 0;
+    if (FIO_GetFileSize(p, &osz) == 0 && wf_fremove(p, &e) != 0) {
+        wf_log("dark: F%02d Prints picture: the old one not removed (%s %d)", i + 1, wf_fe_name(e.step), e.rc);
+        return;
+    }
+    void *o = wf_fopen_w(p, WF_FO_NEW, 0, &e);
+    struct dk_wr w = { o, 0, 0, DK_FNV0, 0, 0 };
+    int rc = !o ? -1 : dk_write_cb(&w, (const uint8_t *)&h, sizeof h) || dk_write_cb(&w, (const uint8_t *)sh,
+                                   WF_PRV_SW * WF_PRV_SH * 2) || dk_write_cb(&w, (const uint8_t *)pic, WF_PRV_W * WF_PRV_H * 2);
+    if (o)
+        FIO_CloseFile(o);
+    if (rc || w.err) {
+        if (o)
+            wf_fremove(p, &e);
+        wf_log("dark: F%02d Prints picture not written (%s)", i + 1, o ? "write" : wf_fe_name(e.step));
+        return;
+    }
+    wf_log("dark: F%02d Prints picture %s, %d KB, o%d", i + 1, dk_base(p), (int)(WF_PRV_BYTES >> 10), h.orient);
+}
+
+/* the card's prints for the film OS's Prints screens (any task; wf_dark.h) */
+static int prs_name(const char *s, int *fr, int *file)   /* "F07_0212.WFP" (either case) */
+{
+    if ((s[0] & ~32) != 'F' || s[3] != '_' || s[8] != '.' || (s[9] & ~32) != 'W' || (s[10] & ~32) != 'F'
+        || (s[11] & ~32) != 'P' || s[12])
+        return -1;
+    int v = 0;
+    for (int k = 1; k < 8; k++) {
+        if (k == 3)
+            continue;
+        if (s[k] < '0' || s[k] > '9')
+            return -1;
+        v = v * 10 + s[k] - '0';
+        if (k == 2) {
+            *fr = v;
+            v = 0;
+        }
+    }
+    *file = v;
+    return *fr >= 1 && *fr <= WF_ROLL_MAXEXP ? 0 : -1;
+}
+
+#define PRS_DIRS 128
+int wf_prints_scan(struct wf_prints *p)
+{
+    static uint16_t dirs[PRS_DIRS];              /* num x 32 + pass of the ROLLS folders, newest first */
+    char root[16], d[40];
+    int nd = 0;
+    memset(p, 0, sizeof *p);
+    if (wf_roll_root(wf_dcim_dir(), root, sizeof root) < 0)
+        return -1;
+    struct fio_file *f = alloc_fio_file();
+    if (!f)
+        return 0;
+    snprintf(d, sizeof d, "%sROLLS/", root);
+    void *h = FIO_FindFirstEx(d, f);
+    if (h && !((uintptr_t)h & 1)) {
+        do {
+            struct wf_file_info fi = convert_fio_file_info(f);
+            int n, v;
+            if (!(fi.mode & 0x10) || wf_roll_name_parse(fi.name, &n, &v) != 0 || n < 1 || n > 999 || v < 1 || v > 31)
+                continue;
+            uint16_t key = (uint16_t)(n * 32 + v);
+            int k;
+            if (nd < PRS_DIRS)
+                k = nd++;
+            else if (dirs[PRS_DIRS - 1] < key)
+                k = PRS_DIRS - 1;                /* full: a newer one takes the oldest's place */
+            else
+                continue;
+            for (; k > 0 && dirs[k - 1] < key; k--)
+                dirs[k] = dirs[k - 1];
+            dirs[k] = key;
+        } while (FIO_FindNextEx(h, f) == 0);
+        FIO_FindClose(h);
+    }
+    for (int q = 0; q < nd && p->n < WF_PRS_MAX; q++) {
+        int n = dirs[q] >> 5, v = dirs[q] & 31;
+        struct wf_prints_roll *r = &p->r[p->n];
+        char nm[12];
+        wf_roll_name(n, v, nm);
+        snprintf(d, sizeof d, "%sROLLS/%s/", root, nm);
+        memset(r, 0, sizeof *r);
+        void *g = FIO_FindFirstEx(d, f);
+        if (!g || ((uintptr_t)g & 1))
+            continue;
+        do {
+            struct wf_file_info fi = convert_fio_file_info(f);
+            int fr = 0, file = 0;
+            if (!(fi.mode & 0x10) && fi.size == WF_PRV_BYTES && prs_name(fi.name, &fr, &file) == 0
+                && r->n < WF_ROLL_MAXEXP) {
+                int k = r->n++;
+                for (; k > 0 && r->fr[k - 1] > fr; k--) {   /* in frame order */
+                    r->fr[k] = r->fr[k - 1];
+                    r->file[k] = r->file[k - 1];
+                }
+                r->fr[k] = (uint8_t)fr;
+                r->file[k] = (uint16_t)file;
+            }
+        } while (FIO_FindNextEx(g, f) == 0);
+        FIO_FindClose(g);
+        if (r->n) {
+            r->num = (int16_t)n;
+            r->dev = (int16_t)v;
+            p->n++;
+        }
+    }
+    __mem_free(f);
+    return 0;
+}
+
+int wf_prints_path(const struct wf_prints_roll *r, int k, char *out, int n)
+{
+    char root[16], nm[12];
+    if (!r || k < 0 || k >= r->n || wf_roll_root(wf_dcim_dir(), root, sizeof root) < 0)
+        return -1;
+    wf_roll_name(r->num, r->dev, nm);
+    int m = snprintf(out, n, "%sROLLS/%s/F%02d_%04d.WFP", root, nm, r->fr[k], r->file[k]);
+    return m > 0 && m < n ? m : -1;
+}
 
 /* the Exif thumbnail (owner 11-16: Canon's playback and index show the print): xt's picture as a JPEG into the APP1's
  * slot (quality down from 90 until it fits) and the APP1 written again at offset 2 of path. 0 = done or left as it
@@ -1955,6 +2121,9 @@ static int dk_encode(int i, const char *path, const struct wf_pf_lay *L, uint8_t
     w->s0 = 2;                                   /* SOI, then the APP1 (wf_jpe_begin) */
     w->s1 = 2 + al;
     static struct wf_dk_xth xt;                  /* (wf_task's stack) */
+    static struct wf_dk_vth vt;                  /* the Prints screens' picture (M5): the print only */
+    if (!what)
+        wf_dk_vth_begin(&vt, L->cw, L->ch, (uint32_t *)(M.in + DK_PV_OFF));
     uint32_t xo = 0, xroom = 0;
     int xth = al && wf_dk_xthumb_slot(app1, al, &xo, &xroom) == 0;
     if (xth)
@@ -1975,6 +2144,8 @@ static int dk_encode(int i, const char *path, const struct wf_pf_lay *L, uint8_t
         rc = wf_jpe_rows(je, rows, pitch, n);
         if (xth)
             wf_dk_xth_rows(&xt, rows, pitch, y, n, (uint32_t *)M.in);
+        if (!what)
+            wf_dk_vth_rows(&vt, rows, pitch, y, n, (uint32_t *)(M.in + DK_PV_OFF));
         for (int ya = py, ye; !what && ya >= 0 && ya < DK_H && ya < py + n; ya = ye) {   /* the screen: the picture's rows */
             ye = dk_row_end(ya) < py + n ? dk_row_end(ya) : py + n;
             wf_dk_thumb_rows(&dk_th, dk_row(0, ya), DK_FP, ya, ye - ya, dv_print);
@@ -2002,6 +2173,8 @@ static int dk_encode(int i, const char *path, const struct wf_pf_lay *L, uint8_t
         dk_why = w->err ? "write (card full?)" : "encode";
         return DK_FATAL;
     }
+    if (!what)
+        dk_prv_write(i, path, &vt, dkr->film, L->orient);
     return DK_OK;
 }
 

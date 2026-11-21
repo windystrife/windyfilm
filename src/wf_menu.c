@@ -78,6 +78,7 @@ volatile int wf_exif_off;
 volatile int wf_os = 1;                           /* Camera interface (wf_api.h): 1 WindyFilm, 0 Canon + ML */
 volatile int wf_vf = WF_VF_FULL;                  /* the film OS's LiveView finder (wf_api.h, WF_VF_*) */
 volatile int wf_plate = 1;                        /* the 5D2's Top plate (wf_api.h) */
+volatile int wf_playv;                            /* PLAY shows: 0 Canon's playback, 1 Prints (wf_api.h) */
 volatile int wf_cfg_dirty;
 static volatile int wf_cfg_t;
 static int wf_out_prev = WF_OUT_FILM;             /* Film LUT row Off goes back to this output */
@@ -348,6 +349,11 @@ void wf_vf_set(int v)                           /* the LiveView finder (wf_api.h
 void wf_plate_set(int on)                       /* the 5D2's Top plate (wf_api.h) from the film OS's Settings */
 {
     wf_plate = on != 0;
+    wf_dirty();
+}
+void wf_playv_set(int on)                       /* PLAY shows (wf_api.h) from the film OS's Settings */
+{
+    wf_playv = on != 0;
     wf_dirty();
 }
 void wf_qk_set(int v)                           /* the quick keys from the film OS's Settings */
@@ -1080,6 +1086,8 @@ void wf_cfg_load(void)
             wf_vf = wf_cfg_word(v, wf_vf_cfg, WF_VF_N, WF_VF_FULL);
         } else if ((v = wf_cfg_val(l, "plate"))) {
             wf_plate = !wf_cfg_word(v, (const char *const[]){ "on", "off" }, 2, 0);
+        } else if ((v = wf_cfg_val(l, "play"))) {
+            wf_playv = wf_cfg_word(v, (const char *const[]){ "canon", "prints" }, 2, 0);
         } else if ((v = wf_cfg_val(l, "input"))) {
             ;                                     /* reserved: "jpeg" is the only input path */
         } else if ((v = wf_cfg_val(l, "userwb"))) {
@@ -1117,7 +1125,7 @@ static int wf_cfg_save(void)
                      "input=jpeg\nfilm=%d\noutput=%s\ncurve=%s\nflut=%s\nlutei=%d\nincurve=%s\nprint=%s\nlight=%s\n"
                      "strength=%s\nhl=%d\nsh=%d\npaper=%s\ngrain=%s\nhalation=%s\nbloom=%s\ngauge=%s\nmist=%s\npreview=%s\n"
                      "exposure=%s\nexptrim=%d\nexif=%s\nblind=%s\nframe=%s\ninfo=%s\ndate=%s\njpeg=%s\njpeg2=%s\ncr2=%s\ndkscreen=%s\n"
-                     "dkphoto=%s\nrolllook=%s\nshoulder=%s\nqkeys=%s\nos=%s\nfinder=%s\nplate=%s\n",
+                     "dkphoto=%s\nrolllook=%s\nshoulder=%s\nqkeys=%s\nos=%s\nfinder=%s\nplate=%s\nplay=%s\n",
                      wf_film_id, wf_pick(wf_out_key, WF_NOUT, wf_out), wf_curve_key[wf_cur() - 1],
                      fl ? wf_flut_code[fl] : "technical", lei, wf_pick(wf_inc_key, WF_INC_N, wf_incurve),
                      wf_pick(wf_print_key, WF_NPRINTS, wf_print),
@@ -1133,7 +1141,7 @@ static int wf_cfg_save(void)
                      wf_pick(wf_ds_key, WF_DS_N, wf_dk_scr), wf_pick(wf_rl_key, 2, wf_dk_photo),
                      wf_pick(wf_rl_key, 2, wf_roll_look8), wf_pick(wf_hue_key, WF_DEV_HUE_N, wf_rb_hue),
                      wf_pick(wf_qk_cfg, WF_QK_N, wf_qk), wf_os ? "on" : "off", wf_pick(wf_vf_cfg, WF_VF_N, wf_vf),
-                     wf_plate ? "on" : "off");
+                     wf_plate ? "on" : "off", wf_playv ? "prints" : "canon");
     struct wf_sg_knobs sk;
     wf_sg_knobs_now(&sk);
     if (n > 0 && n < (int)sizeof b)

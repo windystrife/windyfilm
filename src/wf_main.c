@@ -418,6 +418,11 @@ static unsigned int wf_keypress(unsigned int key)
     int qk = wf_qk_map(key);
     if (qk >= 0 && !wf_qk_key(qk))
         return 0;                                /* the quick keys (EOS M): a ring turn or LEFT / RIGHT used */
+    if (!gui_menu_shown() && !is_play_mode() && wf_ui_play_key(key)) {   /* the film OS: PLAY -> Prints (blind roll
+                                                                         too: they are the Darkroom's prints) */
+        wf_ui_open_prints();
+        return 0;
+    }
     if (key == WF_KEY_PLAY && !gui_menu_shown() && wf_roll_blocks_play()) {   /* blind roll (docs/DESIGN.md 3.6) */
         NotifyBox(2000, "Roll in camera: develop it in the Darkroom");
         return 0;

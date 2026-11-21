@@ -2,7 +2,7 @@
  *
  * Home comes up on the MENU key in shooting while Camera interface = WindyFilm (wf_os; wf_ui.c wf_ui_home_key) in place
  * of Canon's menu: the roll in the camera (can, ROLL nnn, film, frames shot / left on the roll gauge), four ways on
- * (Film shelf = the browser, Darkroom, Prints = Canon's PLAY, Settings) and the roll's look (Light, Print, Paper, Grain,
+ * (Film shelf = the browser, Darkroom, Prints = wf_prints_ui.c, Settings) and the roll's look (Light, Print, Paper, Grain,
  * Halation, Strength: the ring / dial steps the focused one, SET / INFO opens the browser on it).
  * MENU on Home closes the UI at once and hands Canon its MENU (wf_ui.c after_close; the EOS M two-finger tap arrives as
  * MENU too and opens the ML menu instead). 5D2: TRASH on Home opens the ML menu (its only way in while WindyFilm takes
@@ -215,11 +215,18 @@ static void open_tile(int t)
     }
     if (t == HF_PRINTS)
     {
-        if (wf_roll_blocks_play()) { say("Blind roll: the prints come after the Darkroom"); return; }
-        wfui_close_after(WFUI_AFTER_PLAY);
+        wf_log("ui: Home -> Prints");
+        wfui_goto(WFUI_SCR_PRINTS);
         return;
     }
     wfui_goto(WFUI_SCR_SET);
+}
+
+void wfos_play(void)
+{
+    if (wf_playv) { open_tile(HF_PRINTS); return; }
+    if (wf_roll_blocks_play()) { say("Blind roll: Canon's playback after the Darkroom"); return; }
+    wfui_close_after(WFUI_AFTER_PLAY);
 }
 
 /* ------------------------------------------------------------------ Home */
@@ -298,7 +305,7 @@ static void home_render(void)
     snprintf(sb, sizeof sb, "%d films  -  load a roll", wf_nfilms);
     sub[HF_SHELF] = sb;
     sub[HF_DARK] = dark_line(db, sizeof db);
-    sub[HF_PRINTS] = wf_roll_blocks_play() ? "After the Darkroom" : "Canon's playback";
+    sub[HF_PRINTS] = "The Darkroom's prints";
     sub[HF_SET] = "Interface, finder, keys";
     for (int i = 0; i < HF_NTILE; i++)
     {
@@ -397,7 +404,7 @@ static int home_key(int k)
         wfui_close_after(WFUI_AFTER_MENU);
         break;
     case MODULE_KEY_PLAY:
-        open_tile(HF_PRINTS);
+        wfos_play();
         break;
     case MODULE_KEY_TRASH:                                  /* 5D2: the ML menu; EOS M (long DOWN): the shelf */
         if (is5d2()) wfui_close_after(WFUI_AFTER_MLMENU);
@@ -410,7 +417,7 @@ static int home_key(int k)
 }
 
 /* ------------------------------------------------------------------ Settings */
-enum { SR_OS = 0, SR_VF, SR_QK, SR_BLIND, SR_MLMENU, SR_MENUKEY, SR_PLATE, SR_N };
+enum { SR_OS = 0, SR_VF, SR_QK, SR_BLIND, SR_MLMENU, SR_MENUKEY, SR_PLATE, SR_PLAY, SR_N };
 enum { SY_FILMS = 0, SY_FONTS, SY_CANS, SY_N };
 static const char *const sec_name[2] = { "Interface", "System" };
 
@@ -422,6 +429,7 @@ static int set_rows(int sec, uint8_t *out)
         out[n++] = SR_OS;
         out[n++] = SR_VF;
         out[n++] = is5d2() ? SR_PLATE : SR_QK;              /* the quick keys are the EOS M's, the Top plate the 5D2's */
+        out[n++] = SR_PLAY;
         out[n++] = SR_BLIND;
         out[n++] = SR_MLMENU;
         out[n++] = SR_MENUKEY;
@@ -495,6 +503,12 @@ static int set_row(int sec, int r, const char **name, const char **val, const ch
              : wf_plate ? "Through the viewfinder: Canon's screen as the camera's top plate"
                         : "Through the viewfinder: Canon's own shooting screen";
         return 1;
+    case SR_PLAY:
+        *name = "PLAY shows";
+        *val = wf_playv ? "Prints" : "Canon";
+        *sub = !wf_os ? "With Camera interface WindyFilm"
+             : wf_playv ? "The Darkroom's prints; PLAY there: Canon's playback" : "Canon's playback, as before";
+        return 1;
     case SR_BLIND:
         *name = "Blind roll";
         *val = wf_blind ? "On" : "Off";
@@ -520,6 +534,7 @@ static void set_step(int r, int d)
     else if (r == SR_QK) wf_qk_set((wf_qk + WF_QK_N + d) % WF_QK_N);
     else if (r == SR_BLIND) wf_blind_set(!wf_blind);
     else if (r == SR_PLATE) wf_plate_set(!wf_plate);
+    else if (r == SR_PLAY) wf_playv_set(!wf_playv);
 }
 
 static void set_render(void)
@@ -601,6 +616,7 @@ static int set_key(int k)
         if (rows[sfoc] == SR_OS) wf_log("ui: Camera interface %s", wf_os ? "WindyFilm" : "Canon + ML");
         if (rows[sfoc] == SR_VF) wf_log("ui: LiveView finder %d", wf_vf);
         if (rows[sfoc] == SR_PLATE) wf_log("ui: Top plate %s", wf_plate ? "on" : "off");
+        if (rows[sfoc] == SR_PLAY) wf_log("ui: PLAY shows %s", wf_playv ? "Prints" : "Canon");
         break;
     case MODULE_KEY_MENU: case MODULE_KEY_TRASH:
         wfui_goto(WFUI_SCR_HOME);
@@ -781,7 +797,7 @@ static int plate_key(int k)
     case MODULE_KEY_MENU:  wfui_goto(WFUI_SCR_HOME); break;
     case MODULE_KEY_TRASH: wfui_shelf(); break;
     case MODULE_KEY_INFO:  wf_log("ui: Top plate: INFO, Canon's screen"); wfui_close_after(WFUI_AFTER_INFO); break;
-    case MODULE_KEY_PLAY:  open_tile(HF_PRINTS); break;
+    case MODULE_KEY_PLAY:  wfos_play(); break;
     case MODULE_KEY_WHEEL_LEFT: case MODULE_KEY_WHEEL_RIGHT:   /* the main dial */
         wf_plate_dial(0, k == MODULE_KEY_WHEEL_RIGHT ? 1 : -1);
         break;

@@ -351,3 +351,5 @@ int host_dump(const char *path)
     fclose(fp);
     return stray;
 }
+
+int host_px(int x, int y) { return x >= 0 && x < 720 && y >= 0 && y < 480 ? real_raw[OFF + y * BMPPITCH + x] : -1; }

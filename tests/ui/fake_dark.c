@@ -313,3 +313,91 @@ void fake_set_shelf(int on) { fshelf = on; rgen++; }
 /* RAW develop B's menu toggle (wf_rawb.h; the core's wf_rawb.c is not in the harness) */
 int wf_rawb_can(void) { return rawb_can; }     /* as the real builds: B on both cameras (wf_cam.h WF_RAWB_CAN) */
 void fake_set_rawb_can(int c) { rawb_can = c; }
+
+/* ------------------------------------------------------------------ the Prints screens' pictures (M5): the card dir's
+   ROLLS as wf_dark.c lists them (newest roll first, frames in order, only files of WF_PRV_BYTES) */
+const char *fake_card_dir(void);
+int wf_prv_head_ok(const struct wf_prv_head *h)
+{
+    return h->magic == WF_PRV_MAGIC && h->w == WF_PRV_W && h->h == WF_PRV_H && h->sw == WF_PRV_SW && h->sh == WF_PRV_SH
+        && h->px + h->pw <= WF_PRV_W && h->py + h->ph <= WF_PRV_H && h->pw && h->ph;
+}
+
+static int fprs_scans;
+int fake_prints_scans(void) { return fprs_scans; }
+
+int wf_prints_scan(struct wf_prints *p)
+{
+    int keys[256], nk = 0;
+    char d[1100];
+    memset(p, 0, sizeof *p);
+    fprs_scans++;
+    snprintf(d, sizeof d, "%s/ROLLS", fake_card_dir());
+    DIR *dd = opendir(d);
+    if (!dd)
+        return 0;
+    struct dirent *e;
+    while ((e = readdir(dd)) && nk < 256) {
+        int n, v;
+        if (wf_roll_name_parse(e->d_name, &n, &v) == 0 && n >= 1 && n <= 999 && v >= 1 && v < 32)
+            keys[nk++] = n * 32 + v;
+    }
+    closedir(dd);
+    for (int i = 1; i < nk; i++)                 /* newest first */
+        for (int j = i; j > 0 && keys[j - 1] < keys[j]; j--) {
+            int t = keys[j];
+            keys[j] = keys[j - 1];
+            keys[j - 1] = t;
+        }
+    for (int q = 0; q < nk && p->n < WF_PRS_MAX; q++) {
+        struct wf_prints_roll *r = &p->r[p->n];
+        char nm[12];
+        wf_roll_name(keys[q] >> 5, keys[q] & 31, nm);
+        snprintf(d, sizeof d, "%s/ROLLS/%s", fake_card_dir(), nm);
+        DIR *rd = opendir(d);
+        if (!rd)
+            continue;
+        memset(r, 0, sizeof *r);
+        while ((e = readdir(rd))) {
+            int fr, file;
+            char x[4], f2[1400];
+            if (strlen(e->d_name) != 12 || sscanf(e->d_name, "F%2d_%4d.%3s", &fr, &file, x) != 3
+                || strcmp(x, "WFP") || fr < 1 || fr > WF_ROLL_MAXEXP || r->n >= WF_ROLL_MAXEXP)
+                continue;
+            snprintf(f2, sizeof f2, "%s/%s", d, e->d_name);
+            FILE *fp = fopen(f2, "rb");
+            long sz = -1;
+            if (fp) {
+                fseek(fp, 0, SEEK_END);
+                sz = ftell(fp);
+                fclose(fp);
+            }
+            if (sz != (long)WF_PRV_BYTES)
+                continue;
+            int k = r->n++;
+            for (; k > 0 && r->fr[k - 1] > fr; k--) {
+                r->fr[k] = r->fr[k - 1];
+                r->file[k] = r->file[k - 1];
+            }
+            r->fr[k] = (uint8_t)fr;
+            r->file[k] = (uint16_t)file;
+        }
+        closedir(rd);
+        if (r->n) {
+            r->num = (int16_t)(keys[q] >> 5);
+            r->dev = (int16_t)(keys[q] & 31);
+            p->n++;
+        }
+    }
+    return 0;
+}
+
+int wf_prints_path(const struct wf_prints_roll *r, int k, char *out, int n)
+{
+    char nm[12];
+    if (!r || k < 0 || k >= r->n)
+        return -1;
+    wf_roll_name(r->num, r->dev, nm);
+    int m = snprintf(out, n, "ROLLS/%s/F%02d_%04d.WFP", nm, r->fr[k], r->file[k]);
+    return m > 0 && m < n ? m : -1;
+}

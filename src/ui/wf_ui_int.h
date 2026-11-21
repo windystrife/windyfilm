@@ -116,7 +116,7 @@ void wfui_render_anim(int t, int first);/* the load animation at t ms over it (f
 
 /* ------------------------------------------------------------------ wf_dark_ui.c: the Darkroom screen (DESIGN 3.6) */
 /* (owner 11-17: the Roll picker screen is gone; a roll is picked in the browser's Darkroom mode, DESIGN 3.12) */
-enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_DARK, WFUI_SCR_HOME, WFUI_SCR_SET, WFUI_SCR_PLATE, WFUI_SCR_N };
+enum { WFUI_SCR_BROWSER = 0, WFUI_SCR_DARK, WFUI_SCR_HOME, WFUI_SCR_SET, WFUI_SCR_PLATE, WFUI_SCR_PRINTS, WFUI_SCR_N };
 void wfdr_enter(int scr);               /* the screen becomes active: palette theme, its state */
 void wfdr_render(int scr, int now);     /* draw it into the idle buffer */
 int  wfdr_key(int scr, int key);        /* 1 = close the UI */
@@ -159,5 +159,16 @@ void wfui_goto(int scr);
 void wfui_close_after(int what);
 void wfui_browse(int row);
 void wfui_shelf(void);                 /* the film OS's Film shelf on the film in the camera (M2) */
+
+/* ------------------------------------------------------------------ wf_prints_ui.c: Prints + contact sheet (M5) */
+/* the Darkroom's prints (their .WFP pictures, wf_dark.h) one by one and six to a strip; wf_dark_ui.c's wfdr_* pass the
+   screen on. Memory only while it is up (freed in wfpr_leave) */
+void wfpr_enter(void);
+void wfpr_leave(void);
+void wfpr_render(void);
+int  wfpr_key(int key);                 /* 1 = close the UI */
+int  wfpr_tick(int now);                /* 1 = redraw */
+/* PLAY on Home and the Top plate: Prints with Settings > PLAY shows = Prints (wf_playv), else Canon's playback */
+void wfos_play(void);
 
 #endif

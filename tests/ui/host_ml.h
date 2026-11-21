@@ -157,5 +157,6 @@ long host_live_allocs(void);
 long host_peak_bytes(void);
 int  host_lock_depth(void);
 int  host_ui_pixels_ok(void);                   /* every front pixel is one of the browser's entries */
+int  host_px(int x, int y);                     /* a front buffer pixel (after wfg_present) */
 
 #endif

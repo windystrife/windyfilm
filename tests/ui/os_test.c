@@ -10,6 +10,9 @@
 #include "fake_core.h"
 #include "fake_dark.h"
 #include "wf_api.h"
+#include "../../src/wf_dark.h"
+#include <stdlib.h>
+#include <sys/stat.h>
 
 int wfui_host_scr(void);
 int wfui_host_sel_id(void);
@@ -106,6 +109,168 @@ static void roll_in(const char *film, int num, int shot_n, int exp)
     r->state = shot_n >= exp ? WF_RS_FULL : WF_RS_LOADED;
     for (int i = 0; i < shot_n; i++) { r->folder[i] = 100; r->file[i] = 6800 + i; r->fst[i] = WF_RF_SHOT; }
     fake_set_loaded(r->film);
+}
+
+/* ---------------------------------------------------------------- Prints (src/ui/wf_prints_ui.c, M5) */
+int wfpr_host_roll(void);
+int wfpr_host_k(void);
+int wfpr_host_sheet(void);
+int wfpr_host_full(void);
+int wfpr_host_sel(void);
+int wfpr_host_built(void);
+int wfpr_host_npal(void);
+int wfpr_host_pic_ok(void);
+const char *wfpr_host_msg(void);
+int wfui_host_play_pass(void);
+
+/* a stand-in print: sky, a sun, fields, a row of colour patches; kind 1 warmer, 2 black and white, 3 dusk */
+static void prv_rgb(int kind, int x, int y, int w, int h, int c[3])
+{
+    int hz = h * 56 / 100, sx = w * 70 / 100, sy = h * 24 / 100, rr = h / 9;
+    if ((x - sx) * (x - sx) + (y - sy) * (y - sy) <= rr * rr)
+    {
+        c[0] = 255; c[1] = 226; c[2] = 168;
+    }
+    else if (y < hz)
+    {
+        int t = y * 255 / hz;
+        c[0] = 64 + t / 2; c[1] = 112 + t / 3; c[2] = 196 + t / 5;
+    }
+    else if (y > h * 86 / 100)
+    {
+        static const uint8_t pt[8][3] = { { 200, 40, 40 }, { 230, 150, 40 }, { 230, 210, 60 }, { 60, 160, 70 },
+                                          { 50, 150, 170 }, { 50, 70, 180 }, { 150, 60, 160 }, { 222, 180, 150 } };
+        const uint8_t *q = pt[x * 8 / w];
+        c[0] = q[0]; c[1] = q[1]; c[2] = q[2];
+    }
+    else
+    {
+        int band = ((x + 3 * (y - hz)) / 26) & 1, t = (y - hz) * 255 / (h - hz);
+        c[0] = 70 + band * 40 + t / 6; c[1] = 110 + band * 22 - t / 8; c[2] = 40 + t / 10;
+    }
+    if (kind == 1) { c[0] += 24; c[2] -= 26; }
+    if (kind == 3) { c[0] = c[0] * 9 / 10 + 30; c[1] = c[1] * 6 / 10; c[2] = c[2] * 7 / 10 + 20; }
+    if (kind == 2) { int g = (c[0] * 77 + c[1] * 150 + c[2] * 29) >> 8; c[0] = c[1] = c[2] = g; }
+    for (int i = 0; i < 3; i++) c[i] = c[i] < 0 ? 0 : c[i] > 255 ? 255 : c[i];
+}
+
+static uint32_t yuv_word(const int a[3], const int b[3])
+{
+    int y0 = (77 * a[0] + 150 * a[1] + 29 * a[2]) >> 8, y1 = (77 * b[0] + 150 * b[1] + 29 * b[2]) >> 8;
+    int r = (a[0] + b[0]) / 2, g = (a[1] + b[1]) / 2, bl = (a[2] + b[2]) / 2, ym = (77 * r + 150 * g + 29 * bl) >> 8;
+    int u = (bl - ym) * 144 / 256, v = (r - ym) * 183 / 256;
+    u = u < -128 ? -128 : u > 127 ? 127 : u;
+    v = v < -128 ? -128 : v > 127 ? 127 : v;
+    return (uint32_t)(u & 0xFF) | (uint32_t)y0 << 8 | (uint32_t)(v & 0xFF) << 16 | (uint32_t)y1 << 24;
+}
+
+/* ROLLS/<roll>/Fnn_nnnn.WFP in the card dir: the layout of wf_dark.h; portrait: the print 150 x 224 in the bars;
+   bad: a head that is not ours (the size right) */
+static void prv_file(const char *card, const char *roll, int fr, int file, int film, int kind, int portrait, int bad,
+                     int orient)
+{
+    static uint32_t pic[WF_PRV_W / 2 * WF_PRV_H], sh[WF_PRV_SW / 2 * WF_PRV_SH];
+    char p[700];
+    snprintf(p, sizeof p, "%s/ROLLS", card);
+    mkdir(p, 0755);
+    snprintf(p, sizeof p, "%s/ROLLS/%s", card, roll);
+    mkdir(p, 0755);
+    struct wf_prv_head h;
+    memset(&h, 0, sizeof h);
+    h.magic = bad ? 0x12345678u : WF_PRV_MAGIC;
+    h.w = WF_PRV_W; h.h = WF_PRV_H; h.sw = WF_PRV_SW; h.sh = WF_PRV_SH;
+    h.pw = portrait ? 150 : WF_PRV_W;
+    h.ph = WF_PRV_H;
+    h.px = (uint16_t)((WF_PRV_W - h.pw) / 2 & ~1);
+    h.film = (uint16_t)film;
+    h.frame = (uint16_t)(fr - 1);
+    h.orient = (uint16_t)orient;
+    memset(pic, 0, sizeof pic);
+    for (int y = 0; y < h.ph; y++)
+        for (int x = 0; x < h.pw; x += 2)
+        {
+            int a[3], b[3];
+            if (orient == 6)                                /* stored turned left: shown h.ph wide, h.pw high */
+            {
+                prv_rgb(kind, h.ph - 1 - y, x, h.ph, h.pw, a);
+                prv_rgb(kind, h.ph - 1 - y, x + 1, h.ph, h.pw, b);
+            }
+            else
+            {
+                prv_rgb(kind, x, y, h.pw, h.ph, a);
+                prv_rgb(kind, x + 1, y, h.pw, h.ph, b);
+            }
+            pic[(h.py + y) * (WF_PRV_W / 2) + (h.px + x) / 2] = yuv_word(a, b);
+        }
+    for (int y = 0; y < WF_PRV_SH; y++)                     /* the sheet: 4 x 4 means, as wf_dk_vth_sheet */
+        for (int x = 0; x < WF_PRV_SW / 2; x++)
+        {
+            int ya = 0, yb = 0, u = 0, v = 0;
+            for (int j = 0; j < 4; j++)
+                for (int i = 0; i < 4; i++)
+                {
+                    uint32_t q = pic[(y * 4 + j) * (WF_PRV_W / 2) + x * 4 + i];
+                    int s = (int)((q >> 8) & 0xFF) + (int)(q >> 24);
+                    if (i < 2) ya += s; else yb += s;
+                    u += (int8_t)(q & 0xFF);
+                    v += (int8_t)((q >> 16) & 0xFF);
+                }
+            sh[y * (WF_PRV_SW / 2) + x] = (uint32_t)((u / 16) & 0xFF) | (uint32_t)((ya + 8) / 16) << 8
+                                        | (uint32_t)((v / 16) & 0xFF) << 16 | (uint32_t)((yb + 8) / 16) << 24;
+        }
+    snprintf(p, sizeof p, "%s/ROLLS/%s/F%02d_%04d.WFP", card, roll, fr, file);
+    FILE *f = fopen(p, "wb");
+    if (!f) { fprintf(stderr, "cannot write %s\n", p); exit(1); }
+    fwrite(&h, sizeof h, 1, f);
+    fwrite(sh, sizeof sh, 1, f);
+    fwrite(pic, sizeof pic, 1, f);
+    fclose(f);
+}
+
+/* the stand-in rolls: ROLL007 (F01, F02, F04 not ours, F05 + a file of the wrong size), ROLL012 (14 frames),
+   ROLL012B (its develop again: 2, the second portrait) */
+static void prv_card(const char *card)
+{
+    char p[700];
+    snprintf(p, sizeof p, "rm -rf '%s/ROLLS'", card);
+    if (system(p) != 0) fprintf(stderr, "rm ROLLS failed\n");
+    int portra = id_of("PRS400"), hp5 = id_of("PRT160");
+    prv_file(card, "ROLL007", 1, 101, hp5, 0, 0, 0, 1);
+    prv_file(card, "ROLL007", 2, 102, hp5, 3, 0, 0, 1);
+    prv_file(card, "ROLL007", 4, 104, hp5, 0, 0, 1, 1);
+    prv_file(card, "ROLL007", 5, 105, hp5, 1, 0, 0, 6);
+    snprintf(p, sizeof p, "%s/ROLLS/ROLL007/F03_0103.WFP", card);
+    FILE *f = fopen(p, "wb");
+    if (f) { fputs("short", f); fclose(f); }
+    for (int i = 0; i < 14; i++) prv_file(card, "ROLL012", i + 1, 300 + i, portra, i % 4, 0, 0, 1);
+    prv_file(card, "ROLL012B", 1, 300, portra, 2, 0, 0, 1);
+    prv_file(card, "ROLL012B", 2, 301, portra, 1, 1, 0, 1);
+}
+
+static void prv_clean(const char *card)
+{
+    char p[700];
+    snprintf(p, sizeof p, "rm -rf '%s/ROLLS'", card);
+    if (system(p) != 0) fprintf(stderr, "rm ROLLS failed\n");
+}
+
+static void sheet_wait(void)
+{
+    for (int i = 0; i < 200 && !wfpr_host_built(); i++) tick(1);
+    CHECK(wfpr_host_built(), "the contact sheet not built");
+}
+
+/* the screen's picture pixels: entries in the cans' range (the picture's own colours) inside the box */
+static int prv_count(int x0, int y0, int x1, int y1)
+{
+    int n = 0;
+    for (int y = y0; y <= y1; y++)
+        for (int x = x0; x <= x1; x++)
+        {
+            uint8_t c = host_px(x, y);
+            n += c >= PX(C_CAN0) && c < PX(C_CAN0 + WFUI_CAN_SLOTS);
+        }
+    return n;
 }
 
 static void to_tile(int t)
@@ -324,10 +489,9 @@ int main(int argc, char **argv)
     CHECK(!closed && wfui_host_scr() == WFUI_SCR_HOME, "MENU in the look's browser: closed %d, screen %d", closed,
           wfui_host_scr());
 
-    /* Prints with a blind roll: refused (a toast), still open */
-    to_tile(2);
-    key(MODULE_KEY_PRESS_SET);
-    CHECK(!closed && *wfos_host_msg(), "Prints under a blind roll: closed %d, no toast", closed);
+    /* PLAY with a blind roll (PLAY shows = Canon): refused (a toast), still open */
+    key(MODULE_KEY_PLAY);
+    CHECK(!closed && *wfos_host_msg(), "PLAY under a blind roll: closed %d, no toast", closed);
     shot("m1_eosm_home_blind");
 
     /* Settings */
@@ -357,6 +521,13 @@ int main(int argc, char **argv)
     CHECK(wf_qk == (q0 + 1) % WF_QK_N, "the ring on Quick keys: %d (was %d)", wf_qk, q0);
     key(MODULE_KEY_WHEEL_LEFT);
     CHECK(wf_qk == q0, "Quick keys not back");
+    key(MODULE_KEY_PRESS_DOWN);                             /* PLAY shows (M5) */
+    CHECK(wfos_host_sfoc() == 3 && !wf_playv, "DOWN from Quick keys: row %d, PLAY shows %d", wfos_host_sfoc(), wf_playv);
+    key(MODULE_KEY_PRESS_SET);
+    CHECK(wf_playv == 1, "SET on PLAY shows: not Prints");
+    shot("m5_eosm_settings_play");
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wf_playv == 0, "the ring on PLAY shows: not Canon again");
     key(MODULE_KEY_PRESS_DOWN);                             /* Blind roll */
     key(MODULE_KEY_PRESS_SET);
     CHECK(!wf_blind, "SET on Blind roll did not turn it off");
@@ -370,14 +541,13 @@ int main(int argc, char **argv)
     tick(1);
     CHECK(!closed && wfui_host_scr() == WFUI_SCR_HOME, "MENU in Settings: closed %d, screen %d", closed, wfui_host_scr());
 
-    /* Prints without a blind roll: closes, then Canon gets PLAY */
-    to_tile(2);
+    /* PLAY without a blind roll (PLAY shows = Canon): closes, then Canon gets PLAY */
     host_sent_clear();
-    key(MODULE_KEY_PRESS_SET);
+    key(MODULE_KEY_PLAY);
     tick(2);
-    CHECK(closed, "Prints did not close");
+    CHECK(closed, "PLAY on Home did not close");
     end_checks();
-    CHECK(host_sent_key() == MODULE_KEY_PLAY, "Prints: Canon got key %d, not PLAY", host_sent_key());
+    CHECK(host_sent_key() == MODULE_KEY_PLAY, "PLAY on Home: Canon got key %d, not PLAY", host_sent_key());
 
     /* MENU on Home: closes at once, then Canon's menu (a real MENU key: no ML menu came) */
     open_home();
@@ -467,6 +637,199 @@ int main(int argc, char **argv)
         lv_shot("m3_eosm_lv_canon", &v);
         v.shots = -1;                                       /* no card count either: the counter goes */
         lv_shot("m3_eosm_lv_canon_nocard", &v);
+    }
+
+    /* ---------------------------------------------------------------- EOS M: Prints and the contact sheet (M5) */
+    {
+        fake_dark_reset();
+        roll_in("PRT160", 24, 12, 36);
+        wf_blind = 0;
+        prv_card(card);
+        /* PLAY shows Prints: PLAY in shooting takes the film OS's Prints, where MENU takes Home */
+        CHECK(!wf_ui_play_key(MODULE_KEY_PLAY), "PLAY took Prints with PLAY shows = Canon");
+        wf_playv_set(1);
+        CHECK(wf_ui_play_key(MODULE_KEY_PLAY), "PLAY did not take Prints with PLAY shows = Prints");
+        CHECK(!wf_ui_play_key(MODULE_KEY_MENU), "MENU took Prints");
+        wf_os_set(0);
+        CHECK(!wf_ui_play_key(MODULE_KEY_PLAY), "PLAY took Prints with Camera interface = Canon + ML");
+        wf_os_set(1);
+        host_menu(1, -1, 0);
+        CHECK(!wf_ui_play_key(MODULE_KEY_PLAY), "PLAY took Prints over the ML menu");
+        host_menu(0, 0, 0);
+        host_recording = 1;
+        CHECK(!wf_ui_play_key(MODULE_KEY_PLAY), "PLAY took Prints while recording");
+        host_recording = 0;
+        lv = 0;
+        CHECK(!wf_ui_play_key(MODULE_KEY_PLAY), "EOS M: PLAY took Prints outside LiveView");
+        lv = 1;
+
+        closed = 0;
+        wf_ui_open_scr(WF_UI_SCR_PRINTS);
+        CHECK(wf_ui_is_open(), "Prints did not open");
+        wfui_task_begin();
+        tick(1);
+        CHECK(wfui_host_scr() == WFUI_SCR_PRINTS, "opened on screen %d, not Prints", wfui_host_scr());
+        CHECK(wfpr_host_roll() == 0 && wfpr_host_k() == 1 && wfpr_host_pic_ok(), "Prints starts at roll %d frame %d (pic %d)",
+              wfpr_host_roll(), wfpr_host_k(), wfpr_host_pic_ok());
+        CHECK(fake_log_has("ui: Prints: 3 rolls, 20 prints"), "Prints: the card's prints not 3 rolls, 20");
+        shot("m5_eosm_prints_portrait");
+        CHECK(prv_count(72, 48, 647, 431) > 40000 && prv_count(72, 48, 200, 431) == 0,
+              "portrait print: %d picture pixels, %d left of it", prv_count(72, 48, 647, 431), prv_count(72, 48, 200, 431));
+        key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(*wfpr_host_msg() && wfpr_host_k() == 1, "RIGHT past the newest print: frame %d, no word", wfpr_host_k());
+        key(MODULE_KEY_PRESS_LEFT);
+        CHECK(wfpr_host_k() == 0 && wfpr_host_roll() == 0, "LEFT: roll %d frame %d", wfpr_host_roll(), wfpr_host_k());
+        shot("m5_eosm_prints_bw");
+        key(MODULE_KEY_WHEEL_LEFT);                         /* past the roll's first: the next older roll's last */
+        CHECK(wfpr_host_roll() == 1 && wfpr_host_k() == 13, "LEFT past F01: roll %d frame %d", wfpr_host_roll(), wfpr_host_k());
+        shot("m5_eosm_prints");
+        CHECK(prv_count(72, 48, 647, 431) == 576 * 384 && wfpr_host_npal() > 40 && wfpr_host_npal() <= WFUI_CAN_SLOTS,
+              "the 3:2 print: %d picture pixels, %d colours", prv_count(72, 48, 647, 431), wfpr_host_npal());
+        key(MODULE_KEY_INFO);
+        CHECK(wfpr_host_full(), "INFO: not the whole screen");
+        shot("m5_eosm_prints_full");
+        CHECK(prv_count(0, 0, 719, 479) == 720 * 480, "the whole screen: %d picture pixels", prv_count(0, 0, 719, 479));
+        key(MODULE_KEY_MENU);
+        CHECK(!wfpr_host_full() && wfui_host_scr() == WFUI_SCR_PRINTS, "MENU on the whole screen: full %d, screen %d",
+              wfpr_host_full(), wfui_host_scr());
+        key(MODULE_KEY_PRESS_UP);                           /* the newer roll, its first frame */
+        CHECK(wfpr_host_roll() == 0 && wfpr_host_k() == 0, "UP: roll %d frame %d", wfpr_host_roll(), wfpr_host_k());
+        key(MODULE_KEY_PRESS_UP);
+        CHECK(wfpr_host_roll() == 0 && *wfpr_host_msg(), "UP past the newest roll: roll %d, no word", wfpr_host_roll());
+        key(MODULE_KEY_PRESS_DOWN);
+        key(MODULE_KEY_PRESS_DOWN);                         /* ROLL007: F01, F02, F04 (not ours), F05 */
+        CHECK(wfpr_host_roll() == 2 && wfpr_host_k() == 0, "DOWN DOWN: roll %d frame %d", wfpr_host_roll(), wfpr_host_k());
+        key(MODULE_KEY_PRESS_RIGHT);
+        shot("m5_eosm_prints_dusk");
+        key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(wfpr_host_k() == 2 && !wfpr_host_pic_ok(), "ROLL007 F04: frame %d, picture %d", wfpr_host_k(),
+              wfpr_host_pic_ok());
+        shot("m5_eosm_prints_nopic");
+        key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(wfpr_host_k() == 3 && wfpr_host_pic_ok(), "ROLL007 F05: frame %d, picture %d", wfpr_host_k(),
+              wfpr_host_pic_ok());
+        shot("m5_eosm_prints_turned");                      /* stored turned left (orientation 6): shown upright */
+        CHECK(prv_count(72, 48, 647, 431) == 256 * 384 && prv_count(72, 48, 231, 431) == 0
+              && host_px(400, 60) != host_px(400, 420),
+              "orientation 6: %d picture pixels (want 256 x 384), %d left of it", prv_count(72, 48, 647, 431),
+              prv_count(72, 48, 231, 431));
+        key(MODULE_KEY_PRESS_DOWN);
+        CHECK(wfpr_host_roll() == 2 && *wfpr_host_msg(), "DOWN past the oldest roll: roll %d", wfpr_host_roll());
+
+        /* the contact sheet of ROLL012 */
+        key(MODULE_KEY_PRESS_UP);
+        CHECK(wfpr_host_roll() == 1 && wfpr_host_k() == 0, "UP to ROLL012: roll %d frame %d", wfpr_host_roll(), wfpr_host_k());
+        key(MODULE_KEY_PRESS_RIGHT);
+        key(MODULE_KEY_PRESS_SET);
+        CHECK(wfpr_host_sheet() && wfpr_host_sel() == 1, "SET: sheet %d on %d", wfpr_host_sheet(), wfpr_host_sel());
+        sheet_wait();
+        tick(1);
+        shot("m5_eosm_sheet");
+        CHECK(fake_log_has("ui: contact sheet: ROLL012, 14 frames,"), "the sheet's log line");
+        CHECK(prv_count(36, 48, 683, 431) == 14 * WF_PRV_SW * WF_PRV_SH, "the sheet: %d picture pixels, want 14 frames'",
+              prv_count(36, 48, 683, 431));
+        key(MODULE_KEY_PRESS_DOWN);
+        CHECK(wfpr_host_sel() == 7, "DOWN on the sheet: %d", wfpr_host_sel());
+        key(MODULE_KEY_PRESS_DOWN);
+        CHECK(wfpr_host_sel() == 13, "DOWN again: %d", wfpr_host_sel());
+        key(MODULE_KEY_PRESS_DOWN);
+        CHECK(wfpr_host_sel() == 13, "DOWN off the sheet: %d", wfpr_host_sel());
+        key(MODULE_KEY_WHEEL_RIGHT);
+        CHECK(wfpr_host_sel() == 13, "the ring past the last: %d", wfpr_host_sel());
+        key(MODULE_KEY_PRESS_LEFT);
+        key(MODULE_KEY_PRESS_UP);
+        CHECK(wfpr_host_sel() == 6, "LEFT UP: %d", wfpr_host_sel());
+        shot("m5_eosm_sheet_sel");
+        key(MODULE_KEY_PRESS_SET);
+        CHECK(!wfpr_host_sheet() && wfpr_host_roll() == 1 && wfpr_host_k() == 6 && wfpr_host_pic_ok(),
+              "SET on the sheet: sheet %d, roll %d frame %d", wfpr_host_sheet(), wfpr_host_roll(), wfpr_host_k());
+        key(MODULE_KEY_PRESS_SET);                          /* the sheet again: kept, no reads */
+        int rd = fake_card_reads();
+        tick(2);
+        CHECK(wfpr_host_sheet() && wfpr_host_built() && fake_card_reads() == rd, "the sheet again: built %d, %d reads",
+              wfpr_host_built(), fake_card_reads() - rd);
+        key(MODULE_KEY_MENU);
+        CHECK(!wfpr_host_sheet() && wfpr_host_k() == 6, "MENU on the sheet: sheet %d frame %d", wfpr_host_sheet(),
+              wfpr_host_k());
+        /* the sheet of ROLL007: F04 not ours shows none */
+        key(MODULE_KEY_PRESS_DOWN);
+        key(MODULE_KEY_PRESS_SET);
+        sheet_wait();
+        tick(1);
+        shot("m5_eosm_sheet_short");
+        CHECK(prv_count(36, 48, 683, 431) == 3 * WF_PRV_SW * WF_PRV_SH, "ROLL007's sheet: %d picture pixels",
+              prv_count(36, 48, 683, 431));
+        key(MODULE_KEY_MENU);
+        key(MODULE_KEY_MENU);                               /* Prints -> Home */
+        tick(1);
+        CHECK(!closed && wfui_host_scr() == WFUI_SCR_HOME, "MENU on Prints: closed %d, screen %d", closed, wfui_host_scr());
+        shot("m5_eosm_home");
+        /* PLAY on Home with PLAY shows = Prints: Prints; there, PLAY is Canon's */
+        key(MODULE_KEY_PLAY);
+        tick(1);
+        CHECK(wfui_host_scr() == WFUI_SCR_PRINTS, "PLAY on Home: screen %d, not Prints", wfui_host_scr());
+        wf_blind = 1;
+        key(MODULE_KEY_PLAY);
+        tick(1);
+        CHECK(!closed && *wfpr_host_msg(), "Prints PLAY under a blind roll: closed %d, no word", closed);
+        wf_blind = 0;
+        host_sent_clear();
+        key(MODULE_KEY_PLAY);
+        tick(2);
+        CHECK(closed, "PLAY on Prints did not close");
+        end_checks();
+        CHECK(host_sent_key() == MODULE_KEY_PLAY && host_nsent() == 1, "PLAY on Prints: Canon got %d (%d keys)",
+              host_sent_key(), host_nsent());
+        CHECK(!wf_ui_play_key(MODULE_KEY_PLAY), "our own PLAY for Canon's playback opened Prints again");
+        CHECK(wf_ui_play_key(MODULE_KEY_PLAY), "the next PLAY does not open Prints");
+        /* no prints on the card: the screen says so; Home's tile opens it (PLAY shows = Canon) */
+        prv_clean(card);
+        wf_playv_set(0);
+        open_home();
+        to_tile(2);
+        key(MODULE_KEY_PRESS_SET);
+        tick(1);
+        CHECK(wfui_host_scr() == WFUI_SCR_PRINTS, "Prints tile: screen %d", wfui_host_scr());
+        shot("m5_eosm_prints_none");
+        key(MODULE_KEY_PRESS_RIGHT);
+        CHECK(!closed && wfui_host_scr() == WFUI_SCR_PRINTS, "RIGHT with no prints: closed %d", closed);
+        key(MODULE_KEY_MENU);
+        tick(1);
+        CHECK(wfui_host_scr() == WFUI_SCR_HOME, "MENU with no prints: screen %d", wfui_host_scr());
+        wf_ui_key(MODULE_KEY_PRESS_HALFSHUTTER);
+        tick(1);
+        CHECK(closed, "half-press did not close");
+        end_checks();
+        /* the owner's own pictures (WF_PRVREAL: a card dir with ROLLS from a host Darkroom run; local shots only) */
+        const char *real = getenv("WF_PRVREAL");
+        if (real && *real)
+        {
+            char cp[1600];
+            snprintf(cp, sizeof cp, "cp -r '%s/ROLLS' '%s/'", real, card);
+            if (system(cp) == 0)
+            {
+                wf_playv_set(1);
+                closed = 0;
+                wf_ui_open_scr(WF_UI_SCR_PRINTS);
+                wfui_task_begin();
+                tick(1);
+                shot("m5_real_prints");
+                key(MODULE_KEY_PRESS_LEFT);
+                shot("m5_real_prints_2");
+                key(MODULE_KEY_INFO);
+                shot("m5_real_prints_full");
+                key(MODULE_KEY_INFO);
+                key(MODULE_KEY_PRESS_SET);
+                sheet_wait();
+                tick(1);
+                shot("m5_real_sheet");
+                wf_ui_key(MODULE_KEY_PRESS_HALFSHUTTER);
+                tick(1);
+                end_checks();
+                wf_playv_set(0);
+            }
+            prv_clean(card);
+        }
     }
 
     /* ---------------------------------------------------------------- 5D2, through the viewfinder */
@@ -635,6 +998,52 @@ int main(int argc, char **argv)
         }
     }
     lv = 1;
+
+    /* ---------------------------------------------------------------- 5D2: Prints from the Top plate's PLAY (M5) */
+    {
+        fake_reset();
+        fake_dark_reset();
+        fake_set_card(card);
+        fake_set_cam(WF_CAM_5D2);
+        wf_os_set(1);
+        wf_playv_set(1);
+        wf_blind = 0;
+        roll_in("PRS400", 21, 17, 36);
+        prv_card(card);
+        lv = 0;
+        host_gui_set(0, 1, 1);
+        CHECK(wf_ui_play_key(MODULE_KEY_PLAY), "5D2: PLAY through the viewfinder did not take Prints");
+        closed = 0;
+        wf_ui_open_scr(WF_UI_SCR_PLATE);
+        wfui_task_begin();
+        tick(1);
+        key(MODULE_KEY_PLAY);
+        tick(1);
+        CHECK(!closed && wfui_host_scr() == WFUI_SCR_PRINTS, "5D2 Top plate PLAY: closed %d, screen %d", closed,
+              wfui_host_scr());
+        key(MODULE_KEY_WHEEL_LEFT);                         /* the main dial: frames */
+        CHECK(wfpr_host_k() == 0, "5D2 main dial: frame %d", wfpr_host_k());
+        key(MODULE_KEY_PICSTYLE);                           /* PICT: the older roll */
+        CHECK(wfpr_host_roll() == 1, "5D2 PICT on Prints: roll %d", wfpr_host_roll());
+        shot("m5_5d2_prints");
+        key(MODULE_KEY_JOY_CENTER);
+        sheet_wait();
+        tick(1);
+        shot("m5_5d2_sheet");
+        key(MODULE_KEY_PICSTYLE);                           /* PICT on the sheet: the next roll's sheet */
+        CHECK(wfpr_host_sheet() && wfpr_host_roll() == 2, "5D2 PICT on the sheet: sheet %d roll %d", wfpr_host_sheet(),
+              wfpr_host_roll());
+        sheet_wait();
+        key(MODULE_KEY_JOY_CENTER);
+        CHECK(!wfpr_host_sheet() && wfpr_host_roll() == 2, "5D2 joystick on the sheet: sheet %d", wfpr_host_sheet());
+        wf_ui_key(MODULE_KEY_PRESS_HALFSHUTTER);
+        tick(1);
+        CHECK(closed, "5D2 half-press on Prints did not close");
+        end_checks();
+        prv_clean(card);
+        wf_playv_set(0);
+        lv = 1;
+    }
 
     /* 5D2 LiveView: the same finder */
     lv_shots("5d2");

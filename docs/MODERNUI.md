@@ -119,7 +119,7 @@ the touch screen. Patch 0002: long DOWN = TRASH. Patch 0003: the module screen t
 | | ring | step the focused look value |
 | | INFO | the look editor (the browser's rows) |
 | | MENU | Canon's menu |
-| | PLAY | Prints |
+| | PLAY | Prints when "PLAY shows: Prints", else Canon's PLAY |
 | | half-press | back to shooting |
 | Film shelf | LEFT / RIGHT, ring | film |
 | | UP / DOWN | shelf row |
@@ -127,16 +127,17 @@ the touch screen. Patch 0002: long DOWN = TRASH. Patch 0003: the module screen t
 | | SET | load (animation, then LiveView) |
 | | INFO | about the film |
 | | MENU | Home |
-| Prints | LEFT / RIGHT, ring | print |
+| Prints | LEFT / RIGHT, ring | print (past a roll's end: the next roll) |
+| | UP / DOWN | newer / older roll |
 | | SET | contact sheet |
-| | INFO | details |
-| | PLAY | Canon's PLAY of the camera JPEG |
+| | INFO | the whole screen (INFO / MENU back) |
+| | PLAY | Canon's PLAY |
 | | MENU | Home |
 | | half-press | shoot |
-| Contact sheet | arrows | frame |
-| | SET | that print |
-| | INFO | roll |
-| | MENU | Home |
+| Contact sheet | LEFT / RIGHT, ring | frame |
+| | UP / DOWN | the strip above / below |
+| | SET, INFO, MENU | that print |
+| | PLAY | Canon's PLAY |
 | Settings | UP / DOWN | row |
 | | ring | value |
 | | LEFT / RIGHT | section |
@@ -153,7 +154,7 @@ Picture Style, LV.
 | | INFO | Canon's own screen (the plate closes, Canon gets INFO) |
 | | MENU | Home |
 | | TRASH | Film shelf |
-| | PLAY | Prints (Canon's PLAY; a blind roll says why not) |
+| | PLAY | Prints when "PLAY shows: Prints", else Canon's PLAY (a blind roll says why not) |
 | | main dial | Tv / M: shutter, Av: aperture (1/3 stop) |
 | | rear wheel | M: aperture, P / Tv / Av: compensation (1/3 stop, -2 .. +2) |
 | | half-press | closes it (Canon meters and shoots as ever) |
@@ -171,11 +172,15 @@ Picture Style, LV.
 | | SET | load |
 | | INFO | about |
 | | MENU | Home |
-| Prints / sheet | joystick, dial | print / frame |
-| | SET | sheet / print |
-| | INFO | details |
+| Prints | main dial, rear wheel, joystick left / right | print |
+| | joystick up / down, Picture Style | roll |
+| | SET, joystick press | contact sheet |
+| | INFO | the whole screen |
 | | PLAY | Canon's PLAY |
 | | MENU | Home |
+| Contact sheet | joystick, dials | frame |
+| | Picture Style | the next roll's sheet |
+| | SET, joystick press, INFO, MENU | that print |
 | Settings | joystick | row |
 | | dial | value |
 | | Picture Style | section |
@@ -255,24 +260,35 @@ says so.
     does not meter, so EXPOSURE shows the exposure compensation in P / Tv / Av and the last metered value in M.
   - The roll count after a shot: the half-press closed the plate, the review and the display-on bring it back with the
     new count (no separate 2 s view).
-- **PLAY: Prints.**
-  - **Pictures.** The Darkroom already holds each print in memory when it writes `ROLLS/ROLLnnn/Fnn_nnnn.JPG`. Stage 5
-    makes it also write:
-    - a screen-size UYVY preview (720 x 480, about 675 KB);
-    - one contact-sheet strip file per roll (80 x 53 thumbnails).
-    Neither needs a JPEG decoder on the camera.
-  - **The viewer** streams the preview in 16 KB chunks into the display's YUV buffer:
-    - in LiveView through the module's display filter (`CBR_DISPLAY_FILTER`, `wf_dispf`, already the LV preview: it
-      outputs the stored frame instead of the sensor);
-    - or in Canon's PLAY into ML's `get_yuv422_vram()` buffer, with Canon's redraws held off by the front-buffer take.
-      This is how ML's own viewers draw.
-    Our bitmap draws the chrome around it.
-  - **Zero-code alternative (today).** Camera JPEG "Over + print" or "Print + over" already put the print in DCIM, so
-    Canon's own PLAY shows prints.
-  - The option "PLAY shows: Camera JPEG" leaves Canon's PLAY alone (the owner likes it). That is the default (Q2).
+- **PLAY: Prints (M5, built).**
+  - **Pictures.** The Darkroom holds each print's rows while it encodes `ROLLS/ROLLnnn/Fnn_nnnn.JPG`, so it also
+    writes `Fnn_nnnn.WFP` beside it (`wf_dark.h` `WF_PRV_*`, 156 KB): a 28-byte head (`WFP1`, sizes, where the print
+    sits, film, frame, Exif orientation), the contact sheet picture (84 x 56) and the screen picture (336 x 224), both
+    UYVY as the encoder's rows, the print fitted in with black bars. `wf_darkp.c wf_dk_vth_*` gathers them as the
+    Exif thumbnail is gathered (box means of every second row); they sit in the decoder's free input memory (`M.in`
+    after the Exif thumbnail, to 252 KB of 256). A failed write is logged; the print stays.
+  - **The viewer** (`src/ui/wf_prints_ui.c`, the UI task) needs no JPEG decoder and no YUV layer: it draws the
+    pictures through our palette, in the 103 entries the cans use on the other screens. Each picture gets its own
+    colours (median cut over a 4-4-4 histogram), each 5-5-5 colour's nearest entry is found once (a 32 KB table), and
+    a 4 x 4 ordered dither smooths the steps. Prints scales the screen picture up (Y bilinear) into 576 x 384, or the
+    whole 720 x 480 on INFO. The same on both cameras, with or without LiveView, and the host harness sees all of it.
+  - **Orientation.** The print is stored as Canon stores the shot (a portrait shot landscape, Exif orientation 6 / 8),
+    so Prints turns it upright. The contact sheet shows the frames as on the film, sideways where the camera was.
+  - **The contact sheet** is a roll's frames six to a strip with the frame numbers before them, all in one set of
+    colours: every frame is read twice (the colours of all, then each frame through them), a few per tick, so the
+    strips show at once and the pictures fill in. It stays in memory while Prints is up.
+  - **Memory** (malloc, freed on leave): the picture 147 KB and the table 32 KB while Prints is up; the sheet's pixels
+    165 KB, a read buffer and a 16 KB histogram while it is built. Not enough memory for the sheet: the picture goes
+    first, then a word.
+  - **The card:** `wf_prints_scan` lists `ROLLS/ROLLnnn[B..]/Fnn_nnnn.WFP` (the right size only), newest roll first,
+    16 rolls, each in frame order. Prints opens on the newest print; no prints: "No prints yet".
+  - **Ways in:** Home's Prints tile always. PLAY (shooting, Home, the Top plate) only with "PLAY shows: Prints"
+    (`play=prints`; default `canon`, Q2): `wf_ui_play_key` takes it in the same places MENU takes Home, a blind roll
+    too (the prints are the Darkroom's). PLAY on Prints closes and sends Canon its PLAY, with a pass flag so that PLAY
+    does not open Prints again; a blind roll keeps it with a word.
 - **Settings and the switch back.**
-  - Config keys in `WINDYFLM.CFG`: `os=on|off` (Camera interface), `finder=full|min|lines|off` (M3), and later
-    `play=prints|canon`, `plate=on|off`.
+  - Config keys in `WINDYFLM.CFG`: `os=on|off` (Camera interface), `finder=full|min|lines|off` (M3),
+    `plate=on|off` (M4), `play=canon|prints` (M5).
   - The same "Camera interface" item sits in ML's menu (Shoot > WindyFilm), so the film OS can be turned off without
     it.
   - Movie mode: off (Canon + ML only).
@@ -280,8 +296,9 @@ says so.
 ## 5. Risks
 
 - **R1. EOS M memory.**
-  - Budget: the browser peaks at 122 KB of UI heap. The film OS adds no frame buffers: the print previews stream into
-    the display buffer in 16 KB chunks, the sheet reads one strip at a time.
+  - Budget: the browser peaks at 122 KB of UI heap. Prints (M5) adds up to 370 KB while it is up with its contact
+    sheet (the picture 147 KB, the colour table 32 KB, the sheet 165 KB, its build's 25 KB), all freed on leave; short
+    of memory the sheet frees the picture and tries again, then says so.
   - M1: the display sizes went into WFFONTS.DAT itself (no WFOSFONT.DAT): 22,111 B before, 53,757 B now. The host
     harness's peak UI heap is 154 KB (153,776 B), the growth being the larger font pack. To check on the EOS M with
     the first M1 card (free memory in the log at open).
@@ -307,7 +324,6 @@ says so.
 - **R4. 5D2 viewfinder shooting, no LiveView.**
   - The back LCD on while shooting costs battery, so it follows Canon's display: off at half-press, 2 s after a shot.
   - No metering without a half-press.
-  - The display filter does not run without LV: Prints on the 5D2 use Canon's PLAY buffer.
   - The joystick press and the dials in LV need GUI mode 38 (DESIGN 5).
 - **R5. Taking MENU on the EOS M.** The two-finger tap reaches ML as its own event, and patch 0003 turns it into MENU
   only while a module owns the screen, to close it.
@@ -436,18 +452,29 @@ Cards are built only on the owner's word.
      - which dial sends WHEEL LEFT / RIGHT and which UP / DOWN (ML 5D2: main dial assumed LEFT / RIGHT);
      - what INFO does after the close;
      - the battery % and the clock.
-5. **M5: Prints (not started).**
-   - The Darkroom writes the screen previews and the sheet strip. The Prints / Contact sheet viewer (display filter
-     in LV, Canon's PLAY buffer otherwise).
-   - "PLAY shows" option, default Camera JPEG.
-   - **Why it is its own stage:** it changes the Darkroom's output (a 720 x 480 UYVY preview per print, about 675 KB,
-     24 MB a roll on the card, plus one strip file per roll) and draws into the YUV layer (`CBR_DISPLAY_FILTER` in
-     LiveView, `get_yuv422_vram()` in Canon's PLAY). The host harness can check the files and our bitmap's chrome, not
-     the YUV path: that needs a probe card on each camera first (does Canon redraw PLAY over us; the 5D2 has no display
-     filter without LV).
-   - **Until then:** Home's Prints tile and PLAY open Canon's PLAY; Camera JPEG "Over + print" / "Print + over" put the
-     prints in DCIM, so Canon's own PLAY already shows them. The Darkroom keeps its luma contact sheet of the CR2s
-     (`wf_dark_photos`).
+5. **M5: Prints + contact sheet (built 21 Nov 2026, see section 4).**
+   - **Design change:** the plan was a 720 x 480 UYVY preview per print (675 KB, 24 MB a roll) drawn into the YUV
+     layer (display filter in LV, Canon's PLAY buffer without). Built instead: a 156 KB `.WFP` per print drawn through
+     our palette. No probe card needed (no YUV path, no Canon PLAY under us), the same on both cameras with or without
+     LiveView, and the host harness checks every pixel. The price: 336 x 224 scaled up and 103 colours a picture.
+   - **Layout (mocks 07 / 08, our own look):** Prints: the film OS top bar "Prints" with ROLL nnn, frame, n of m and
+     the film; the print in a 576 x 384 box; the footer keys. Contact sheet: strips of six with amber frame numbers,
+     the picked frame in an amber outline, a frame that has no picture "none".
+   - **Settings:** Interface > PLAY shows Canon / Prints (both cameras).
+   - **Checked:**
+     - `tests/ui/run.sh`: os_test writes stand-in `.WFP` rolls (one roll developed twice, a portrait print in bars, one
+       stored turned (orientation 6), a head that is not ours, a file of the wrong size) and walks them: frames across
+       rolls and their ends, rolls, INFO's whole screen, the sheet (built, its keys, kept when opened again with no
+       reads, the short roll's "none"), Home's tile, PLAY in and out (Canon gets PLAY once, the pass flag, a blind
+       roll), the empty card, the 5D2 from the Top plate with Picture Style; every picture pixel counted in its box, the
+       palette checked, every allocation freed. Shots `m5_*`; with `WF_PRVREAL` set, shots of real prints from a host
+       Darkroom run (local only).
+     - `test.sh` ROLL:jpeg: the Darkroom writes a valid `.WFP` beside each print (size, head, film, frame,
+       orientation, black bars, the picture not flat, the sheet the 4 x 4 means of the picture) and `wf_prints_scan`
+       lists them. CFG reads and saves `play=` (default canon).
+   - **On the camera:** the time to open a print and to build a 36-frame sheet (two reads of 9 KB a frame); the
+     pictures' look on the LCD (103 colours, the dither); free memory with the sheet up; PLAY in shooting on both
+     (and that Canon's PLAY after ours does not bounce back); the 5D2's joystick up / down codes on Prints.
 6. **M6: Polish.**
    - The Darkroom's top bar in the film OS style (safelight theme kept).
    - Boot straight to the HUD with the roll toast.
@@ -458,7 +485,8 @@ Cards are built only on the owner's word.
 1. **5D2 ML menu key:** TRASH on Home (mock), or keep TRASH = Film shelf everywhere and reach the ML menu only from
    Settings > System? *M1 default: TRASH on Home opens the ML menu (5D2 only; the EOS M keeps the two-finger tap).*
 2. **PLAY default:** Camera JPEG (Canon's PLAY, as the owner likes) with Prints as the option (proposed), or Prints by
-   default? *M1 default: PLAY on Home is Canon's playback (Prints comes in M5).*
+   default? *M5 default: Canon (`play=canon`); Settings > PLAY shows = Prints turns PLAY to our Prints. Home's
+   Prints tile always opens Prints.*
 3. **LiveView HUD default:** Full or Minimal? Is the FILM tag next to ISO (ISO set by the film) wanted?
 4. **Home look strip:** keep it (Light / Print / Paper / Grain / Halation / Strength), or show the last 6 frames
    instead?

@@ -39,4 +39,5 @@ void fake_photo_partial(int nread, int none);   /* frames >= nread not read yet 
 void fake_photo_again(void);               /* the next wf_dark_photos assembles them again */
 void fake_photo_reset(void);               /* wf_dk_photo on, all read */
 const struct wf_dark_photos *fake_photos(void);
+int  fake_prints_scans(void);              /* wf_prints_scan calls (the card's ROLLS/.../Fnn_nnnn.WFP, fake_card_dir) */
 #endif

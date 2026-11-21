@@ -64,6 +64,7 @@ static volatile int hb, phase;          /* the UI task's last sign of life (ms c
 static volatile int stale_said;
 static volatile int close_after;        /* WFUI_AFTER_*: what the close hands Canon / ML once the screen is theirs */
 static volatile int menu_pass, menu_pass_t;   /* our own MENU for Canon's menu (after Home): not Home again */
+static volatile int play_pass, play_pass_t;   /* our own PLAY for Canon's playback (after Prints): not Prints again */
 static inline void beat(int p) { phase = p; hb = get_ms_clock(); }
 
 /* Pack reads (fonts, cans). Canon may hold the card for a while (owner's log 11-14, EOS M 10 s after boot: "fonts
@@ -2030,8 +2031,8 @@ static void pack_retry(int now)
         if (!(fs & 1) || !wff_again()) pack_again &= ~1;
         dirty = 1;
     }
-    if ((pack_again & 2) && scr != WFUI_SCR_DARK)          /* the darkroom draws no cans: its print tones hold those */
-    {                                                       /* palette entries */
+    if ((pack_again & 2) && scr != WFUI_SCR_DARK && scr != WFUI_SCR_PRINTS)   /* the darkroom and Prints draw no */
+    {                                                       /* cans: their tones / pictures hold those entries */
         beat(PH_CANS);
         int cs = wfc_open();
         if (!cs) wf_log("ui: cans WFCANS.DAT ok (%d colours), read again %d", wfc_pal_used(), pack_n);
@@ -2124,6 +2125,8 @@ static void after_close(int what)
     if (what == WFUI_AFTER_PLAY)
     {
         wf_log("ui: closed for Canon's PLAY");
+        play_pass_t = get_ms_clock();                       /* (only a PLAY that would open Prints) */
+        play_pass = wf_playv != 0;
         module_send_keypress(MODULE_KEY_PLAY);
         return;
     }
@@ -2244,6 +2247,7 @@ int wfui_host_anim(void) { return anim_on; }
 int wfui_host_scr(void) { return scr; }
 int wfui_host_after(void) { return close_after; }
 int wfui_host_menu_pass(void) { return menu_pass; }
+int wfui_host_play_pass(void) { return play_pass; }
 const char *wfui_host_msg(void) { return msg && get_ms_clock() - msg_until < 0 ? msg : ""; }
 int wfui_host_edit(void) { return edit; }
 int wfui_host_phase(void) { return phase; }
@@ -2346,7 +2350,7 @@ void wf_ui_init(void)
     took = 0;
     fonts_held = ui_quit = 0;
     anim_on = lv_after = edit = 0;
-    close_after = menu_pass = 0;
+    close_after = menu_pass = play_pass = 0;
     mg.shown = mg.tries = mg.came = mg.done = mg.undo_until = 0;
 }
 
@@ -2397,7 +2401,7 @@ void wf_ui_open_scr(int s)
 {
     if (s == WF_UI_NEW_ROLL) nr_req = 1;
     s = s == WF_UI_SCR_DARK ? WFUI_SCR_DARK : s == WF_UI_SCR_HOME ? WFUI_SCR_HOME
-      : s == WF_UI_SCR_PLATE ? WFUI_SCR_PLATE : WFUI_SCR_BROWSER;
+      : s == WF_UI_SCR_PLATE ? WFUI_SCR_PLATE : s == WF_UI_SCR_PRINTS ? WFUI_SCR_PRINTS : WFUI_SCR_BROWSER;
     if (st == ST_OPEN)
     {
         scr_req = s;                                        /* the UI task makes the switch on its next tick */
@@ -2466,6 +2470,7 @@ void wf_ui_open_refused(unsigned int key, int play)
 }
 
 void wf_ui_open_home(void) { wf_ui_open_scr(WF_UI_SCR_HOME); }
+void wf_ui_open_prints(void) { wf_ui_open_scr(WF_UI_SCR_PRINTS); }
 
 /* the film OS (docs/MODERNUI.md): MENU in shooting opens Home with Camera interface = WindyFilm. Not over the ML menu or
  * a Canon screen, not while recording; EOS M: stills LiveView (as the open key); not our own MENU for Canon's menu */
@@ -2476,6 +2481,21 @@ int wf_ui_home_key(unsigned int key)
     {
         menu_pass = 0;
         if (get_ms_clock() - menu_pass_t < 1500) return 0;
+    }
+    if (gui_menu_shown() || gui_state != GUISTATE_IDLE || RECORDING) return 0;
+    if (wf_cam() != WF_CAM_5D2 && (!lv || is_movie_mode())) return 0;
+    return 1;
+}
+
+/* Settings > PLAY shows = Prints (M5): PLAY in shooting opens the film OS's Prints, as MENU opens Home (the same
+ * places), not our own PLAY for Canon's playback from there */
+int wf_ui_play_key(unsigned int key)
+{
+    if (key != MODULE_KEY_PLAY || !wf_os || !wf_playv || st != ST_CLOSED) return 0;
+    if (play_pass)
+    {
+        play_pass = 0;
+        if (get_ms_clock() - play_pass_t < 1500) return 0;
     }
     if (gui_menu_shown() || gui_state != GUISTATE_IDLE || RECORDING) return 0;
     if (wf_cam() != WF_CAM_5D2 && (!lv || is_movie_mode())) return 0;

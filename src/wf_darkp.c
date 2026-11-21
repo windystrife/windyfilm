@@ -466,6 +466,97 @@ void wf_dk_xth_rows(struct wf_dk_xth *t, const uint32_t *rows, int pitch, int y,
 
 int wf_dk_xth_done(const struct wf_dk_xth *t) { return t->row >= t->th; }
 
+/* ------------------------------------------------------------------ the Prints screens' picture (M5) */
+void wf_dk_vth_begin(struct wf_dk_vth *t, int cw, int ch, uint32_t *out)
+{
+    t->cw = cw;
+    t->ch = ch;
+    if ((uint32_t)cw * WF_DK_VH >= (uint32_t)ch * WF_DK_VW) {   /* wide: bars top and bottom */
+        t->tw = WF_DK_VW;
+        t->th = (ch * WF_DK_VW + cw / 2) / cw;
+    } else {
+        t->th = WF_DK_VH;
+        t->tw = ((cw * WF_DK_VH + ch / 2) / ch) & ~1;
+    }
+    if (t->th < 1) t->th = 1;
+    if (t->th > WF_DK_VH) t->th = WF_DK_VH;
+    if (t->tw < 2) t->tw = 2;
+    t->ox = ((WF_DK_VW - t->tw) / 2) & ~1;
+    t->oy = (WF_DK_VH - t->th) / 2;
+    for (int j = 0; j <= t->tw; j++)
+        t->xb[j] = (uint16_t)((j * (cw >> 1)) / t->tw);
+    t->row = 0;
+    t->y1 = ch / t->th;
+    t->n = 0;
+    for (int j = 0; j < WF_DK_VW; j++)
+        t->sy[j] = t->su[j] = t->sv[j] = 0;
+    for (int i = 0; i < WF_DK_VW / 2 * WF_DK_VH; i++)
+        out[i] = 0;
+}
+
+void wf_dk_vth_rows(struct wf_dk_vth *t, const uint32_t *rows, int pitch, int y, int n, uint32_t *out)
+{
+    for (int r = 0; r < n; r++, y++) {
+        if (t->row >= t->th)
+            return;
+        if (!(y & 1)) {
+            const uint32_t *wd = (const uint32_t *)((const uint8_t *)rows + r * pitch);
+            for (int j = 0; j < t->tw; j++) {
+                int32_t a = 0, u = 0, v = 0;
+                for (int x = t->xb[j]; x < t->xb[j + 1]; x++) {
+                    uint32_t q = wd[x];
+                    a += (int32_t)((q >> 8) & 0xFF) + (int32_t)(q >> 24);
+                    u += (int8_t)(q & 0xFF);
+                    v += (int8_t)((q >> 16) & 0xFF);
+                }
+                t->sy[j] += a;
+                t->su[j] += u;
+                t->sv[j] += v;
+            }
+            t->n++;
+        }
+        if (y + 1 >= t->y1) {
+            uint32_t *o = out + (t->oy + t->row) * (WF_DK_VW / 2) + t->ox / 2;
+            for (int j = 0; j + 1 < t->tw; j += 2) {
+                int c0 = (t->xb[j + 1] - t->xb[j]) * t->n, c1 = (t->xb[j + 2] - t->xb[j + 1]) * t->n, cc = c0 + c1;
+                int y0 = c0 ? (t->sy[j] + c0) / (2 * c0) : 0, y1 = c1 ? (t->sy[j + 1] + c1) / (2 * c1) : 0;
+                int u = cc ? (t->su[j] + t->su[j + 1]) / cc : 0, v = cc ? (t->sv[j] + t->sv[j + 1]) / cc : 0;
+                o[j >> 1] = (uint32_t)(u & 0xFF) | (uint32_t)(y0 > 255 ? 255 : y0) << 8 | (uint32_t)(v & 0xFF) << 16
+                          | (uint32_t)(y1 > 255 ? 255 : y1) << 24;
+            }
+            for (int j = 0; j < t->tw; j++)
+                t->sy[j] = t->su[j] = t->sv[j] = 0;
+            t->n = 0;
+            t->row++;
+            t->y1 = (int)(((t->row + 1) * t->ch) / t->th);
+        }
+    }
+}
+
+int wf_dk_vth_done(const struct wf_dk_vth *t) { return t->row >= t->th; }
+
+void wf_dk_vth_sheet(const uint32_t *pic, uint32_t *sheet)
+{
+    for (int y = 0; y < WF_DK_VSH; y++)
+        for (int x = 0; x < WF_DK_VSW / 2; x++) {   /* one sheet word = 2 x 4 picture words (8 x 4 pixels) */
+            int32_t ya = 0, yb = 0, u = 0, v = 0;
+            for (int j = 0; j < 4; j++) {
+                const uint32_t *w = pic + (y * 4 + j) * (WF_DK_VW / 2) + x * 4;
+                for (int i = 0; i < 4; i++) {
+                    uint32_t q = w[i];
+                    int s = ((q >> 8) & 0xFF) + (q >> 24);
+                    if (i < 2) ya += s; else yb += s;
+                    u += (int8_t)(q & 0xFF);
+                    v += (int8_t)((q >> 16) & 0xFF);
+                }
+            }
+            u /= 16;
+            v /= 16;
+            sheet[y * (WF_DK_VSW / 2) + x] = (uint32_t)(u & 0xFF) | (uint32_t)((ya + 8) / 16) << 8
+                                           | (uint32_t)(v & 0xFF) << 16 | (uint32_t)((yb + 8) / 16) << 24;
+        }
+}
+
 /* ------------------------------------------------------------------ thumbnails */
 void wf_dk_thumb_begin(struct wf_dk_thumb *t, int w, int h)
 {

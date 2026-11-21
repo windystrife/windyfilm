@@ -2515,7 +2515,7 @@ static void t_cfg(void)
             "hl=3\nsh= -2\ngrain=fine\nhalation=spkbloom\nmist=b2\npreview=fast\nexposure=smooth\nexptrim=-5\nexif=off\ninput=jpeg\nbogus=1\n"
             "blind=OFF\nframe=BlackWide\ninfo=roll\ndate=DMY\njpeg=PrintOver\njpeg2=Folder\ndkscreen=Off\ndkphoto=Off\n"
             "rolllook=ON\nshoulder=D\n"
-            "qkeys=LR\nos=OFF\nfinder=Lines\nplate=OFF\ncr2=Move\nuserwb=1,5600,2,-3\n",
+            "qkeys=LR\nos=OFF\nfinder=Lines\nplate=OFF\nplay=Prints\ncr2=Move\nuserwb=1,5600,2,-3\n",
             wf_films[fA].id, code1);
     mod_init(1);
     chk(wf_film_id == wf_films[fA].id && wf_out == WF_OUT_LLUT && wf_curve == 4 && wf_flut == 1 && wf_lut_ei == -2,
@@ -2535,6 +2535,7 @@ static void t_cfg(void)
     chk(wf_os == 0, "os=OFF read: Camera interface Canon + ML (%d)", wf_os);
     chk(wf_vf == WF_VF_LINES, "finder=Lines read: the LiveView finder Bright lines (%d)", wf_vf);
     chk(wf_plate == 0, "plate=OFF read: the Top plate off (%d)", wf_plate);
+    chk(wf_playv == 1, "play=Prints read: PLAY shows Prints (%d)", wf_playv);
     chk(wf_pr_cr2 == WF_PC_MOVE, "cr2=Move read: RAW after Darkroom Move to ROLLS (%d)", wf_pr_cr2);
     chk(wf_pr_frame == 4 && wf_pr_info == 2 && wf_pr_date == 2 && wf_pr_jpeg == WF_PJ_PRINT && wf_pr_jpg2 == WF_J2_FOLDER
         && wf_dk_scr == WF_DS_OFF, "print finishes read: frame %d info %d date %d jpeg %d jpeg2 %d dkscreen %d (want 4 2 2 "
@@ -2559,6 +2560,7 @@ static void t_cfg(void)
              "os=off\n"
              "finder=lines\n"
              "plate=off\n"
+             "play=prints\n"
              "stage=0,0,0,0,0,0,2,0,0,0,0\n"
              "userwb=1,5600,2,-3\n", wf_films[fA].id, code1, WF_EXP_CAN ? "smooth" : "camera");
     chk(b && !strcmp(b, want), "saved 1.5 s after a change, every key:\n%s", b ? b : "(none)");
@@ -6449,6 +6451,76 @@ static const char *jp_fitline(char *b, size_t n, int i, int fr, int orient)
              P.ix, P.iy);
     return b;
 }
+/* the Prints screens' pictures (modernUI M5): ROLLS/ROLLnnn/Fnn_nnnn.WFP beside each of a roll's n prints, the layout
+ * of wf_dark.h (head, contact sheet picture, screen picture), the print in it (bars black, the picture not flat, the
+ * sheet its 4 x 4 means), and wf_prints_scan lists them */
+static void prv_check(int num, int from, int n, const char *tag)
+{
+    for (int i = 0; i < n; i++) {
+        char p[64];
+        long sz = 0;
+        snprintf(p, sizeof p, "ROLLS/ROLL%03d/F%02d_%04d.WFP", num, i + 1, from + i);
+        unsigned char *b = (unsigned char *)get_file(p, &sz);
+        struct wf_prv_head h;
+        if (b && sz >= (long)sizeof h)
+            memcpy(&h, b, sizeof h);
+        int ok = b && sz == (long)WF_PRV_BYTES && wf_prv_head_ok(&h) && h.frame == i && h.film == wf_roll_now()->film;
+        chk(ok, "%s: F%02d %s (%ld B, want %u)", tag, i + 1, p, sz, (unsigned)WF_PRV_BYTES);
+        if (!ok) {
+            free(b);
+            continue;
+        }
+        const uint32_t *sh = (const uint32_t *)(b + WF_PRV_SHEET_OFF), *pic = (const uint32_t *)(b + WF_PRV_PIC_OFF);
+        int lo = 255, hi = 0, bar = 0, sheet_off = 0;
+        for (int y = 0; y < WF_PRV_H; y++)
+            for (int x = 0; x < WF_PRV_W / 2; x++) {
+                uint32_t q = pic[y * (WF_PRV_W / 2) + x];
+                int in = y >= h.py && y < h.py + h.ph && x * 2 >= h.px && x * 2 < h.px + h.pw;
+                int a = (q >> 8) & 0xFF, c = q >> 24;
+                if (!in && q)
+                    bar++;
+                if (in) {
+                    lo = a < lo ? a : lo;
+                    hi = c > hi ? c : hi;
+                }
+            }
+        for (int y = 0; y < WF_PRV_SH; y++)
+            for (int x = 0; x < WF_PRV_SW / 2; x++) {
+                int s = 0;
+                for (int j = 0; j < 4; j++)
+                    for (int k = 0; k < 4; k++) {
+                        uint32_t q = pic[(y * 4 + j) * (WF_PRV_W / 2) + x * 4 + k];
+                        s += (int)((q >> 8) & 0xFF) + (int)(q >> 24);
+                    }
+                int m = (s + 16) / 32, t = (int)((sh[y * (WF_PRV_SW / 2) + x] >> 8) & 0xFF)
+                                          + (int)(sh[y * (WF_PRV_SW / 2) + x] >> 24);
+                if (abs(t / 2 - m) > 2)
+                    sheet_off++;
+            }
+        chk(h.pw >= 300 && h.ph >= 180 && !bar && hi - lo > 40 && !sheet_off
+            && (h.orient == 1 || h.orient == 3 || h.orient == 6 || h.orient == 8),
+            "%s: F%02d picture %dx%d at %d,%d, o%d, Y %d..%d, bars %d, sheet off %d", tag, i + 1, h.pw, h.ph, h.px, h.py,
+            h.orient, lo, hi, bar, sheet_off);
+        free(b);
+    }
+    char want[48];
+    snprintf(want, sizeof want, "dark: F01 Prints picture F01_%04d.WFP, %d KB, o", from, (int)(WF_PRV_BYTES >> 10));
+    chk(log_has(want), "%s: '%s'", tag, log_line("Prints picture"));
+    static struct wf_prints ps;
+    int rc = wf_prints_scan(&ps), at = -1;
+    for (int k = 0; k < ps.n; k++)
+        if (ps.r[k].num == num && ps.r[k].dev == 1)
+            at = k;
+    char p0[96] = "";
+    if (at >= 0)
+        wf_prints_path(&ps.r[at], 0, p0, sizeof p0);
+    char w0[48];
+    snprintf(w0, sizeof w0, "ROLLS/ROLL%03d/F01_%04d.WFP", num, from);
+    chk(!rc && at >= 0 && ps.r[at].n == n && ps.r[at].fr[0] == 1 && ps.r[at].file[n - 1] == from + n - 1
+        && strstr(p0, w0), "%s: wf_prints_scan rc %d, %d rolls, roll %03d at %d (%d frames), %s", tag, rc, ps.n, num, at,
+        at >= 0 ? ps.r[at].n : -1, p0);
+}
+
 static void t_roll_jpeg(void)
 {
     {   /* Camera JPEG Overwrite with a frame (owner 11-17): the print fitted into 5184 x 3456 (wf_pf_fit / wf_pf_pad)
@@ -6587,6 +6659,7 @@ static void t_roll_jpeg(void)
     }
     chk(log_has("dark: F01 print Exif thumbnail 160x120 q"), "keep: '%s'", log_line("print Exif thumbnail"));
     chk(jp_cr2s(dir, 501) && !jp_wft(501), "keep: CR2s untouched, no .WFT");
+    prv_check(1, 501, 3, "keep");
 
     /* copy: frame Off, Overwrite; and Screen Off (owner 11-16, DESIGN 3.11): the test stands in for the Darkroom screen's
      * tick (wf_dark_dark) and keys (wf_dark_wake; a key "WF_DS_WAKE_MS ago" = the time without a key is over) */
@@ -7678,6 +7751,7 @@ static void t_plate(void)
     h_gui_mode = 0;
     mod_init(0);
     chk(wf_plate == 1, "config: plate=on (%d)", wf_plate);
+    chk(wf_playv == 0, "config: play=canon by default (%d)", wf_playv);
     log_mark();
     usleep(800000);
     chk(!log_has("plate:"), "LiveView: no Top plate");

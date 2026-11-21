@@ -111,6 +111,23 @@ void wf_dk_xth_begin(struct wf_dk_xth *t, int cw, int ch, uint32_t *out);
 void wf_dk_xth_rows(struct wf_dk_xth *t, const uint32_t *rows, int pitch, int y, int n, uint32_t *out);
 int  wf_dk_xth_done(const struct wf_dk_xth *t);   /* 1 = every row of the picture written */
 
+#define WF_DK_VW  336                            /* = WF_PRV_W / H / SW / SH (wf_dark.h) */
+#define WF_DK_VH  224
+#define WF_DK_VSW 84
+#define WF_DK_VSH 56
+/* the Prints screens' picture (modernUI M5, wf_dark.h WF_PRV_*): the canvas fitted into WF_DK_VW x WF_DK_VH as the Exif
+   thumbnail above (box means of every 2nd row, black bars), and its contact sheet picture (4 x 4 means of it) */
+struct wf_dk_vth {
+    int cw, ch, tw, th, ox, oy;
+    int row, y1, n;
+    uint16_t xb[WF_DK_VW + 1];
+    int32_t sy[WF_DK_VW], su[WF_DK_VW], sv[WF_DK_VW];
+};
+void wf_dk_vth_begin(struct wf_dk_vth *t, int cw, int ch, uint32_t *out);
+void wf_dk_vth_rows(struct wf_dk_vth *t, const uint32_t *rows, int pitch, int y, int n, uint32_t *out);
+int  wf_dk_vth_done(const struct wf_dk_vth *t);
+void wf_dk_vth_sheet(const uint32_t *pic, uint32_t *sheet);   /* WF_DK_VW x WF_DK_VH -> WF_DK_VSW x WF_DK_VSH words */
+
 #define WF_DK_PW 288                             /* = WF_DR_PW / PH / TW / TH (wf_dark.h) */
 #define WF_DK_PH 192
 #define WF_DK_TW 72

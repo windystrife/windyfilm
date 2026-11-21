@@ -185,6 +185,46 @@ struct wf_dark_photos {
    cell is there, big_st once the picture is); never 0 (n = 0 until a sheet starts) */
 const struct wf_dark_photos *wf_dark_photos(int num, int cam);
 
+/* ------------------------------------------------------------------ the Prints screens' pictures (modernUI M5) */
+/* Beside each print ROLLS/ROLLnnn/Fnn_nnnn.JPG the Darkroom writes Fnn_nnnn.WFP: a struct wf_prv_head, the contact
+   sheet's picture (WF_PRV_SW x WF_PRV_SH) and the screen picture (WF_PRV_W x WF_PRV_H), both UYVY words as the encoder's
+   ({U s8, Y0, V s8, Y1}), the print's canvas fitted in with black bars at (px, py, pw, ph). Little-endian. The film OS's
+   Prints screen and contact sheet (src/ui/wf_prints_ui.c) draw them through the UI's palette: no JPEG decoder, no YUV
+   layer, the same on both cameras with or without LiveView. */
+#define WF_PRV_W     336
+#define WF_PRV_H     224
+#define WF_PRV_SW    84                          /* = WF_PRV_W / 4 */
+#define WF_PRV_SH    56
+#define WF_PRV_MAGIC 0x31505746u                 /* "WFP1" */
+struct wf_prv_head {
+    uint32_t magic;
+    uint16_t w, h, sw, sh;                       /* WF_PRV_W, WF_PRV_H, WF_PRV_SW, WF_PRV_SH */
+    uint16_t px, py, pw, ph;                     /* the print's place in the picture (the rest black) */
+    uint16_t film, frame;                        /* the roll's film id; the frame index on the roll (0-based) */
+    uint16_t orient, rsv;                        /* the print's Exif orientation (1 / 3 / 6 / 8; the pictures are
+                                                    stored as the print, the Prints screen turns them; the contact sheet
+                                                    shows them as on the film) */
+};                                               /* 28 bytes */
+#define WF_PRV_SHEET_OFF ((uint32_t)sizeof(struct wf_prv_head))
+#define WF_PRV_PIC_OFF   (WF_PRV_SHEET_OFF + WF_PRV_SW * WF_PRV_SH * 2)
+#define WF_PRV_BYTES     (WF_PRV_PIC_OFF + WF_PRV_W * WF_PRV_H * 2)
+int wf_prv_head_ok(const struct wf_prv_head *h); /* 1 = this layout */
+/* the card's prints for those screens (any task, it lists the card: the UI task when they open): the ROLLS folders with
+   .WFP files, newest roll first (by number, then pass), WF_PRS_MAX of them, each with its frames in order. 0 = listed
+   (p->n may be 0), -1 = no card root */
+#define WF_PRS_MAX 16
+struct wf_prints_roll {
+    int16_t num, dev, n;                         /* roll number, develop pass (1 = ROLL021, 2 = ROLL021B), frames */
+    uint8_t fr[WF_ROLL_MAXEXP];                  /* their frame numbers (1-based, as in the names) */
+    uint16_t file[WF_ROLL_MAXEXP];               /* their shots' file numbers */
+};
+struct wf_prints {
+    int n;
+    struct wf_prints_roll r[WF_PRS_MAX];
+};
+int wf_prints_scan(struct wf_prints *p);
+int wf_prints_path(const struct wf_prints_roll *r, int k, char *out, int n);   /* frame k's .WFP; its length, -1 none */
+
 /* ------------------------------------------------------------------ UI */
 /* wf_ui_open_scr (wf_ui.c): open the UI there, or switch an open UI to it. WF_UI_NEW_ROLL = the browser in Darkroom mode
    on its Exposures row, the way to a new roll (the ML menu's Film roll, the end-of-roll notice's INFO; owner 11-17: the
@@ -193,6 +233,7 @@ const struct wf_dark_photos *wf_dark_photos(int num, int cam);
 #define WF_UI_SCR_DARK 2
 #define WF_UI_SCR_HOME 3                         /* the film OS's Home (docs/MODERNUI.md) */
 #define WF_UI_SCR_PLATE 4                        /* the 5D2's Top plate (docs/MODERNUI.md M4) */
+#define WF_UI_SCR_PRINTS 5                       /* the film OS's Prints (docs/MODERNUI.md M5) */
 void wf_ui_open_scr(int scr);
 /* the HUD over LiveView (src/ui/wf_dark_ui.c; wf_task draws it while a roll is in the camera): wfdr_hud_fonts(1) loads
    the font pack once (0 frees it, 2 reads it again; 1 back = the read may pass later: card busy), wfdr_hud draws into ML's bitmap with ML's own colour indices; blink = the "wind on"

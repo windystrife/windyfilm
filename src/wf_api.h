@@ -110,6 +110,10 @@ void wf_vf_set(int v);
    shooting screen becomes the film camera's top plate (wf_osvf.c wf_plate_poll). config plate=on|off (default on) */
 extern volatile int wf_plate;
 void wf_plate_set(int on);
+/* what PLAY shows with Camera interface = WindyFilm (docs/MODERNUI.md M5): 0 Canon's playback (as before), 1 the film
+   OS's Prints (the Darkroom's prints; its PLAY is Canon's). config play=canon|prints (default canon) */
+extern volatile int wf_playv;
+void wf_playv_set(int on);
 int  wf_loaded(void);                     /* the active film id, 0 = none (output is plain log, Log + LUT or Off) */
 int  wf_avail(int id);                    /* 1 = loadable now (its table is in the pack / its cube is on the card) */
 int  wf_films_state(void);                /* the film tables: 1 read, 0 starting (worker / pack not up yet), -1 the
@@ -130,7 +134,9 @@ int  wf_ui_is_open(void);
 unsigned int wf_ui_key(unsigned int key); /* from the core's CBR_KEYPRESS while open: 0 = consumed, 1 = pass on */
 int  wf_ui_open_key(unsigned int key);    /* 1 = this key opens the browser (EOS M: long DOWN; 5D2: TRASH) */
 int  wf_ui_home_key(unsigned int key);    /* 1 = this key opens the film OS's Home (MENU with wf_os, in shooting) */
+int  wf_ui_play_key(unsigned int key);    /* 1 = this key opens the film OS's Prints (PLAY with wf_os + wf_playv) */
 void wf_ui_open_home(void);
+void wf_ui_open_prints(void);             /* the film OS's Prints (M5) */
 void wf_ui_open_refused(unsigned int key, int play);   /* the open key did not open it: log why */
 int  wf_ui_menu_guard(void);              /* EOS M, every ~10 ms (wf_task's waits): the ML menu's Canon dialog; 1 = asked */
 
