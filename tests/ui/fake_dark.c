@@ -20,7 +20,7 @@ volatile int wf_blind = 1;
 void wf_blind_set(int on) { wf_blind = on != 0; }
 
 static int locked, nswap;
-static int fshelf, rawb_can = 1;
+static int fshelf, rawb_can = 1, fdcim, fnplay;
 static struct wf_shelf fshv;                     /* the shelf (owner 11-17): rolls the requests below put on it */
 static int nrescan, st_num, st_again, st_film, nswap_devd;
 volatile int wf_rawb;
@@ -41,6 +41,7 @@ void fake_dark_reset(void)
     req_film = req_exp = nstart = nstop = 0;
     locked = nswap = 0;
     fshelf = 0;
+    fdcim = fnplay = 0;
     memset(&fshv, 0, sizeof fshv);
     nrescan = st_num = st_again = st_film = nswap_devd = 0;
     wf_rawb = 0;
@@ -297,6 +298,12 @@ int fake_nkeep(void) { return fkeep; }
 int wf_roll_shelve(int on) { if (on && !wf_roll_open(&roll)) return -1; fshelf = on ? 1 : 0; rgen++; return 0; }
 int wf_roll_shelved(void) { return fshelf && wf_roll_open(&roll); }
 void fake_set_shelf(int on) { fshelf = on; rgen++; }
+
+/* ------------------------------------------------------------------ Canon's PLAY after a run (wf_dark.h) */
+int wf_dark_dcim_changed(void) { return fdcim; }
+int wf_dark_play_notice(void) { if (!fdcim) return 0; fnplay++; return 1; }
+void fake_set_dcim(int on) { fdcim = on; view.gen++; }
+int fake_nplay_notice(void) { return fnplay; }
 
 /* RAW develop B's menu toggle (wf_rawb.h; the core's wf_rawb.c is not in the harness) */
 int wf_rawb_can(void) { return rawb_can; }     /* as the real builds: B on both cameras (wf_cam.h WF_RAWB_CAN) */

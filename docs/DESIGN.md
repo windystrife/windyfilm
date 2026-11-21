@@ -994,12 +994,34 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     - Canon's side, unchecked on the camera (HUONGDAN step aj, 5D2 step m). File numbers: the JPEG keeps its number in
       DCIM, so the highest number in the folder does not change (Continuous numbering keeps its own counter; Auto
       reset sees the same highest file). Playback: whether its list notices a CR2 that ML removed before a power cycle
-      is not known for DryOS; the step looks at PLAY right after the run and again after a power cycle.
+      is not known for DryOS; the step looks at PLAY right after the run and again after a power cycle. (Owner
+      2026-11-21, 5D2: it does not; "Canon's PLAY after a run" below.)
     - Costs (told to the owner): an importer that pairs RAW + JPEG by folder sees the JPEG alone in DCIM; Canon's erase
       takes only the JPEG; the 5D2 copy reads the CR2 twice and writes it once (about 25 MB a frame; the time is in the
       log line); a rename across folders on DryOS is first tried by the card run.
   - Not checked on the camera yet: PLAY after Print + over (the print in DCIM, the CR2 still beside it unless moved,
     so 3.9's playback note applies), and the time of the second encode on the 5D2.
+  - **Canon's PLAY after a run** (owner 2026-11-21, 5D2: after a Darkroom run some prints show in PLAY and some do
+    not, the files on the card whole; a power cycle shows them). Canon reads its list of the card's pictures at power
+    on / card mount and not again while the camera stays on, so a run that replaced camera JPEGs or moved CR2s leaves
+    that list stale until then. Canon's firmware keeps its own file catalog, but no ML core function or public stub
+    asks it to read the card again and its calls are not documented, so nothing here does (a candidate for a later
+    camera test, with the owner's OK). Instead the module says how:
+    - `dk_dcim_mark` (wf_dark.c) sets `wf_dark_dcim_changed()` when a run is about to change a file under `/DCIM/`:
+      the camera JPEG's rename in `dk_dcim_put`, a CR2's rename or removal in `dk_cr2_move`. One log line a power-on:
+      `dark: DCIM changed: Canon's PLAY may miss it until power off / on or the card door`. RAM only: a power cycle
+      clears it; the card door does not (no property handler), so the notice may show once more than needed.
+    - The DONE screen adds two lines under the roll's: "Power off/on (or open the card door)" / "so Canon's PLAY shows
+      the new prints".
+    - `wf_dark_play_notice()` (wf_dark.h): a 3 s NotifyBox "New prints: PLAY may miss them" / "Power off/on or open
+      card door" when PLAY goes to Canon with the UI closed and the camera not in playback (wf_main.c `wf_keypress`,
+      after the Blind roll's block; the key still goes to Canon). A UI that sends the camera to PLAY itself calls it
+      on the way.
+    - English on the camera (the fonts and NotifyBox are ASCII); the HUONGDAN steps say it in Vietnamese (EOS M step
+      an, 5D2 step p): develop, PLAY, power off / on, PLAY. Both bodies: the EOS M's firmware has the same catalog.
+    - Checks: `test.sh` ROLL:jpeg: the Keep roll leaves the flag off; the Overwrite roll sets it, with its log line;
+      PLAY into Canon's playback shows the notice and passes, PLAY out of playback shows none. `tests/ui/dr_ui_test.c`
+      9b: the flag adds the two lines and changes no other pixel (shot `dark_done_play_notice`).
 - **Memory.** Nothing new is allocated: the pack (<= 512 KB), the caption band (<= about 3.7 MB) and the row buffer
   (about 197 KB) use `M.raw`, which is free scratch in the DRY phase. The stamp's map (about 148 KB) uses `M.raw` too.
   Fonts / text are static (about 1 KB BSS). The logo pack (<= 384 KB) is read beside the fonts in the 512 KB pack

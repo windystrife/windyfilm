@@ -104,6 +104,12 @@ int  wf_dark_start(void);                        /* asks wf_task for a run (it r
    roll's own) into its next pass's folder, with the PRINT settings of now (owner 11-17); codes as wf_dark_start */
 int  wf_dark_start_roll(int num, int again, int film);
 void wf_dark_stop(void);                         /* MENU: stop after the current band (the frame is done again next run) */
+/* Canon's PLAY after a run (owner 11-21, 5D2 bug 3): Canon reads its list of the card's pictures at power on / card
+   mount only, so a run that changed DCIM (a camera JPEG replaced, a CR2 moved) can leave PLAY missing prints until
+   power off / on or the card door opens. wf_dark_dcim_changed: such a run in this power-on (the DONE screen says how);
+   wf_dark_play_notice: GUI task, on the way into Canon's PLAY, that notice (NotifyBox) when so; 1 = shown */
+int  wf_dark_dcim_changed(void);
+int  wf_dark_play_notice(void);
 int  wf_dark_eta_s(const struct wf_dark_view *v);   /* seconds left for the roll (estimate) */
 int  wf_dark_eta_left(const struct wf_dark_view *v, int left);   /* seconds for left frames (the Darkroom's pick) */
 int  wf_dark_src(int output, int flut);          /* EOS M: the WF_DEV_* tables a run builds for look output (WF_OUT_*) +

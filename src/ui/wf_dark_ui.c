@@ -665,6 +665,11 @@ static void dr_right(const struct wf_dark_view *v, int now)
         snprintf(b, sizeof b, "%d prints in ROLLS/%s", v->num ? v->done : wf_roll_ndev(r), nm);
         text_c(F_15, cx, 318, b, C_TXT);
         text_c(F_13, cx, 340, "Copy them from the card's ROLLS folder", C_TXT2);
+        if (wf_dark_dcim_changed())                        /* Canon's PLAY list is from power on (wf_dark.c) */
+        {
+            text_c(F_13, cx, 368, "Power off/on (or open the card door)", C_AMBER);
+            text_c(F_13, cx, 386, "so Canon's PLAY shows the new prints", C_AMBER);
+        }
     }
 }
 

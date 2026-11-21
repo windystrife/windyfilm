@@ -6895,6 +6895,7 @@ static void t_roll_jpeg(void)
 
     /* copy: frame Off, Overwrite; and Screen Off (owner 11-16, DESIGN 3.11): the test stands in for the Darkroom screen's
      * tick (wf_dark_dark) and keys (wf_dark_wake; a key "WF_DS_WAKE_MS ago" = the time without a key is over) */
+    int dc_keep = wf_dark_dcim_changed();        /* Keep: DCIM as it was (checked after roll 002) */
     wf_pr_jpeg = WF_PJ_OVER;
     wf_dk_scr = WF_DS_OFF;
     chk(mem_roll(film, 2, dir, 504), "roll 002: 3 frames (%d)", wf_roll_now()->nshot);
@@ -6955,6 +6956,22 @@ static void t_roll_jpeg(void)
         free(rb);
     }
     chk(jp_cr2s(dir, 504) && !jp_wft(504), "copy: CR2s untouched, no .WFT");
+    /* Canon's PLAY after a run that changed DCIM (owner 11-21, 5D2 bug 3: Canon's list of the card is from power on):
+     * roll 001 (Keep) left DCIM alone, roll 002 replaced its camera JPEGs. On the way into PLAY the notice, the key still
+     * Canon's; leaving PLAY no notice */
+    {
+        int hp = h_play, n0 = h_notify_n;
+        h_play = 0;
+        int k1 = cbr_key(WF_KEY_PLAY), shown = h_notify_n == n0 + 1 && strstr(h_notify, "PLAY may miss them")
+                                               && strstr(h_notify, "Power off/on or open card door");
+        h_play = 1;
+        int n1 = h_notify_n, k2 = cbr_key(WF_KEY_PLAY);
+        h_play = hp;
+        chk(!dc_keep && wf_dark_dcim_changed() && log_has("dark: DCIM changed: Canon's PLAY may miss it until power off")
+            && k1 == 1 && shown && k2 == 1 && h_notify_n == n1,
+            "PLAY after the run: Keep %d, Overwrite %d ('%s'), into PLAY: passes %d, notice %d ('%s'), out: %d, %d",
+            dc_keep, wf_dark_dcim_changed(), log_line("dark: DCIM changed"), k1, shown, h_notify, k2, h_notify_n - n1);
+    }
 
     /* frame: a white frame + details + the logo, Overwrite, one camera JPEG gone */
     int lg = ld && access(ld, R_OK) == 0 && mem_copy(ld, "ML/DATA/WFLOGO.DAT");

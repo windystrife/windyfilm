@@ -189,6 +189,12 @@ không có CR2 thì không được đếm.
   tráng tiếp phần còn lại.
 - Pin thấp: tự dừng ("Battery low"). Sạc rồi vào Darkroom, SET để tráng nốt.
 - Không mở nắp thẻ, không tắt máy khi đang tráng.
+- Tráng xong với Camera JPEG khác Keep (hoặc RAW files = Move to ROLLS): PLAY của Canon có
+  thể thiếu vài bản in mới, hay báo lỗi vài tấm, cho tới khi tắt / mở máy. Canon chỉ đọc
+  danh sách ảnh trên thẻ lúc bật máy (hoặc lúc lắp thẻ), ML không có cách bắt Canon đọc lại.
+  Màn "Roll developed" nhắc hai dòng vàng "Power off/on (or open the card door) / so
+  Canon's PLAY shows the new prints"; bấm PLAY trong cùng lần bật máy đó thì hiện hộp
+  "New prints: PLAY may miss them / Power off/on or open card door" 3 giây, PLAY vẫn mở.
 - Bản in nằm ở gốc thẻ: ROLLS/ROLL001/F01_0206.JPG (F01 = kiểu số 1, 0206 = số
   IMG của Canon). DCIM không bị đụng tới: CR2 và JPG của Canon giữ nguyên (trừ khi
   đặt Camera JPEG = Overwrite, xem "ĐÈ LÊN JPEG CỦA MÁY" bên dưới; CR2 thì không bao giờ).
@@ -653,6 +659,17 @@ am. (20/11, RAWB28) Xem ảnh trong Darkroom, Camera JPEG mới, Blind roll tron
       chỉ còn IMG_nnnn.JPG = bản in có viền (PLAY hiện bản in); ROLLS/ROLL00n/ có F0n_nnnn.JPG,
       IMG_nnnn.JPG (ảnh không viền) và IMG_nnnn.CR2. Gửi WINDYFLM.LOG (các dòng "dark: photos
       ...", "camera JPEG ..."), chụp màn hình Darkroom lúc có tờ ảnh và bản in phác.
+an. (21/11) PLAY sau khi tráng (lỗi 3 của 5D2: "cái được cái không"). Camera JPEG = Overwrite
+   (hoặc Print + over), RAW files = Move to ROLLS, nạp cuộn 3 kiểu, chụp 3 tấm.
+   1. Tráng. Màn "Roll developed" có thêm hai dòng vàng: "Power off/on (or open the card
+      door)" và "so Canon's PLAY shows the new prints".
+   2. MENU đóng Darkroom, bấm PLAY (chưa tắt máy): hộp "New prints: PLAY may miss them /
+      Power off/on or open card door" hiện 3 giây, PLAY vẫn mở. Xem 3 tấm vừa tráng: ghi
+      lại tấm nào hiện bản tráng, tấm nào màu Canon, tấm nào báo lỗi / ô trống.
+   3. Tắt máy, bật lại, PLAY: cả 3 tấm phải là bản tráng, không báo lỗi, không còn hộp nhắc.
+   4. Camera JPEG = Keep, tráng một cuộn khác: không có hai dòng vàng, không có hộp nhắc.
+   Log: một dòng "dark: DCIM changed: Canon's PLAY may miss it until power off / on or the
+   card door" mỗi lần bật máy (ở lần tráng đầu tiên có đổi DCIM).
 
 
 6. GỬI LẠI

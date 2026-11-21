@@ -99,6 +99,7 @@ static int hud_on, hud_fonts_on, hud_t, hud_mode = -1, info_t = -100000, hud_sig
 static int hud_font_again, hud_font_t, hud_font_n;  /* the font pack read again while Canon held the card */
 static volatile int dk_running;                   /* a darkroom run owns the roll (asked for, or in wf_task now) */
 static volatile int dk_go;                        /* wf_dark_start asked: wf_task's next wf_dark_poll runs it */
+static volatile int dk_dcim_new;                  /* a run changed DCIM in this power-on (wf_dark_dcim_changed) */
 static int nt_state = -1, nt_req, nt_t, nt_len, nt_mode = -1, nt_pt;   /* the end-of-roll notice (roll_notice) */
 static volatile int nt_up, nt_drop, nt_poke;
 static volatile int sh_k;                         /* the shutter held now (roll_shutter): 0 no, 1 full, 2 rewound */
@@ -131,6 +132,30 @@ int wf_roll_shelve(int on)
 int wf_dark_busy(void) { return dk_running; }
 const struct wf_shelf *wf_shelf_now(void) { return &shv; }
 void wf_shelf_rescan(void) { sh_scan = 1; }
+
+/* Canon's PLAY after a run that changed DCIM (owner 11-21, 5D2 bug 3: "some prints show, some do not"): Canon reads
+ * its list of the card's pictures at power on / card mount and not again while the camera stays on, so in the same
+ * power-on PLAY can miss a JPEG a run replaced, a CR2 it moved, a file it wrote. No public call makes Canon read the
+ * card again (ML has none), so the Darkroom says how: power off / on, or open the card door (DESIGN 3.9).
+ * dk_dcim_mark: a file in DCIM about to change (path with /DCIM/), set once per power-on, one log line */
+static void dk_dcim_mark(const char *p)
+{
+    for (; *p; p++)
+        if (p[0] == '/' && p[1] == 'D' && p[2] == 'C' && p[3] == 'I' && p[4] == 'M' && p[5] == '/') {
+            if (!dk_dcim_new)
+                wf_log("dark: DCIM changed: Canon's PLAY may miss it until power off / on or the card door");
+            dk_dcim_new = 1;
+            return;
+        }
+}
+int wf_dark_dcim_changed(void) { return dk_dcim_new; }
+int wf_dark_play_notice(void)
+{
+    if (!dk_dcim_new)
+        return 0;
+    NotifyBox(3000, "New prints: PLAY may miss them\nPower off/on or open card door");
+    return 1;
+}
 
 /* what the look's tables (the shot LUT, halation / grain / mist) are built for (owner RAWB9, 11-15: each roll frame took
  * 23..36 s of the in-camera look, the LUT read 21 s and the grain 8..13 s at boot and at each roll load, and the
@@ -2127,6 +2152,7 @@ static int dk_dcim_put(int i, const char *dst, const char *nm, const char *verb,
         return DK_ERR;
     }
     int had = FIO_GetFileSize(dst, &sz) == 0;
+    dk_dcim_mark(dst);
     if (wf_frename(tmp, dst, &e) != 0) {
         int still = FIO_GetFileSize(dst, &sz) == 0;
         wf_log("dark: F%02d camera JPEG: rename failed (%s %d): %s", i + 1, wf_fe_name(e.step), e.rc,
@@ -2311,6 +2337,8 @@ static void dk_cr2_move(int i, const char *cr2, const char *mv, const char *rn, 
     if (FIO_GetFileSize(mv, &dz) == 0) {         /* that name there already: a run stopped after its copy, or the same
                                                     number from another DCIM folder */
         int same = dz == sz && dk_cr2_same(cr2, mv, sz) == 0;
+        if (same)
+            dk_dcim_mark(cr2);
         if (same && wf_fremove(cr2, &e) == 0)
             wf_log("dark: F%02d %s moved to ROLLS/%s/ (the same file was there, %d KB)", i + 1, nm, rn, (int)(sz >> 10));
         else
@@ -2319,6 +2347,7 @@ static void dk_cr2_move(int i, const char *cr2, const char *mv, const char *rn, 
         return;
     }
 #ifndef WF_BUILD_5D2
+    dk_dcim_mark(cr2);
     if (wf_frename(cr2, mv, &e) == 0) {
         if (FIO_GetFileSize(mv, &dz) == 0 && dz == sz)
             wf_log("dark: F%02d %s moved to ROLLS/%s/ (renamed, %d KB, %dms)", i + 1, nm, rn, (int)(sz >> 10),
@@ -2342,6 +2371,7 @@ static void dk_cr2_move(int i, const char *cr2, const char *mv, const char *rn, 
                renfail ? ", after the rename failed" : "");
         return;
     }
+    dk_dcim_mark(cr2);
     if (wf_fremove(cr2, &e) != 0) {
         wf_log("dark: F%02d %s copied to ROLLS/%s/ but not removed from DCIM (%s %d): both kept", i + 1, nm, rn,
                wf_fe_name(e.step), e.rc);

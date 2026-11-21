@@ -442,6 +442,22 @@ int main(int argc, char **argv)
     v->hung_ms = get_ms_clock() - 100000;
     tick(40);
     shot("dark_done");
+    /* 9b. the run changed DCIM (owner 11-21, 5D2 bug 3: Canon's list of the card is from power on): two lines under the
+     * roll's say how PLAY sees the new prints; nothing else on the screen changes */
+    {
+        static uint8_t was[480 * 720];
+        const uint8_t *s = bmp_vram_real();
+        for (int y = 0; y < 480; y++) memcpy(was + y * 720, s + y * BMPPITCH, 720);
+        fake_set_dcim(1);
+        tick(2);
+        shot("dark_done_play_notice");
+        int in = 0, out = 0;
+        for (int y = 0; y < 480; y++)
+            for (int x = 0; x < 720; x++)
+                if (s[y * BMPPITCH + x] != was[y * 720 + x]) { if (y >= 364 && y <= 404 && x >= 360) in++; else out++; }
+        CHECK(in > 300 && out == 0, "DCIM changed: %d pixels in the PLAY lines, %d elsewhere", in, out);
+        fake_set_dcim(0);
+    }
     close_ui();
 
     /* 10. HUD over LiveView */

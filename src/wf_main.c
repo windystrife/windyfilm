@@ -17,6 +17,7 @@
  *   worker film_yuv (prio 0x1C, wf_shot.c) and the Canon hook tasks never log and never touch files. */
 #include <module.h>
 #include "wf_core.h"
+#include "wf_dark.h"                             /* wf_dark_play_notice */
 #include "wf_expsim.h"
 #include "wf_film.h"
 #include "wf_fx.h"
@@ -426,6 +427,8 @@ static unsigned int wf_keypress(unsigned int key)
         wf_ui_open();
         return 0;
     }
+    if (key == WF_KEY_PLAY && !gui_menu_shown() && !is_play_mode())
+        wf_dark_play_notice();                   /* into Canon's PLAY after a run: it may miss prints (wf_dark.c) */
     if (key == MODULE_KEY_TRASH)                 /* the next log says why the browser did not come up */
         wf_ui_open_refused(key, is_play_mode());
     return 1;
