@@ -127,24 +127,26 @@ Develop on the phone has **8 tabs**: Film · Print · Tone · Grain · Glow · L
 Frame variation).
 
 **Owner, 21 Nov (later): the owner's own film model drives Tone, Grain and Glow.** The owner has a measured model of
-five stages in this order: Developer → Compression → Bloom → Halation → Grain. Its numbers and code are private: they
-live in the private desktop repository only, never in this repository or in a public build. The app reads the stages
-from the shared C core.
+five stages in this order: negative curve → shoulder → bloom → halation → grain. Its numbers and code are private:
+they live in the private desktop repository only, never in this repository or in a public build. The app reads the
+stages from the shared C core.
+- Every control, key and shader name is our own and matches the core's `lab.*` keys. The mapping from the model's own
+  field names lives only in the private repository.
 - Tone, Grain and Glow each get an **Engine: Lab | Camera** switch. This is a proposal, temporary, and question 14.
   - Lab is the owner's model and the default.
   - Camera is the film's own camera-side tools, bit-exact with the camera: the controls in the rows above.
   - Levels, Print range and Highlight colour show under both engines.
 - Tone (Lab) has two groups:
-  - **Developer**: Contrast, Midtone lift, Colour purity (0..200 %), Lift & toe.
+  - **Negative**: S-curve, Midtone lift, Colour purity (0..200 %), Lift & toe.
   - **Shoulder**: Shoulder, Shoulder white, Shoulder width, Colour mute.
-  - Saturation leaves Tone, because Colour purity covers it.
+  - The camera engine's saturation row leaves Tone under Lab, because Colour purity covers it.
 - Grain (Lab): **gauge chips 8 / 16 / 35 / 65 mm**, which set Bloom, Halation and Grain to that gauge at once. Then
-  Amount, Tones S / M / H, Colour, Size, Clump, Angle, Seed (+ per frame), and Dust & scratches below.
+  Amount, Tones S / M / H, Colour noise, Grain size, Clump, Angle, Seed (+ per frame), and Dust & scratches below.
 - Glow (Lab): a segmented control picks **Halation · Bloom · Mist**, each with its own switch.
-  - Halation: Amount, Hue red↔orange, Source gamma, Tight spread, Wide spread, Threshold, Tone range low / high,
-    Blue cut, Softness.
-  - Bloom keeps the light's own colour: Amount, Threshold, Hard edge, Brightness, Spread, Falloff, Layers, Size,
-    Saturation, Bright roll-off, Edge guard, Edge reach, Edge detail.
+  - Halation: Amount, Hue red↔orange, Source gamma, Tight spread, Wide spread, Threshold, Light band low / high,
+    Blue cut, Feather.
+  - Bloom keeps the light's own colour: Amount, Threshold, Hard edge, Exposure, Spread, Decay, Layers, Reach,
+    Vividness, Highlight cut, Edge guard (Guard, Width, Blur).
   - Mist: White / Black, as before.
 
 ## 4. Architecture
@@ -209,7 +211,7 @@ viewfinder                 ^
     mist = one more blur level.
   - Lab engine (the owner's model): the shaders are written and measured in a real browser GPU against the model's
     reference code. Both live in the private desktop repository, branch `android-gpu`.
-    - Developer and Compression fold into the cube: 33^3 while dragging, 65^3 on release.
+    - The negative curve and the shoulder fold into the cube: 33^3 while dragging, 65^3 on release.
     - Bloom and Halation: one blur per layer at a reduced size, plus a full-size edge mask.
     - Grain: the model's noise made in the shader. It is checked by its statistics, because a phone GPU's float maths
       cannot repeat the reference's bits.
@@ -366,7 +368,7 @@ Foldable screens (`<meta name="wf-size">` sets the window; `render.sh` reads it)
 13. Edge print text on the rebate: "WINDYFILM · film name · frame number" (mock 12), or something else (roll number,
     your name)?
 14. Tone, Grain and Glow get an **Engine: Lab | Camera** switch.
-    - Lab is your film model: Developer, Shoulder, Bloom, Halation and Grain with your numbers.
+    - Lab is your film model: Negative, Shoulder, Bloom, Halation and Grain with your numbers.
     - Camera is the film's own camera-side tools, bit-exact with the camera.
     - Proposed, and taken for now: Lab as the default. Or should Camera be the default for frames shot on the EOS M
       / 5D2?

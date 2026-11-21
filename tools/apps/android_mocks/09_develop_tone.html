@@ -5,15 +5,15 @@
 <body><div class="screen"></div>
 <script src="dev.js"></script>
 <script>
-// Engine Lab: the owner's own film model (Developer, then Shoulder). Camera: the film's own tone tools (mock 09 of
+// Engine Lab: the owner's own film model (Negative, then Shoulder). Camera: the film's own tone tools (mock 09 of
 // fb2f4a8). The picture is the phone preview's shader output for these settings; the values are illustrative.
 wfDev({
   time: '14:54', title: 'F11 · ROLL 003', sub: 'IMG_6849.CR2 · Ektar 100', bg: 'assets/lab/tone_gpu.png', pos: 'center 30%',
-  img: split('assets/f/039_6849.jpg', 150, 'BEFORE', 'DEVELOPER + SHOULDER', 'center 30%'), chip: false, tab: 'Tone',
+  img: split('assets/f/039_6849.jpg', 150, 'BEFORE', 'NEGATIVE + SHOULDER', 'center 30%'), chip: false, tab: 'Tone',
   panel:
     eng() +
-    gh('Developer', 'how the negative was developed', 'new') +
-    sl('Contrast', 35, 0, 100, '35', 'new') +
+    gh('Negative', 'how the negative was developed', 'new') +
+    sl('S-curve', 35, 0, 100, '35', 'new') +
     sl('Midtone lift', 10, -100, 100, '+10', 'new') +
     sl('Colour purity', 110, 0, 200, '110%', 'new', 100) +
     sl('Lift & toe', 15, 0, 100, '15', 'new') +
