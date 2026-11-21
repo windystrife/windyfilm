@@ -109,6 +109,7 @@ static int dlg_want;                    /* the mode for this open (0 = none) */
 static int dlg_mode;                    /* we asked Canon for dlg_want */
 static int dlg_mask;                    /* bmp_off() is ours to undo */
 static int dlg_seen;                    /* the screen came up: losing the mode or the display then closes us */
+static int dlg_kept, dlg_reasks, dlg_reask_t;   /* the Darkroom's run kept us (said once), its asks for the mode again */
 static void dlg_take(void);
 static int dlg_lost(void);
 static int dlg_give(void);
@@ -2289,7 +2290,7 @@ static int dlg_wait(int ms, int want_mode)
 
 static void dlg_take(void)
 {
-    dlg_mode = dlg_seen = dlg_mask = dlg_want = 0;
+    dlg_mode = dlg_seen = dlg_mask = dlg_want = dlg_kept = dlg_reasks = 0;
     if (wf_cam() != WF_CAM_5D2 || RECORDING) return;
     dlg_want = lv ? DLG_LV : DLG_NOLV;
     int t0 = get_ms_clock(), gm0 = get_gui_mode(), d0 = display_is_on();
@@ -2323,12 +2324,42 @@ static void dlg_take(void)
            dlg_mode ? (dlg_want == DLG_LV ? " (asked 38)" : " (asked 2)") : "", d0, display_is_on(), get_ms_clock() - t0);
 }
 
-/* 1 = Canon left the mode we asked for, or the display went off: close (else the next TRASH would open nothing) */
+/* 1 = Canon left the mode we asked for, or the display went off: close (else the next TRASH would open nothing).
+ * Not the Darkroom screen while a run lives (owner 11-21, 5D2: with Screen Off the screen closed once the display went
+ * dark, and the key that woke it showed Canon's screen): its display goes dark on purpose there (Screen Off, a key wakes
+ * it) or by Canon (Screen On turns it on again), and the run's end turns it on for the result. A mode Canon left
+ * meanwhile is asked for again once the display is on (never while dark: Canon's menu mode lights the display), every
+ * DLG_REASK_MS, DLG_REASKS times; still not back DLG_REASK_MS after the last ask: closed as before. */
+#define DLG_REASK_MS    2000
+#define DLG_REASKS      3
 static int dlg_lost(void)
 {
     if (!dlg_seen) return 0;
-    if (display_is_on() && (!dlg_mode || get_gui_mode() == dlg_want)) return 0;
-    wf_log("ui: 5D2: gui mode %d, display %d: closing", get_gui_mode(), display_is_on());
+    int don = display_is_on(), gm = get_gui_mode(), mode_ok = !dlg_mode || gm == dlg_want;
+    if (don && mode_ok)
+    {
+        dlg_kept = dlg_reasks = 0;
+        return 0;
+    }
+    if (wfdr_live(scr))
+    {
+        int now = get_ms_clock();
+        if (!dlg_kept)
+        {
+            dlg_kept = 1;
+            wf_log("ui: 5D2: gui mode %d, display %d while the Darkroom runs: kept", gm, don);
+        }
+        if (!don || mode_ok) return 0;
+        if (dlg_reasks < DLG_REASKS && (!dlg_reasks || now - dlg_reask_t >= DLG_REASK_MS))
+        {
+            dlg_reask_t = now;
+            dlg_reasks++;
+            SetGUIRequestMode(dlg_want);
+            wf_log("ui: 5D2: gui mode %d, asked for %d again (%d)", gm, dlg_want, dlg_reasks);
+        }
+        if (dlg_reasks < DLG_REASKS || now - dlg_reask_t < DLG_REASK_MS) return 0;
+    }
+    wf_log("ui: 5D2: gui mode %d, display %d: closing", gm, don);
     return 1;
 }
 

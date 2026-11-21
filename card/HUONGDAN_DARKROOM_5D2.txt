@@ -94,6 +94,14 @@ Màn hình giống EOS M, chỉ khác tên phím (chân màn hình ghi đúng ph
 - Hàng ROLL trên cùng: cuộn trong máy, rồi các cuộn trên kệ. Cuộn đã tráng: "develop
   again" + hàng Film (SET chọn phim khác). Bản in lần 2 vào ROLLS/ROLL001B.
 - Không mở nắp thẻ, không tắt máy khi đang tráng.
+- Tráng xong với Camera JPEG khác Keep (hoặc RAW files = Move to ROLLS): PLAY của Canon xem
+  theo danh mục file riêng của Canon, chỉ đọc lúc lắp thẻ / bật máy (vì vậy trước đây "cái
+  được cái không", rút thẻ ra cắm lại thì hiện đủ). Từ bản này, sau mỗi kiểu có đổi DCIM,
+  module bảo Canon đọc lại đúng số ảnh đó, nên PLAY thấy bản in ngay. Chỉ khi việc đó không
+  làm được: màn "Roll developed" có hai dòng vàng "Card out and in (or power off/on) / so
+  Canon's PLAY shows the new prints", và bấm PLAY trong cùng lần bật máy thì hiện hộp "PLAY
+  may miss new prints: / Card out and in, or power off/on" 3 giây, PLAY vẫn mở. Khi đó: rút
+  thẻ ra cắm lại, hoặc tắt mở máy, để PLAY thấy bản in (hộp nhắc có thể hiện thêm một lần).
 
 
 6. NHỮNG GÌ CẦN THỬ (theo thứ tự)
@@ -158,6 +166,17 @@ o. (RAWB28) Ảnh trong Darkroom, Camera JPEG, Blind roll.
       không có WFP_. Camera JPEG = Print + over, Frame White, RAW files = Move to ROLLS: DCIM
       chỉ còn bản in IMG_nnnn.JPG; ROLLS/ROLL00n/ có F0n_nnnn.JPG, IMG_nnnn.JPG, IMG_nnnn.CR2.
       Gửi WINDYFLM.LOG (dòng "dark: photos ...", "camera JPEG ...").
+p. (21/11) PLAY sau khi tráng (lỗi 3: "cái được cái không"). Camera JPEG = Overwrite (hoặc
+   Print + over), RAW files = Move to ROLLS, nạp cuộn 3 kiểu, chụp 3 tấm.
+   1. Tráng. Màn "Roll developed" KHÔNG có hai dòng vàng (module đã bảo Canon đọc lại).
+   2. MENU đóng Darkroom, bấm PLAY ngay (chưa tắt máy, chưa rút thẻ): không có hộp nhắc. Cả 3
+      tấm phải hiện bản tráng, không báo lỗi, không ô trống; nếu Move to ROLLS thì không còn
+      CR2 của 3 tấm đó trong PLAY. Ghi lại tấm nào sai.
+   3. Tắt máy, bật lại, PLAY: vẫn như bước 2 (đối chiếu).
+   4. Camera JPEG = Keep, tráng một cuộn khác: không đổi gì trong DCIM, không có hộp nhắc.
+   Log: một dòng "dark: F01 Canon's file list read again (PLAY shows the new print), N ms".
+   Nếu thấy "Canon's file list not read again (...)" thì hai dòng vàng và hộp nhắc hiện như
+   cũ; gửi WINDYFLM.LOG (dòng đó có mã lỗi), rút thẻ ra cắm lại / tắt mở máy để PLAY thấy bản in.
 
 
 7. GỬI LẠI

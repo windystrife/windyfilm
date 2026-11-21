@@ -847,7 +847,12 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     were Y 118 / 150 up to RAWB26; owner 11-18 "sửa info exif cho font chữ nổi hơn tí"). No logo from the repo:
     the maker's wordmark comes only from the owner's card-time pack (Logo, below).
 - **Caption** (`wf_pf_caption`, from `wf_dk_shot`: the Exif of the print's APP1, gaps filled from the CR2's own tags).
-  - Line 1: camera / lens (84 px, medium).
+  - Line 1: camera / lens (84 px, medium). The lens is Exif LensModel (0xA434). The 5D2 writes Exif 2.21 without it,
+    so Canon's MakerNote 0x0095 is read then (`wf_dk_mnlens`, Make Canon; owner 2026-11-21 on a 5D2 print: "ko hiện
+    canon 50mm STM à"). The 5D2 names the lenses it knows there ("EF85mm f/1.8 USM" in the owner's 100EOS5D files) and
+    writes only the focal length for others ("35mm" in Day 10, LensType 255): such a name is left out, line 2 has the
+    focal length. What the 5D2 writes for the EF 50mm f/1.8 STM (2015, newer than its firmware 2.1.2) is not known yet:
+    no 5D2 file with it here (the EOS M writes "EF50mm f/1.8 STM", LensType 4156).
   - Line 2: focal length, f-number, shutter, ISO (62 px, wght 500 since RAWB27, was 400).
   - Line 3: the film, then Print / Grain / Halation / Bloom / Mist from the look's text (62 px, the same).
   - On + roll adds `ROLL 021 · 07/24` at the right of line 1.
@@ -989,12 +994,39 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
     - Canon's side, unchecked on the camera (HUONGDAN step aj, 5D2 step m). File numbers: the JPEG keeps its number in
       DCIM, so the highest number in the folder does not change (Continuous numbering keeps its own counter; Auto
       reset sees the same highest file). Playback: whether its list notices a CR2 that ML removed before a power cycle
-      is not known for DryOS; the step looks at PLAY right after the run and again after a power cycle.
+      is not known for DryOS; the step looks at PLAY right after the run and again after a power cycle. (Owner
+      2026-11-21, 5D2: it does not; "Canon's PLAY after a run" below.)
     - Costs (told to the owner): an importer that pairs RAW + JPEG by folder sees the JPEG alone in DCIM; Canon's erase
       takes only the JPEG; the 5D2 copy reads the CR2 twice and writes it once (about 25 MB a frame; the time is in the
       log line); a rename across folders on DryOS is first tried by the card run.
   - Not checked on the camera yet: PLAY after Print + over (the print in DCIM, the CR2 still beside it unless moved,
     so 3.9's playback note applies), and the time of the second encode on the 5D2.
+  - **Canon's PLAY after a run** (owner 2026-11-21, 5D2: after a Darkroom run some prints show in PLAY and some do
+    not, the files on the card whole; a power cycle shows them, and so does the card out and in). PLAY lists the card
+    from Canon's file catalog, filled at card mount; FIO changes files without telling it, so a JPEG a run replaced
+    or a CR2 it moved keeps its old entry. The fix tells the catalog after each frame:
+    - `dk_dcim_mark` (wf_dark.c) notes that a frame is about to change a file under `/DCIM/` (the camera JPEG's
+      rename in `dk_dcim_put`, a CR2's rename or removal in `dk_cr2_move`). After the frame, `dk_cat_tell` calls
+      `wf_cam_cat_tell(<the frame's DCIM JPEG>)` (camera layer): `FM_GetObjectHandleByPath(path, &handle)` turns the
+      DCF path into Canon's object handle, `FC_ReScanFile(handle)` locks the catalog, finds every file of that folder
+      and number again (which of JPG / CR2 are there, size, time) and unlocks (0 = done). The JPEG is always there
+      when its CR2 moved, so one call covers both. Addresses: 5D2 2.1.2 0xFF8453FC / 0xFF856A64, EOS M 2.0.2
+      0xFF118EB0 / 0xFF1167B0 (the owner's ROM dumps, by their debug strings; the same code on both bodies).
+    - Guards: model + firmware, the two prologues and the literal of the file manager's ready word (5D2 0x1ED8,
+      EOS M 0x3E4E4), checked once; that word != 0 (FM_GetObjectHandleByPath asserts otherwise); the path of the DCF
+      shape, 29 chars (it is copied into a 48-byte stack buffer). The Darkroom runs in wf_task: never a hook.
+    - The first success logs `dark: F01 Canon's file list read again (PLAY shows the new print), N ms`; a failure
+      logs `dark: Fnn Canon's file list not read again (<body | no FM | path | Canon> <code>): ...` and sets
+      `wf_dark_dcim_changed()`. Only then the old way out shows: the DONE screen's two lines "Card out and in (or
+      power off/on)" / "so Canon's PLAY shows the new prints", and `wf_dark_play_notice()` (wf_dark.h), a 3 s
+      NotifyBox "PLAY may miss new prints:" / "Card out and in, or power off/on" when PLAY goes to Canon with the UI
+      closed and the camera not in playback (wf_main.c `wf_keypress`; the key still goes to Canon). RAM only.
+    - FC_ReScanFile has no caller in either firmware (it is there, complete, with its log lines), so the first
+      camera run is its test: PLAY right after a run, without a power cycle, should list every print.
+    - Checks: `test.sh` ROLL:jpeg: the Keep roll asks nothing; the Overwrite roll asks once per frame with the frame's
+      `B:/DCIM/100CANON/IMG_nnnn.JPG`, the rescan gets the handle, no notice; the framed roll with Canon refusing
+      (0x82110007) logs each frame that changed DCIM (not F03, which has no camera JPEG) and shows the notice into
+      PLAY, none out of it. `tests/ui/dr_ui_test.c` 9b: the flag adds the two lines, no other pixel.
 - **Memory.** Nothing new is allocated: the pack (<= 512 KB), the caption band (<= about 3.7 MB) and the row buffer
   (about 197 KB) use `M.raw`, which is free scratch in the DRY phase. The stamp's map (about 148 KB) uses `M.raw` too.
   Fonts / text are static (about 1 KB BSS). The logo pack (<= 384 KB) is read beside the fonts in the 512 KB pack
@@ -1138,6 +1170,16 @@ screen itself ("one UI"), at its top right.
 - **End.** Done, stopped or failed: no more dark from the tick, an off asked under 2 s before is let land, then
   `dk_screen("after the run")` turns the display on so the result shows; `powersave_permit` then leaves Canon's own
   auto-off to Canon. Unloading after a dark run: one `display_on` (no wait).
+- **5D2: the screen stays** (owner 2026-11-21, a 5D2 roll: "lúc screenoff bật lại ko vào được darkroom nữa"). Canon's
+  dialog lies under the 5D2's UI (3.18: mode 2 without LiveView, 38 in it), and `dlg_lost` (`src/ui/wf_ui.c`) closed
+  the UI when that mode left or the display read off. So the first dark of a Screen Off run closed the Darkroom screen
+  (`ui: 5D2: gui mode 38, display 0: closing`), the run went on, and the key that woke the display showed Canon's
+  screen. Now the Darkroom screen while a run lives (`wfdr_live`: the view RUN / STOPPING, which lasts until the run's
+  end has turned the display on) is kept through a dark display (`ui: 5D2: gui mode N, display 0 while the Darkroom
+  runs: kept`, once), and a key wakes that screen. A mode Canon left meanwhile is asked for again once the display is
+  on (never while dark: Canon's menu mode lights the display), every 2 s, 3 times (`ui: 5D2: gui mode 0, asked for 38
+  again (n)`); not back 2 s after the third, the UI closes as before. Idle, or after the run, a dark display or a lost
+  mode closes it as before. The EOS M has no Canon dialog under the UI: unchanged.
 - **Text.** `dark: Screen Off: the display goes dark 10 s after the last key` at the start, `dark: Screen Off: display
   turned off N times, woken M times` at the end. The footer while running says "Screen Off: any key wakes it for 10 s".
   Screen On: after each frame `dark: Fnn screen: relit N` (`, first off at T ms` = ms into the frame when it first read
@@ -1151,7 +1193,12 @@ screen itself ("one UI"), at its top right.
   ROLL:jpeg roll 001 (a real run, the test standing in for the tick while F02 runs): on = nothing; off = turned on;
   within its second = not looked at; the ask took; stuck off = 3 asks then given up; the F01 / F02 / F03 screen lines
   (F02 `relit 4, first off at`), the give-up line and the end line; roll 002 (Screen Off) has no screen lines.
-  `dr_ui_test.c`: the dark screen's tick calls it on a Screen On run.
+  `dr_ui_test.c`: the dark screen's tick calls it on a Screen On run. 5D2 (11-21), `dr_ui_test.c` 15b on both cameras
+  (`CAM=5D2 dr_run.sh`): kept while dark, a key wakes the Darkroom and does nothing else, no ask while dark, one ask
+  after the wake brings Canon's mode back, a mode lost for good gets 3 asks and then the close; the harness's Screen
+  Off now turns its display off as the camera does, so step 5b checks the screen stays too. With the old `wf_ui.c`
+  `CAM=5D2 dr_run.sh` fails 12 checks. Not checked on the camera: whether Canon leaves its dialog when the display
+  goes off (the log's `kept` line says the mode).
 - **Not checked on the camera:** that Canon keeps the display off while LiveView is paused, and how the EOS M's own
   keys reach ML while it is dark (the first key may also be seen by Canon). The 5D2 has no Darkroom: stubs only.
 
@@ -1664,15 +1711,24 @@ hold all three per gauge).
   gathers the halation layer again from the bloomed frame (`yl_gather2_chunk`, as film-lab blurs the halation of the
   bloomed image), then one apply pass writes both. Grain after them, per row. Halves (every 5D2 shot, Diana): the BOT
   fades from the TOP's glow over 256 rows (`YL_XF`), checked against the whole frame at the seam (FX:lab).
+- **The halo's glow composite** (film-lab 2026-11-21; owner: the sky rim first). The halo is the whole scattered light,
+  (near glow x its weight + far glow x its weight) x mix, added per channel through film-lab's glow composite: as it is
+  while it fills at most half the headroom 1 - v (the knee), past that 1 - (1 - v) / 2 x exp(1 - 2a / (1 - v)), the
+  same value and slope at the knee, towards white without reaching it. Until then the sharp core (0.75 x the layer) was
+  left out of the halo and the sum clamped: that kept highlights from clipping, but just inside every highlight edge a
+  band got no halo at all, a pale rim (cyan on a sky) between the orange halo outside and the halo inside. On the
+  camera, per pixel and without a divide: 2a / (1 - v) from the reciprocal of the headroom's top 11 bits (a table of
+  1024; ARMv5TE's CLZ), the exp from a table at 1/64 steps, linear in between: within 1.6 Q4 levels (a tenth of a
+  level) of the formula in double. The linear path's limit counts the halo twice, so a word takes it only where the
+  composite adds the halo as it is. Bloom and Grain are unchanged.
 - **What the camera does differently**, each measured against the reference CLI (`tools/lab_check.sh`):
   - halation and bloom are blurred on grids of cell means, 1/8 (halation) and 1/16 (bloom), then interpolated per
     pixel pair; the blur variance is the reference's three-box Gaussian minus what the grid adds;
-  - the halation core, the colour, the clamps and the bloom's ease-off in the highlights are per pixel, on the camera's UYVY words
-    (full-range BT.601), as deltas: a word without glow is kept bit-exact; a word whose channels cannot clamp and that
-    has no halation core takes the linear path (its Y / U / V change from the word's glow once), the others the exact
-    per-pixel path;
+  - the colour, the clamps, the halo's glow composite and the bloom's ease-off in the highlights are per pixel, on the
+    camera's UYVY words (full-range BT.601), as deltas: a word without glow is kept bit-exact; a word whose channels
+    cannot clamp and whose halo stays under the knee on every channel takes the linear path (its Y / U / V change from
+    the word's glow once), the others the exact per-pixel path;
   - the bloom's edge mask uses the largest luma step per 16-px cell instead of a per-pixel Sobel;
-  - both glows are gathered from the frame before the bloom (the per-pixel core uses the bloomed pixel);
   - the grain is film-lab's lattice noise (its hash at whole cells of the cell size s, bilinear in between over the weights'
     root sum of squares, R G B on their shifted lattices, the clump blur, the gain that keeps the strength of the
     800-row preview at any size) on a **periodic lattice**: the field's 256 x 256 samples over one period, computed once
@@ -1691,9 +1747,13 @@ hold all three per gauge).
 
     | IMG_6851 | 8 mm | 16 mm | 35 mm | 65 mm |
     |---|---|---|---|---|
-    | Halation | 53.3 dB, 22 | 53.7 dB, 21 | 54.4 dB, 22 | 54.6 dB, 22 |
+    | Halation | 54.6 dB, 6 | 55.0 dB, 6 | 56.0 dB, 6 | 56.3 dB, 7 |
     | Bloom | 55.8 dB, 12 | 58.1 dB, 11 | 58.8 dB, 10 | 60.6 dB, 9 |
-    | both | 50.0 dB, 37 | 51.4 dB, 34 | 52.3 dB, 30 | 53.3 dB, 31 |
+    | both | 51.9 dB, 16 | 53.0 dB, 17 | 54.2 dB, 15 | 55.1 dB, 16 |
+
+  (With the glow composite, against the reference's own; the old composite measured against its old reference gave
+  Halation 53.3 .. 54.6 dB, at most 22 levels, both 50.0 .. 53.3 dB, at most 37: the largest differences were where the
+  1/8 grid's glow and the per-pixel core met the reference's full-resolution layer.)
 
   Grain (its pattern is another draw, so the statistics): the luma change's sd in the mid tones, camera / reference
   through the camera's UYVY round trip (the camera's grain is rounded to whole codes, which adds near-white noise):
@@ -1702,29 +1762,34 @@ hold all three per gauge).
 
     | frame | Halation | Bloom | both | both, 8 .. 65 mm |
     |---|---|---|---|---|
-    | IMG_6853 (EOS M, street at sunset) | 45.5 dB, 20 | 46.5 dB, 22 | 43.6 dB, 37 | 42.9 .. 43.6 dB |
-    | IMG_0216 (EOS M, backlit tree, Darkroom set) | 38.9 dB, 35 | 46.8 dB, 43 | 39.4 dB, 41 | 39.1 .. 39.6 dB |
-    | IMG_0214 (EOS M, the same) | 39.7 dB, 36 | 45.8 dB, 49 | 40.0 dB, 44 | 39.7 .. 40.3 dB |
-    | IMG_8553 (5D2, two halves) | 47.0 dB, 46 | 41.2 dB, 64 | 42.3 dB, 64 | 42.3 .. 45.1 dB |
+    | IMG_6853 (EOS M, street at sunset) | 51.1 dB, 13 | 46.5 dB, 22 | 46.1 dB, 22 | 45.3 .. 46.1 dB |
+    | IMG_0216 (EOS M, backlit tree, Darkroom set) | 43.3 dB, 32 | 46.8 dB, 43 | 40.4 dB, 41 | 40.1 .. 40.5 dB |
+    | IMG_0214 (EOS M, the same) | 43.9 dB, 33 | 45.8 dB, 49 | 41.0 dB, 44 | 41.0 .. 41.1 dB |
+    | IMG_8553 (5D2, two halves) | 50.6 dB, 30 | 41.2 dB, 64 | 42.7 dB, 64 | 42.4 .. 45.7 dB |
 
-  Where most of the frame glows (the backlit trees: 73 .. 97 % of the pixels) the mean difference inside the glow is
-  still about one level (0.9 .. 1.2), p99 14 .. 16: the differences sit on thin edges (wires, twigs), where the 1/8
-  grid's glow and the per-pixel core part from the reference's full-resolution blur; crops of the camera's and the
+  Where most of the frame glows (the backlit trees: 89 .. 99 % of the pixels) the mean difference inside the glow is
+  under one level (0.75 .. 0.94), p99 7 .. 8 (Halation) and 12 .. 13 (both): the differences sit on thin edges (wires,
+  twigs), where the grids' glows part from the reference's full-resolution blur; crops of the camera's and the
   reference's frames look the same. The 5D2's Bloom as one whole frame: 54.5 .. 57.9 dB, at most 9 levels; the rest is
   the halves: the TOP is graded before the BOT's light exists, so the TOP's rows within the bloom's reach of the seam
   miss it (the mirror guesses only wide light at the seam), as with the WindyFilm stage. Grain on every frame: the mid
   tones' sd within 1 .. 4 % of the reference through UYVY at 8 / 16 / 35 mm, 65 mm 3 .. 5 % under it.
-- **Time per shot** (memsim, the EOS M's ARM946 model; the 5D2 is ~0.83x of its memsim): EOS M, 35 mm, both glows
-  18.1 s (gather 3.5, build 2.0, gather2 2.9, build2 1.0, apply 8.7), 8 mm 20.8 s, 65 mm 17.7 s; halation alone 9.5 s,
-  bloom alone 9.8 s; grain 3.6 s (8 mm 4.2, 65 mm 3.4). The glows' time follows how much of the frame glows: IMG_0216
-  (backlit, ~97 % of the pixels in the glow) takes 48.2 s at 35 mm (8 mm 51.4 s; halation alone 25.5, bloom alone
-  24.5), mostly the per-pixel paths of the apply (27.7 s) and gather2 (11.2 s). 5D2 (IMG_8553, two halves, memsim x
-  0.83): both 28.5 s at 35 mm (8 mm 32.9, 65 mm 26.3), halation alone 13.9, bloom alone 14.7, grain 3.4 (3.3 .. 3.9).
-  Once per setting: 1.1 .. 1.4 s.
+- **Time per shot** (memsim, the EOS M's ARM946 model; the 5D2 is ~0.83x of its memsim; with the glow composite):
+  EOS M, 35 mm, both glows 17.0 s (gather 3.5, build 2.0, gather2 2.9, build2 1.0, apply 7.6), 8 mm 19.4 s; halation
+  alone 9.1 s; grain 3.5 s (8 mm 4.1). The glows' time follows how much of the frame glows: IMG_0216 (backlit, ~97 % of
+  the pixels in the glow) takes 45.5 s at 35 mm, mostly the per-pixel paths of the apply (25.1 s) and gather2 (11.1
+  s); halation alone 30.5 s there (25.5 with the old composite): most of its sky passes the knee, so most words take
+  the apply's per-pixel path. 5D2 (IMG_8553, two halves, memsim x 0.83): both 25.4 s at 35 mm. Measured with the old
+  composite and not again (the code they time is unchanged or close): 65 mm both 17.7 s, bloom alone 9.8 s (IMG_0216
+  24.5), 5D2 8 / 65 mm 32.9 / 26.3 s, halation alone 13.9, bloom alone 14.7, grain 3.4 (3.3 .. 3.9). Once per setting:
+  1.1 .. 1.4 s.
 - **Memory.** The glows: one block of `yl_mem_bytes` (EOS M 3.79 MB both, 2.34 halation, 1.38 bloom; 5D2 4.44 / 2.74 /
   1.62 MB), as the WindyFilm stage's. Grain: 213 KB + 1.4 KB (the samples, the period row, the tables), and 665 KB of
   shoot memory while it is built.
-- **Checks.** `test.sh` FX:lab (both cameras): config words, rows and keys, each glow alone and both on the disc frame
+- **Checks.** `test.sh` FX:lab (both cameras): the glow composite against its formula in double (within 2 Q4 levels,
+  the halo as it is below the knee, rising, never past white) and film-lab's sky edge (a bright sky against dark
+  leaves, 35 mm: 4 px inside the edge at least half the red the inside gets; the old composite gave +8 against +25),
+  config words, rows and keys, each glow alone and both on the disc frame
   (a red-orange halo, a glow in the light's colour, both more than either), halves = whole frame at the seam (EOS M;
   again with a white band over the frame's top: at most 12 levels apart over the YL_XF rows, as the TOP's halation and
   bloom rows round the seam are kept in blocks of their own; sharing one block put the band's glow into the BOT's first

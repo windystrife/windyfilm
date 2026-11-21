@@ -10,8 +10,8 @@
  *   FX                 grain + halation through the shot: ready keys, glow round a light, grain texture, no memory, free
  *   FX bloom           Bloom on its own row (RAWB11): halation alone, bloom alone, both, both off, levels, rows, EXIF text;
  *                      WF_FX_DUMP=1 [WF_FX_UYVY=frame] also writes bloom_<level>.ppm (the harness strip)
- *   FX lab             the film-lab Halation / Bloom / Grain (yl_lab.c): config words, rows, keys, the glows, 8 mm, grain,
- *                      EXIF; WF_FX_DUMP=1 [WF_FX_UYVY=frame] also writes lab_<set>.ppm (tests/ui/lab_strip.sh)
+ *   FX lab             the film-lab Halation / Bloom / Grain (yl_lab.c): the glow composite and the sky edge, config words,
+ *                      rows, keys, the glows, 8 mm, grain, EXIF; WF_FX_DUMP=1 [WF_FX_UYVY=frame] also writes lab_<set>.ppm (tests/ui/lab_strip.sh)
  *   FXAB             Even grain / Wrap (the Genesis Pro 1.6.6 model, DESIGN 1a) against the stages before; Bloom alone,
  *                      the Gauge (16 / 35 / 65 mm: halo reach, grain size)
  *                      them on the same frame: the halo round a light, the core of a light (difference of blur keeps
@@ -99,6 +99,7 @@
 #include "wf_darkp.h"
 #include "wf_cr2.h"
 #include "wf_print.h"
+#include "yl_lab.h"
 /* this build's input curve decode tables (generated header, static copies for the checks) */
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-const-variable"
@@ -1232,12 +1233,67 @@ static double fx_lab_shot(const char *what, int halo, int bloom, double *rv)
         *rv = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'v', 0);
     return ry;
 }
+/* the halo's glow composite (film-lab 11-21: the halo is the whole scattered light, added as it is up to half the
+ * headroom, then rolled off towards white) on the camera's arithmetic: against the formula in double, and the sky
+ * edge of film-lab's own check (until then the halo left out the sharp core, 0.75 x the layer: just inside every
+ * highlight edge a band got no halo, a pale rim between the orange outside and the halo inside) */
+static double fx_glow_ref(double v, double a)
+{
+    double hd = 1.0 - v;
+    if (a <= 0.5 * hd) return v + a > 1.0 ? 1.0 : v + a;
+    if (hd <= 0.0) return 1.0;
+    return v + hd * (0.5 + 0.5 * (1.0 - exp(-(a / hd - 0.5) / 0.5)));
+}
+static int fx_r_of(uint32_t w) { return clampi(WY0(w) + ((359 * WV(w)) >> 8), 0, 255); }
+static void t_fx_lab_glow(void)
+{
+    const int W = 320, H = 544, edge = 160;      /* film-lab's frame at 1080 / 2 rows: sky left of the edge, leaves right */
+    yl_params lp = { 1, 0, 2 };                  /* Halation alone, 35 mm */
+    yl_ctx *g = malloc(sizeof *g);
+    void *mem = malloc(yl_mem_bytes(W, H, 1, 0));
+    uint32_t *f = malloc((size_t)W * H * 2), *o = malloc((size_t)W * H * 2);
+    yl_init(g, &lp, W, H, mem);
+    double me = 0.0;
+    int exact = 1, mono = 1;
+    for (int v = 0; v <= 4080; v += 5)
+        for (int a = 0, pv = v; a <= 4080; a += 7) {
+            int c = yl_glow(g, v, a);
+            double e = fabs(c - 4080.0 * fx_glow_ref(v / 4080.0, a / 4080.0));
+            if (e > me) me = e;
+            if (2 * a <= 4080 - v && c != v + a) exact = 0;
+            if (c < pv || c > 4080) mono = 0;
+            pv = c;
+        }
+    chk(me <= 2.0 && exact && mono, "Lab glow composite: within %.2f Q4 levels of the formula, the halo as it is below the"
+        " knee (%s), rising and never past white (%s)", me, exact ? "yes" : "NO", mono ? "yes" : "NO");
+    int Ys = (299 * 230 + 587 * 240 + 114 * 228 + 500) / 1000, Yl = (299 * 40 + 587 * 60 + 114 * 40 + 500) / 1000;
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x += 2)
+            f[(y * W + x) / 2] = x < edge ? word(564 * (228 - Ys) / 1000, Ys, 713 * (230 - Ys) / 1000, Ys)
+                                          : word(564 * (40 - Yl) / 1000, Yl, 713 * (40 - Yl) / 1000, Yl);
+    memcpy(o, f, (size_t)W * H * 2);
+    yl_begin_frame(g);
+    for (int y = 0; y < H; y++) yl_gather_chunk(g, o + y * W / 2, W, 0, y);
+    yl_build(g, 0, H, YL_WHOLE);
+    for (int y = 0; y < H; y++) yl_apply_chunk(g, o + y * W / 2, W, 0, y);
+    const int r = H / 2 * W / 2;
+    int in = fx_r_of(o[r + 20]) - fx_r_of(f[r + 20]), near = fx_r_of(o[r + edge / 2 - 2]) - fx_r_of(f[r + edge / 2 - 2]);
+    int out = fx_r_of(o[r + edge / 2 + 2]) - fx_r_of(f[r + edge / 2 + 2]);
+    /* 11-21: the old composite (core left out, hard clamp) gave inside +25, 4 px inside the edge +8, outside +43 */
+    chk(in > 10 && near * 2 >= in && out > 0, "Lab Halation, sky edge: red added inside %+d, 4 px inside the edge %+d (at least"
+        " half: no pale rim), 4 px outside %+d", in, near, out);
+    free(o);
+    free(f);
+    free(mem);
+    free(g);
+}
 static void t_fx_lab(void)
 {
     struct pk e[] = { { fC, 0, tab_make(0, 0, 0, 0) } };
     int hk = 0, gk = 0, hk16 = 0, post;
     double rvh, rvb, rvhb, sd, sd8, sd65, cm;
     char tb[200];
+    t_fx_lab_glow();
     pack_write(e, 1, 0);
     put_cfg("film=%d\noutput=film\ngrain=lab\nhalation=lab\nbloom=lab\ngauge=8\nmist=off\n", wf_films[fC].id);
     wf_fx_retry_ms = 500;
@@ -6952,6 +7008,8 @@ static void t_roll_jpeg(void)
 
     /* copy: frame Off, Overwrite; and Screen Off (owner 11-16, DESIGN 3.11): the test stands in for the Darkroom screen's
      * tick (wf_dark_dark) and keys (wf_dark_wake; a key "WF_DS_WAKE_MS ago" = the time without a key is over) */
+    int dc_keep = wf_dark_dcim_changed();        /* Keep: DCIM as it was (checked after roll 002) */
+    int cat0 = h_cat_n, cr0 = h_cat_rescans;     /* Keep: Canon's catalog not asked either */
     wf_pr_jpeg = WF_PJ_OVER;
     wf_dk_scr = WF_DS_OFF;
     chk(mem_roll(film, 2, dir, 504), "roll 002: 3 frames (%d)", wf_roll_now()->nshot);
@@ -7012,6 +7070,37 @@ static void t_roll_jpeg(void)
         free(rb);
     }
     chk(jp_cr2s(dir, 504) && !jp_wft(504), "copy: CR2s untouched, no .WFT");
+    /* Canon's PLAY after a run that changed DCIM (owner 11-21, 5D2 bug 3: PLAY's list is Canon's file catalog, read at
+     * card mount): roll 001 (Keep) left DCIM alone and asked nothing; roll 002 replaced its camera JPEGs, and after
+     * each frame Canon's catalog read that number again (FM_GetObjectHandleByPath on the DCIM JPEG, FC_ReScanFile on
+     * its handle). Done: no notice on the way into PLAY, the key Canon's */
+    {
+#ifdef WF_BUILD_5D2
+        const uint32_t fh = 0xFF8453FCu, fr = 0xFF856A64u;
+#else
+        const uint32_t fh = 0xFF118EB0u, fr = 0xFF1167B0u;
+#endif
+        int pok = cat0 + 3 <= 8;
+        for (int k = 0; pok && k < 3; k++) {
+            char p[40];
+            snprintf(p, sizeof p, "B:/DCIM/100CANON/IMG_%04d.JPG", 504 + k);
+            pok = !strcmp(h_cat_path[cat0 + k], p) && h_cat_hseen[cr0 + k] == h_cat_h;
+        }
+        chk(cat0 == 0 && cr0 == 0 && h_cat_n == 3 && h_cat_rescans == 3 && pok && h_cat_fn[0] == fh && h_cat_fn[1] == fr
+            && log_has("dark: F01 Canon's file list read again (PLAY shows the new print)")
+            && !log_has("Canon's file list not read again"),
+            "catalog: Keep %d / %d calls, Overwrite %d handles + %d rescans of IMG_0504..0506.JPG (%s, '%s'), "
+            "at %x / %x",
+            cat0, cr0, h_cat_n - cat0, h_cat_rescans - cr0, pok ? "the frames' JPEGs" : h_cat_path[0],
+            log_line("Canon's file list"), (unsigned)h_cat_fn[0], (unsigned)h_cat_fn[1]);
+        int hp = h_play, n0 = h_notify_n;
+        h_play = 0;
+        int k1 = cbr_key(WF_KEY_PLAY);
+        h_play = hp;
+        chk(!dc_keep && !wf_dark_dcim_changed() && k1 == 1 && h_notify_n == n0,
+            "PLAY after the run, catalog told: Keep %d, Overwrite %d, into PLAY: passes %d, notices %d",
+            dc_keep, wf_dark_dcim_changed(), k1, h_notify_n - n0);
+    }
 
     /* frame: a white frame + details + the logo, Overwrite, one camera JPEG gone */
     int lg = ld && access(ld, R_OK) == 0 && mem_copy(ld, "ML/DATA/WFLOGO.DAT");
@@ -7021,7 +7110,29 @@ static void t_roll_jpeg(void)
     wf_pr_date = 2;
     chk(mem_roll(film, 3, dir, 507), "roll 003: 3 frames (%d)", wf_roll_now()->nshot);
     remove("DCIM/100CANON/IMG_0509.JPG");
+    int cr3 = h_cat_rescans;
+    h_cat_rc = 0x82110007u;                      /* Canon's catalog refuses: the notice is the way */
     mem_run("frame", 3);
+    h_cat_rc = 0;
+    /* each frame that changed DCIM asked (F03 has no camera JPEG: nothing changed, nothing asked); every refusal
+     * logged; into PLAY the notice, the key still Canon's; in PLAY no notice */
+    {
+        int hp = h_play, n0 = h_notify_n;
+        h_play = 0;
+        int k1 = cbr_key(WF_KEY_PLAY), shown = h_notify_n == n0 + 1 && strstr(h_notify, "PLAY may miss new prints")
+                                               && strstr(h_notify, "Card out and in, or power off/on");
+        h_play = 1;
+        int n1 = h_notify_n, k2 = cbr_key(WF_KEY_PLAY);
+        h_play = hp;
+        chk(h_cat_rescans - cr3 == 2 && wf_dark_dcim_changed()
+            && log_has("dark: F01 Canon's file list not read again (Canon 82110007): PLAY may miss it till card out/in "
+                       "or power off/on")
+            && log_has("dark: F02 Canon's file list not read again") && !log_has("dark: F03 Canon's file list")
+            && k1 == 1 && shown && k2 == 1 && h_notify_n == n1,
+            "catalog refused: %d rescans, notice flag %d ('%s'), into PLAY: passes %d, notice %d ('%s'), out: %d, %d",
+            h_cat_rescans - cr3, wf_dark_dcim_changed(), log_line("Canon's file list not"), k1, shown, h_notify, k2,
+            h_notify_n - n1);
+    }
     chk(strstr(log_line("dark: roll 003 end"), "3 developed, 0 failed, 0 left") != 0, "frame: 3 of 3 ('%s')",
         log_line("dark: roll 003 end"));
     chk(log_has("dark: F01 logo Canon ") && log_has("+ lettering " DK_T_MODEL) && log_has("dark: F02 logo Canon "),

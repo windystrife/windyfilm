@@ -665,6 +665,11 @@ static void dr_right(const struct wf_dark_view *v, int now)
         snprintf(b, sizeof b, "%d prints in ROLLS/%s", v->num ? v->done : wf_roll_ndev(r), nm);
         text_c(F_15, cx, 318, b, C_TXT);
         text_c(F_13, cx, 340, "Copy them from the card's ROLLS folder", C_TXT2);
+        if (wf_dark_dcim_changed())                        /* Canon's PLAY list is from power on (wf_dark.c) */
+        {
+            text_c(F_13, cx, 368, "Card out and in (or power off/on)", C_AMBER);
+            text_c(F_13, cx, 386, "so Canon's PLAY shows the new prints", C_AMBER);
+        }
     }
 }
 
@@ -1173,6 +1178,12 @@ int wfdr_tick(int scr, int now)
 }
 
 int wfdr_dark(int scr) { return scr == WFUI_SCR_DARK && dr_dark; }
+
+int wfdr_live(int scr)                                     /* the run's view says RUN / STOPPING until after its end has */
+{                                                          /* turned the display on for the result (wf_dark.c) */
+    const struct wf_dark_view *v = wf_dark_view();
+    return scr == WFUI_SCR_DARK && (v->state == WF_DR_RUN || v->state == WF_DR_STOPPING);
+}
 
 #ifdef WF_HOST
 const char *wfdr_host_msg(void) { return msg ? msg : ""; }

@@ -122,6 +122,7 @@ void wfdr_render(int scr, int now);     /* draw it into the idle buffer */
 int  wfdr_key(int scr, int key);        /* 1 = close the UI */
 int  wfdr_tick(int scr, int now);       /* 1 = something moved (redraw now) */
 int  wfdr_dark(int scr);                /* 1 = the Darkroom's Screen Off has the display dark: no redraws (wf_dark.h) */
+int  wfdr_live(int scr);                /* 1 = the Darkroom screen while a run lives (its display may go dark: 5D2 keeps it) */
 void wfdr_leave(int scr);
 /* the Darkroom entry of the browser (owner 11-15, EOS M): PLAY opens the Darkroom while the roll has
    frames to develop. wfdr_dev_why: 0 = it can, else why not ("Load a roll first" / "No frames to develop");

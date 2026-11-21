@@ -104,6 +104,12 @@ extern volatile int h_romcalls;
 uint32_t wf_host_romcall(uint32_t fn, uint32_t arg);
 uint32_t wf_host_mem_read(uint32_t addr);
 int wf_host_memnavi(uint32_t *out, uint32_t *tmp, int a, int layer);
+/* Canon's file catalog (wf_cam_cat_tell): FM_GetObjectHandleByPath hands h_cat_h (0 = not DCF), FC_ReScanFile returns
+   h_cat_rc; the paths and handles asked for (first 8 of each), h_cat_fn the last function called */
+extern volatile int h_cat_n, h_cat_rescans;
+extern uint32_t h_cat_h, h_cat_rc, h_cat_hseen[8], h_cat_fn[2];
+extern char h_cat_path[8][40];
+uint32_t wf_host_cat_call(uint32_t fn, uint32_t a0, uint32_t a1);
 
 /* RAW develop "B": ML's drive_mode and ml_shutdown_requested; get_halfshutter_pressed() returns h_half and moves the clock
  * by h_half_step_ms per read; NotifyBox keeps its last text (h_notify) and counts calls */

@@ -135,6 +135,7 @@ int  host_gui_req0_front(void);         /* front buffer state at the last SetGUI
 void host_gui_drop(int n);              /* the next n non-zero requests do not take (EOS M after Canon's own MENU) */
 int  host_gui_last_req(void);           /* the last SetGUIRequestMode argument, -1 none since host_gui_set */
 int  host_display_ons(void);
+void host_display_set(int on);              /* the display reads on / off (as display_off leaves it) */
 int  host_bmp_muted(void);              /* bmp_off() in force (Canon's bitmap hidden) */
 int  host_bmp_offs(void);               /* bmp_off() calls since host_gui_set */
 int  host_bmp_muted_at_req(void);       /* muted at the last SetGUIRequestMode(non-zero): 1 = Canon's dialog hidden */

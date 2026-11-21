@@ -23,6 +23,8 @@ void fake_set_dark(int d);                  /* a Screen Off run: the display rea
 int  fake_nkeep(void);                      /* the Darkroom tick's Screen On keep-alive calls (wf_dark_keep, ui 1) */
 int  fake_nwake(void);                      /* keys that only woke it (wf_dark_wake = 1) */
 void fake_set_shelf(int on);                /* wf_roll_shelved() (a roll set aside by the mode chip) */
+void fake_set_dcim(int on);                 /* wf_dark_dcim_changed(): a run changed DCIM in this power-on */
+int  fake_nplay_notice(void);               /* wf_dark_play_notice calls that showed it */
 void fake_set_rawb_can(int c);              /* wf_rawb_can(): RAW develop on this camera (wf_rawb in fake_dark.c) */
 /* the shelf (owner 11-17): wf_shelf_now's list, a roll put on it (newest first), the Darkroom's asks */
 struct wf_shelf *fake_shelf(void);          /* write access (bumps its gen) */

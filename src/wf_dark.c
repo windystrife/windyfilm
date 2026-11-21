@@ -99,6 +99,8 @@ static int hud_on, hud_fonts_on, hud_t, hud_mode = -1, info_t = -100000, hud_sig
 static int hud_font_again, hud_font_t, hud_font_n;  /* the font pack read again while Canon held the card */
 static volatile int dk_running;                   /* a darkroom run owns the roll (asked for, or in wf_task now) */
 static volatile int dk_go;                        /* wf_dark_start asked: wf_task's next wf_dark_poll runs it */
+static volatile int dk_dcim_new;                  /* DCIM changed and Canon's catalog not told (wf_dark_dcim_changed) */
+static int dk_dcim_pend, dk_cat_told;             /* this frame changed DCIM (dk_cat_tell); told once this power-on */
 static int nt_state = -1, nt_req, nt_t, nt_len, nt_mode = -1, nt_pt;   /* the end-of-roll notice (roll_notice) */
 static volatile int nt_up, nt_drop, nt_poke;
 static volatile int sh_k;                         /* the shutter held now (roll_shutter): 0 no, 1 full, 2 rewound */
@@ -132,6 +134,48 @@ int wf_dark_busy(void) { return dk_running; }
 int wf_roll_wind(void) { return wf_roll_open(&roll) && get_ms_clock() - wind_t < 1000; }   /* the finder's wind-on cue */
 const struct wf_shelf *wf_shelf_now(void) { return &shv; }
 void wf_shelf_rescan(void) { sh_scan = 1; }
+
+/* Canon's PLAY after a run that changed DCIM (owner 11-21, 5D2 bug 3: "some prints show, some do not"; the card out
+ * and in showed them all): PLAY lists the card from Canon's file catalog, read at card mount, and FIO does not update
+ * it, so a JPEG a run replaced or a CR2 it moved kept its old entry. After each frame that changed DCIM the catalog
+ * reads that folder + number again (wf_cam_cat_tell, the camera layer: FM_GetObjectHandleByPath + FC_ReScanFile).
+ * Only when that cannot be done does the Darkroom say how PLAY catches up: the card out and in, or power off / on
+ * (DESIGN 3.9). dk_dcim_mark: a file in DCIM about to change (path with /DCIM/) */
+static void dk_dcim_mark(const char *p)
+{
+    for (; *p; p++)
+        if (p[0] == '/' && p[1] == 'D' && p[2] == 'C' && p[3] == 'I' && p[4] == 'M' && p[5] == '/') {
+            dk_dcim_pend = 1;
+            return;
+        }
+}
+/* after a frame: what it changed in DCIM (jpg: the frame's DCIM JPEG, there whenever its CR2 moved) told to Canon's
+ * catalog; the first success and every failure logged */
+static void dk_cat_tell(int i, const char *jpg)
+{
+    if (!dk_dcim_pend)
+        return;
+    dk_dcim_pend = 0;
+    int t0 = get_ms_clock(), rc = wf_cam_cat_tell(jpg);
+    if (rc == 0) {
+        if (!dk_cat_told++)
+            wf_log("dark: F%02d Canon's file list read again (PLAY shows the new print), %dms", i + 1,
+                   get_ms_clock() - t0);
+        return;
+    }
+    wf_log("dark: F%02d Canon's file list not read again (%s %x): PLAY may miss it till card out/in or power "
+           "off/on", i + 1, rc == WF_CAT_BODY ? "body" : rc == WF_CAT_NOFM ? "no FM" : rc == WF_CAT_PATH ? "path"
+           : "Canon", (unsigned)rc);
+    dk_dcim_new = 1;
+}
+int wf_dark_dcim_changed(void) { return dk_dcim_new; }
+int wf_dark_play_notice(void)
+{
+    if (!dk_dcim_new)
+        return 0;
+    NotifyBox(3000, "PLAY may miss new prints:\nCard out and in, or power off/on");
+    return 1;
+}
 
 /* what the look's tables (the shot LUT, halation / grain / mist) are built for (owner RAWB9, 11-15: each roll frame took
  * 23..36 s of the in-camera look, the LUT read 21 s and the grain 8..13 s at boot and at each roll load, and the
@@ -2325,6 +2369,7 @@ static int dk_dcim_put(int i, const char *dst, const char *nm, const char *verb,
         return DK_ERR;
     }
     int had = FIO_GetFileSize(dst, &sz) == 0;
+    dk_dcim_mark(dst);
     if (wf_frename(tmp, dst, &e) != 0) {
         int still = FIO_GetFileSize(dst, &sz) == 0;
         wf_log("dark: F%02d camera JPEG: rename failed (%s %d): %s", i + 1, wf_fe_name(e.step), e.rc,
@@ -2509,6 +2554,8 @@ static void dk_cr2_move(int i, const char *cr2, const char *mv, const char *rn, 
     if (FIO_GetFileSize(mv, &dz) == 0) {         /* that name there already: a run stopped after its copy, or the same
                                                     number from another DCIM folder */
         int same = dz == sz && dk_cr2_same(cr2, mv, sz) == 0;
+        if (same)
+            dk_dcim_mark(cr2);
         if (same && wf_fremove(cr2, &e) == 0)
             wf_log("dark: F%02d %s moved to ROLLS/%s/ (the same file was there, %d KB)", i + 1, nm, rn, (int)(sz >> 10));
         else
@@ -2517,6 +2564,7 @@ static void dk_cr2_move(int i, const char *cr2, const char *mv, const char *rn, 
         return;
     }
 #ifndef WF_BUILD_5D2
+    dk_dcim_mark(cr2);
     if (wf_frename(cr2, mv, &e) == 0) {
         if (FIO_GetFileSize(mv, &dz) == 0 && dz == sz)
             wf_log("dark: F%02d %s moved to ROLLS/%s/ (renamed, %d KB, %dms)", i + 1, nm, rn, (int)(sz >> 10),
@@ -2540,6 +2588,7 @@ static void dk_cr2_move(int i, const char *cr2, const char *mv, const char *rn, 
                renfail ? ", after the rename failed" : "");
         return;
     }
+    dk_dcim_mark(cr2);
     if (wf_fremove(cr2, &e) != 0) {
         wf_log("dark: F%02d %s copied to ROLLS/%s/ but not removed from DCIM (%s %d): both kept", i + 1, nm, rn,
                wf_fe_name(e.step), e.rc);
@@ -2730,6 +2779,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
         dk_camjpg(i, jpg, out, &wr, M.app1 + ao, al, &L, rowbuf, t2, &jok);
         if (dk_pcr && src_cr2 == cr2)            /* RAW after Darkroom Move to ROLLS: once the JPEG(s) are in DCIM */
             dk_cr2_move(i, cr2, mvk < 0 ? 0 : mv, rn, jok);
+        dk_cat_tell(i, jpg);                     /* Canon's PLAY list: what this frame changed in DCIM */
     }
     dk_t[3] = get_ms_clock() - t;
     wf_dev_note(lk, WF_PATH_DARK, dk_t[0] + dk_t[1] + dk_t[2] + dk_t[3]);   /* the whole print, dry included (11-17) */

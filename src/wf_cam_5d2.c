@@ -421,3 +421,66 @@ int wf_cam_rejects_jpeg(int *bot)
     bot_rej_seen = rej_k[K_BOT];
     return n;
 }
+
+/* ------------------------------------------------------------------ Canon's file catalog (owner 11-21, 5D2 bug 3)
+ * PLAY lists the card from Canon's file catalog, read when the card mounts; a file changed through FIO behind its back
+ * (a print renamed over the shot's JPEG, a CR2 moved to ROLLS) keeps its old entry until the card mounts again ("some
+ * prints show, some do not"; the card out and in showed them all). FM_GetObjectHandleByPath(path, &handle) turns a DCF
+ * path (A:/DCIM/100CANON/IMG_0206.JPG) into Canon's object handle (0 = not a DCF name); FC_ReScanFile(handle) locks the
+ * catalog, finds every file of that folder and number again (JPG / CR2 there or not, size, time) and unlocks: 0 = done,
+ * else Canon's error. FM_GetObjectHandleByPath asserts when the file manager is not set up (its word at 0x1ED8 = 0) and
+ * copies the path into a 48-byte stack buffer: called only with that word set and a path of the DCF shape (29 chars).
+ * The prologues and the literal holding 0x1ED8 are checked once. wf_task / the Darkroom task only, never a hook. */
+#define CAT_FM_HANDLE 0xFF8453FCu                /* FM_GetObjectHandleByPath (const char *path, uint32_t *handle) */
+#define CAT_FC_RESCAN 0xFF856A64u                /* FC_ReScanFile (uint32_t handle) */
+#define CAT_FM_READY  0x00001ED8u                /* != 0: the file manager is set up */
+static const uint32_t cat_words[9][2] = {
+    { CAT_FM_HANDLE, 0xE92D4030u },              /* push {r4, r5, lr} */
+    { 0xFF845400u, 0xE1A05000u },                /* mov r5, r0                 the path */
+    { 0xFF845404u, 0xE51F0A60u },                /* ldr r0, =0x1ED8 */
+    { 0xFF845408u, 0xE1A04001u },                /* mov r4, r1                 the handle out */
+    { 0xFF8449ACu, CAT_FM_READY },               /* the literal */
+    { CAT_FC_RESCAN, 0xE92D4070u },              /* push {r4, r5, r6, lr} */
+    { 0xFF856A68u, 0xE1A05000u },                /* mov r5, r0                 the handle */
+    { 0xFF856A6Cu, 0xE3A00027u },                /* mov r0, #0x27              its log class */
+    { 0xFF856A70u, 0xE28F2F5Au },                /* add r2, pc, #0x168         "FC_ReScanFile" */
+};
+#ifdef WF_HOST
+extern uint32_t wf_host_mem_read(uint32_t addr);
+extern uint32_t wf_host_cat_call(uint32_t fn, uint32_t a0, uint32_t a1);
+#define CAT_RD32(a) wf_host_mem_read(a)
+#define CAT_CALL(fn, a0, a1) wf_host_cat_call(fn, (uint32_t)(a0), (uint32_t)(a1))
+#else
+#define CAT_RD32(a) (*(volatile uint32_t *)(a))
+#define CAT_CALL(fn, a0, a1) ((uint32_t (*)(uint32_t, uint32_t))(fn))((uint32_t)(a0), (uint32_t)(a1))
+#endif
+
+static int cat_dcf(const char *p)                /* X:/DCIM/nnnXXXXX/XXXX_nnnn.EXT */
+{
+    int n = 0;
+    while (p[n] && n < 40)
+        n++;
+    return n == 29 && p[1] == ':' && p[2] == '/' && p[3] == 'D' && p[4] == 'C' && p[5] == 'I' && p[6] == 'M'
+        && p[7] == '/' && p[16] == '/' && p[25] == '.';
+}
+
+int wf_cam_cat_tell(const char *path)
+{
+    static int body = -1;                        /* -1 not checked, 0 no, 1 yes */
+    if (body < 0) {
+        body = streq(__camera_model_short, "5D2") && streq(firmware_version, "2.1.2");
+        for (unsigned i = 0; body && i < sizeof cat_words / sizeof *cat_words; i++)
+            body = ROM32(cat_words[i][0]) == cat_words[i][1];
+    }
+    if (!body)
+        return WF_CAT_BODY;
+    if (!CAT_RD32(CAT_FM_READY))
+        return WF_CAT_NOFM;
+    if (!cat_dcf(path))
+        return WF_CAT_PATH;
+    uint32_t h = 0;
+    CAT_CALL(CAT_FM_HANDLE, path, &h);
+    if (!h)
+        return WF_CAT_PATH;
+    return (int)CAT_CALL(CAT_FC_RESCAN, h, 0);
+}

@@ -200,8 +200,7 @@ uint32_t yl_mem_bytes(int W, int H, int hal, int bloom)
 {
     uint32_t gw = W / 8, gh = H / 8, bw = W / 16, bh = H / 16, n = 0;
     if (hal)
-        n += 4 * YL_AL(2 * gw * gh) + YL_AL(4 * gw) + 2 * YL_AL(2 * gh) + YL_AL(2 * 2 * gw) + YL_AL(2 * 2 * gw * YL_SV8)
-             + YL_AL(2 * gw);
+        n += 4 * YL_AL(2 * gw * gh) + YL_AL(4 * gw) + 2 * YL_AL(2 * gh) + YL_AL(2 * 2 * gw * YL_SV8) + YL_AL(2 * gw);
     if (bloom)
         n += 3 * YL_AL(6 * bw * bh) + YL_AL(bw * bh) + YL_AL(12 * bw) + YL_AL(bw) + YL_AL(W) + 2 * YL_AL(2 * bh)
              + YL_AL(2 * 3 * bw) + YL_AL(2 * 3 * bw * YL_SV16) + YL_AL(2 * 4 * bw);
@@ -229,7 +228,6 @@ int yl_init(yl_ctx *g, const yl_params *p, int W, int H, void *mem)
         YL_TAKE(g->pacc, uint32_t *, 4 * g->gw);
         YL_TAKE(g->hlo, int16_t *, 2 * g->gh);
         YL_TAKE(g->hhi, int16_t *, 2 * g->gh);
-        YL_TAKE(g->vh, uint16_t *, 2 * 2 * g->gw);
         YL_TAKE(g->sv, uint16_t *, 2 * 2 * g->gw * YL_SV8);
         YL_TAKE(g->vq, uint16_t *, 2 * g->gw);
     }
@@ -295,6 +293,10 @@ int yl_init(yl_ctx *g, const yl_params *p, int W, int H, void *mem)
         }
         for (int i = 0; i < 4096; i++)
             g->pw[i] = (uint16_t)(powf(i / 4095.0f, pw) * 32767.0f + 0.5f);
+        for (int i = 0; i < 1024; i++)
+            g->grcp[i] = (uint16_t)(((1u << 26) - 1u) / (uint32_t)(1024 + i));
+        for (int i = 0; i <= YL_GE; i++)
+            g->gexp[i] = (uint16_t)(expf(-i / 64.0f) * 32768.0f + 0.5f);
         if (lw + gw < 1e-4f) { lw = 1.0f; gw = 0.0f; }
         s = lw + gw;
         g->lw_q15 = (int)(lw / s * op * 32768.0f + 0.5f);
@@ -712,8 +714,6 @@ static void yl_prep_row(yl_ctx *g, int y)
             for (int i = lo; i <= hi; i++) {
                 uint32_t l = (uint32_t)((a0[i] * (16 - fy) + a1[i] * fy + 8) >> 4);
                 uint32_t q = (uint32_t)((b0[i] * (16 - fy) + b1[i] * fy + 8) >> 4);
-                g->vh[2 * i] = (uint16_t)l;
-                g->vh[2 * i + 1] = (uint16_t)q;
                 g->vq[i] = (uint16_t)((l * (uint32_t)g->lw_q15 + q * (uint32_t)g->gw_q15) >> 15);
             }
             g->hl0 = lo; g->hh0 = hi;
@@ -866,28 +866,28 @@ void yl_build2(yl_ctx *g, int y_begin, int y_end, int mode)
     g->cur_y = -1;
 }
 
-/* one pixel: bloom, then halation on the bloomed pixel, as film-lab orders them; d* = the change, Q4 levels */
-YL_INLINE void yl_pix(const yl_ctx *g, int Y, int rv, int gu, int bu, int bl, int bg, int aR, int aG, int aB,
-                      int *dR, int *dG, int *dB)
+/* film-lab's glow composite on one channel, Q4 levels (v <= 4080, a >= 0): v + a while the halo fills at most half the
+ * headroom hd = 4080 - v (the knee, 0.5), past it 4080 - hd / 2 x exp(1 - 2a / hd): the same value and slope at the
+ * knee, towards white without reaching it. No divide: 2a / hd from the reciprocal of hd's top 11 bits (CLZ; hd's
+ * rounding moves the result by at most ~2 Q4 levels), Q12; exp from a table at 1/64 steps, linear in between. */
+YL_INLINE int yl_glow_i(const yl_ctx *g, int v, int a)
 {
-    int R = yl_c8(Y + rv), G = yl_c8(Y - gu), B = yl_c8(Y + bu);
-    int r4 = R << 4, g4 = G << 4, b4 = B << 4;
-    if (aR | aG | aB)
-        yl_bpix(g, R, G, B, aR, aG, aB, &r4, &g4, &b4);
-    if (bl | bg) {
-        int c = (3 * yl_layer(g, r4, g4, b4)) >> 2;
-        int sl = bl - c, sg = bg - c, h;
-        if (sl < 0) sl = 0;
-        if (sg < 0) sg = 0;
-        h = (sl * g->lw_q15 + sg * g->gw_q15) >> 15;
-        if (h) {
-            r4 += (h * g->kr) >> 15; g4 += (h * g->kg) >> 15; b4 += (h * g->kb) >> 15;
-            if (r4 > 4080) r4 = 4080;
-            if (g4 > 4080) g4 = 4080;
-            if (b4 > 4080) b4 = 4080;
-        }
-    }
-    *dR = r4 - (R << 4); *dG = g4 - (G << 4); *dB = b4 - (B << 4);
+    int hd = 4080 - v;
+    if (2 * a <= hd) return v + a;
+    if (hd <= 0) return 4080;
+    int sh = 21 - __builtin_clz((unsigned)hd);         /* hd's top bit - 10 */
+    int m = sh > 0 ? (hd + 1) >> 1 : hd << -sh;        /* 1024 .. 2047 (hd <= 4080: sh <= 1) */
+    int u = (int)(((uint32_t)(2 * a) * g->grcp[m - 1024]) >> (14 + sh)) - 4096;
+    if (u < 0) u = 0;
+    int i = u >> 6;
+    if (i >= YL_GE) return 4080;
+    int e = g->gexp[i] - (((g->gexp[i] - g->gexp[i + 1]) * (u & 63)) >> 6);
+    return 4080 - ((hd * e + 32768) >> 16);
+}
+
+int yl_glow(const yl_ctx *g, int v, int a)
+{
+    return yl_glow_i(g, v, a);
 }
 
 YL_INLINE uint32_t yl_pack(int U, int Y0, int V, int Y1)
@@ -898,47 +898,9 @@ YL_INLINE uint32_t yl_pack(int U, int Y0, int V, int Y1)
     return (uint32_t)(U & 255) | ((uint32_t)Y0 << 8) | ((uint32_t)(V & 255) << 16) | ((uint32_t)Y1 << 24);
 }
 
-/* a word the linear case does not cover (a halation core, or a channel that clamps): the glows at x by the per-word
- * formula, then bloom and halation on each pixel */
-static void __attribute__((noinline)) yl_apply_slow(const yl_ctx *g, uint32_t *p, int x)
-{
-    int bl = 0, bg = 0, aR = 0, aG = 0, aB = 0;
-    if (g->hl0 <= g->hh0) {
-        int t = x - 3, i = t >> 3, f = t & 7;
-        int ia = i < 0 ? 0 : i, ib = i + 1 >= g->gw ? g->gw - 1 : i + 1, a0 = 0, a1 = 0, b0 = 0, b1 = 0;
-        if (ia >= g->hl0 && ia <= g->hh0) { a0 = g->vh[2 * ia]; b0 = g->vh[2 * ia + 1]; }
-        if (ib >= g->hl0 && ib <= g->hh0) { a1 = g->vh[2 * ib]; b1 = g->vh[2 * ib + 1]; }
-        bl = (a0 * (8 - f) + a1 * f + 4) >> 3;
-        bg = (b0 * (8 - f) + b1 * f + 4) >> 3;
-    }
-    if (g->bl0 <= g->bh0) {
-        int t = x - 7, i = t >> 4, f = t & 15;
-        int ia = i < 0 ? 0 : i, ib = i + 1 >= g->bw ? g->bw - 1 : i + 1;
-        int r0 = 0, g0 = 0, c0 = 0, r1 = 0, g1 = 0, c1 = 0;
-        if (ia >= g->bl0 && ia <= g->bh0) { const uint16_t *v = g->vb + 3 * ia; r0 = v[0]; g0 = v[1]; c0 = v[2]; }
-        if (ib >= g->bl0 && ib <= g->bh0) { const uint16_t *v = g->vb + 3 * ib; r1 = v[0]; g1 = v[1]; c1 = v[2]; }
-        aR = (r0 * (16 - f) + r1 * f + 8) >> 4;
-        aG = (g0 * (16 - f) + g1 * f + 8) >> 4;
-        aB = (c0 * (16 - f) + c1 * f + 8) >> 4;
-    }
-    uint32_t w = *p;
-    int Y0 = (w >> 8) & 255, Y1 = w >> 24, U = (int8_t)w, V = (int8_t)(w >> 16);
-    int rv = (359 * V) >> 8, gu = (88 * U + 183 * V) >> 8, bu = (454 * U) >> 8;
-    int dR0, dG0, dB0, dR1, dG1, dB1;
-    yl_pix(g, Y0, rv, gu, bu, bl, bg, aR, aG, aB, &dR0, &dG0, &dB0);
-    yl_pix(g, Y1, rv, gu, bu, bl, bg, aR, aG, aB, &dR1, &dG1, &dB1);
-    if (!(dR0 | dG0 | dB0 | dR1 | dG1 | dB1))
-        return;
-    int nY0 = Y0 + ((19595 * dR0 + 38470 * dG0 + 7471 * dB0 + (1 << 19)) >> 20);
-    int nY1 = Y1 + ((19595 * dR1 + 38470 * dG1 + 7471 * dB1 + (1 << 19)) >> 20);
-    int sR = dR0 + dR1, sG = dG0 + dG1, sB = dB0 + dB1;
-    int nU = U + ((-11059 * sR - 21709 * sG + 32768 * sB + (1 << 20)) >> 21);
-    int nV = V + ((32768 * sR - 27439 * sG - 5329 * sB + (1 << 20)) >> 21);
-    *p = yl_pack(nU, nY0, nV, nY1);
-}
-
-/* a word whose channels clamp but that has no halation core: bloom and halo per pixel with the clamps (yl_pix without
- * the core). The glows come from the block: the bloom's Y / U / V back to RGB, the halo h times its colour */
+/* a word the linear case does not cover (a channel that clamps, or a halo past the knee on some channel): per pixel
+ * the bloom with its clamp, then the halo through the glow composite, as film-lab orders them. The glows come from
+ * the block: the bloom's Y / U / V back to RGB, the halo h times its colour */
 static void __attribute__((noinline)) yl_apply_clip(const yl_ctx *g, uint32_t *p, int32_t a, int32_t c)
 {
     int aY = a & 0xffff, h = a >> 16, aU = c >> 16, aV = (int16_t)c;
@@ -953,10 +915,10 @@ static void __attribute__((noinline)) yl_apply_clip(const yl_ctx *g, uint32_t *p
     for (int q = 0; q < 2; q++) {
         int Y = q ? Y1 : Y0, R = yl_c8(Y + rv), G = yl_c8(Y - gu), B = yl_c8(Y + bu);
         int k = g->kl[(19595 * R + 38470 * G + 7471 * B) >> 14];
-        int r4 = (R << 4) + ((aR * k) >> 15) + hr, g4 = (G << 4) + ((aG * k) >> 15) + hg, b4 = (B << 4) + ((aB * k) >> 15) + hb;
-        d[3 * q] = (r4 > 4080 ? 4080 : r4) - (R << 4);
-        d[3 * q + 1] = (g4 > 4080 ? 4080 : g4) - (G << 4);
-        d[3 * q + 2] = (b4 > 4080 ? 4080 : b4) - (B << 4);
+        int r4 = (R << 4) + ((aR * k) >> 15), g4 = (G << 4) + ((aG * k) >> 15), b4 = (B << 4) + ((aB * k) >> 15);
+        d[3 * q] = yl_glow_i(g, r4 > 4080 ? 4080 : r4, hr) - (R << 4);
+        d[3 * q + 1] = yl_glow_i(g, g4 > 4080 ? 4080 : g4, hg) - (G << 4);
+        d[3 * q + 2] = yl_glow_i(g, b4 > 4080 ? 4080 : b4, hb) - (B << 4);
     }
     int nY0 = Y0 + ((19595 * d[0] + 38470 * d[1] + 7471 * d[2] + (1 << 19)) >> 20);
     int nY1 = Y1 + ((19595 * d[3] + 38470 * d[4] + 7471 * d[5] + (1 << 19)) >> 20);
@@ -1012,12 +974,12 @@ static int yl_fill(const yl_ctx *g, int32_t *q, int x, int m)
     return any;
 }
 
-/* the linear case's limits for the words of pixels xu .. xu + 15 (xu % 16 == 0) from the cells their glows come from
- * (halation cells xu / 8 - 1 .. xu / 8 + 2, bloom xu / 16 - 1 .. xu / 16 + 1): *A, the most Y + moff can be with no
- * channel clamping after the glows; *C, what Y + lofs must stay under for no halation core (32767: no halo) */
-YL_INLINE void yl_limits(const yl_ctx *g, int xu, int *A, int *C)
+/* the linear case's limit for the words of pixels xu .. xu + 15 (xu % 16 == 0) from the cells their glows come from
+ * (halation cells xu / 8 - 1 .. xu / 8 + 2, bloom xu / 16 - 1 .. xu / 16 + 1): the most Y + moff can be with no
+ * channel clamping after the bloom and the halo under the glow composite's knee (twice the halo fits) on every channel */
+YL_INLINE int yl_limit(const yl_ctx *g, int xu)
 {
-    int hm = 0, bm = 0, ym = 0;
+    int hm = 0, bm = 0;
     if (g->hl0 <= g->hh0) {
         int i0 = (xu >> 3) - 1, i1 = i0 + 3;
         if (i0 < g->hl0) i0 = g->hl0;
@@ -1032,11 +994,9 @@ YL_INLINE void yl_limits(const yl_ctx *g, int xu, int *A, int *C)
         for (int i = i0; i <= i1; i++) {
             const int16_t *c = g->vb4 + 4 * i;
             if (c[3] > bm) bm = c[3];
-            if (c[0] > ym) ym = c[0];
         }
     }
-    *A = 254 - (bm ? ((bm * g->klmax) >> 19) + 1 : 0) - ((hm * g->kr) >> 19);
-    *C = hm ? (g->hmin >> 3) - 2 - ((ym * g->klmax) >> 19) : 32767;
+    return 254 - (bm ? ((bm * g->klmax) >> 19) + 1 : 0) - ((2 * hm * g->kr) >> 19);
 }
 
 void yl_apply_chunk(yl_ctx *g, uint32_t *p, int npix, int x0, int y)
@@ -1054,9 +1014,8 @@ void yl_apply_chunk(yl_ctx *g, uint32_t *p, int npix, int x0, int y)
         if (!yl_fill(g, q, x, m))
             continue;
         for (int j = 0; j < m;) {
-            int xu = (x + 2 * j) & ~15, je = j + ((xu + 16 - (x + 2 * j)) >> 1), A, C;
+            int xu = (x + 2 * j) & ~15, je = j + ((xu + 16 - (x + 2 * j)) >> 1), A = yl_limit(g, xu);
             if (je > m) je = m;
-            yl_limits(g, xu, &A, &C);
             for (; j < je; j++) {
                 int h = q[j], aY = q[YL_BLK + j];
                 int32_t c = q[2 * YL_BLK + j];
@@ -1066,13 +1025,9 @@ void yl_apply_chunk(yl_ctx *g, uint32_t *p, int npix, int x0, int y)
                 int Y0 = (w >> 8) & 255, Y1 = w >> 24;
                 uint32_t t = bint[((wb & 0xf8u) << 2) | ((wb >> 19) & 31u)];
                 int lo = Y0 < Y1 ? Y0 : Y1, hi = Y0 < Y1 ? Y1 : Y0;
-                if (hi + (int)(t >> 16) >= C) {             /* a halation core is possible */
-                    yl_apply_slow(g, p + j, x + 2 * j);
-                    continue;
-                }
-                /* the linear case: no channel of either pixel clamps, before or after, and neither has a halation
-                 * core: the change is the bloom glow x k(Y) plus the halo, so its Y / U / V parts come from the word's
-                 * glow once */
+                /* the linear case: no channel of either pixel clamps, before or after, and the halo stays under the
+                 * glow composite's knee on every channel (where it adds as it is): the change is the bloom glow x k(Y)
+                 * plus the halo, so its Y / U / V parts come from the word's glow once */
                 if (hi + (int)(t & 255) > A || lo < (int)((t >> 8) & 255)) {
                     yl_apply_clip(g, p + j, aY | h << 16, c);
                     continue;

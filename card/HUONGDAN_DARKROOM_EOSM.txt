@@ -189,6 +189,13 @@ không có CR2 thì không được đếm.
   tráng tiếp phần còn lại.
 - Pin thấp: tự dừng ("Battery low"). Sạc rồi vào Darkroom, SET để tráng nốt.
 - Không mở nắp thẻ, không tắt máy khi đang tráng.
+- Tráng xong với Camera JPEG khác Keep (hoặc RAW files = Move to ROLLS): PLAY của Canon xem
+  theo danh mục file riêng của Canon, chỉ đọc lúc lắp thẻ / bật máy. Từ bản này, sau mỗi
+  kiểu có đổi DCIM, module bảo Canon đọc lại đúng số ảnh đó, nên PLAY thấy bản in ngay, không
+  phải tắt máy. Chỉ khi việc đó không làm được: màn "Roll developed" có hai dòng vàng "Card
+  out and in (or power off/on) / so Canon's PLAY shows the new prints", và bấm PLAY trong cùng
+  lần bật máy thì hiện hộp "PLAY may miss new prints: / Card out and in, or power off/on" 3
+  giây, PLAY vẫn mở. Khi đó: rút thẻ ra cắm lại, hoặc tắt mở máy, để PLAY thấy bản in.
 - Bản in nằm ở gốc thẻ: ROLLS/ROLL001/F01_0206.JPG (F01 = kiểu số 1, 0206 = số
   IMG của Canon). DCIM không bị đụng tới: CR2 và JPG của Canon giữ nguyên (trừ khi
   đặt Camera JPEG = Overwrite, xem "ĐÈ LÊN JPEG CỦA MÁY" bên dưới; CR2 thì không bao giờ).
@@ -653,6 +660,17 @@ am. (20/11, RAWB28) Xem ảnh trong Darkroom, Camera JPEG mới, Blind roll tron
       chỉ còn IMG_nnnn.JPG = bản in có viền (PLAY hiện bản in); ROLLS/ROLL00n/ có F0n_nnnn.JPG,
       IMG_nnnn.JPG (ảnh không viền) và IMG_nnnn.CR2. Gửi WINDYFLM.LOG (các dòng "dark: photos
       ...", "camera JPEG ..."), chụp màn hình Darkroom lúc có tờ ảnh và bản in phác.
+an. (21/11) PLAY sau khi tráng (lỗi 3 của 5D2: "cái được cái không"). Camera JPEG = Overwrite
+   (hoặc Print + over), RAW files = Move to ROLLS, nạp cuộn 3 kiểu, chụp 3 tấm.
+   1. Tráng. Màn "Roll developed" KHÔNG có hai dòng vàng (module đã bảo Canon đọc lại).
+   2. MENU đóng Darkroom, bấm PLAY ngay (chưa tắt máy, chưa rút thẻ): không có hộp nhắc. Cả 3
+      tấm phải hiện bản tráng, không báo lỗi, không ô trống; nếu Move to ROLLS thì không còn
+      CR2 của 3 tấm đó trong PLAY. Ghi lại tấm nào sai.
+   3. Tắt máy, bật lại, PLAY: vẫn như bước 2 (đối chiếu).
+   4. Camera JPEG = Keep, tráng một cuộn khác: không đổi gì trong DCIM, không có hộp nhắc.
+   Log: một dòng "dark: F01 Canon's file list read again (PLAY shows the new print), N ms".
+   Nếu thấy "Canon's file list not read again (...)" thì hai dòng vàng và hộp nhắc hiện như
+   cũ; gửi WINDYFLM.LOG (dòng đó có mã lỗi), rút thẻ ra cắm lại / tắt mở máy để PLAY thấy bản in.
 
 
 6. GỬI LẠI

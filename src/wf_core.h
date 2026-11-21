@@ -139,6 +139,12 @@ void wf_cam_poll(void);                           /* wf_task: the camera layer's
 int  wf_cam_shot_ok(void);                        /* the in-camera path is up (worker + main hook) */
 int  wf_cam_gate_pv(void);                        /* preview: a shot now would get a look at all (JPEG L, no multishot) */
 const char *wf_cam_name(void);                    /* "EOS M" / "5D2" */
+int  wf_cam_cat_tell(const char *path);           /* Darkroom task: Canon's file catalog (PLAY's list) reads the DCIM
+                                                     files of path's folder + number again; 0 = done, else a WF_CAT_*
+                                                     or Canon's error */
+#define WF_CAT_BODY (-1)                          /* not this body / firmware, or its ROM words differ */
+#define WF_CAT_NOFM (-2)                          /* Canon's file manager not set up */
+#define WF_CAT_PATH (-3)                          /* not a DCF path (X:/DCIM/100CANON/IMG_0206.JPG) */
 extern volatile int wf_aspect;                    /* JPEG aspect (EOS M property), -1 not reported; 5D2 always 0 */
 /* RAW probe P0 (wf_probe.c + the camera layer, DESIGN 3.2): log only, the frame is never touched; off at every boot,
    never saved. The menu entry is built where WF_PRB_CAN (wf_cam.h). */
