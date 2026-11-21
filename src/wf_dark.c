@@ -1204,6 +1204,7 @@ static int dk_battery(void)
     return b <= 0 ? 5 : b == 1 ? 30 : b == 2 ? 70 : 100;
 #endif
 }
+int wf_battery_pct(void) { return dk_battery(); }   /* the film OS's top bar (src/ui/wf_os_ui.c) */
 
 /* ------------------------------------------------------------------ the screen while the run lives
  * The owner's RAWB18 EOS M (16 Nov): "the screen turns off while the Darkroom runs". The run pauses LiveView (Canon idle,

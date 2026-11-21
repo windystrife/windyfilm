@@ -12,6 +12,13 @@
 #include "wf_api.h"
 
 int wfui_host_scr(void);
+int wfui_host_sel_id(void);
+int wfui_host_tab(void);
+int wfui_host_shelf(void);
+int wfui_host_sh_top(void);
+int wfui_host_sh_row(void);
+int wfui_host_sh_cur(void);
+int wfui_host_sh_n(void);
 int wfui_host_after(void);
 int wfos_host_hfoc(void);
 int wfos_host_sfoc(void);
@@ -261,14 +268,60 @@ int main(int argc, char **argv)
     CHECK(!closed && wfui_host_scr() == WFUI_SCR_HOME, "MENU in the Darkroom: closed %d, screen %d", closed,
           wfui_host_scr());
 
-    /* Film shelf tile -> the browser; MENU there -> Home (not closed) */
+    /* Film shelf tile -> the Film shelf (M2): the ring and DOWN through the grid (the cursor's row always in view),
+       TAP the next tab, UP from the first row the pill, INFO the browser's own screen (Details) and MENU there back to
+       the shelf, MENU on the shelf -> Home (not closed) */
     to_tile(0);
     key(MODULE_KEY_PRESS_SET);
     tick(1);
-    CHECK(wfui_host_scr() == WFUI_SCR_BROWSER, "Film shelf tile: screen %d", wfui_host_scr());
-    CHECK(key(MODULE_KEY_MENU) == 0, "MENU in the browser not consumed");
+    CHECK(wfui_host_scr() == WFUI_SCR_BROWSER && wfui_host_shelf(), "Film shelf tile: screen %d, shelf %d",
+          wfui_host_scr(), wfui_host_shelf());
+    CHECK(wfui_host_sel_id() == id_of("PRT160"), "the shelf opens on the film in the camera (%d)", wfui_host_sel_id());
+    shot("m2_eosm_shelf");
+    int s0 = wfui_host_sel_id();
+    key(MODULE_KEY_WHEEL_RIGHT);
+    CHECK(wfui_host_sel_id() != s0, "the ring on the shelf: the film did not move");
+    key(MODULE_KEY_WHEEL_LEFT);
+    CHECK(wfui_host_sel_id() == s0, "the ring back: not the film it was on");
+    for (int i = 0; i < 6; i++)
+    {
+        int c0 = wfui_host_sh_cur();
+        key(MODULE_KEY_PRESS_DOWN);
+        int c = wfui_host_sh_cur(), r = wfui_host_sh_row();
+        CHECK(c == c0 + 1 || c == (wfui_host_sh_n() - 1) / 4, "DOWN %d: cursor row %d after %d", i, c, c0);
+        CHECK(c >= r && c <= r + 2, "DOWN %d: the cursor's row %d not in view (rows %d..%d)", i, c, r, r + 2);
+        if (i == 2) shot("m2_eosm_shelf_down");
+    }
+    CHECK(wfui_host_sh_n() <= 12 || wfui_host_sh_row() > 0, "a tab of %d films never scrolled", wfui_host_sh_n());
+    key(MODULE_KEY_TOUCH_1_FINGER);
+    CHECK(wfui_host_tab() == 1 && wfui_host_shelf(), "TAP on the shelf: tab %d, not Cine", wfui_host_tab());
+    shot("m2_eosm_shelf_cine");
+    key(MODULE_KEY_PRESS_UP);
+    CHECK(wfui_host_sh_top(), "UP from the first row: not on the pill");
+    shot("m2_eosm_shelf_top");
+    key(MODULE_KEY_PRESS_DOWN);
+    CHECK(!wfui_host_sh_top(), "DOWN from the pill: still there");
+    key(MODULE_KEY_INFO);
+    CHECK(!wfui_host_shelf() && wfui_host_scr() == WFUI_SCR_BROWSER, "INFO on the shelf: shelf %d, screen %d",
+          wfui_host_shelf(), wfui_host_scr());
+    shot("m2_eosm_shelf_details");
+    key(MODULE_KEY_MENU);
     tick(1);
-    CHECK(!closed && wfui_host_scr() == WFUI_SCR_HOME, "MENU in the browser: closed %d, screen %d", closed,
+    CHECK(!closed && wfui_host_shelf() && wfui_host_scr() == WFUI_SCR_BROWSER, "MENU in Details: shelf %d, closed %d",
+          wfui_host_shelf(), closed);
+    CHECK(key(MODULE_KEY_MENU) == 0, "MENU on the shelf not consumed");
+    tick(1);
+    CHECK(!closed && wfui_host_scr() == WFUI_SCR_HOME, "MENU on the shelf: closed %d, screen %d", closed,
+          wfui_host_scr());
+    /* the look strip (Grain, the look item Home kept) opens the browser's own screen on its row, not the shelf */
+    to_tile(7);
+    key(MODULE_KEY_PRESS_SET);
+    tick(1);
+    CHECK(wfui_host_scr() == WFUI_SCR_BROWSER && !wfui_host_shelf(), "the look strip: screen %d, shelf %d",
+          wfui_host_scr(), wfui_host_shelf());
+    key(MODULE_KEY_MENU);
+    tick(1);
+    CHECK(!closed && wfui_host_scr() == WFUI_SCR_HOME, "MENU in the look's browser: closed %d, screen %d", closed,
           wfui_host_scr());
 
     /* Prints with a blind roll: refused (a toast), still open */
@@ -429,6 +482,18 @@ int main(int argc, char **argv)
     CHECK(wf_ui_home_key(MODULE_KEY_MENU), "5D2: MENU through the viewfinder did not take Home");
     open_home();
     shot("m1_5d2_home");
+    to_tile(0);                                             /* 5D2: the Film shelf with the dial and PICT */
+    key(MODULE_KEY_JOY_CENTER);
+    tick(1);
+    CHECK(wfui_host_shelf() && wfui_host_sel_id() == id_of("PRS400"), "5D2 Film shelf: shelf %d, film %d",
+          wfui_host_shelf(), wfui_host_sel_id());
+    shot("m2_5d2_shelf");
+    int t5 = wfui_host_tab();
+    key(MODULE_KEY_PICSTYLE);
+    CHECK(wfui_host_tab() != t5 && wfui_host_shelf(), "5D2 PICT on the shelf: still tab %d", wfui_host_tab());
+    key(MODULE_KEY_MENU);
+    tick(1);
+    CHECK(wfui_host_scr() == WFUI_SCR_HOME, "5D2 MENU on the shelf: screen %d", wfui_host_scr());
     to_tile(3);
     key(MODULE_KEY_JOY_CENTER);
     tick(1);

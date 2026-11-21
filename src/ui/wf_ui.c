@@ -187,6 +187,10 @@ static int tsub;                                /* the top bar's focus: 0 the se
 static const struct wf_film *sw_film;           /* the close-and-load question (a finished roll, SET on another film) */
 static int pick, pick_num, pick_dev;            /* the Darkroom's develop again picks its film here (wfui_pick_film) */
 static int sw_exp;
+static int shelf, shelf_back, sh_top;          /* the film OS's Film shelf is up; its Details came from it; the
+                                                  shelf's focus on the pill / chip (M2, below wfui_render) */
+static void shelf_act(int k);
+static void shelf_on(void);
 static char msgb[96];                           /* a say() text built here */
 
 /* the tabs: 0 .. 3 the Film section's groups, TAB_STAGE .. NTAB - 1 the Film stage families */
@@ -739,6 +743,7 @@ static void act(int k)
         }
         return;
     }
+    if (shelf && !pick) { shelf_act(k); return; }          /* the film OS's Film shelf (M2) */
     focus_fix();
     int top = focus == FOC_TOP;
     switch (k)
@@ -766,6 +771,7 @@ static void act(int k)
         close_req = 1;                                      /* it closes, as before */
         break;
     case MODULE_KEY_MENU:
+        if (wf_os && shelf_back) { shelf_on(); break; }    /* the shelf's Details: back to the shelf */
         if (wf_os) { edit = info = 0; wfui_goto(WFUI_SCR_HOME); break; }   /* film OS: back to Home */
         close_req = 1;
         break;
@@ -793,6 +799,7 @@ void wfui_browse(int row)
     if (i >= 0) select_film(i);
     edit = info = 0;
     tsub = 0;
+    shelf = shelf_back = 0;
     focus_to(row >= 0 && row < WF_NROWS ? row : WF_ROW_LIGHT);
     scr_req = WFUI_SCR_BROWSER;
 }
@@ -1524,6 +1531,223 @@ static void draw_info(const struct wf_film *f, int g)
     ui_text_clip(F_13, 22, 424, nb, C_TXT2, 698);
 }
 
+/* ------------------------------------------------------------------ the film OS's Film shelf (modernUI M2, mock 03)
+ * With Camera interface = WindyFilm the browser opens on the shelf (Home's Film shelf tile, the EOS M's long DOWN): the
+ * film OS's top bar with the section pill (and the EOS M's mode chip); on the left the film under the cursor (big can,
+ * name, chips, its two lines, why it cannot load), on the right the section's tabs and the tab's films in a 4-column
+ * grid (the cursor's can larger in an outline, the loaded film's green dot, a scroll bar past 3 rows). The browser's own
+ * list, tabs, selection, loads, questions and toasts. INFO opens the browser's own screen (Details: the look rows,
+ * Exposures / Blind roll, its INFO page) and MENU there comes back to the shelf; MENU on the shelf goes to Home.
+ * Keys: LEFT / RIGHT and the ring / dial the film (across the section's tabs), UP / DOWN a grid row (UP from the first
+ * row: the pill / chip, as the browser's top bar), TAP / PICT / Q the next tab, SET / the joystick press load (or step
+ * the pill / chip). Off (Camera interface Canon + ML), the Darkroom's film pick and a new roll: the browser as before. */
+#define SH_COLS 4
+#define SH_ROWS 3
+#define SH_X0   304                                         /* the grid's left edge, 4 columns of SH_CW */
+#define SH_CW   98
+#define SH_Y0   84                                          /* the first visible row's top, rows SH_RH apart */
+#define SH_RH   116
+static int sh_row[NTAB];                                    /* each tab's first visible grid row */
+
+static void sh_place(void)
+{
+    int t = tab_of_sel(), r = (sel - tstart[t]) / SH_COLS, nr = (tcount(t) + SH_COLS - 1) / SH_COLS;
+    if (r < sh_row[t]) sh_row[t] = r;
+    if (r >= sh_row[t] + SH_ROWS) sh_row[t] = r - SH_ROWS + 1;
+    if (sh_row[t] > nr - SH_ROWS) sh_row[t] = nr - SH_ROWS;
+    if (sh_row[t] < 0) sh_row[t] = 0;
+}
+
+/* the shelf (again): the cursor's row in view, the focus on the films */
+static void shelf_on(void)
+{
+    shelf = 1;
+    shelf_back = 0;
+    sh_top = 0;
+    edit = info = 0;
+    if (nlist) sh_place();
+    dirty = 1;
+}
+
+/* the Film shelf on the film in the camera (Home's Film shelf tile, the EOS M's long DOWN on Home) */
+void wfui_shelf(void)
+{
+    int i = index_of_id(wf_loaded());
+    if (i >= 0) select_film(i);
+    tsub = 0;
+    focus_to(WF_ROW_LIGHT);
+    shelf_on();
+    scr_req = WFUI_SCR_BROWSER;
+}
+
+static void sh_film_step(int d)
+{
+    film_step(d);
+    sh_place();
+}
+
+/* UP / DOWN: a row of the tab; UP from the first row: the pill / chip; DOWN from there: the films again */
+static void sh_row_step(int d)
+{
+    if (sh_top)
+    {
+        if (d > 0) { sh_top = 0; dirty = 1; }
+        return;
+    }
+    int t = tab_of_sel(), l = sel - tstart[t], n = tcount(t);
+    if (d < 0 && l < SH_COLS) { sh_top = 1; tsub = 0; dirty = 1; return; }
+    int nl = l + d * SH_COLS;
+    if (nl >= n) nl = (n - 1) / SH_COLS > l / SH_COLS ? n - 1 : l;   /* into a short last row: its last film */
+    if (nl < 0 || nl == l) return;
+    select_film(tstart[t] + nl);
+    sh_place();
+}
+
+static void shelf_act(int k)
+{
+    switch (k)
+    {
+    case MODULE_KEY_PRESS_LEFT:   if (sh_top) top_lr(0); else sh_film_step(-1); break;
+    case MODULE_KEY_PRESS_RIGHT:  if (sh_top) top_lr(1); else sh_film_step(1); break;
+    case MODULE_KEY_WHEEL_LEFT:
+    case MODULE_KEY_WHEEL_UP:     if (sh_top) top_step(-1); else sh_film_step(-1); break;
+    case MODULE_KEY_WHEEL_RIGHT:
+    case MODULE_KEY_WHEEL_DOWN:   if (sh_top) top_step(1); else sh_film_step(1); break;
+    case MODULE_KEY_PRESS_UP:     sh_row_step(-1); break;
+    case MODULE_KEY_PRESS_DOWN:   sh_row_step(1); break;
+    case MODULE_KEY_JOY_CENTER:
+    case MODULE_KEY_PRESS_SET:
+        if (sh_top) top_step(1);
+        else load_sel();
+        if (nlist) sh_place();
+        break;
+    case MODULE_KEY_Q:
+    case MODULE_KEY_PICSTYLE:
+    case MODULE_KEY_TOUCH_1_FINGER: next_tab(); sh_place(); break;
+    case MODULE_KEY_INFO:                                   /* the browser's own screen on this film */
+        shelf = 0;
+        shelf_back = 1;
+        sh_top = 0;
+        focus_to(WF_ROW_LIGHT);
+        wf_log("ui: shelf -> details");
+        dirty = 1;
+        break;
+    case MODULE_KEY_PLAY:                                   /* as the browser: a roll or Darkroom mode, the Darkroom */
+        if (wf_roll_open(wf_roll_now()) || rollrows() || wf_shelf_now()->n) { dev_key(); break; }
+        close_req = 1;
+        break;
+    case MODULE_KEY_MENU:         sh_top = 0; wfui_goto(WFUI_SCR_HOME); break;
+    case MODULE_KEY_TRASH:
+    case MODULE_KEY_LV:           close_req = 1; break;
+    }
+}
+
+static void sh_tabs(int t)
+{
+    char b[32];
+    int s = sec_of_tab(t), tx = SH_X0 + 10;
+    for (int h = sec_lo(s); h < sec_hi(s); h++)
+    {
+        snprintf(b, sizeof(b), "%s %d", tname[h], tcount(h));
+        int w = ui_textw(F_15, b);
+        if (tx + w > 704) break;
+        ui_text(F_15, tx, 50, b, h == t ? C_TXT : C_TXT3);
+        if (h == t) wfg_rrect(tx, 70, tx + w, 72, 1, acc(h), -1, 0);
+        tx += w + 18;
+    }
+}
+
+static void sh_grid(int t)
+{
+    int A = acc(t), AD = accd(t), loaded = wf_loaded();
+    int n = tcount(t), r0 = sh_row[t], l = sel - tstart[t], nr = (n + SH_COLS - 1) / SH_COLS;
+    for (int rr = 0; rr < SH_ROWS; rr++)
+    {
+        int y = SH_Y0 + rr * SH_RH;
+        if ((r0 + rr) * SH_COLS >= n) break;
+        wfg_rect(SH_X0 + 6, y + 86, 694, y + 87, C_SEP);    /* the shelf board under the row */
+        for (int c = 0; c < SH_COLS; c++)
+        {
+            int li = (r0 + rr) * SH_COLS + c;
+            if (li >= n) break;
+            const struct wf_film *f = film_at(tstart[t] + li);
+            int cx = SH_X0 + c * SH_CW + SH_CW / 2, on = li == l;
+            if (on)
+            {
+                wfg_rrect(cx - 38, y - 3, cx + 37, y + 88, 8, AD, sh_top ? C_LINE : A, 2);
+                wfc_draw(f, CAN_SEL, cx - 29, y + 2, AD);
+            }
+            else wfc_draw(f, CAN_STRIP, cx - 26, y + 12, C_BG0);
+            if (f->id == loaded) wfg_ellipse(cx + 22, y + 4, cx + 29, y + 11, C_GRN);
+            text_c(F_13C, cx, y + 94, label_of(f), on && !sh_top ? A : wf_avail(f->id) ? C_TXT2 : C_LINE, SH_CW - 4);
+        }
+    }
+    if (nr > SH_ROWS)                                       /* the tab's rows: where the 3 shown sit */
+    {
+        int y0 = SH_Y0, h = SH_ROWS * SH_RH - 12;
+        int t0 = y0 + h * r0 / nr, t1 = y0 + h * (r0 + SH_ROWS) / nr - 1;
+        wfg_rect(705, y0, 706, y0 + h - 1, C_SEP);
+        wfg_rect(705, t0, 706, t1, C_TXT3);
+    }
+}
+
+static void sh_left(const struct wf_film *f, int t)
+{
+    char b[24];
+    wfc_draw(f, CAN_BIG, 66, 52, C_BG0);
+    ui_text_clip(F_ML28, 18, 288, f->name, C_TXT, 292);
+    int x = chip_s(18, 326, f->kind, acc(t), 292);
+    snprintf(b, sizeof(b), "ISO %d", f->iso);
+    x = chip_s(x, 326, b, C_TXT2, 292);
+    chip_s(x, 326, f->format, C_TXT2, 292);
+    if (sec_now())                                          /* Film stage: the negative it develops as */
+    {
+        if (f->line1) ui_text_clip(F_13, 18, 354, f->line1, C_TXT2, 292);
+    }
+    else
+    {
+        if (f->line1) ui_text_clip(F_13, 18, 354, f->line1, C_TXT2, 292);
+        if (f->line2) ui_text_clip(F_13, 18, 371, f->line2, C_TXT2, 292);
+    }
+    if (!wf_avail(f->id)) ui_text_clip(F_13, 18, 396, roll_why(f), C_WARN, 292);
+}
+
+static void sh_footer(void)
+{
+    const char *ld = rollrows() ? "Load roll" : "Load";
+    const char *const kt[] = { "SET", ld, "RING", "Film", "UP/DN", "Row", "TAP", "Group", "INFO", "Details",
+                               "MENU", "Home", 0 };
+    const char *const k5[] = { "SET", ld, "DIAL", "Film", "PICT", "Group", "INFO", "Details", "MENU", "Home", 0 };
+    const char *const kp[] = { "SET", tsub && chip_on() ? mname(mode_next(1)) : "Film / Film stage",
+                               chip_on() ? "L/R" : "DOWN", chip_on() ? "Section / mode" : "Films", "MENU", "Home", 0 };
+    wfos_footer(sh_top ? kp : is5d2() ? k5 : kt);
+}
+
+static void shelf_render(int now)
+{
+    const struct wf_film *f = film_at(sel);
+    int t = tab_of_sel();
+    wfg_glow_centre(146, 165, 146, 284);                    /* the glow under the big can */
+    wfg_background(0, WFUI_H);
+    int xr = wfos_top_bar("Film shelf");
+    int pe = sec_pill(48 + ui_textw(F_D20, "Film shelf") + 14, sh_top && !tsub);
+    if (chip_on() && xr - 10 > pe + 150) mode_chip(xr - 10, sh_top && tsub);
+    if (!f)
+    {
+        ui_text(F_15, 24, 60, "No films in this build.", C_TXT2);
+        sh_footer();
+        return;
+    }
+    sh_left(f, t);
+    sh_tabs(t);
+    sh_grid(t);
+    sh_footer();
+    draw_toast(now);
+    if (leave_to >= 0) draw_leave();
+    else if (sec_to >= 0) draw_sec_leave();
+    else if (sw_film) draw_swap();
+}
+
 void wfui_render(void)
 {
     int now = get_ms_clock();
@@ -1541,6 +1765,8 @@ void wfui_render(void)
         wfp_set_glow(rgb);
         glow_id = f->id;
     }
+    if (shelf && !pick) { shelf_render(now); return; }
+    wfg_glow_centre(125, 150, 125, 272);                    /* the browser's glow under its big can */
     wfg_background(0, 300);
     wfg_background(437, WFUI_H);
     draw_header(now);
@@ -1632,6 +1858,7 @@ static volatile int nr_req;
 static void new_roll_view(void)
 {
     nr_req = 0;
+    shelf = shelf_back = 0;
     if (!mode_ok(M_DARK)) { say("Rolls come to this camera later (EOS M first)"); return; }
     const struct wf_roll *r = wf_roll_now();
     int i = wf_roll_open(r) ? index_of_id(r->film) : -1;
@@ -1711,6 +1938,9 @@ void wfui_task_begin(void)
     tsub = 0;
     sw_film = 0;
     pick = 0;
+    memset(sh_row, 0, sizeof sh_row);
+    shelf = 0;
+    if (wf_os) shelf_on();                                  /* film OS: the Film shelf (M2) */
     {
         const struct wf_roll *r = wf_roll_now();
         for (int k = 0; k < NEXP; k++)                      /* the roll on the camera's count, else the last one */
@@ -1998,6 +2228,11 @@ int wfui_host_rows(void) { return rollrows(); }
 int wfui_host_focus(void) { return focus; }
 int wfui_host_rtop(void) { return rtop; }
 int wfui_host_info(void) { return info; }
+int wfui_host_shelf(void) { return shelf; }                /* the film OS's Film shelf is up */
+int wfui_host_sh_top(void) { return sh_top; }
+int wfui_host_sh_row(void) { return nlist ? sh_row[tab_of_sel()] : 0; }
+int wfui_host_sh_cur(void) { return nlist ? (sel - tstart[tab_of_sel()]) / SH_COLS : 0; }   /* the cursor's row */
+int wfui_host_sh_n(void) { return nlist ? tcount(tab_of_sel()) : 0; }
 int wfui_host_info_y(void) { return ilast; }                /* the Info page's last grid row (drawn) */
 int wfui_host_anim(void) { return anim_on; }
 int wfui_host_scr(void) { return scr; }

@@ -364,7 +364,27 @@ Cards are built only on the owner's word.
      - PLAY on Home gives Canon's playback;
      - free memory at open;
      - Camera interface = Canon + ML gives back the old MENU.
-2. **M2: Film shelf.** The new shelf layout over the browser's list. The browser stays as the INFO look editor.
+2. **M2: Film shelf (built 21 Nov 2026).** The browser opens on the shelf with Camera interface WindyFilm.
+   - **Opens from:** Home's Film shelf tile, the EOS M's long DOWN, or any open of the browser.
+   - **Layout (mock 03):**
+     - Top bar: the film OS top bar with the section pill, and the mode chip where the camera has rolls.
+     - Left: the film under the cursor (big can, name, kind / ISO / format chips, its two lines, why it cannot load).
+     - Right: the section's tabs and the tab's films in a 4-column grid (3 rows in view, a scroll bar past that).
+       The cursor's can is larger in an outline; the loaded film has a green dot.
+   - **Behind it:** the browser's own list, tabs, selection, loads, questions and toasts.
+   - **Keys:**
+     - LEFT / RIGHT and the ring / dial step the film (across the section's tabs).
+     - UP / DOWN move a row. UP from the first row goes to the pill / chip.
+     - TAP / PICT / Q go to the next tab; SET loads.
+     - INFO opens the browser's own screen ("Details": look rows, Exposures, Blind roll, INFO page); MENU there
+       comes back to the shelf.
+     - MENU on the shelf goes to Home.
+   - **Still the browser's own screen:** Camera interface Canon + ML, Home's look strip (a row), the Darkroom's
+     film pick, a new roll.
+   - **Every film OS screen's top bar** now has the battery (the 5D2's in % too), the camera's clock and the
+     camera.
+   - **Checked:** os_test shelf keys and shots (`m2_*`, both cameras); ui_test and dr_run unchanged; build.sh both,
+     gate PASS.
 3. **M3: LiveView finder (built 21 Nov 2026, see section 4).**
    - Full / Minimal / Bright lines / Canon + ML in Settings. INFO stays Canon's: it switches Canon's info view and the
      finder.

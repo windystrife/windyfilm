@@ -142,6 +142,8 @@ void wfos_leave(int scr);
 void wfos_render(int scr, int now);
 int  wfos_key(int scr, int key);        /* 1 = close the UI (nothing after it) */
 int  wfos_tick(int scr, int now);       /* 1 = redraw */
+int  wfos_top_bar(const char *title);  /* the film OS top bar (battery, clock, camera); back: that group's left x */
+void wfos_footer(const char *const *kv);   /* the film OS footer: key caps and what they do, 0-ended pairs */
 /* the roll in the camera, as Home and the LiveView finder (wf_os_hud.c) show it; any task (plain reads) */
 struct wfos_roll {
     const struct wf_film *f;            /* the roll's film, else the loaded one, else 0 */
@@ -155,5 +157,6 @@ enum { WFUI_AFTER_NONE = 0, WFUI_AFTER_MENU, WFUI_AFTER_MLMENU, WFUI_AFTER_PLAY 
 void wfui_goto(int scr);
 void wfui_close_after(int what);
 void wfui_browse(int row);
+void wfui_shelf(void);                 /* the film OS's Film shelf on the film in the camera (M2) */
 
 #endif

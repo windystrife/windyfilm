@@ -247,6 +247,7 @@ int  wf_osvf_wants(void);                        /* the finder could come up (it
 /* the lock: ms >= 0 takes it (waits up to ms; 1 = taken), ms < 0 gives it back. Before the lock exists: always 1 */
 int  wf_hud_lock(int ms);
 int  wf_roll_wind(void);                         /* wf_dark.c: 1 while the wind-on cue shows (1 s after a frame) */
+int  wf_battery_pct(void);                       /* the battery in % (EOS M: from ML's bars), -1 unknown (wf_dark.c) */
 int  wf_clock_hm(void);                          /* the camera clock as h * 100 + m, -1 = unknown (wf_dark.c) */
 
 #endif

@@ -140,6 +140,9 @@ int wf_dark_eta_s(const struct wf_dark_view *v)
     return s < 0 ? 0 : s;
 }
 int wf_clock_hm(void) { return clock_hm; }
+static int batt_pct = 70;
+void fake_set_batt(int pct) { batt_pct = pct; }
+int wf_battery_pct(void) { return batt_pct; }
 
 /* ------------------------------------------------------------------ print finishes (wf_menu.c's rows, DESIGN 3.9) */
 volatile int wf_pr_frame, wf_pr_info = 1, wf_pr_date, wf_pr_jpeg, wf_pr_cr2;

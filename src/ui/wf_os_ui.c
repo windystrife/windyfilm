@@ -85,16 +85,50 @@ static void footer(const char *const *kv)
     int x = 16;
     for (; kv[0]; kv += 2) x = key(x, 450, kv[0], kv[1]);
 }
+void wfos_footer(const char *const *kv) { footer(kv); }   /* (the Film shelf, wf_ui.c) */
 
-static void top_bar(const char *title)
+/* the top bar of every film OS screen (and the Film shelf, wf_ui.c): the mark and the title; right: the battery (the
+   5D2's in % too: the EOS M has only ML's three bars), the camera's clock, the camera. Returns the left edge of that
+   group (the shelf puts its mode chip before it). The UI task draws it again every second (HEAL_MS): the clock moves. */
+int wfos_top_bar(const char *title)
 {
     os_mark(16, 9, 22);
     ui_text(F_D20, 48, 8, title, C_TXT);
     const char *cam = is5d2() ? "5D Mark II" : "EOS M";
-    int w = ui_textw(F_13, cam) + 16;
-    chip(704 - w, 10, cam, C_LINE, C_TXT2);
+    int w = ui_textw(F_13, cam) + 16, xr = 704 - w;
+    chip(xr, 10, cam, C_LINE, C_TXT2);
+    xr -= 14;
+    int hm = wf_clock_hm();
+    if (hm >= 0)
+    {
+        char ck[8];
+        snprintf(ck, sizeof ck, "%02d:%02d", hm / 100 % 100, hm % 100);
+        xr -= ui_textw(F_15, ck);
+        ui_text(F_15, xr, 10, ck, C_TXT2);
+        xr -= 14;
+    }
+    int b = wf_battery_pct();
+    if (b >= 0)
+    {
+        int c = b <= 15 ? C_WARN : C_TXT2, fw = 17 * (b > 100 ? 100 : b) / 100;
+        if (is5d2())
+        {
+            char p[8];
+            snprintf(p, sizeof p, "%d%%", b > 100 ? 100 : b);
+            xr -= ui_textw(F_13, p);
+            ui_text(F_13, xr, 12, p, c);
+            xr -= 6;
+        }
+        xr -= 24;
+        wfg_rrect(xr, 13, xr + 21, 24, 2, -1, c, 1);
+        wfg_rect(xr + 22, 16, xr + 23, 21, c);
+        if (fw > 0) wfg_rect(xr + 2, 15, xr + 2 + fw - 1, 22, c);
+        xr -= 14;
+    }
     wfg_rect(16, 40, 703, 40, C_SEP);
+    return xr;
 }
+static void top_bar(const char *title) { wfos_top_bar(title); }
 
 static void toast(void)
 {
@@ -169,7 +203,7 @@ static const char *dark_line(char *b, int n)
 
 static void open_tile(int t)
 {
-    if (t == HF_SHELF) { wfui_browse(WF_ROW_LIGHT); return; }
+    if (t == HF_SHELF) { wfui_shelf(); return; }
     if (t == HF_DARK)
     {
         const char *why = wfdr_dev_why();
@@ -264,7 +298,7 @@ static void home_render(void)
     sub[HF_SHELF] = sb;
     sub[HF_DARK] = dark_line(db, sizeof db);
     sub[HF_PRINTS] = wf_roll_blocks_play() ? "After the Darkroom" : "Canon's playback";
-    sub[HF_SET] = "Interface, LiveView finder, keys";
+    sub[HF_SET] = "Interface, finder, keys";
     for (int i = 0; i < HF_NTILE; i++)
     {
         int y0 = 54 + i * 66, foc = i == hfoc;
@@ -366,7 +400,7 @@ static int home_key(int k)
         break;
     case MODULE_KEY_TRASH:                                  /* 5D2: the ML menu; EOS M (long DOWN): the shelf */
         if (is5d2()) wfui_close_after(WFUI_AFTER_MLMENU);
-        else wfui_browse(WF_ROW_LIGHT);
+        else wfui_shelf();
         break;
     case MODULE_KEY_LV:
         return 1;
