@@ -94,13 +94,14 @@ Màn hình giống EOS M, chỉ khác tên phím (chân màn hình ghi đúng ph
 - Hàng ROLL trên cùng: cuộn trong máy, rồi các cuộn trên kệ. Cuộn đã tráng: "develop
   again" + hàng Film (SET chọn phim khác). Bản in lần 2 vào ROLLS/ROLL001B.
 - Không mở nắp thẻ, không tắt máy khi đang tráng.
-- Tráng xong với Camera JPEG khác Keep (hoặc RAW files = Move to ROLLS): PLAY của Canon có
-  thể thiếu vài bản in mới, hay báo lỗi vài tấm, cho tới khi tắt / mở máy (hoặc mở nắp thẻ
-  rồi đóng lại). Canon chỉ đọc danh sách ảnh trên thẻ lúc bật máy / lắp thẻ, ML không có
-  cách bắt Canon đọc lại. Màn "Roll developed" nhắc hai dòng vàng "Power off/on (or open
-  the card door) / so Canon's PLAY shows the new prints"; bấm PLAY trong cùng lần bật máy đó
-  thì hiện hộp "New prints: PLAY may miss them / Power off/on or open card door" 3 giây,
-  PLAY vẫn mở. Mở nắp thẻ rồi đóng thì hộp nhắc vẫn hiện (module không biết), bỏ qua.
+- Tráng xong với Camera JPEG khác Keep (hoặc RAW files = Move to ROLLS): PLAY của Canon xem
+  theo danh mục file riêng của Canon, chỉ đọc lúc lắp thẻ / bật máy (vì vậy trước đây "cái
+  được cái không", rút thẻ ra cắm lại thì hiện đủ). Từ bản này, sau mỗi kiểu có đổi DCIM,
+  module bảo Canon đọc lại đúng số ảnh đó, nên PLAY thấy bản in ngay. Chỉ khi việc đó không
+  làm được: màn "Roll developed" có hai dòng vàng "Card out and in (or power off/on) / so
+  Canon's PLAY shows the new prints", và bấm PLAY trong cùng lần bật máy thì hiện hộp "PLAY
+  may miss new prints: / Card out and in, or power off/on" 3 giây, PLAY vẫn mở. Khi đó: rút
+  thẻ ra cắm lại, hoặc tắt mở máy, để PLAY thấy bản in (hộp nhắc có thể hiện thêm một lần).
 
 
 6. NHỮNG GÌ CẦN THỬ (theo thứ tự)
@@ -167,17 +168,15 @@ o. (RAWB28) Ảnh trong Darkroom, Camera JPEG, Blind roll.
       Gửi WINDYFLM.LOG (dòng "dark: photos ...", "camera JPEG ...").
 p. (21/11) PLAY sau khi tráng (lỗi 3: "cái được cái không"). Camera JPEG = Overwrite (hoặc
    Print + over), RAW files = Move to ROLLS, nạp cuộn 3 kiểu, chụp 3 tấm.
-   1. Tráng. Màn "Roll developed" có thêm hai dòng vàng: "Power off/on (or open the card
-      door)" và "so Canon's PLAY shows the new prints".
-   2. MENU đóng Darkroom, bấm PLAY (chưa tắt máy): hộp "New prints: PLAY may miss them /
-      Power off/on or open card door" hiện 3 giây, PLAY vẫn mở. Xem 3 tấm vừa tráng: ghi
-      lại tấm nào hiện bản tráng, tấm nào màu Canon, tấm nào báo lỗi / ô trống.
-   3. Tắt máy, bật lại, PLAY: cả 3 tấm phải là bản tráng, không báo lỗi, không còn hộp nhắc.
-   4. (Nếu muốn) tráng thêm một cuộn, mở nắp thẻ CF rồi đóng (không tắt máy), PLAY: có
-      hiện đủ bản in không? Ghi lại.
-   5. Camera JPEG = Keep, tráng một cuộn khác: không có hai dòng vàng, không có hộp nhắc.
-   Log: một dòng "dark: DCIM changed: Canon's PLAY may miss it until power off / on or the
-   card door" mỗi lần bật máy (ở lần tráng đầu tiên có đổi DCIM).
+   1. Tráng. Màn "Roll developed" KHÔNG có hai dòng vàng (module đã bảo Canon đọc lại).
+   2. MENU đóng Darkroom, bấm PLAY ngay (chưa tắt máy, chưa rút thẻ): không có hộp nhắc. Cả 3
+      tấm phải hiện bản tráng, không báo lỗi, không ô trống; nếu Move to ROLLS thì không còn
+      CR2 của 3 tấm đó trong PLAY. Ghi lại tấm nào sai.
+   3. Tắt máy, bật lại, PLAY: vẫn như bước 2 (đối chiếu).
+   4. Camera JPEG = Keep, tráng một cuộn khác: không đổi gì trong DCIM, không có hộp nhắc.
+   Log: một dòng "dark: F01 Canon's file list read again (PLAY shows the new print), N ms".
+   Nếu thấy "Canon's file list not read again (...)" thì hai dòng vàng và hộp nhắc hiện như
+   cũ; gửi WINDYFLM.LOG (dòng đó có mã lỗi), rút thẻ ra cắm lại / tắt mở máy để PLAY thấy bản in.
 
 
 7. GỬI LẠI

@@ -1002,26 +1002,31 @@ defaults) = the print is byte for byte today's (`tools/dr_dark_check.sh` compare
   - Not checked on the camera yet: PLAY after Print + over (the print in DCIM, the CR2 still beside it unless moved,
     so 3.9's playback note applies), and the time of the second encode on the 5D2.
   - **Canon's PLAY after a run** (owner 2026-11-21, 5D2: after a Darkroom run some prints show in PLAY and some do
-    not, the files on the card whole; a power cycle shows them). Canon reads its list of the card's pictures at power
-    on / card mount and not again while the camera stays on, so a run that replaced camera JPEGs or moved CR2s leaves
-    that list stale until then. Canon's firmware keeps its own file catalog, but no ML core function or public stub
-    asks it to read the card again and its calls are not documented, so nothing here does (a candidate for a later
-    camera test, with the owner's OK). Instead the module says how:
-    - `dk_dcim_mark` (wf_dark.c) sets `wf_dark_dcim_changed()` when a run is about to change a file under `/DCIM/`:
-      the camera JPEG's rename in `dk_dcim_put`, a CR2's rename or removal in `dk_cr2_move`. One log line a power-on:
-      `dark: DCIM changed: Canon's PLAY may miss it until power off / on or the card door`. RAM only: a power cycle
-      clears it; the card door does not (no property handler), so the notice may show once more than needed.
-    - The DONE screen adds two lines under the roll's: "Power off/on (or open the card door)" / "so Canon's PLAY shows
-      the new prints".
-    - `wf_dark_play_notice()` (wf_dark.h): a 3 s NotifyBox "New prints: PLAY may miss them" / "Power off/on or open
-      card door" when PLAY goes to Canon with the UI closed and the camera not in playback (wf_main.c `wf_keypress`,
-      after the Blind roll's block; the key still goes to Canon). A UI that sends the camera to PLAY itself calls it
-      on the way.
-    - English on the camera (the fonts and NotifyBox are ASCII); the HUONGDAN steps say it in Vietnamese (EOS M step
-      an, 5D2 step p): develop, PLAY, power off / on, PLAY. Both bodies: the EOS M's firmware has the same catalog.
-    - Checks: `test.sh` ROLL:jpeg: the Keep roll leaves the flag off; the Overwrite roll sets it, with its log line;
-      PLAY into Canon's playback shows the notice and passes, PLAY out of playback shows none. `tests/ui/dr_ui_test.c`
-      9b: the flag adds the two lines and changes no other pixel (shot `dark_done_play_notice`).
+    not, the files on the card whole; a power cycle shows them, and so does the card out and in). PLAY lists the card
+    from Canon's file catalog, filled at card mount; FIO changes files without telling it, so a JPEG a run replaced
+    or a CR2 it moved keeps its old entry. The fix tells the catalog after each frame:
+    - `dk_dcim_mark` (wf_dark.c) notes that a frame is about to change a file under `/DCIM/` (the camera JPEG's
+      rename in `dk_dcim_put`, a CR2's rename or removal in `dk_cr2_move`). After the frame, `dk_cat_tell` calls
+      `wf_cam_cat_tell(<the frame's DCIM JPEG>)` (camera layer): `FM_GetObjectHandleByPath(path, &handle)` turns the
+      DCF path into Canon's object handle, `FC_ReScanFile(handle)` locks the catalog, finds every file of that folder
+      and number again (which of JPG / CR2 are there, size, time) and unlocks (0 = done). The JPEG is always there
+      when its CR2 moved, so one call covers both. Addresses: 5D2 2.1.2 0xFF8453FC / 0xFF856A64, EOS M 2.0.2
+      0xFF118EB0 / 0xFF1167B0 (the owner's ROM dumps, by their debug strings; the same code on both bodies).
+    - Guards: model + firmware, the two prologues and the literal of the file manager's ready word (5D2 0x1ED8,
+      EOS M 0x3E4E4), checked once; that word != 0 (FM_GetObjectHandleByPath asserts otherwise); the path of the DCF
+      shape, 29 chars (it is copied into a 48-byte stack buffer). The Darkroom runs in wf_task: never a hook.
+    - The first success logs `dark: F01 Canon's file list read again (PLAY shows the new print), N ms`; a failure
+      logs `dark: Fnn Canon's file list not read again (<body | no FM | path | Canon> <code>): ...` and sets
+      `wf_dark_dcim_changed()`. Only then the old way out shows: the DONE screen's two lines "Card out and in (or
+      power off/on)" / "so Canon's PLAY shows the new prints", and `wf_dark_play_notice()` (wf_dark.h), a 3 s
+      NotifyBox "PLAY may miss new prints:" / "Card out and in, or power off/on" when PLAY goes to Canon with the UI
+      closed and the camera not in playback (wf_main.c `wf_keypress`; the key still goes to Canon). RAM only.
+    - FC_ReScanFile has no caller in either firmware (it is there, complete, with its log lines), so the first
+      camera run is its test: PLAY right after a run, without a power cycle, should list every print.
+    - Checks: `test.sh` ROLL:jpeg: the Keep roll asks nothing; the Overwrite roll asks once per frame with the frame's
+      `B:/DCIM/100CANON/IMG_nnnn.JPG`, the rescan gets the handle, no notice; the framed roll with Canon refusing
+      (0x82110007) logs each frame that changed DCIM (not F03, which has no camera JPEG) and shows the notice into
+      PLAY, none out of it. `tests/ui/dr_ui_test.c` 9b: the flag adds the two lines, no other pixel.
 - **Memory.** Nothing new is allocated: the pack (<= 512 KB), the caption band (<= about 3.7 MB) and the row buffer
   (about 197 KB) use `M.raw`, which is free scratch in the DRY phase. The stamp's map (about 148 KB) uses `M.raw` too.
   Fonts / text are static (about 1 KB BSS). The logo pack (<= 384 KB) is read beside the fonts in the 512 KB pack

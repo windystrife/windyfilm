@@ -51,6 +51,12 @@ static const uint32_t h_rom[][2] = {
     { 0xFF888ACCu, 0xE5857054u }, { 0xFF888AD4u, 0xE585806Cu }, { 0xFF88AB40u, 0xEBFFF74Fu },
     { 0xFF8867A0u, 0xE92D47F0u }, { 0xFF8867A8u, 0xE1A05000u }, { 0xFF886824u, 0xE5805054u },
     { 0xFF886828u, 0xE580606Cu }, { 0xFF887A94u, 0xEBFFFB41u }, { 0xFF9BE83Cu, 0x0140D600u },
+    { 0xFF8453FCu, 0xE92D4030u }, { 0xFF845400u, 0xE1A05000u }, { 0xFF845404u, 0xE51F0A60u },     /* 5D2 catalog */
+    { 0xFF845408u, 0xE1A04001u }, { 0xFF8449ACu, 0x00001ED8u }, { 0xFF856A64u, 0xE92D4070u },
+    { 0xFF856A68u, 0xE1A05000u }, { 0xFF856A6Cu, 0xE3A00027u }, { 0xFF856A70u, 0xE28F2F5Au },
+    { 0xFF118EB0u, 0xE92D4030u }, { 0xFF118EB4u, 0xE1A05000u }, { 0xFF118EB8u, 0xE51F0A8Cu },     /* EOS M catalog */
+    { 0xFF118EBCu, 0xE1A04001u }, { 0xFF118434u, 0x0003E4E4u }, { 0xFF1167B0u, 0xE92D4070u },
+    { 0xFF1167B4u, 0xE1A05000u }, { 0xFF1167B8u, 0xE28F2F4Au }, { 0xFF1167BCu, 0xE3A01001u },
 };
 uint32_t wf_host_rom_read(uint32_t a)
 {
@@ -92,6 +98,30 @@ uint32_t wf_host_romcall(uint32_t fn, uint32_t arg)
     for (int i = 0; i < 5; i++)
         if (fn == g[i])
             return h_romcall_ret[i];
+    return 0xDEADBEEFu;
+}
+/* Canon's file catalog (wf_cam_cat_tell): FM_GetObjectHandleByPath (5D2 0xFF8453FC, EOS M 0xFF118EB0) writes h_cat_h,
+ * FC_ReScanFile (0xFF856A64, 0xFF1167B0) returns h_cat_rc */
+volatile int h_cat_n, h_cat_rescans;
+uint32_t h_cat_h = 0x00640504u, h_cat_rc, h_cat_hseen[8], h_cat_fn[2];
+char h_cat_path[8][40];
+uint32_t wf_host_cat_call(uint32_t fn, uint32_t a0, uint32_t a1)
+{
+    if (fn == 0xFF8453FCu || fn == 0xFF118EB0u) {
+        if (h_cat_n < 8)
+            snprintf(h_cat_path[h_cat_n], sizeof *h_cat_path, "%s", (const char *)(uintptr_t)a0);
+        h_cat_n++;
+        h_cat_fn[0] = fn;
+        *(uint32_t *)(uintptr_t)a1 = h_cat_h;
+        return 0;
+    }
+    if (fn == 0xFF856A64u || fn == 0xFF1167B0u) {
+        if (h_cat_rescans < 8)
+            h_cat_hseen[h_cat_rescans] = a0;
+        h_cat_rescans++;
+        h_cat_fn[1] = fn;
+        return h_cat_rc;
+    }
     return 0xDEADBEEFu;
 }
 uint32_t wf_host_mem_read(uint32_t a)

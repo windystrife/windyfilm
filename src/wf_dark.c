@@ -99,7 +99,8 @@ static int hud_on, hud_fonts_on, hud_t, hud_mode = -1, info_t = -100000, hud_sig
 static int hud_font_again, hud_font_t, hud_font_n;  /* the font pack read again while Canon held the card */
 static volatile int dk_running;                   /* a darkroom run owns the roll (asked for, or in wf_task now) */
 static volatile int dk_go;                        /* wf_dark_start asked: wf_task's next wf_dark_poll runs it */
-static volatile int dk_dcim_new;                  /* a run changed DCIM in this power-on (wf_dark_dcim_changed) */
+static volatile int dk_dcim_new;                  /* DCIM changed and Canon's catalog not told (wf_dark_dcim_changed) */
+static int dk_dcim_pend, dk_cat_told;             /* this frame changed DCIM (dk_cat_tell); told once this power-on */
 static int nt_state = -1, nt_req, nt_t, nt_len, nt_mode = -1, nt_pt;   /* the end-of-roll notice (roll_notice) */
 static volatile int nt_up, nt_drop, nt_poke;
 static volatile int sh_k;                         /* the shutter held now (roll_shutter): 0 no, 1 full, 2 rewound */
@@ -133,27 +134,45 @@ int wf_dark_busy(void) { return dk_running; }
 const struct wf_shelf *wf_shelf_now(void) { return &shv; }
 void wf_shelf_rescan(void) { sh_scan = 1; }
 
-/* Canon's PLAY after a run that changed DCIM (owner 11-21, 5D2 bug 3: "some prints show, some do not"): Canon reads
- * its list of the card's pictures at power on / card mount and not again while the camera stays on, so in the same
- * power-on PLAY can miss a JPEG a run replaced, a CR2 it moved, a file it wrote. No public call makes Canon read the
- * card again (ML has none), so the Darkroom says how: power off / on, or open the card door (DESIGN 3.9).
- * dk_dcim_mark: a file in DCIM about to change (path with /DCIM/), set once per power-on, one log line */
+/* Canon's PLAY after a run that changed DCIM (owner 11-21, 5D2 bug 3: "some prints show, some do not"; the card out
+ * and in showed them all): PLAY lists the card from Canon's file catalog, read at card mount, and FIO does not update
+ * it, so a JPEG a run replaced or a CR2 it moved kept its old entry. After each frame that changed DCIM the catalog
+ * reads that folder + number again (wf_cam_cat_tell, the camera layer: FM_GetObjectHandleByPath + FC_ReScanFile).
+ * Only when that cannot be done does the Darkroom say how PLAY catches up: the card out and in, or power off / on
+ * (DESIGN 3.9). dk_dcim_mark: a file in DCIM about to change (path with /DCIM/) */
 static void dk_dcim_mark(const char *p)
 {
     for (; *p; p++)
         if (p[0] == '/' && p[1] == 'D' && p[2] == 'C' && p[3] == 'I' && p[4] == 'M' && p[5] == '/') {
-            if (!dk_dcim_new)
-                wf_log("dark: DCIM changed: Canon's PLAY may miss it until power off / on or the card door");
-            dk_dcim_new = 1;
+            dk_dcim_pend = 1;
             return;
         }
+}
+/* after a frame: what it changed in DCIM (jpg: the frame's DCIM JPEG, there whenever its CR2 moved) told to Canon's
+ * catalog; the first success and every failure logged */
+static void dk_cat_tell(int i, const char *jpg)
+{
+    if (!dk_dcim_pend)
+        return;
+    dk_dcim_pend = 0;
+    int t0 = get_ms_clock(), rc = wf_cam_cat_tell(jpg);
+    if (rc == 0) {
+        if (!dk_cat_told++)
+            wf_log("dark: F%02d Canon's file list read again (PLAY shows the new print), %dms", i + 1,
+                   get_ms_clock() - t0);
+        return;
+    }
+    wf_log("dark: F%02d Canon's file list not read again (%s %x): PLAY may miss it till card out/in or power "
+           "off/on", i + 1, rc == WF_CAT_BODY ? "body" : rc == WF_CAT_NOFM ? "no FM" : rc == WF_CAT_PATH ? "path"
+           : "Canon", (unsigned)rc);
+    dk_dcim_new = 1;
 }
 int wf_dark_dcim_changed(void) { return dk_dcim_new; }
 int wf_dark_play_notice(void)
 {
     if (!dk_dcim_new)
         return 0;
-    NotifyBox(3000, "New prints: PLAY may miss them\nPower off/on or open card door");
+    NotifyBox(3000, "PLAY may miss new prints:\nCard out and in, or power off/on");
     return 1;
 }
 
@@ -2562,6 +2581,7 @@ static int dk_frame(int i, const struct wf_look *lk, int src, int *bytes)
         dk_camjpg(i, jpg, out, &wr, M.app1 + ao, al, &L, rowbuf, t2, &jok);
         if (dk_pcr && src_cr2 == cr2)            /* RAW after Darkroom Move to ROLLS: once the JPEG(s) are in DCIM */
             dk_cr2_move(i, cr2, mvk < 0 ? 0 : mv, rn, jok);
+        dk_cat_tell(i, jpg);                     /* Canon's PLAY list: what this frame changed in DCIM */
     }
     dk_t[3] = get_ms_clock() - t;
     wf_dev_note(lk, WF_PATH_DARK, dk_t[0] + dk_t[1] + dk_t[2] + dk_t[3]);   /* the whole print, dry included (11-17) */

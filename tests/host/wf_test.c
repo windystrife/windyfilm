@@ -6896,6 +6896,7 @@ static void t_roll_jpeg(void)
     /* copy: frame Off, Overwrite; and Screen Off (owner 11-16, DESIGN 3.11): the test stands in for the Darkroom screen's
      * tick (wf_dark_dark) and keys (wf_dark_wake; a key "WF_DS_WAKE_MS ago" = the time without a key is over) */
     int dc_keep = wf_dark_dcim_changed();        /* Keep: DCIM as it was (checked after roll 002) */
+    int cat0 = h_cat_n, cr0 = h_cat_rescans;     /* Keep: Canon's catalog not asked either */
     wf_pr_jpeg = WF_PJ_OVER;
     wf_dk_scr = WF_DS_OFF;
     chk(mem_roll(film, 2, dir, 504), "roll 002: 3 frames (%d)", wf_roll_now()->nshot);
@@ -6956,21 +6957,36 @@ static void t_roll_jpeg(void)
         free(rb);
     }
     chk(jp_cr2s(dir, 504) && !jp_wft(504), "copy: CR2s untouched, no .WFT");
-    /* Canon's PLAY after a run that changed DCIM (owner 11-21, 5D2 bug 3: Canon's list of the card is from power on):
-     * roll 001 (Keep) left DCIM alone, roll 002 replaced its camera JPEGs. On the way into PLAY the notice, the key still
-     * Canon's; leaving PLAY no notice */
+    /* Canon's PLAY after a run that changed DCIM (owner 11-21, 5D2 bug 3: PLAY's list is Canon's file catalog, read at
+     * card mount): roll 001 (Keep) left DCIM alone and asked nothing; roll 002 replaced its camera JPEGs, and after
+     * each frame Canon's catalog read that number again (FM_GetObjectHandleByPath on the DCIM JPEG, FC_ReScanFile on
+     * its handle). Done: no notice on the way into PLAY, the key Canon's */
     {
+#ifdef WF_BUILD_5D2
+        const uint32_t fh = 0xFF8453FCu, fr = 0xFF856A64u;
+#else
+        const uint32_t fh = 0xFF118EB0u, fr = 0xFF1167B0u;
+#endif
+        int pok = cat0 + 3 <= 8;
+        for (int k = 0; pok && k < 3; k++) {
+            char p[40];
+            snprintf(p, sizeof p, "B:/DCIM/100CANON/IMG_%04d.JPG", 504 + k);
+            pok = !strcmp(h_cat_path[cat0 + k], p) && h_cat_hseen[cr0 + k] == h_cat_h;
+        }
+        chk(cat0 == 0 && cr0 == 0 && h_cat_n == 3 && h_cat_rescans == 3 && pok && h_cat_fn[0] == fh && h_cat_fn[1] == fr
+            && log_has("dark: F01 Canon's file list read again (PLAY shows the new print)")
+            && !log_has("Canon's file list not read again"),
+            "catalog: Keep %d / %d calls, Overwrite %d handles + %d rescans of IMG_0504..0506.JPG (%s, '%s'), "
+            "at %x / %x",
+            cat0, cr0, h_cat_n - cat0, h_cat_rescans - cr0, pok ? "the frames' JPEGs" : h_cat_path[0],
+            log_line("Canon's file list"), (unsigned)h_cat_fn[0], (unsigned)h_cat_fn[1]);
         int hp = h_play, n0 = h_notify_n;
         h_play = 0;
-        int k1 = cbr_key(WF_KEY_PLAY), shown = h_notify_n == n0 + 1 && strstr(h_notify, "PLAY may miss them")
-                                               && strstr(h_notify, "Power off/on or open card door");
-        h_play = 1;
-        int n1 = h_notify_n, k2 = cbr_key(WF_KEY_PLAY);
+        int k1 = cbr_key(WF_KEY_PLAY);
         h_play = hp;
-        chk(!dc_keep && wf_dark_dcim_changed() && log_has("dark: DCIM changed: Canon's PLAY may miss it until power off")
-            && k1 == 1 && shown && k2 == 1 && h_notify_n == n1,
-            "PLAY after the run: Keep %d, Overwrite %d ('%s'), into PLAY: passes %d, notice %d ('%s'), out: %d, %d",
-            dc_keep, wf_dark_dcim_changed(), log_line("dark: DCIM changed"), k1, shown, h_notify, k2, h_notify_n - n1);
+        chk(!dc_keep && !wf_dark_dcim_changed() && k1 == 1 && h_notify_n == n0,
+            "PLAY after the run, catalog told: Keep %d, Overwrite %d, into PLAY: passes %d, notices %d",
+            dc_keep, wf_dark_dcim_changed(), k1, h_notify_n - n0);
     }
 
     /* frame: a white frame + details + the logo, Overwrite, one camera JPEG gone */
@@ -6981,7 +6997,29 @@ static void t_roll_jpeg(void)
     wf_pr_date = 2;
     chk(mem_roll(film, 3, dir, 507), "roll 003: 3 frames (%d)", wf_roll_now()->nshot);
     remove("DCIM/100CANON/IMG_0509.JPG");
+    int cr3 = h_cat_rescans;
+    h_cat_rc = 0x82110007u;                      /* Canon's catalog refuses: the notice is the way */
     mem_run("frame", 3);
+    h_cat_rc = 0;
+    /* each frame that changed DCIM asked (F03 has no camera JPEG: nothing changed, nothing asked); every refusal
+     * logged; into PLAY the notice, the key still Canon's; in PLAY no notice */
+    {
+        int hp = h_play, n0 = h_notify_n;
+        h_play = 0;
+        int k1 = cbr_key(WF_KEY_PLAY), shown = h_notify_n == n0 + 1 && strstr(h_notify, "PLAY may miss new prints")
+                                               && strstr(h_notify, "Card out and in, or power off/on");
+        h_play = 1;
+        int n1 = h_notify_n, k2 = cbr_key(WF_KEY_PLAY);
+        h_play = hp;
+        chk(h_cat_rescans - cr3 == 2 && wf_dark_dcim_changed()
+            && log_has("dark: F01 Canon's file list not read again (Canon 82110007): PLAY may miss it till card out/in "
+                       "or power off/on")
+            && log_has("dark: F02 Canon's file list not read again") && !log_has("dark: F03 Canon's file list")
+            && k1 == 1 && shown && k2 == 1 && h_notify_n == n1,
+            "catalog refused: %d rescans, notice flag %d ('%s'), into PLAY: passes %d, notice %d ('%s'), out: %d, %d",
+            h_cat_rescans - cr3, wf_dark_dcim_changed(), log_line("Canon's file list not"), k1, shown, h_notify, k2,
+            h_notify_n - n1);
+    }
     chk(strstr(log_line("dark: roll 003 end"), "3 developed, 0 failed, 0 left") != 0, "frame: 3 of 3 ('%s')",
         log_line("dark: roll 003 end"));
     chk(log_has("dark: F01 logo Canon ") && log_has("+ lettering " DK_T_MODEL) && log_has("dark: F02 logo Canon "),

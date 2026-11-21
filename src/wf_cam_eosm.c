@@ -388,3 +388,62 @@ int wf_cam_rejects_jpeg(int *bot)
     bot_rej_seen = rejects[K_BOT];
     return n;
 }
+
+/* ------------------------------------------------------------------ Canon's file catalog (owner 11-21, 5D2 bug 3)
+ * The same calls as the 5D2 (wf_cam_5d2.c says why): PLAY's list of the card is Canon's file catalog, read at card
+ * mount; after the Darkroom renamed a print over the shot's JPEG or moved its CR2 to ROLLS, FC_ReScanFile makes it read
+ * that folder and number again. FM_GetObjectHandleByPath(path, &handle) asserts when the file manager is not set up
+ * (its word at 0x3E4E4 = 0): called only with that word set and a path of the DCF shape (B:/DCIM/100CANON/IMG_0206.JPG,
+ * 29 chars). The prologues and the literal holding 0x3E4E4 are checked once. wf_task / the Darkroom task only. */
+#define CAT_FM_HANDLE 0xFF118EB0u                /* FM_GetObjectHandleByPath (const char *path, uint32_t *handle) */
+#define CAT_FC_RESCAN 0xFF1167B0u                /* FC_ReScanFile (uint32_t handle) */
+#define CAT_FM_READY  0x0003E4E4u                /* != 0: the file manager is set up */
+static const uint32_t cat_words[9][2] = {
+    { CAT_FM_HANDLE, 0xE92D4030u },              /* push {r4, r5, lr} */
+    { 0xFF118EB4u, 0xE1A05000u },                /* mov r5, r0                 the path */
+    { 0xFF118EB8u, 0xE51F0A8Cu },                /* ldr r0, =0x3E4E4 */
+    { 0xFF118EBCu, 0xE1A04001u },                /* mov r4, r1                 the handle out */
+    { 0xFF118434u, CAT_FM_READY },               /* the literal */
+    { CAT_FC_RESCAN, 0xE92D4070u },              /* push {r4, r5, r6, lr} */
+    { 0xFF1167B4u, 0xE1A05000u },                /* mov r5, r0                 the handle */
+    { 0xFF1167B8u, 0xE28F2F4Au },                /* add r2, pc, #0x128         "FC_ReScanFile" */
+    { 0xFF1167BCu, 0xE3A01001u },                /* mov r1, #1 */
+};
+#ifdef WF_HOST
+extern uint32_t wf_host_cat_call(uint32_t fn, uint32_t a0, uint32_t a1);
+#define CAT_RD32(a) wf_host_mem_read(a)
+#define CAT_CALL(fn, a0, a1) wf_host_cat_call(fn, (uint32_t)(a0), (uint32_t)(a1))
+#else
+#define CAT_RD32(a) (*(volatile uint32_t *)(a))
+#define CAT_CALL(fn, a0, a1) ((uint32_t (*)(uint32_t, uint32_t))(fn))((uint32_t)(a0), (uint32_t)(a1))
+#endif
+
+static int cat_dcf(const char *p)                /* X:/DCIM/nnnXXXXX/XXXX_nnnn.EXT */
+{
+    int n = 0;
+    while (p[n] && n < 40)
+        n++;
+    return n == 29 && p[1] == ':' && p[2] == '/' && p[3] == 'D' && p[4] == 'C' && p[5] == 'I' && p[6] == 'M'
+        && p[7] == '/' && p[16] == '/' && p[25] == '.';
+}
+
+int wf_cam_cat_tell(const char *path)
+{
+    static int body = -1;                        /* -1 not checked, 0 no, 1 yes */
+    if (body < 0) {
+        body = streq(__camera_model_short, "EOSM") && streq(firmware_version, "2.0.2");
+        for (unsigned i = 0; body && i < sizeof cat_words / sizeof *cat_words; i++)
+            body = ROM32(cat_words[i][0]) == cat_words[i][1];
+    }
+    if (!body)
+        return WF_CAT_BODY;
+    if (!CAT_RD32(CAT_FM_READY))
+        return WF_CAT_NOFM;
+    if (!cat_dcf(path))
+        return WF_CAT_PATH;
+    uint32_t h = 0;
+    CAT_CALL(CAT_FM_HANDLE, path, &h);
+    if (!h)
+        return WF_CAT_PATH;
+    return (int)CAT_CALL(CAT_FC_RESCAN, h, 0);
+}
