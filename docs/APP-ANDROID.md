@@ -132,7 +132,8 @@ they live in the private desktop repository only, never in this repository or in
 stages from the shared C core.
 - Every control, key and shader name is our own and matches the core's `lab.*` keys. The mapping from the model's own
   field names lives only in the private repository.
-- Tone, Grain and Glow each get an **Engine: Lab | Camera** switch. This is a proposal, temporary, and question 14.
+- Tone, Grain and Glow each get an **Engine: Lab | Camera** switch (owner, 21 Nov: Lab is the default, also for
+  frames shot on the EOS M / 5D2).
   - Lab is the owner's model and the default.
   - Camera is the film's own camera-side tools, bit-exact with the camera: the controls in the rows above.
   - Levels, Print range and Highlight colour show under both engines.
@@ -200,8 +201,9 @@ viewfinder                 ^
     contrast, Dye density, Keep brightness, Split tone) and Frame variation fold into the same cube: exact up to the
     cube. While a slider is dragged a 17^3 cube is baked (<= 8 ms), the 33^3 one on release (<= 60 ms, a worker thread;
     the GPU keeps the old cube until the new one is up).
-  - Per-frame draws use the seed of roll + frame; the viewfinder shows the **next** frame's (Frame variation, Frame
-    drift, dust): what you see is the frame you get. Free mode seeds with the shot counter.
+  - Per-frame draws use the seed of roll + frame; Free mode seeds with the shot counter. The viewfinder stays clean
+    (owner, 21 Nov): Frame variation, Frame drift and dust show only in Develop and on the print, never in the
+    viewfinder (mock 01).
   - Overlays drawn by the core at preview size when a setting changes (<= 30 ms): the film rebate (exact shapes; Edge
     light and Edge softness blurs at preview size) and the dust marks (exact positions, thin marks at least 1 px). The
     shader places the picture in the rebate (Frame drift = an affine move, bilinear) and computes the vignette with the
@@ -217,8 +219,8 @@ viewfinder                 ^
       cannot repeat the reference's bits.
     - The preview is approximate. **The saved print always comes from the C core.**
     - The phone needs `EXT_color_buffer_half_float`. All current GLES 3.x phones have it.
-  - Tiers: Full (all), Fast (the cube + vignette + rebate: no grain / glow / mist / dust), Off (the phone's picture,
-    with a thin frame line when a rebate is on). Film LUT 65^3 cubes are resampled to 33^3 for it. Details per key:
+  - Tiers: Full (all; the default, owner 21 Nov), Fast (the cube + vignette + rebate: no grain / glow / mist / dust),
+    Off (the phone's picture, with a thin frame line when a rebate is on). Film LUT 65^3 cubes are resampled to 33^3 for it. Details per key:
     option model section 13.
 - **Roll, shelf, Darkroom** (DESIGN 3.6, 3.14, 3.15): one roll in the camera, 3 / 6 / 12 / 24 / 36 frames, its film
   locked, Blind roll hides the frames until developed, a finished roll goes on the shelf, the Darkroom develops a roll
@@ -226,6 +228,9 @@ viewfinder                 ^
   (passes B..Z). Modes on the phone: **Free** (no roll: each frame developed right after the shot) and **Roll** (its
   frames develop at the shot or later in the Darkroom: the camera's RAW develop / Darkroom choice). The app keeps its
   rolls in its own database; a camera roll file `WFROLL.TXT` is read on import with the camera's semantics.
+  - Default (owner, 21 Nov): Roll, 36 frames, Blind on (mock 06).
+  - Words: the film cans live in the **Film fridge** (mock 02; renamed from "Film shelf" on 21 Nov), so "shelf" means
+    only finished rolls waiting for the Darkroom, as on the camera.
 - **Camera card import** (mock 07): SAF tree on the card; finds `DCIM/*CANON`, `ROLLS/ROLLnnn*/WFROLL.TXT`, `ML/DATA`;
   copies (or reads in place) the CR2 + JPG of the chosen rolls; never writes to the card; offers the card's `ML/DATA`
   as the user's film data folder.
@@ -249,9 +254,13 @@ The app supports foldables from the first build:
   - Medium or Expanded (inner screen: 673 dp wide upright, 841 dp sideways): the viewfinder with its controls in a
     side column, and Develop in two panes (the picture and the roll on the left, the tabs on the right). Mocks 13
     and 14.
-- **Tabletop (Flex mode).** Jetpack WindowManager's `FoldingFeature` reports half open with a horizontal hinge. The
-  viewfinder moves above the hinge and the shutter, settings and roll counter move below it. Nothing sits on the
-  hinge band. Mock 15.
+  - The inner-screen viewfinder lies sideways with the camera column on the right (owner, 21 Nov; mock 13).
+- **Tabletop (Flex mode).** Jetpack WindowManager's `FoldingFeature` reports half open with a horizontal hinge.
+  Nothing sits on the hinge band.
+  - Camera: the viewfinder moves above the hinge and the shutter, settings and roll counter move below it. Mock 15.
+  - Develop too (owner, 21 Nov): the picture, the frame's name, Print and the roll strip stand above the hinge; the 8
+    tabs and the tool panel, in two columns, lie below it. Unfolding flat brings back the two-pane Develop with the
+    same tab and edit. Mock 15b.
   - Book posture (vertical hinge) keeps the two-pane layout and keeps controls off the hinge.
 - **Folding or unfolding mid-shot keeps everything.**
   - The camera keeps running: it feeds our own texture, so only the screen surface is replaced.
@@ -274,7 +283,7 @@ The app supports foldables from the first build:
 | develop one frame (B + look + print + JPEG) | <= 2 s for 12 MP DNG, <= 3 s for an 18 MP CR2 | 4 threads; the camera takes 50-60 s |
 | Darkroom, 36 frames | <= 90 s, screen may sleep | foreground service; pauses at thermal SEVERE |
 | memory while developing | <= 400 MB | raw 33 MB + frame 36 MB + buffers per frame in flight |
-| APK | <= 30 MB | core, the public film tables, 97 cans, fonts |
+| APK | <= 30 MB | core, the public film tables, 97 cans (with the 4 spektrafilm Film LUT cubes), fonts |
 
 All of these are targets to measure in stage 2, not measurements.
 
@@ -292,17 +301,18 @@ All of these are targets to measure in stage 2, not measurements.
 - **Licences**: the app is GPL-3.0-or-later like the core (AndroidX Apache-2.0 is compatible); Ubuntu Sans (UFL 1.0)
   ships with its licence; the spektrafilm-derived tables and the 4 spektrafilm Film LUT cans (CC BY-SA 4.0) ship with
   attribution in About; the other 19 cans' cubes are the user's own files. The Even grain and Wrap halation constants
-  in `src/yg_grain.*` / `src/yh_halo.*` are Genesis-derived (DESIGN 1a, published with permission): whether that
-  permission covers a store-distributed app is the owner's call; a build flag can leave those two choices out.
-- **Names**: the cans carry real stock names, as on the camera; in a store listing that is a trademark question for
-  the owner.
+  in `src/yg_grain.*` / `src/yh_halo.*` are Genesis-derived (DESIGN 1a, published with permission); the owner
+  decided on 21 Nov to keep both in the app.
+- **Names**: the cans carry real stock names, as on the camera. The app ships as a signed APK only (owner, 21 Nov), so
+  there is no store listing.
 - **Thermal and battery**: a 30 fps shader plus long Darkroom runs; Fast tier and a thermal-status listener.
 - **Two places to keep in step**: the C core is the single source; the preview bakes from it, so a core change needs
   no shader change (except grain / glow approximations, checked against prints in a host test).
 
 ## 7. Staged plan
 
-1. **Stage 1 (this):** research, feature map, the shared option model, 18 mockups (14 phone screens, 4 foldable), this plan. Owner approval.
+1. **Stage 1 (this):** research, feature map, the shared option model, 19 mockups (14 phone screens, 5 foldable), this
+   plan. The owner answered the 16 questions on 21 Nov (section 9); approval of the mockups is next.
 2. **Stage 2, core + preview skeleton:** the core as `libwfcore.so` (arm64 / x86_64) with the wasm kit's shims; host
    test: the ref17 CR2 frames give the camera's prints (bit-exact gate, section 4); a bare Kotlin app with Camera2
    PRIV + RAW + JPEG, the GL preview with the baked cube, the shutter writing DNG. Measure section 5 on the owner's
@@ -319,15 +329,17 @@ All of these are targets to measure in stage 2, not measurements.
    Film rebate (all formats, edge print), Frame variation, Frame drift. Recipes, sidecar, undo, split / hold, 1:1.
    Each control lands in the core (C, the camera's and desktop's too) and in the preview split of section 4 together.
 5. **Stage 5, Film stage + user data + card:** the data folder (SAF), Film stage and its knobs and prints, Printing
-   lamp (needs the user's `WFSTAGE.DAT`), the Film LUT cans from the user's cubes, camera card import, develop again.
-6. **Stage 6, beta:** a device matrix (the owner's phones + 3-4 common mid-range models), perf / thermal, packaging
-   (APK / F-Droid / Play: the owner decides), the README languages (vi / en / ja / ko / zh).
+   lamp (needs the user's `WFSTAGE.DAT`), the other 19 Film LUT cans from the user's cubes (the 4 spektrafilm cans
+   ship in the APK), camera card import, develop again.
+6. **Stage 6, beta:** a device matrix (the owner's Fold3 first, then 3-4 common mid-range models), perf / thermal,
+   packaging as a signed APK (owner, 21 Nov: no F-Droid or Play), the README languages (vi / en / ja / ko / zh).
 
 ## 8. Mockups
 
 Sources `tools/apps/android_mocks/` (HTML + `wfm.css`, `dev.js` = the shared Develop chrome of 08..12, `mk_assets.py`
 gathers the inputs, `render.sh` = Edge headless at 360 x 800 x3, `mk_sheet.py` = the overview). PNGs, 1080 x 2400, in
-`F:\MagicLatern\_windyfilm_docs\android_mocks\`: `00_tong_quan.png` (overview), `01_viewfinder`, `02_shelf`,
+`F:\MagicLatern\_windyfilm_docs\android_mocks\`: `00_tong_quan.png` (overview), `01_viewfinder`, `02_shelf` (the Film
+fridge; the file keeps its old name),
 `03_roll`, `04_develop` (Glow tab), `04b_develop_film` (Film tab), `05_filmstage`, `06_settings`, `07_import`,
 `08_develop_print`, `09_develop_tone`, `10_develop_grain` (with Dust & scratches), `11_develop_lens`,
 `12_develop_gate` (Film rebate, Per frame). The photos in them are real renders of the WindyFilm core on the owner's
@@ -341,37 +353,29 @@ Redrawn on 21 Nov (later) for the owner's film model:
 - The slider values are illustrative, not the model's presets.
 
 Foldable screens (`<meta name="wf-size">` sets the window; `render.sh` reads it):
-- `13_fold_viewfinder`, `14_fold_develop`, `15_fold_tabletop`: 841 x 673 dp.
+- `13_fold_viewfinder`, `14_fold_develop`, `15_fold_tabletop`, `15b_fold_tabletop_develop`: 841 x 673 dp.
 - `16_fold_cover`: 317 x 864 dp.
 - The overview sheet has them in their own row.
 
-## 9. Open questions for the owner
+## 9. Owner's decisions (21 Nov 2026)
 
-1. OK that the camera (live film viewfinder, RAW, roll) is our own design and the reference plugin gives only the
-   depth of the editing options?
-2. "Film shelf" (the cans, mock 02) vs the camera's "shelf" (rolls waiting, 3.15): keep both words, or rename the cans
-   screen?
-3. Default mode: Roll with 36 frames and Blind on (as mocked), or Free?
-4. Live preview default: Full (30 fps, more battery) or Fast?
-5. Develop screens stay neutral grey for colour judgement; the safelight red only on the Darkroom run screen. OK?
-6. The Genesis-derived Even grain / Wrap halation in a store-distributed app: covered by the permission, or leave
-   them out of app builds?
-7. Distribution: APK only, F-Droid, or Play Store (and the stock names on the cans there)?
-8. Which phones first (your own models), and minSdk 29?
-9. Everything on the panel goes in (your 21 Nov note). The order inside stage 4 (section 7: tone and print controls
-   first, then dust, rebate and per-frame variation): OK, or something first?
-10. Ship the 4 spektrafilm Film LUT cans inside the app, or all 23 cans from your folder only?
-11. 8 Develop tabs on a phone (Film · Print · Tone · Grain · Glow · Lens · Gate · Finish), or fold Lens (vignette)
-    into Gate for 7?
-12. Viewfinder with Frame variation / Frame drift / dust on: show the next frame's draw (what you see is what you
-    get, mock 01 would change per shot), or keep the viewfinder clean and show them only in Develop?
-13. Edge print text on the rebate: "WINDYFILM · film name · frame number" (mock 12), or something else (roll number,
-    your name)?
-14. Tone, Grain and Glow get an **Engine: Lab | Camera** switch.
-    - Lab is your film model: Negative, Shoulder, Bloom, Halation and Grain with your numbers.
-    - Camera is the film's own camera-side tools, bit-exact with the camera.
-    - Proposed, and taken for now: Lab as the default. Or should Camera be the default for frames shot on the EOS M
-      / 5D2?
-15. On the Fold3, the viewfinder on the inner screen: sideways with the camera column on the right (mock 13), or
-    upright like a big phone?
-16. Tabletop (mock 15): only the camera, or Develop too (picture above the hinge, the tool panel below)?
+The owner answered the 16 stage-1 questions on 21 Nov. The sections above already follow them.
+
+1. **Camera of our own:** yes. The camera (live film viewfinder, RAW, roll) is our own design; the reference
+   plugin only sets the depth of the editing options.
+2. **Rename the cans screen:** yes. The owner left the name open; we chose **Film fridge** ("Tủ phim" in Vietnamese),
+   where film is kept before it goes into the camera. "Shelf" stays the camera's word for finished rolls (mock 02).
+3. **Default mode:** Roll, 36 frames, Blind on.
+4. **Live preview default:** Full, 30 fps.
+5. **Neutral grey Develop:** yes; the safelight red only on the Darkroom run screen.
+6. **Even grain and Wrap halation (Genesis-derived):** kept in the app.
+7. **Distribution:** a signed APK only.
+8. **Phones:** the Galaxy Z Fold3 first; minSdk 29.
+9. **Stage 4 order:** as in section 7.
+10. **Film LUT cans:** the 4 spektrafilm cans ship in the app; the other 19 come from the user's folder.
+11. **Develop tabs:** 8 (Film · Print · Tone · Grain · Glow · Lens · Gate · Finish).
+12. **Viewfinder:** clean. Frame variation, Frame drift and dust show only in Develop.
+13. **Edge print text:** as in mock 12 ("WINDYFILM · film name · frame number").
+14. **Engine:** Lab is the default.
+15. **Fold3 inner viewfinder:** sideways, camera column on the right (mock 13).
+16. **Tabletop:** covers Develop too (mock 15b).

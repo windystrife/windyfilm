@@ -74,7 +74,7 @@
 <script>
 const looks = [['033','Portra 400'],['032','Portra 160'],['044','Pro 400H'],['034','Gold 200'],['039','Ektar 100'],['027','Classic Neg'],['030','Chungking'],['066','Windy EKTA P']];
 const st = document.getElementById('strip');
-const add = document.createElement('div'); add.className = 'lk add'; add.innerHTML = '<div>+</div><span>Shelf</span>'; st.appendChild(add);
+const add = document.createElement('div'); add.className = 'lk add'; add.innerHTML = '<div>+</div><span>Fridge</span>'; st.appendChild(add);
 looks.forEach(([id, n]) => { const d = document.createElement('div'); d.className = 'lk' + (id === '033' ? ' on' : ''); d.innerHTML = `<div style="background-image:url(assets/f/${id}_6849.jpg)"></div><span>${n}</span>`; st.appendChild(d); });
 </script>
 </body></html>

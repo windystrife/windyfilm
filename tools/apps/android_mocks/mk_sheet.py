@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 D, FR, FB, OUT = sys.argv[1:5]
 SHOTS = [
     ('01_viewfinder', '01 · Ngắm chụp', 'Film live 30 fps trong khung ngắm · ROLL 004 12/36 · ISO / tốc / WB / focus / EV'),
-    ('02_shelf', '02 · Kệ film (lon)', 'Film | Film stage · Colour / Cine / B&W / Film LUT · nạp cuộn 3-36 kiểu'),
+    ('02_shelf', '02 · Tủ phim (Film fridge, các lon)', 'Film | Film stage · Colour / Cine / B&W / Film LUT · nạp cuộn 3-36 kiểu'),
     ('03_roll', '03 · Cuộn + contact sheet', 'Cuộn trong máy (blind: ẩn ảnh) · cuộn đã tráng · cuộn chờ trên kệ'),
     ('04b_develop_film', '04b · Tráng: tab Film', 'Light + Kelvin / Tint / Exposure (mới) · Strength · Print · Paper'),
     ('08_develop_print', '08 · Tráng: tab Print', 'Đèn in (K) · Print contrast · Dye density · đầu màu C/M/Y, Linked, Keep brightness · Split tone'),
@@ -25,19 +25,32 @@ SHOTS = [
     ('06_settings', '06 · Cài đặt', 'DNG + JPG · preview · dữ liệu film của bạn (không kèm trong app) · thẻ máy'),
     ('07_import', '07 · Nhập thẻ EOS M / 5D2', 'Đầu đọc OTG · ROLLS + WFROLL.TXT · tráng lại · không ghi gì vào thẻ'),
 ]
-# the owner's Galaxy Z Fold3: inner screen (841 x 673 dp) three times, the cover screen (317 x 864 dp) once
+# the owner's Galaxy Z Fold3: inner screen (841 x 673 dp) four times, the cover screen (317 x 864 dp) once;
+# the row wraps when it is full (open flat + cover first, then the two tabletop screens)
 FOLD = [
     ('13_fold_viewfinder', '13 · Fold3 mở: ngắm chụp', 'Màn trong nằm ngang: khung ngắm trái, cột máy phải · gập lại là màn ngoài chụp tiếp'),
     ('14_fold_develop', '14 · Fold3 mở: tráng 2 cột', 'Ảnh + cuộn + histogram bên trái · 8 tab và núm bên phải (cùng hàng như điện thoại)'),
-    ('15_fold_tabletop', '15 · Fold3 gập nửa (Flex)', 'Đặt bàn: ảnh nửa trên, nút nửa dưới · không vẽ gì lên bản lề · hẹn giờ 10 s'),
     ('16_fold_cover', '16 · Màn ngoài', '317 dp: bố cục điện thoại vừa khít'),
+    ('15_fold_tabletop', '15 · Fold3 gập nửa (Flex): chụp', 'Đặt bàn: ảnh nửa trên, nút nửa dưới · không vẽ gì lên bản lề · hẹn giờ 10 s'),
+    ('15b_fold_tabletop_develop', '15b · Fold3 gập nửa: tráng', 'Chủ chọn 21/11: tabletop có cả Develop · ảnh nửa trên, 8 tab và núm nửa dưới (2 cột)'),
 ]
 FW, FH, CW = 552, 442, 162           # inner screens at width 552; the cover screen at the same height
 W, H = 360, 800                      # each screen at 1/3 of 1080 x 2400
 COLS, PAD, TOP, CAP = 5, 28, 140, 78
 rows = (len(SHOTS) + COLS - 1) // COLS
 FTOP = TOP + rows * (H + CAP + PAD) + 20
-sheet = Image.new('RGB', (COLS * W + (COLS + 1) * PAD, FTOP + 48 + CAP + 24 + FH + PAD), (20, 21, 25))
+SW = COLS * W + (COLS + 1) * PAD
+FIMS, fpos, fx, fy = {}, [], PAD, 0
+for name, title, cap in FOLD:
+    im = Image.open(os.path.join(D, name + '.png')).convert('RGB')
+    w = FW if im.width > im.height else CW
+    if fx + w > SW - PAD:
+        fx, fy = PAD, fy + 1
+    FIMS[name] = (im, w)
+    fpos.append((fx, fy))
+    fx += w + PAD
+FROWH = CAP + 24 + FH + PAD
+sheet = Image.new('RGB', (SW, FTOP + 48 + (fy + 1) * FROWH), (20, 21, 25))
 d = ImageDraw.Draw(sheet)
 fb = lambda s: ImageFont.truetype(FB, s)
 fr = lambda s: ImageFont.truetype(FR, s)
@@ -70,18 +83,15 @@ for i, (name, title, cap) in enumerate(SHOTS):
     for k, ln in enumerate(wrap(cap, fr(15), W)):
         d.text((x, y + 34 + k * 19), ln, font=fr(15), fill=(160, 168, 180))
 d.text((PAD, FTOP), 'Điện thoại gập · Galaxy Z Fold3 của chủ (không khoá xoay, không viền đen)', font=fb(26), fill=(236, 238, 240))
-x = PAD
-for name, title, cap in FOLD:
-    im = Image.open(os.path.join(D, name + '.png')).convert('RGB')
-    w = FW if im.width > im.height else CW
+for (name, title, cap), (x, row) in zip(FOLD, fpos):
+    im, w = FIMS[name]
     im = im.resize((w, FH), Image.LANCZOS)
-    y = FTOP + 48
+    y = FTOP + 48 + row * FROWH
     capw = w
     d.text((x, y + 2), title, font=fb(20 if w == CW else 22), fill=(244, 166, 52))
     for k, ln in enumerate(wrap(cap, fr(15), capw)):
         d.text((x, y + 32 + k * 19), ln, font=fr(15), fill=(160, 168, 180))
     sheet.paste(im, (x, y + CAP + 24))
     d.rectangle((x - 1, y + CAP + 23, x + w, y + CAP + 24 + FH), outline=(42, 47, 56))
-    x += w + PAD
 sheet.save(OUT)
 print(OUT, sheet.size)

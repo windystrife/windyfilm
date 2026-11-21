@@ -1,0 +1,86 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>WindyFilm foldable: tabletop (Flex mode) Develop (Galaxy Z Fold3, half open)</title>
+<meta name="wf-size" content="841x673">
+<link rel="stylesheet" href="wfm.css">
+<style>
+/* Owner 21 Nov (A16): tabletop covers Develop too. Fold3 inner screen half open, hinge horizontal: the picture stands
+   up above the hinge, the 8 tabs and the tool panel lie on the table below it, in two columns. Nothing on the hinge. */
+html, body, .screen { width: 841px; height: 673px; }
+.status, .gesture { width: 841px; }
+.up { position: absolute; left: 0; top: 0; width: 841px; height: 330px; background: #0A0B0E; }
+.pic { position: absolute; left: 186px; top: 26px; width: 450px; height: 300px; overflow: hidden; border-radius: 3px;
+  background: url(assets/lab/tone_gpu.png) center 30%/cover no-repeat; }
+.pic .l { position: absolute; font-size: 9.5px; font-weight: 700; padding: 3px 8px; border-radius: 5px; background: rgba(13,14,17,.75); }
+.lft { position: absolute; left: 16px; top: 34px; width: 160px; }
+.lft .ttl { font-size: 13px; font-weight: 700; }
+.lft .sub { font-size: 10.5px; color: var(--t3); font-weight: 600; margin-top: 2px; line-height: 1.35; }
+.lft .acts { display: flex; gap: 8px; align-items: center; margin-top: 12px; }
+.lft .chips { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.rgt { position: absolute; left: 652px; top: 34px; width: 174px; }
+.rgt .hist { width: 160px; height: 64px; background: rgba(236,238,240,.04); border: 1px solid var(--line); border-radius: 6px; padding: 5px; }
+.rgt .h { margin-top: 12px; font-size: 10px; color: var(--t3); font-weight: 700; letter-spacing: .1em; }
+.rgt .row { display: flex; gap: 4px; margin-top: 6px; }
+.rgt .fr { width: 50px; height: 34px; border-radius: 3px; background-size: cover; background-position: center; position: relative; }
+.rgt .fr span { position: absolute; left: 2px; bottom: 1px; font-size: 8px; font-weight: 700; color: #fff; text-shadow: 0 0 3px #000; }
+.rgt .fr.on { outline: 2px solid var(--amber); outline-offset: 1px; }
+.hinge { position: absolute; left: 0; top: 330px; width: 841px; height: 14px; background: linear-gradient(#050608, #16181D 50%, #050608); }
+.hinge span { position: absolute; left: 50%; top: 1px; transform: translateX(-50%); font-size: 8.5px; letter-spacing: .14em; font-weight: 700; color: #3A404B; }
+.dtt { left: 0 !important; width: 841px; top: 344px; border-bottom: 1px solid var(--line); }
+.cols { position: absolute; left: 0; top: 396px; width: 841px; display: grid; grid-template-columns: 1fr 1fr; }
+.cols .dpn { position: static; width: auto; }
+.cols .dpn + .dpn { border-left: 1px solid var(--line); }
+.note { position: absolute; left: 0; width: 841px; top: 640px; text-align: center; font-size: 9.5px; color: var(--t3); }
+</style></head>
+<body><div class="screen">
+<div class="up">
+  <div class="status"><span>14:58</span><div class="icons"><i class="wifi"></i><i class="sig"></i><i class="bat"></i></div></div>
+  <div class="lft">
+    <div class="ttl">F11 · ROLL 003</div>
+    <div class="sub">IMG_6849.CR2 · Ektar 100<br>ISO 100 · 1/250</div>
+    <div class="acts">
+      <span class="ico"><svg viewBox="0 0 24 24"><path d="M9 7L4 12l5 5"/><path d="M4 12h10a6 6 0 0 1 0 12"/></svg></span>
+      <span class="chip am" style="height:28px;border-radius:14px;padding:0 14px">Print</span>
+    </div>
+    <div class="chips"><span class="chip">Split</span><span class="chip ol">Hold for before</span><span class="chip ol">1:1 grain</span></div>
+  </div>
+  <div class="pic" id="pic"></div>
+  <div class="rgt">
+    <div class="hist"><svg viewBox="0 0 150 54" width="150" height="54" preserveAspectRatio="none">
+      <path d="M0 54 L0 50 C12 47 20 36 34 33 C48 30 56 16 72 14 C88 12 94 26 108 28 C122 30 130 16 150 20 L150 54 Z" fill="rgba(236,238,240,.45)"/>
+      <path d="M0 54 L0 52 C16 51 26 42 42 38 C58 34 70 24 86 26 C102 28 116 36 130 32 C140 30 146 38 150 42 L150 54 Z" fill="rgba(244,166,52,.4)"/></svg></div>
+    <div class="h">ROLL 003 · 12 FRAMES</div>
+    <div class="row" id="row"></div>
+  </div>
+</div>
+<div class="hinge"><span>HINGE · NOTHING DRAWN HERE</span></div>
+<div class="dtt" id="tt"></div>
+<div class="cols"><div class="dpn" id="c1"></div><div class="dpn" id="c2"></div></div>
+<div class="note">Tabletop: picture up, tools down. Unfold flat and the two-pane Develop comes back with the same tab and edit.</div>
+<div class="gesture"></div>
+</div>
+<script src="dev.js"></script>
+<script>
+document.getElementById('pic').innerHTML = split('assets/f/039_6849.jpg', 190, 'BEFORE', 'NEGATIVE + SHOULDER', 'center 30%');
+document.getElementById('tt').innerHTML = WF_TABS.map(([n, svg]) => `<div${n === 'Tone' ? ' class="on"' : ''}><svg viewBox="0 0 24 24">${svg}</svg>${n}</div>`).join('');
+const frames = [['033_6847', 'F10'], ['033_6849', 'F11'], ['033_6852', 'F12']];
+document.getElementById('row').innerHTML = frames.map(([f, n]) => `<div class="fr${n === 'F11' ? ' on' : ''}" style="background-image:url(assets/f/${f}.jpg)"><span>${n}</span></div>`).join('');
+document.getElementById('c1').innerHTML =
+  eng() +
+  gh('Negative', 'how the negative was developed', 'new') +
+  sl('S-curve', 35, 0, 100, '35', 'new') +
+  sl('Midtone lift', 10, -100, 100, '+10', 'new') +
+  sl('Colour purity', 110, 0, 200, '110%', 'new', 100) +
+  sl('Lift & toe', 15, 0, 100, '15', 'new') +
+  gh('Print', '') +
+  sl('Highlight colour', 50, 0, 100, 'film\'s', '', 50);
+document.getElementById('c2').innerHTML =
+  gh('Shoulder', 'how the highlights roll off', 'new') +
+  sl('Shoulder', 55, 0, 100, '55', 'new') +
+  sl('Shoulder white', 95, 50, 100, '95', 'new', 100) +
+  sl('Shoulder width', 35, 0, 100, '35', 'new') +
+  sl('Colour mute', 40, 0, 100, '40', 'new') +
+  gh('Levels', seg(['Colour', 'Luma'], 'Colour', 'width:110px')) +
+  sl('Black level', 2, -10, 10, '+2%') +
+  sl('White level', 97, 80, 110, '97%', '', 100);
+</script>
+</body></html>
