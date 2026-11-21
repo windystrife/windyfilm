@@ -1,7 +1,9 @@
 # WindyFilm for phones (Android first): stage 1 plan (21 Nov 2026, branch `app-android`)
 
-**Status: research, feature map, mockups and plan for the owner's approval. No app code yet.** The only code on this
-branch is what draws the mockups (`tools/apps/android_mocks/`).
+**Status: stage 1 (research, feature map, mockups, plan) approved by the owner on 21 Nov 2026; stage 2 (core +
+preview skeleton) is under way in the private desktop repository (`windyfilm-desktop`, branch `android-gpu`,
+`android/`), because the app carries the owner's private film model.** The only code on this branch is what draws the
+mockups (`tools/apps/android_mocks/`).
 
 Owner's words (21 Nov, paraphrased): the phone app shoots RAW and adds film; learn the features and choices of the
 owner's reference, a commercial desktop film plugin, built on what WindyFilm already has; keep Film stage, with many
@@ -312,7 +314,7 @@ All of these are targets to measure in stage 2, not measurements.
 ## 7. Staged plan
 
 1. **Stage 1 (this):** research, feature map, the shared option model, 19 mockups (14 phone screens, 5 foldable), this
-   plan. The owner answered the 16 questions on 21 Nov (section 9); approval of the mockups is next.
+   plan. The owner answered the 16 questions on 21 Nov (section 9) and approved the mockups the same day.
 2. **Stage 2, core + preview skeleton:** the core as `libwfcore.so` (arm64 / x86_64) with the wasm kit's shims; host
    test: the ref17 CR2 frames give the camera's prints (bit-exact gate, section 4); a bare Kotlin app with Camera2
    PRIV + RAW + JPEG, the GL preview with the baked cube, the shutter writing DNG. Measure section 5 on the owner's
@@ -321,6 +323,12 @@ All of these are targets to measure in stage 2, not measurements.
    - fold and unfold while the camera runs;
    - tabletop;
    - the Lab-engine shaders' frame time on its GPU.
+
+   Status, 21 Nov (in the private repo, see the status line): the core builds with NDK r27c for arm64-v8a and
+   x86_64, and both builds print the desktop's golden md5 lines (1,170 lines, every one equal; arm64 under qemu). The
+   skeleton app builds as a debug APK: Camera2 viewfinder with the GL preview, the shutter writing DNG + JPEG, a
+   Camera2 probe, and a core check on a CR2 with the card's data files. Left for stage 2: the measurements on the
+   Fold3 (the owner's phone).
 3. **Stage 3, develop + roll:** `wf_dng.c` and B on DNG; Free mode; rolls (film lock, Blind, exposures), the shelf, the
    Darkroom service, the contact sheet, gallery, export, share.
 4. **Stage 4, Develop tools:** the 8 tabs; the H rows everywhere, then the A controls in this order: Light K / Tint,
