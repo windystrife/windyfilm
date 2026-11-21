@@ -475,6 +475,11 @@ Cards are built only on the owner's word.
    - **On the camera:** the time to open a print and to build a 36-frame sheet (two reads of 9 KB a frame); the
      pictures' look on the LCD (103 colours, the dither); free memory with the sheet up; PLAY in shooting on both
      (and that Canon's PLAY after ours does not bounce back); the 5D2's joystick up / down codes on Prints.
+   - **Cards (21 Nov 2026, on the owner's word):** `F:\MagicLatern\EOSM_WindyFilm_M5` and `5D2_WindyFilm_M5` (and on
+     the share), the M1 / RAWB28 recipe, `windyflm.mo` from cb503d4 (code = 7f7a019). Against the M1 cards only
+     `windyflm.mo` and `card/HUONGDAN_FILMOS_<CAM>.txt` differ: the step lists now walk M1 - M5 (M2 shelf, M3 finder,
+     M4 Top plate on the 5D2, M5 Prints and the contact sheet; a roll must be developed with the M5 card first, older
+     prints have no `.WFP`). Logs come back to share Anh `log_m5_eosm` / `log_m5_5d2`.
 6. **M6: Polish.**
    - The Darkroom's top bar in the film OS style (safelight theme kept).
    - Boot straight to the HUD with the roll toast.
