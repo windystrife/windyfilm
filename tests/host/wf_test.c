@@ -10,7 +10,9 @@
  *   FX                 grain + halation through the shot: ready keys, glow round a light, grain texture, no memory, free
  *   FX bloom           Bloom on its own row (RAWB11): halation alone, bloom alone, both, both off, levels, rows, EXIF text;
  *                      WF_FX_DUMP=1 [WF_FX_UYVY=frame] also writes bloom_<level>.ppm (the harness strip)
- *   FXAB               Even grain / Wrap (the Genesis Pro 1.6.6 model, DESIGN 1a) against the stages before; Bloom alone,
+ *   FX lab             the film-lab Halation / Bloom / Grain (yl_lab.c): config words, rows, keys, the glows, 8 mm, grain,
+ *                      EXIF; WF_FX_DUMP=1 [WF_FX_UYVY=frame] also writes lab_<set>.ppm (tests/ui/lab_strip.sh)
+ *   FXAB             Even grain / Wrap (the Genesis Pro 1.6.6 model, DESIGN 1a) against the stages before; Bloom alone,
  *                      the Gauge (16 / 35 / 65 mm: halo reach, grain size)
  *                      them on the same frame: the halo round a light, the core of a light (difference of blur keeps
  *                      it), no pixel darker than the plain look, the three grain amounts monotonic, and the frames
@@ -544,6 +546,8 @@ static int shot(const uint32_t *src, uint32_t *dst, int w, int h)
         bad = sentinel_bad(fa, nh, A_USED) + sentinel_bad(fb, n - nh, B_USED);
     }
 #endif
+    if (getenv("WF_SHOT_HASH"))                  /* tools: every shot's result as a hash, to hold a build against another one */
+        printf("shot hash %08x\n", fnv(2166136261u, (const uint8_t *)dst, (size_t)n * 4));
     return bad;
 }
 
@@ -1037,6 +1041,26 @@ static void dump_half(const char *path, const uint32_t *p, int w, int h)
     free(row);
     fclose(f);
 }
+static void dump_full(const char *path, const uint32_t *p, int w, int h)   /* the whole frame as RGB (lab strip) */
+{
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return;
+    fprintf(f, "P6\n%d %d\n255\n", w, h);
+    unsigned char *row = malloc((size_t)w * 3);
+    for (int y = 0; row && y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            uint32_t q = p[(size_t)y * (w / 2) + x / 2];
+            int u = (int8_t)(q & 255), yy = x & 1 ? q >> 24 : (q >> 8) & 255, v = (int8_t)((q >> 16) & 255);
+            row[x * 3] = (unsigned char)clampi(yy + 1402 * v / 1000, 0, 255);
+            row[x * 3 + 1] = (unsigned char)clampi(yy - (344 * u + 714 * v) / 1000, 0, 255);
+            row[x * 3 + 2] = (unsigned char)clampi(yy + 1772 * u / 1000, 0, 255);
+        }
+        fwrite(row, 1, (size_t)w * 3, f);
+    }
+    free(row);
+    fclose(f);
+}
 /* set halation / bloom, wait for the stage's key (or none), shoot the frame in `in`; the glow ring's mean dY (dV in *rv) */
 static double fx_bloom_shot(const char *what, int halo, int bloom, double *rv)
 {
@@ -1114,11 +1138,15 @@ static void t_fx_bloom(void)
         wf_row_text(WF_ROW_BLOOM), wf_row_text(WF_ROW_HALO));
     chk(wf_row_avail(WF_ROW_BLOOM) == wf_row_avail(WF_ROW_HALO) && wf_row_avail(WF_ROW_BLOOM) == 1, "Bloom available like Halation");
     wf_row_step(WF_ROW_BLOOM, 1);
-    chk(wf_bloom == 0 && wf_halo == 2, "Bloom Strong + 1 wraps to Off, Halation untouched (%d, %d)", wf_bloom, wf_halo);
+    chk(wf_bloom == WF_BLOOM_LAB && wf_halo == 2, "Bloom Strong + 1 = Lab, Halation untouched (%d, %d)", wf_bloom, wf_halo);
+    wf_row_step(WF_ROW_BLOOM, 1);
+    chk(wf_bloom == 0 && wf_halo == 2, "Bloom Lab + 1 wraps to Off, Halation untouched (%d, %d)", wf_bloom, wf_halo);
     wf_row_step(WF_ROW_HALO, 1);
     chk(wf_halo == 3 && wf_bloom == 0, "Halation Tight + 1 = Wrap (%d, %d)", wf_halo, wf_bloom);
     wf_row_step(WF_ROW_HALO, 1);
-    chk(wf_halo == 0 && wf_bloom == 0, "Halation Wrap + 1 wraps to Off (%d, %d)", wf_halo, wf_bloom);
+    chk(wf_halo == WF_HALO_LAB && wf_bloom == 0, "Halation Wrap + 1 = Lab (%d, %d)", wf_halo, wf_bloom);
+    wf_row_step(WF_ROW_HALO, 1);
+    chk(wf_halo == 0 && wf_bloom == 0, "Halation Lab + 1 wraps to Off (%d, %d)", wf_halo, wf_bloom);
 #ifndef WF_BUILD_5D2
     h_prop_send(PROP_ASPECT, 1);
     chk(WAIT(!wf_row_avail(WF_ROW_BLOOM), 2000) && !wf_row_avail(WF_ROW_HALO), "1:1 aspect: Bloom greyed like Halation");
@@ -1170,7 +1198,7 @@ static void t_fx_bloom(void)
             memcpy(in, b, NW * 4);
         free(b);
         printf("bloom strip on %s\n", b && n == (long)NW * 4 ? src : "the disc frame");
-        for (int lv = 0; lv <= WF_BLOOM_MAX; lv++) {
+        for (int lv = 0; lv < WF_BLOOM_LAB; lv++) {   /* the WindyFilm levels (Lab: FX:lab) */
             char pth[32];
             fx_bloom_shot("strip", 0, lv, 0);
             printf("  %s\n", log_line("shot #"));
@@ -1183,6 +1211,235 @@ static void t_fx_bloom(void)
 
 /* ------------------------------------------------------------------ FXAB: WindyGrain / WindyHalation against the old stages */
 /* the most negative (b - a) luma of an annulus round the frame centre, and how many pixels it darkened */
+/* ------------------------------------------------------------------ FX:lab */
+/* Lab (11-21, DESIGN 3.20): the film-lab Halation / Bloom / Grain (yl_lab.c) in the module - the config words, the rows
+ * and keys, a Lab value in one glow row taking the other's WindyFilm value out, the stage on the disc frame, 8 mm. How
+ * close the camera's arithmetic is to the reference CLI is tools/lab_check.sh's (frames, not this test). */
+static double box_dy(const uint32_t *a, const uint32_t *b, int w, int x0, int x1, int y0, int y1);
+static double fx_lab_shot(const char *what, int halo, int bloom, double *rv)
+{
+    log_mark();
+    wf_halo = halo;
+    wf_bloom = bloom;
+    int want = WF_HALO_RUN(halo, bloom) || WF_BLOOM_RUN(halo, bloom);
+    chk(WAIT(want ? wf_fx_hk && WF_FXK_HLAB(wf_fx_hk) == (halo == WF_HALO_LAB) && WF_FXK_BLAB(wf_fx_hk) == (bloom == WF_BLOOM_LAB)
+             : !wf_fx_hk, 60000), "%s: halation-stage key %x", what, wf_fx_hk);
+    usleep(200000);
+    shot(in, out, FW, FH);
+    chk(LOGW("shot #", 5000), "%s: %s", what, log_line("shot #"));
+    double ry = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'y', 0);
+    if (rv)
+        *rv = ring(ref, out, FW, FH, disc_r + 6, disc_r + 40, 'v', 0);
+    return ry;
+}
+static void t_fx_lab(void)
+{
+    struct pk e[] = { { fC, 0, tab_make(0, 0, 0, 0) } };
+    int hk = 0, gk = 0, hk16 = 0, post;
+    double rvh, rvb, rvhb, sd, sd8, sd65, cm;
+    char tb[200];
+    pack_write(e, 1, 0);
+    put_cfg("film=%d\noutput=film\ngrain=lab\nhalation=lab\nbloom=lab\ngauge=8\nmist=off\n", wf_films[fC].id);
+    wf_fx_retry_ms = 500;
+    mod_init(1);
+    chk(wf_grain == WF_GRAIN_LAB && wf_halo == WF_HALO_LAB && wf_bloom == WF_BLOOM_LAB && wf_gauge == WF_GAUGE_8,
+        "cfg grain / halation / bloom = lab, gauge = 8 read (%d %d %d %d)", wf_grain, wf_halo, wf_bloom, wf_gauge);
+    chk(!strcmp(wf_row_text(WF_ROW_GRAIN), "Lab") && !strcmp(wf_row_text(WF_ROW_HALO), "Lab") && !strcmp(wf_row_text(WF_ROW_BLOOM), "Lab")
+        && !strcmp(wf_row_text(WF_ROW_GAUGE), "8 mm") && !strcmp(wf_fx_gstock_name(), "Lab"), "rows Lab / Lab / Lab / 8 mm, stock"
+        " '%s'", wf_fx_gstock_name());
+#ifndef WF_BUILD_5D2
+    h_prop_send(PROP_ASPECT, 0);
+#endif
+    disc_r = 60;
+    gen_frame(in, FW, FH, 1);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+    chk(WAIT(look_table_ready(), 10000), "table published");
+    post = wf_fx_mode();
+    chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_HLAB(hk) && WF_FXK_BLAB(hk) && !WF_FXK_HALO(hk) && !WF_FXK_BLOOM(hk)
+        && WF_FXK_HGAUGE(hk) == WF_GAUGE_8 && WF_FXK_GLAB(gk) && WF_FXK_GGAUGE(gk) == WF_GAUGE_8 && !(gk & 0x1c0),
+        "Lab keys: stage %x, grain %x", hk, gk);
+    chk(WAIT(wf_fx_hk == hk && wf_fx_gk == gk, 120000) && LOGW("fx halation lab, bloom lab, 8mm Lab ready", 5000)
+        && LOGW("fx grain lab 8mm ready", 5000), "Lab ready: '%s' | '%s'", log_line("fx halation "), log_line("fx grain "));
+    chk(wf_fx_state(WF_FX_HAL) == WF_FXS_READY && wf_fx_state(WF_FX_BLM) == WF_FXS_READY && wf_fx_state(WF_FX_GRN) == WF_FXS_READY,
+        "menu state: all three ready");
+    usleep(200000);
+    log_mark();
+    chk(shot(in, out, FW, FH) == 0, "8 mm, all three Lab: the frame's words only");
+    chk(LOGW("shot #", 5000), "all three: a shot line");
+    const char *sl = log_line("shot #");
+    chk(strstr(sl, " + halation lab+bloom lab ") && strstr(sl, " + grain "), "all three: shot line '%s'", sl);
+
+    /* the glows alone (grain off), 35 mm: a red-orange halo, a glow in the light's colour, both more than either */
+    wf_grain = 0;
+    wf_gauge = 1;
+    double ryh = fx_lab_shot("Halation Lab", WF_HALO_LAB, 0, &rvh);
+    sl = log_line("shot #");
+    chk(strstr(sl, " + halation lab ") && !strstr(sl, "bloom") && LOGW("fx halation lab, bloom off, 35mm Lab ready", 5000),
+        "Halation Lab: '%s' | '%s'", sl, log_line("fx halation "));
+    chk(ryh > 0.3 && rvh > 0.2, "Halation Lab: a red-orange halo round the light (dY %+.2f, dV %+.2f)", ryh, rvh);
+    cm = corner(ref, out, FW, &sd);
+    chk(cm == 0 && sd == 0, "Halation Lab: far from the light the frame is the film look alone (%+.3f, sd %.3f)", cm, sd);
+    double ryb = fx_lab_shot("Bloom Lab", 0, WF_BLOOM_LAB, &rvb);
+    chk(strstr(log_line("shot #"), " + bloom lab ") && !strstr(log_line("shot #"), "halation"), "Bloom Lab: '%s'", log_line("shot #"));
+    chk(ryb > 0.3 && fabs(rvb) < rvh / 2, "Bloom Lab: a glow in the light's own colour (dY %+.2f, dV %+.2f; halation dV %+.2f)",
+        ryb, rvb, rvh);
+    double ryhb = fx_lab_shot("both Lab", WF_HALO_LAB, WF_BLOOM_LAB, &rvhb);
+    chk(ryhb > ryh && ryhb > ryb && rvhb > rvb, "both Lab: more than either alone (dY %+.2f vs %+.2f / %+.2f, dV %+.2f)", ryhb,
+        ryh, ryb, rvhb);
+#ifndef WF_BUILD_5D2
+    {                                            /* the Diana halves against the whole frame: the light crosses the seam (the
+                                                    centre row); its glow in the rows above and below it, as WindyHalation's */
+        int x0 = FW / 2 - disc_r - 40, x1 = FW / 2 + disc_r + 40;
+        double wa = box_dy(ref, out, FW, x0, x1, FH / 2 - 6, FH / 2), wb = box_dy(ref, out, FW, x0, x1, FH / 2, FH / 2 + 6);
+        double wa2 = box_dy(ref, out, FW, x0, x1, FH / 2 - 60, FH / 2 - 6), wb2 = box_dy(ref, out, FW, x0, x1, FH / 2 + 6, FH / 2 + 60);
+        halves = 1;
+        log_mark();
+        shot(in, out2, FW, FH);
+        halves = 0;
+        chk(LOGW("(TOP ", 5000), "both Lab, halves shot: %s", log_line("(TOP "));
+        double ha = box_dy(ref, out2, FW, x0, x1, FH / 2 - 6, FH / 2), hb = box_dy(ref, out2, FW, x0, x1, FH / 2, FH / 2 + 6);
+        double ha2 = box_dy(ref, out2, FW, x0, x1, FH / 2 - 60, FH / 2 - 6), hb2 = box_dy(ref, out2, FW, x0, x1, FH / 2 + 6, FH / 2 + 60);
+        printf("INFO Lab halves seam: whole %+.2f | %+.2f (wide %+.2f | %+.2f), halves %+.2f | %+.2f (wide %+.2f | %+.2f), max diff"
+               " %d, mean %+.3f\n", wa, wb, wa2, wb2, ha, hb, ha2, hb2, max_d(out, out2, NW), mean_dy(out, out2, NW));
+        /* 11-21 EOS M: at the seam +15.81 / +15.65 (whole +15.76 / +15.55), 6..60 rows off +19.86 / +20.89 (+19.91 / +19.49):
+         * below, the BOT fades from the TOP's glow over YL_XF rows */
+        chk(fabs(ha - wa) < 1.0 && fabs(hb - wb) < 1.0 && fabs(ha2 - wa2) < 1.0 && fabs(hb2 - wb2) < 1.5, "both Lab, halves ="
+            " whole frame round the seam: above %+.2f / %+.2f (whole %+.2f / %+.2f), below %+.2f / %+.2f (whole %+.2f / %+.2f)",
+            ha, ha2, wa, wa2, hb, hb2, wb, wb2);
+    }
+    {                                            /* a white band over the frame's top, far from the seam: the BOT's first rows
+                                                    fade from the TOP's own seam rows, not from the band's glow (11-21: with
+                                                    both on, the bloom's seam rows were kept past the halation's block and
+                                                    written over by the apply and the bloom grid; IMG_8553 on the 5D2: +247
+                                                    levels in the BOT's first rows) */
+        const int bn = 96 * (FW / 2), s0 = (FH / 2 - 16) * (FW / 2), sn = (16 + 256) * (FW / 2);   /* YL_XF rows */
+        uint32_t *keep = malloc((size_t)bn * 4);
+        memcpy(keep, in, (size_t)bn * 4);
+        for (int i = 0; i < bn; i++) in[i] = word(0, 255, 0, 255);
+        log_mark();
+        shot(in, out, FW, FH);
+        chk(LOGW("shot #", 5000), "white band, whole frame: %s", log_line("shot #"));
+        halves = 1;
+        log_mark();
+        shot(in, out2, FW, FH);
+        halves = 0;
+        chk(LOGW("(TOP ", 5000), "white band, halves: %s", log_line("(TOP "));   /* its line before the next case's mark */
+        memcpy(in, keep, (size_t)bn * 4);
+        free(keep);
+        int md = max_d(out + s0, out2 + s0, sn);
+        double mm = mean_dy(out + s0, out2 + s0, sn);
+        printf("INFO Lab halves, white band at the top: round the seam max diff %d, mean %+.3f\n", md, mm);
+        chk(md <= 12 && fabs(mm) < 0.25, "both Lab, white band at the top: halves = whole frame round the seam (max diff %d,"
+            " mean %+.3f)", md, mm);
+    }
+#endif
+
+    /* the rows together: a Lab value in one glow row takes the other's WindyFilm value out (the menu shows it unused) */
+    fx_lab_shot("Wide + Bloom Lab", 1, WF_BLOOM_LAB, 0);
+    chk(wf_fx_state(WF_FX_HAL) == WF_FXS_UNUSED && wf_fx_state(WF_FX_BLM) == WF_FXS_READY && !strstr(log_line("shot #"), "halation"),
+        "Halation Wide + Bloom Lab: the bloom alone, Halation unused ('%s')", log_line("shot #"));
+    fx_lab_shot("Halation Lab + Bloom Normal", WF_HALO_LAB, 2, 0);
+    chk(wf_fx_state(WF_FX_BLM) == WF_FXS_UNUSED && wf_fx_state(WF_FX_HAL) == WF_FXS_READY && !strstr(log_line("shot #"), "bloom"),
+        "Halation Lab + Bloom Normal: the halo alone, Bloom unused ('%s')", log_line("shot #"));
+    wf_halo = 1;
+    wf_bloom = 0;
+    wf_gauge = WF_GAUGE_8;
+    wf_fx_keys(post, &hk, &gk);
+    wf_gauge = 0;
+    wf_fx_keys(post, &hk16, &gk);
+    chk(hk == hk16 && WF_FXK_HGAUGE(hk) == 0, "8 mm with Wide: the WindyFilm stage as 16 mm (key %x = %x)", hk, hk16);
+    wf_halo = 0;
+
+    /* the grain alone on a mid grey (its zone weights peak there): film-lab's strength at full size is ~2 levels sd at
+     * 8 mm and ~0.7 at 65 mm (amount 50 / 15, the 800-row gain); no mean shift beyond the draw (the 300 x 300 px corner
+     * holds ~60 of the 8 mm grain's 38 px cells: its mean has an sd of ~0.25 levels) */
+    for (int i = 0; i < NW; i++) in[i] = word(0, 128, 0, 128);
+    memcpy(ref, in, NW * 4);
+    ref_film(ref, NW, tabs[fC][0], flags_of(fC, 1));
+    wf_grain = WF_GRAIN_LAB;
+    wf_gauge = WF_GAUGE_8;
+    log_mark();
+    chk(wf_fx_keys(post, &hk, &gk) && !hk && WAIT(wf_fx_gk == gk && !wf_fx_hk, 120000),
+        "Grain Lab 8 mm ready (%s)", log_line("fx grain"));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    cm = corner(ref, out, FW, &sd8);
+    wf_gauge = 2;
+    log_mark();
+    chk(wf_fx_keys(post, &hk, &gk) && WAIT(wf_fx_gk == gk, 120000) && LOGW("fx grain lab 65mm ready", 5000),
+        "Grain Lab 65 mm ready (%s)", log_line("fx grain "));
+    usleep(200000);
+    shot(in, out, FW, FH);
+    corner(ref, out, FW, &sd65);
+    printf("INFO Lab grain on mid grey (Y %d): sd 8 mm %.3f, 65 mm %.3f, mean %+.3f\n", WY0(ref[0]), sd8, sd65, cm);
+    chk(sd8 > 1.2 && sd8 < 3.0 && sd65 > 0.35 && sd65 < 1.2 && sd8 > sd65 && fabs(cm) < 0.75,
+        "Grain Lab sd on mid grey: 8 mm %.3f (1.2 .. 3), 65 mm %.3f (0.35 .. 1.2), mean %+.3f", sd8, sd65, cm);
+
+    /* the EXIF / print text, the rows' steps, the config written back */
+    struct wf_look lk;
+    wf_look_now(&lk);
+    lk.gauge = WF_GAUGE_8;
+    const char *t = wf_exif_text(&lk, WF_GRAIN_LAB, WF_HALO_LAB, WF_BLOOM_LAB, 0, WF_EV_NONE, tb, sizeof tb);
+    chk(strstr(t, " | Grain Lab | Halation Lab | Bloom Lab | Gauge 8 mm") != 0, "EXIF text, Lab: '%s'", t);
+    t = wf_exif_text(&lk, 2, 1, 0, 0, WF_EV_NONE, tb, sizeof tb);
+    chk(strstr(t, " | Halation Wide | Gauge 16 mm") != 0, "EXIF text, WindyFilm at 8 mm: as 16 mm ('%s')", t);
+    wf_halo = WF_HALO_LAB;
+    wf_bloom = WF_BLOOM_LAB;
+    wf_gauge = WF_GAUGE_8;
+    wf_row_step(WF_ROW_GAUGE, 1);
+    chk(wf_gauge == 0 && !strcmp(wf_row_text(WF_ROW_GAUGE), "16 mm"), "Gauge 8 mm + 1 = 16 mm (%d)", wf_gauge);
+    wf_gauge = 2;
+    wf_row_step(WF_ROW_GAUGE, 1);
+    chk(wf_gauge == WF_GAUGE_8, "Gauge 65 mm + 1 wraps to 8 mm (%d)", wf_gauge);
+    wf_row_step(WF_ROW_GAUGE, -1);
+    chk(wf_gauge == 2, "Gauge 8 mm - 1 = 65 mm (%d)", wf_gauge);
+    wf_row_step(WF_ROW_GAUGE, 1);
+    h_clock_add_ms += 2000;
+    usleep(400000);
+    long n;
+    char *b = get_file("ML/SETTINGS/WINDYFLM.CFG", &n);
+    chk(b && strstr(b, "\ngrain=lab\nhalation=lab\nbloom=lab\ngauge=8\n"), "config written: grain / halation / bloom lab, gauge 8");
+    free(b);
+
+    /* the comparison strip (harness only, tests/ui/lab_strip.sh, WF_FX_DUMP=1): Off, the WindyFilm defaults (Grain
+     * Normal, Halation Wide, Bloom Normal, 35 mm) and all three Lab at 35 / 8 / 16 / 65 mm on one frame (WF_FX_UYVY, an
+     * FW x FH UYVY file; else the disc), each written whole as lab_<name>.ppm */
+    if (getenv("WF_FX_DUMP")) {
+        static const struct { const char *nm; int g, h, b, ga; } S[] = {
+            { "off", 0, 0, 0, 1 }, { "classic", 2, 1, 2, 1 }, { "lab35", WF_GRAIN_LAB, WF_HALO_LAB, WF_BLOOM_LAB, 1 },
+            { "lab8", WF_GRAIN_LAB, WF_HALO_LAB, WF_BLOOM_LAB, WF_GAUGE_8 },
+            { "lab16", WF_GRAIN_LAB, WF_HALO_LAB, WF_BLOOM_LAB, 0 }, { "lab65", WF_GRAIN_LAB, WF_HALO_LAB, WF_BLOOM_LAB, 2 } };
+        const char *src = getenv("WF_FX_UYVY");
+        long nb = 0;
+        char *fb = src ? get_file(src, &nb) : 0;
+        int own = fb && nb == (long)NW * 4;
+        if (own)
+            memcpy(in, fb, NW * 4);
+        else
+            gen_frame(in, FW, FH, 1);
+        free(fb);
+        printf("lab strip on %s\n", own ? src : "the disc frame");
+        for (unsigned i = 0; i < sizeof S / sizeof *S; i++) {
+            char pth[40];
+            wf_grain = S[i].g; wf_halo = S[i].h; wf_bloom = S[i].b; wf_gauge = S[i].ga;
+            wf_fx_keys(post, &hk, &gk);
+            chk(WAIT(wf_fx_hk == hk && wf_fx_gk == gk, 120000), "strip %s: stage key %x, grain key %x", S[i].nm, hk, gk);
+            usleep(200000);
+            log_mark();
+            shot(in, out, FW, FH);
+            printf("  %s: %s\n", S[i].nm, LOGW("shot #", 5000) ? log_line("shot #") : "(no shot line)");
+            snprintf(pth, sizeof pth, "lab_%s.ppm", S[i].nm);
+            dump_full(pth, out, FW, FH);
+        }
+    }
+    wf_grain = 0;
+    wf_halo = 0;
+    wf_bloom = 0;
+    chk(WAIT(!wf_fx_hk && !wf_fx_gk && h_arena_live == 0, 20000), "all off: the memory given back (%d live)", h_arena_live);
+    mod_deinit();
+}
+
 static double ring_neg(const uint32_t *a, const uint32_t *b, int w, int h, int r0, int r1, int *nneg)
 {
     int wpr = w / 2, mn = 0;
@@ -1372,7 +1629,7 @@ static void t_fxab(void)
         chk(bo > 0.5, "Bloom alone glows round the light: dY %+.2f", bo);
         wf_bloom = 0;
         wf_halo = 1;
-        for (int ga = 0; ga <= WF_GAUGE_MAX; ga++) {
+        for (int ga = 0; ga <= 2; ga++) {        /* 16 / 35 / 65 mm (8 mm is Lab's: the WindyFilm models take it as 16 mm) */
             wf_gauge = ga;
             chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_HGAUGE(hk) == ga && WAIT(wf_fx_hk == hk, 120000), "Wide at gauge %d ready (%s)",
                 ga, log_line("fx halation"));
@@ -1387,7 +1644,7 @@ static void t_fxab(void)
             "the halo spreads wider on a narrower gauge: dY at r+6..30 16 mm %+.2f, 35 mm %+.2f, 65 mm %+.2f (r+60..160:"
             " %+.2f %+.2f %+.2f)", near[0], near[1], near[2], far[0], far[1], far[2]);
         wf_halo = 0;
-        for (int ga = 0; ga <= WF_GAUGE_MAX; ga++) {
+        for (int ga = 0; ga <= 2; ga++) {
             wf_gauge = ga;
             wf_grain = 2;
             chk(wf_fx_keys(post, &hk, &gk) && WF_FXK_GGAUGE(gk) == ga && WAIT(wf_fx_gk == gk && !wf_fx_hk, 120000),
@@ -8600,7 +8857,7 @@ int main(int argc, char **argv)
     if (!in || !out || !ref || !out2) { fprintf(stderr, "no memory for the frames\n"); return 3; }
     pick_films();
     if (!strcmp(mode, "SHOT")) t_shot(cs);
-    else if (!strcmp(mode, "FX")) { if (!strcmp(cs, "bloom")) t_fx_bloom(); else t_fx(); }
+    else if (!strcmp(mode, "FX")) { if (!strcmp(cs, "bloom")) t_fx_bloom(); else if (!strcmp(cs, "lab")) t_fx_lab(); else t_fx(); }
     else if (!strcmp(mode, "FXAB")) t_fxab();
     else if (!strcmp(mode, "MIST")) { if (!strcmp(cs, "levels")) t_mist_levels(); else t_mist(); }
     else if (!strcmp(mode, "LOOK")) t_look_sweep();

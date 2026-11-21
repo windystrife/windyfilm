@@ -1017,6 +1017,8 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
     }
     wf_fx_begin(k, fx, seed, f->devd ? f->dev_ev8 : WF_EV_LIVE);
     uint32_t th = 0, tg = 0, tm = 0, t, t2;
+    int lab = (fx & WF_FX_HAL) && wf_fx_lab();  /* the Lab stage gathers the coloured frame (film-lab works on the finished
+                                                   image); the WindyFilm one the camera's words before our colour pass */
     if (fx & WF_FX_MST) {                        /* the mist's low-res light map: every 2nd row of this request */
         t = wf_us();
         for (int r = 0, o = 0; o < nw; r++, o += wpr)
@@ -1041,10 +1043,13 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
             tm += wf_dt(t, wf_us());
         }
         if (fx & WF_FX_HAL) {
+            if (lab)
+                fn(wf_scr, m, arg);
             t = wf_us();
             wf_fx_gather(wf_scr, m, x0, y);
             th += wf_dt(t, wf_us());
-            fn(wf_scr, m, arg);
+            if (!lab)
+                fn(wf_scr, m, arg);
         } else {
             fn(wf_scr, m, arg);
             if (fx & WF_FX_GRN) {
@@ -1060,6 +1065,17 @@ static void wf_colour_fx(const struct wf_frame *f, int bot, const struct wf_look
         t = wf_us();
         wf_fx_build(k);
         th += wf_dt(t, wf_us());
+        if (lab && wf_fx_two()) {                /* Lab halation + bloom: the halation layer of the bloomed frame, a read-only pass */
+            t = wf_us();
+            for (int o = 0, x0 = 0, y = y0, m = 0; o < nw; o += m) {
+                m = wf_seg(nw - o, x0, W);
+                wf_copyw(wf_scr, f->nseg ? wf_frame_row(f, y - y0) + (x0 >> 1) : buf + o, m);
+                wf_fx_gather2(wf_scr, m, x0, y);
+                if ((x0 += 2 * m) >= W) { x0 = 0; y++; }
+            }
+            wf_fx_build2(k);
+            th += wf_dt(t, wf_us());
+        }
         for (int o = 0, x0 = 0, y = y0, m = 0; o < nw; o += m) {
             m = wf_seg(nw - o, x0, W);
             uint32_t *sp = f->nseg ? wf_frame_row(f, y - y0) + (x0 >> 1) : buf + o;
@@ -1354,10 +1370,11 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
         wf_exif_none();
         return;
     }
-    static const char *const bn[WF_BLOOM_MAX + 1] = { "", "bloom low", "bloom normal", "bloom strong" };
+    static const char *const bn[WF_BLOOM_MAX + 1] = { "", "bloom low", "bloom normal", "bloom strong", "bloom lab" };
     char hn[32];
-    int hb = lk->bloom <= WF_BLOOM_MAX && !WF_HALO_GEN(lk->halo) ? lk->bloom : 0;
-    snprintf(hn, sizeof hn, " + %s%s%s ", lk->halo || !hb ? "halation" : "", lk->halo && hb ? "+" : "", bn[hb]);
+    int hh = lk->halo <= WF_HALO_MAX ? lk->halo : 0, hb = lk->bloom <= WF_BLOOM_MAX ? WF_BLOOM_RUN(hh, lk->bloom) : 0;
+    hh = WF_HALO_RUN(hh, lk->bloom <= WF_BLOOM_MAX ? lk->bloom : 0);
+    snprintf(hn, sizeof hn, " + %s%s%s ", hh || !hb ? hh == WF_HALO_LAB ? "halation lab" : "halation" : "", hh && hb ? "+" : "", bn[hb]);
     const char *const en[3] = { " + mist ", hn, " + grain " };
     char line[2 * WF_SHOT_LINE], title[48];
     int l = 0, cut[5], nc = 0;
@@ -1424,7 +1441,8 @@ static void wf_shot_flush(const struct wf_sp *a, const struct wf_sp *b, const st
     int hr = a->hst == 1 && (!b || b->hst == 1), gr = a->gst == 1 && (!b || b->gst == 1), mr = a->mst == 1 && (!b || b->mst == 1);
     int path = a->rb || (b && b->rb) ? WF_PATH_RAW : WF_PATH_JPEG, ms = a->ms + (b ? b->ms : 0);
     wf_dev_note(lk, path, ms);                   /* owner 11-17: the develop time per path, "Last develop" on Info */
-    wf_exif_shot(lk, gr ? lk->grain : 0, hr ? lk->halo : 0, hr && !WF_HALO_GEN(lk->halo) ? lk->bloom : 0, mr ? lk->mist : 0, ev,
+    int eh = lk->halo <= WF_HALO_MAX ? lk->halo : 0, eb = lk->bloom <= WF_BLOOM_MAX ? lk->bloom : 0;   /* what ran (wf_fx.h) */
+    wf_exif_shot(lk, gr ? lk->grain : 0, hr ? WF_HALO_RUN(eh, eb) : 0, hr ? WF_BLOOM_RUN(eh, eb) : 0, mr ? lk->mist : 0, ev,
                  path, ms);
 }
 

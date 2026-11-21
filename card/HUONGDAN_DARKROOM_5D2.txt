@@ -105,7 +105,8 @@ a. Bộ nhớ + thời gian: LiveView bật, nạp cuộn 3 kiểu phim màu (vd
      dark: 5D2 memory: biggest shoot block ...
      dark: srm chunks ...
      dark: memory raw ...        (hoặc "frame split at row ...", hoặc "memory short: ...")
-     dark: look ready ...        (có dấu "-" sau halation / bloom / grain = thiếu bộ nhớ)
+     dark: look ready ...        (có dấu "-" sau halation / bloom / grain = thiếu bộ nhớ;
+                                  Lab: "halation lab + bloom lab, grain lab", tráng lâu hơn)
      dark: screen at the start: display .. LiveView ..
      dark: F01 IMG_xxxx iso ...: load .. expose .. fix .. dry .. ms ...   (mỗi kiểu một dòng)
      dark: roll 001 end: ...

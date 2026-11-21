@@ -124,7 +124,17 @@ Grain, Halation và Bloom mặc định tắt trên 5D2 (mỗi nửa ảnh tốn
 - Hàng Gauge: 16 mm / 35 mm / 65 mm (mặc định 35 mm = như trước). Khổ phim giả lập:
   16 mm hạt thô hơn và quầng halation / bloom rộng hơn; 65 mm hạt mịn hơn, quầng hẹp
   hơn. Chỉ có tác dụng khi Grain, Halation hoặc Bloom đang bật. EXIF ghi "| Gauge
-  16 mm" (không ghi khi 35 mm).
+  16 mm" (không ghi khi 35 mm). (21/11) Có thêm 8 mm (8 -> 16 -> 35 -> 65 mm), chỉ cho
+  Lab; các lựa chọn cũ ở 8 mm chạy như 16 mm.
+- (21/11) Hàng Grain, Halation, Bloom có thêm lựa chọn cuối Lab: hạt, quầng halation và
+  bloom theo số liệu film-lab, mỗi khổ phim một bộ số (như nhau với mọi phim). Các lựa
+  chọn cũ giữ nguyên. Một hàng Halation / Bloom là Lab thì lựa chọn cũ ở hàng kia không
+  chạy (menu hiện mờ, như Wrap với Bloom). EXIF "| Grain Lab | Halation Lab | Bloom Lab
+  | Gauge 8 mm". Lab chậm hơn: thêm khoảng 26-33 giây một tấm khi bật cả Halation Lab
+  và Bloom Lab (lâu hơn khi gần cả khung có quầng), Grain Lab khoảng 3,5-4 giây (ước
+  tính trên mô hình máy, chưa đo trên máy). 5D2 xử lý ảnh theo hai nửa: nửa trên chưa
+  thấy ánh sáng của nửa dưới, nên quầng Bloom Lab sát đường giữa ảnh có thể lệch nhẹ so
+  với film-lab.
 - Hàng Highlights / Shadows: -5 .. +5, mặc định 0. Dương làm sáng vùng sáng /
   nâng vùng tối, âm làm tối. Áp cho phim và Log + LUT (cả lon Film LUT), không
   áp cho Log phẳng. Cũng có trong menu ML. Trình chọn giờ có 23 hàng (11 hàng cuối

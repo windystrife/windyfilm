@@ -47,6 +47,7 @@
 #include <stddef.h>
 #include "yh_halo.h"
 #include "yg_grain.h"
+#include "yl_lab.h"
 #include "wf_mist.h"
 #include "wf_cam.h"
 #include "wf_fx.h"
@@ -71,6 +72,12 @@ extern int   wf_yuv_active(void);                /* wf_shot.c: worker up, main h
 #define FX_HH WF_HALO_H
 #define FX_AL(n) (((uint32_t)(n) + 31u) & ~31u)
 #define FX_GBYTES (FX_AL(sizeof(yg_ctx)) + YG_TS * YG_TS * 3)
+/* the Lab stage (yl_lab.c) works on frame rows: the 3:2 frame itself (the 5D2 grid's WF_HALO_Y0 rows are not in it), its
+ * halves meet at the same frame row as the WindyFilm stage's */
+#define FX_LW WF_HALO_W
+#define FX_LH (WF_HALO_H - WF_HALO_Y0)
+#define FX_LSEAM (WF_HALO_SEAM - WF_HALO_Y0)
+#define FX_LGBYTES (FX_AL(sizeof(yl_grain)) + YL_GBYTES)
 #define FX_HEAP_KEEP (3 << 19)                   /* Canon heap: leave 1.5 MB free (ML mem.c preferred_free_space) */
 #define FX_CACHEABLE(p) ((void *)((uint32_t)(p) & ~0x40000000u))   /* ML mem_defs.h CACHEABLE (DIGIC 5) */
 #include "wf_core.h"                             /* post codes, the generated catalogue's effect sets (wf_catalog.c; at most
@@ -93,11 +100,15 @@ volatile int wf_fx_retry_ms = 10000;             /* "no memory": next attempt af
                                                     Genesis light wrap), bits 8..9 the bloom level, bits 10..11 the gauge
                                                     (wf_fx.h WF_FXK_*) */
 #define FX_KEY_GGEN 256
-static const char *const fx_gname[WF_GAUGE_MAX + 1] = { "16mm", "35mm", "65mm" };
+#define FX_KEY_GLAB 2048                         /* the Lab grain (wf_fx.h WF_FXK_GLAB) */
+#define FX_KEY_HLAB 4096                         /* the Lab stage: its halation, its bloom */
+#define FX_KEY_BLAB 8192
+static const char *const fx_gname[WF_GAUGE_MAX + 1] = { "16mm", "35mm", "65mm", "8mm" };
 static const char *const fx_hname[YH_NSTOCK] = { "neg", "800T", "slide", "bw", "spk-s", "spk-w", "spk-c", "spk-n", "spk-bw", "spk-bww",
                                                  "wrap" };
-static const float fx_amount[WF_GRAIN_MAX + 1] = { 0.0f, 0.6f, 1.0f, 1.5f, 0.6f, 1.0f, 1.5f };
-static const char *const fx_aname[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "even fine", "even normal", "even strong" };
+static const float fx_amount[WF_GRAIN_MAX + 1] = { 0.0f, 0.6f, 1.0f, 1.5f, 0.6f, 1.0f, 1.5f, 0.0f };   /* Lab: its gauge preset's */
+static const char *const fx_aname[WF_GRAIN_MAX + 1] = { "off", "fine", "normal", "strong", "even fine", "even normal", "even strong",
+                                                        "lab" };
 
 /* one block: p = cacheable address; from a shoot memory suite (suite != 0) or Canon's heap (raw) */
 typedef struct { void *p, *raw, *suite; } fx_blk;
@@ -107,6 +118,10 @@ static int fx_m_tried, fx_m_nomem, fx_m_retry, fx_m_logged, fx_m_errlog, fx_m_ok
                      /* halation block: yh_ctx, then its buffers; grain: yg_ctx, templates */
 #define fx_yh ((yh_ctx *)fx_hb.p)
 #define fx_yg ((yg_ctx *)fx_gb.p)
+#define fx_yl ((yl_ctx *)fx_hb.p)                /* the Lab stage in the same block (key bits FX_KEY_HLAB / BLAB) */
+#define fx_ylg ((yl_grain *)fx_gb.p)             /* the Lab grain likewise (FX_KEY_GLAB) */
+static uint32_t fx_hb_n, fx_gb_n;                /* bytes of the block held (the models' blocks differ) */
+static int fx_lab_h, fx_lab_g;                   /* the published stage / grain is the Lab one (read by the worker under the key) */
 static yg_stock fx_gst;                          /* stock with the menu amount, read by yg_init */
 static int fx_h_tried, fx_g_tried;               /* key last loaded or attempted, 0 = none */
 static int fx_h_nomem, fx_g_nomem;               /* that attempt found no memory */
@@ -183,7 +198,7 @@ static int fx_sets(int post, int *gs, int *hs)
 
 /* post: as a shot runs it (wf_post_mode); only post codes get keys, the catalogue gives the sets.
  * keys: halation stage (set + 1) | halation << 6 | bloom << 8 | gauge << 10, when halation or bloom runs (Wrap has no
- * bloom); grain (set + 1) | amount level << 6 | 256 Genesis | gauge << 9 */
+ * bloom); grain (set + 1) | amount level << 6 | 256 Genesis | gauge << 9; the Lab ones wf_fx.h */
 int wf_fx_keys(int post, int *hk, int *gk)
 {
     int h = wf_halo, b = wf_bloom, g = wf_grain, ga = wf_gauge, gs, hs;   /* each read once */
@@ -192,14 +207,21 @@ int wf_fx_keys(int post, int *hk, int *gk)
         return 0;
     if (h < 0 || h > WF_HALO_MAX)
         h = 0;
-    if (b < 0 || b > WF_BLOOM_MAX || WF_HALO_GEN(h))
+    if (b < 0 || b > WF_BLOOM_MAX)
         b = 0;
     if (ga < 0 || ga > WF_GAUGE_MAX)
         ga = WF_GAUGE_DEF;
+    int lab = WF_FX_LABSTAGE(h, b), ca = WF_GAUGE_CLASSIC(ga);   /* the WindyFilm models: 8 mm as 16 mm */
+    int hr = WF_HALO_RUN(h, b), br = WF_BLOOM_RUN(h, b);   /* Wrap has no bloom; a Lab value in one row: the other's
+                                                              WindyFilm value is out */
+    h = hr;
+    b = br;
     if (WF_HALO_CAN && (h || b))
-        *hk = (hs + 1) | h << 6 | b << 8 | ga << 10;
-    if (WF_GRAIN_CAN && g >= 1 && g <= WF_GRAIN_MAX)
-        *gk = (gs + 1) | ((WF_GRAIN_GEN(g) ? g - WF_GRAIN_GEN0 + 1 : g) << 6) | (WF_GRAIN_GEN(g) ? FX_KEY_GGEN : 0) | ga << 9;
+        *hk = lab ? (hs + 1) | (h ? FX_KEY_HLAB : 0) | (b ? FX_KEY_BLAB : 0) | ga << 10 : (hs + 1) | h << 6 | b << 8 | ca << 10;
+    if (WF_GRAIN_CAN && g == WF_GRAIN_LAB)
+        *gk = (gs + 1) | FX_KEY_GLAB | ga << 9;
+    else if (WF_GRAIN_CAN && g >= 1 && g <= WF_GRAIN_MAX)
+        *gk = (gs + 1) | ((WF_GRAIN_GEN(g) ? g - WF_GRAIN_GEN0 + 1 : g) << 6) | (WF_GRAIN_GEN(g) ? FX_KEY_GGEN : 0) | ca << 9;
     return *hk | *gk;
 }
 
@@ -248,7 +270,9 @@ const char *wf_fx_gstock_name(void)
     int gs, hs;
     if (!fx_sets(wf_fx_mode(), &gs, &hs))
         return "-";
-    if (wf_grain >= WF_GRAIN_GEN0)
+    if (wf_grain == WF_GRAIN_LAB)
+        return "Lab";                            /* the film-lab grain: one per gauge, not a stock of ours */
+    if (WF_GRAIN_GEN(wf_grain))
         return "Even";                           /* WindyGrain Even ...: the film-stage grain (DESIGN 1a), not a stock of ours */
     const char *s = yg_stocks[wf_cat_gsets[gs].row].name, *x = fx_xname(wf_cat_gsets[gs].scale_q8, xb);
     int i = 0;
@@ -321,8 +345,8 @@ static int fx_retry_due(int want, int nomem, int at)
  * yh_init limits hal_q8 / bloom_q8 to 1024 (x4); clamped here too so the log names what is used. */
 /* Bloom levels (its own row since 11-15, as RAWB11 on the darkroom branch): Normal = the old "+ Glow" (bloom_q8 512,
  * x2 since Strength v2), Low half of it, Strong 896 (x3.5 of bloom_frac). GUESSES like the rest. */
-static const uint16_t fx_bloom_q8[WF_BLOOM_MAX + 1] = { 0, 256, 512, 896 };
-static const char *const fx_bname[WF_BLOOM_MAX + 1] = { "off", "low", "normal", "strong" };
+static const uint16_t fx_bloom_q8[WF_BLOOM_MAX + 1] = { 0, 256, 512, 896, 0 };   /* [4] Lab: never in a WindyFilm key */
+static const char *const fx_bname[WF_BLOOM_MAX + 1] = { "off", "low", "normal", "strong", "lab" };
 typedef char fx_gain_rows[YH_NSTOCK == 11 ? 1 : -1];                 /* a new profile needs its gain below (0 = no halation) */
 static int fx_hal_gain(int prof, int hq)
 {
@@ -351,9 +375,14 @@ static void fx_h_sync(int want)
         fx_h_errlog = 0;                         /* a failure spell ends here: the next one logs again */
         return;
     }
-    uint32_t nb = fx_hbytes();
+    int lh = (want & FX_KEY_HLAB) != 0, lb = (want & FX_KEY_BLAB) != 0, lab = lh || lb;
+    uint32_t nb = lab ? FX_AL(sizeof(yl_ctx)) + yl_mem_bytes(FX_LW, FX_LH, lh, lb) : fx_hbytes();
     int t0 = get_ms_clock();
-    if (!fx_hb.p && !fx_shoot_alloc(&fx_hb, nb)) {
+    if (fx_hb.p && fx_hb_n != nb)
+        fx_free(&fx_hb);                         /* the other model, or another Lab glow set: another size */
+    if (fx_hb.p || fx_shoot_alloc(&fx_hb, nb))
+        fx_hb_n = nb;
+    if (!fx_hb.p) {
         fx_h_nomem = 1;
         fx_h_retry = get_ms_clock() + wf_fx_retry_ms;
         if (!fx_h_errlog)
@@ -362,8 +391,30 @@ static void fx_h_sync(int want)
         fx_h_logged = 0;                         /* a later success logs its ready line */
         return;
     }
+    if (lab) {
+        /* the Lab stage (yl_lab.c): the film-lab Halation / Bloom of the gauge's preset, the same for every film; a B&W
+         * film's set still writes Y only (wf_fx_apply) */
+        yl_params lp;
+        int s = (want & FX_KEY_SET) - 1, ga = WF_FXK_HGAUGE(want);
+        lp.hal = lh;
+        lp.bloom = lb;
+        lp.gauge = WF_GAUGE_LAB(ga);
+        fx_h_bw = YH_STOCK_BW(wf_cat_hsets[s].prof);
+        fx_h_spk = 0;
+        fx_lab_h = 1;
+        yl_init(fx_yl, &lp, FX_LW, FX_LH, (uint8_t *)fx_yl + FX_AL(sizeof(yl_ctx)));
+        if (want != fx_h_logged)
+            wf_log("fx halation %s, bloom %s, %s Lab ready %dms %dKB", lh ? "lab" : "off", lb ? "lab" : "off", fx_gname[ga],
+                   get_ms_clock() - t0, (int)(nb >> 10));
+        fx_h_logged = want;
+        fx_h_errlog = 0;
+        __asm__ __volatile__("" ::: "memory");
+        wf_fx_hk = want;                         /* published last */
+        return;
+    }
     yh_params p;
     int s = (want & FX_KEY_SET) - 1, hm = WF_FXK_HALO(want), bl = WF_FXK_BLOOM(want), ga = WF_FXK_HGAUGE(want);
+    fx_lab_h = 0;
     int gen = WF_HALO_GEN(hm), spk = WF_HALO_SPK(hm);
     int prof = gen ? YH_GEN : spk ? wf_cat_hsets[s].sprof : wf_cat_hsets[s].prof;
     int hq = spk ? wf_cat_hsets[s].shal_q8 : wf_cat_hsets[s].hal_q8;
@@ -412,19 +463,22 @@ static void fx_g_sync(int want)
     int t0 = get_ms_clock();
     fx_blk scr = { 0, 0, 0 };
     int s = (want & FX_KEY_SET) - 1, a = (want >> 6) & 3, row = wf_cat_gsets[s].row, sc = wf_cat_gsets[s].scale_q8;
-    int gen = (want & FX_KEY_GGEN) != 0;
+    int gen = (want & FX_KEY_GGEN) != 0, lab = (want & FX_KEY_GLAB) != 0;
     int ga = WF_FXK_GGAUGE(want) <= WF_GAUGE_MAX ? WF_FXK_GGAUGE(want) : WF_GAUGE_DEF, gq = WF_GAUGE_Q8(ga);
+    uint32_t gb = lab ? FX_LGBYTES : FX_GBYTES, sb = lab ? YL_GSCRATCH : yg_scratch_bytes();
     char xb[8];
-    if (!fx_gb.p)
-        fx_heap_alloc(&fx_gb, FX_GBYTES);
+    if (fx_gb.p && fx_gb_n != gb)
+        fx_free(&fx_gb);                         /* the other model's block: another size */
+    if (!fx_gb.p && fx_heap_alloc(&fx_gb, gb))
+        fx_gb_n = gb;
     if (fx_gb.p && !gen)
-        fx_shoot_alloc(&scr, yg_scratch_bytes());   /* yg_init's scratch: shoot memory, ~1 s (the Genesis model has none) */
+        fx_shoot_alloc(&scr, sb);                /* yg_init's / the Lab tile's scratch: shoot memory, ~1 s (the Genesis model has none) */
     if (!scr.p && !gen) {
         fx_free(&fx_gb);                         /* nothing usable: no RAM held */
         fx_g_nomem = 1;
         fx_g_retry = get_ms_clock() + wf_fx_retry_ms;
         if (!fx_g_errlog)
-            wf_log("fx grain: no memory for %d KB + %d KB, grain off", (int)(FX_GBYTES >> 10), (int)(yg_scratch_bytes() >> 10));
+            wf_log("fx grain: no memory for %d KB + %d KB, grain off", (int)(gb >> 10), (int)(sb >> 10));
         fx_g_errlog = 1;
         fx_g_logged = 0;
         return;
@@ -433,9 +487,25 @@ static void fx_g_sync(int want)
         fx_g_nomem = 1;
         fx_g_retry = get_ms_clock() + wf_fx_retry_ms;
         if (!fx_g_errlog)
-            wf_log("fx grain: no memory for %d KB, grain off", (int)(FX_GBYTES >> 10));
+            wf_log("fx grain: no memory for %d KB, grain off", (int)(gb >> 10));
         fx_g_errlog = 1;
         fx_g_logged = 0;
+        return;
+    }
+    fx_lab_g = lab;
+    if (lab) {
+        /* the Lab grain (yl_lab.c): a tile of the film-lab hash noise for the gauge's preset, sized for the 3:2 frame's
+         * height (a crop keeps the grain size, as on film); a B&W film's grain is Y only */
+        yl_grain_init(fx_ylg, WF_GAUGE_LAB(ga), FX_LH, yg_stocks[row].mode == YG_BW, (uint8_t *)fx_ylg + FX_AL(sizeof(yl_grain)),
+                      scr.p);
+        fx_free(&scr);
+        if (want != fx_g_logged)
+            wf_log("fx grain lab %s%s ready %dms %dKB%s", fx_gname[ga], fx_ylg->bw ? " bw" : "", get_ms_clock() - t0,
+                   (int)(gb >> 10), fx_gb.suite ? " shoot" : "");
+        fx_g_logged = want;
+        fx_g_errlog = 0;
+        __asm__ __volatile__("" ::: "memory");
+        wf_fx_gk = want;                         /* published last */
         return;
     }
     if (gen) {
@@ -578,8 +648,16 @@ int wf_fx_state(int which)
         return WF_FXS_OFF;
     if (!wf_yuv_active())
         return WF_FXS_INACTIVE;
-    if (which == WF_FX_BLM && WF_HALO_GEN(wf_halo))
-        return WF_FXS_UNUSED;                    /* the light wrap has no bloom */
+    {
+        int h = wf_halo, b = wf_bloom;           /* the light wrap has no bloom; a Lab value in one row: the other's WindyFilm
+                                                    value does not run */
+        if (h < 0 || h > WF_HALO_MAX)
+            h = 0;
+        if (b < 0 || b > WF_BLOOM_MAX)
+            b = 0;
+        if (which == WF_FX_BLM ? !WF_BLOOM_RUN(h, b) : which == WF_FX_HAL && !WF_HALO_RUN(h, b))
+            return WF_FXS_UNUSED;
+    }
     wf_fx_keys(m = wf_fx_mode(), &hk, &gk);
     if (!(hal ? hk : gk))
         return WF_FXS_UNUSED;
@@ -640,25 +718,62 @@ void wf_fx_begin(int kind, int fx, uint32_t seed, int ev8)
 {
     if (kind != 2 && (fx & (WF_FX_HAL | WF_FX_MST))) {
         fx_hot(ev8);
-        if (fx & WF_FX_HAL)
+        if ((fx & WF_FX_HAL) && !fx_lab_h)       /* the Lab stage has no exposure term (film-lab) */
             yh_set_hot(fx_yh, fx_hb_q8, fx_hp_q8, fx_h_spk ? 256 : FX_HS_DAY + (((256 - FX_HS_DAY) * fx_hb_q8 + 128) >> 8));   /* Spektra: its own physical strengths, the clipped / point boosts still follow the exposure */
         if (fx & WF_FX_MST)
             mist_set_hot(fx_mc, fx_hb_q8);
     }
-    if ((fx & WF_FX_HAL) && kind != 2)
-        yh_begin_frame(fx_yh);                   /* NN / Diana TOP: a new frame; BOT keeps the TOP's rows */
-    if (fx & WF_FX_GRN)
+    if ((fx & WF_FX_HAL) && kind != 2) {         /* NN / Diana TOP: a new frame; BOT keeps the TOP's rows */
+        if (fx_lab_h)
+            yl_begin_frame(fx_yl);
+        else
+            yh_begin_frame(fx_yh);
+    }
+    if ((fx & WF_FX_GRN) && fx_lab_g)
+        yl_grain_shot(fx_ylg, seed);
+    else if (fx & WF_FX_GRN)
         yg_set_shot(fx_yg, seed);
+}
+
+/* the Lab stage: frame rows of the 3:2 frame only (a wider chunk never reaches it: the stage runs on that frame) */
+#define FX_LAB_IN(nw, x0) ((x0) + 2 * (nw) <= FX_LW)
+
+int wf_fx_lab(void)
+{
+    return fx_lab_h;
+}
+
+int wf_fx_two(void)
+{
+    return fx_lab_h && fx_yl->two;
 }
 
 void wf_fx_gather(const uint32_t *w, int nw, int x0, int y)
 {
-    yh_gather_chunk(fx_yh, w, 2 * nw, x0, y + WF_HALO_Y0);
+    if (!fx_lab_h)
+        yh_gather_chunk(fx_yh, w, 2 * nw, x0, y + WF_HALO_Y0);
+    else if (FX_LAB_IN(nw, x0))
+        yl_gather_chunk(fx_yl, w, 2 * nw, x0, y);
+}
+
+void wf_fx_gather2(const uint32_t *w, int nw, int x0, int y)
+{
+    if (FX_LAB_IN(nw, x0))
+        yl_gather2_chunk(fx_yl, w, 2 * nw, x0, y);
+}
+
+#define FX_LROWS(kind) (kind) == 2 ? FX_LSEAM : 0, (kind) == 1 ? FX_LSEAM : FX_LH, \
+                       (kind) == 0 ? YL_WHOLE : (kind) == 1 ? YL_TOP : YL_BOTTOM
+void wf_fx_build2(int kind)
+{
+    yl_build2(fx_yl, FX_LROWS(kind));
 }
 
 void wf_fx_build(int kind)
 {
-    if (kind == 0)
+    if (fx_lab_h)
+        yl_build(fx_yl, FX_LROWS(kind));
+    else if (kind == 0)
         yh_build(fx_yh, 0, FX_HH, YH_WHOLE);
     else if (kind == 1)
         yh_build(fx_yh, 0, WF_HALO_SEAM, YH_TOP);
@@ -672,7 +787,10 @@ void wf_fx_build(int kind)
  * them is clearing them, on the cached scratch words (no read of the frame) */
 void wf_fx_apply(uint32_t *w, int nw, int x0, int y)
 {
-    yh_apply_chunk(fx_yh, w, 2 * nw, x0, y + WF_HALO_Y0);
+    if (!fx_lab_h)
+        yh_apply_chunk(fx_yh, w, 2 * nw, x0, y + WF_HALO_Y0);
+    else if (FX_LAB_IN(nw, x0))
+        yl_apply_chunk(fx_yl, w, 2 * nw, x0, y);
     if (fx_h_bw)
         for (int i = 0; i < nw; i++)
             w[i] &= 0xff00ff00u;
@@ -680,7 +798,10 @@ void wf_fx_apply(uint32_t *w, int nw, int x0, int y)
 
 void wf_fx_grain(uint32_t *w, int nw, int x0, int y)
 {
-    yg_uyvy_row(fx_yg, w, 2 * nw, x0, y);
+    if (fx_lab_g)
+        yl_grain_row(fx_ylg, w, 2 * nw, x0, y);
+    else
+        yg_uyvy_row(fx_yg, w, 2 * nw, x0, y);
 }
 
 /* ---- mist (worker; wf_shot.c wf_colour_fx). kind 0 NN, 1 TOP, 2 BOT. The frame size is announced first; a BOT uses its

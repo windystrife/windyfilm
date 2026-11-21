@@ -62,6 +62,11 @@ nào cũng dùng được cho cả Film lẫn Film stage.
 Cool), Grain, Halation, Bloom, Gauge, và Exposures cho cuộn. *Light Auto* giữ WB của bạn; các lựa chọn khác đặt WB theo
 phim, và WB của bạn được trả lại khi về Auto hoặc tắt module. Nạp phim hoặc cuộn sẽ đặt **ISO theo phim**.
 
+**Lab** (Grain, Halation, Bloom): mô hình theo số liệu film-lab ở bốn khổ phim; Gauge có thêm **8 mm** (8 · 16 · 35 ·
+65 mm). Hạt Lab to và rõ hơn ở khổ nhỏ, quầng Lab rộng hơn; các lựa chọn cũ giữ nguyên. Lab chậm hơn: trên EOS M thêm
+khoảng 18–21 giây một tấm khi bật cả Halation và Bloom (tới khoảng 50 giây khi gần cả khung có quầng, vd trời ngược
+sáng), khoảng 3,5–4 giây cho Grain; trên 5D2 khoảng 26–33 giây. Số ước tính trên mô hình máy, chưa đo trên máy thật.
+
 ## Darkroom
 
 ![Chụp một cuộn, tráng ngay trong máy](docs/img/vi/darkroom.jpg)
